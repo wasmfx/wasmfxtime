@@ -562,6 +562,18 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn is_x86(&self) -> bool {
         false
     }
+
+    /// TODO(dhil): write documentation.
+    fn translate_cont_new(&mut self, pos: FuncCursor, func: ir::Value) -> WasmResult<ir::Value>;
+
+    /// TODO(dhil): write documentation.
+    fn translate_resume(&mut self, pos: FuncCursor, cont: ir::Value, call_args: &[ir::Value]) -> WasmResult<ir::Value>;
+
+    /// TODO(dhil): write documentation.
+    fn translate_resume_throw(&mut self, pos: FuncCursor, tag_index: u32, cont: ir::Value) -> WasmResult<ir::Value>;
+
+    /// TODO(dhil): write documentation.
+    fn translate_suspend(&mut self, pos: FuncCursor, tag_index: u32);
 }
 
 /// An object satisfying the `ModuleEnvironment` trait can be passed as argument to the

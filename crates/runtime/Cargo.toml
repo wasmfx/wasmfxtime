@@ -13,7 +13,7 @@ edition.workspace = true
 [dependencies]
 wasmtime-asm-macros = { workspace = true }
 wasmtime-environ = { workspace = true }
-wasmtime-fiber = { workspace = true, optional = true }
+wasmtime-fiber = { workspace = true }
 wasmtime-jit-debug = { workspace = true, features = ["gdb_jit_int"] }
 libc = { version = "0.2.112", default-features = false }
 log = { workspace = true }
@@ -52,7 +52,7 @@ once_cell = { workspace = true }
 cc = "1.0"
 
 [features]
-async = ["wasmtime-fiber"]
+async = []
 
 # Enables support for the pooling instance allocator
 pooling-allocator = []

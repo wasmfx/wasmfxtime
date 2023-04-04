@@ -70,6 +70,9 @@ pub fn parse_type_section<'a>(
             Type::Func(wasm_func_ty) => {
                 environ.declare_type_func(wasm_func_ty.clone().try_into()?)?;
             }
+            Type::Cont(_) => unimplemented!()
+            // Note(dhil): there is no support for declaring bare
+            // continuation types.
         }
     }
     Ok(())

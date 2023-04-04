@@ -140,6 +140,9 @@ pub struct Instance {
     /// seems not too bad.
     vmctx_self_reference: SendSyncPtr<VMContext>,
 
+    /// Current top of the stack pointer (tsp)
+    tsp: TopOfStackPointer,
+
     /// Additional context used by compiled wasm code. This field is last, and
     /// represents a dynamically-sized array that extends beyond the nominal
     /// end of the struct (similar to a flexible array member).
@@ -148,6 +151,13 @@ pub struct Instance {
 
 #[allow(clippy::cast_ptr_alignment)]
 impl Instance {
+    pub(crate) fn tsp(&self) -> TopOfStackPointer {
+        self.tsp
+    }
+    pub(crate) fn set_tsp(&mut self, ptr: TopOfStackPointer) {
+        self.tsp = ptr;
+    }
+
     /// Create an instance at the given memory address.
     ///
     /// It is assumed the memory was properly aligned and the
@@ -183,6 +193,7 @@ impl Instance {
                 vmctx_self_reference: SendSyncPtr::new(
                     NonNull::new(ptr.cast::<u8>().add(mem::size_of::<Instance>()).cast()).unwrap(),
                 ),
+                tsp: TopOfStackPointer::null(),
                 vmctx: VMContext {
                     _marker: std::marker::PhantomPinned,
                 },
@@ -1212,6 +1223,48 @@ impl Drop for Instance {
 /// A handle holding an `Instance` of a WebAssembly module.
 pub struct InstanceHandle {
     instance: Option<SendSyncPtr<Instance>>,
+}
+
+// These are only valid if the `Instance` type is send/sync, hence the
+// assertion below.
+unsafe impl Send for InstanceHandle {}
+unsafe impl Sync for InstanceHandle {}
+
+pub struct TopOfStackPointer {
+    tsp: *mut u8,
+}
+
+impl TopOfStackPointer {
+    pub fn null() -> Self {
+        TopOfStackPointer {
+            tsp: std::ptr::null_mut(),
+        }
+    }
+
+    pub fn as_raw(self) -> *mut u8 {
+        self.tsp
+    }
+
+    pub fn from_raw(tsp: *mut u8) -> Self {
+        TopOfStackPointer { tsp }
+    }
+}
+
+impl Copy for TopOfStackPointer {}
+impl Clone for TopOfStackPointer {
+    fn clone(&self) -> Self {
+        TopOfStackPointer {
+            tsp: self.tsp
+        }
+    }
+}
+
+unsafe impl Send for TopOfStackPointer {}
+unsafe impl Sync for TopOfStackPointer {}
+
+fn _assert_send_sync() {
+    fn _assert<T: Send + Sync>() {}
+    _assert::<Instance>();
 }
 
 impl InstanceHandle {

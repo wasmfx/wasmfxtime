@@ -51,6 +51,12 @@ macro_rules! foreach_builtin_function {
             out_of_gas(vmctx: vmctx);
             /// Invoked when we reach a new epoch.
             new_epoch(vmctx: vmctx) -> i64;
+            /// Creates a new continuation from a funcref.
+            cont_new(vmctx: vmctx, r: pointer) -> pointer;
+            /// Resumes a continuation.
+            resume(vmctx: vmctx, r: pointer) -> i32;
+            /// Suspends a continuation.
+            suspend(vmctx: vmctx, r: i32);
         }
     };
 }

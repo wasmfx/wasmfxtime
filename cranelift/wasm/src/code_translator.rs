@@ -126,6 +126,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
     environ: &mut FE,
+    ty: Option<wasmparser::ValType>,
 ) -> WasmResult<()> {
     if !state.reachable {
         translate_unreachable_operator(validator, &op, builder, state, environ)?;
@@ -2342,6 +2343,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 op
             ));
         }
+
         Operator::BrOnNull { relative_depth } => {
             let r = state.pop1();
             let (br_destination, inputs) = translate_br_if_args(*relative_depth, state);
@@ -2407,7 +2409,170 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         Operator::I31New | Operator::I31GetS | Operator::I31GetU => {
             unimplemented!("GC operators not yet implemented")
         }
+
+        Operator::ContNew { type_index: _ } => {
+            let r = state.pop1();
+            state.push1(environ.translate_cont_new(builder.cursor(), r)?);
+        }
+        Operator::Resume { resumetable } => {
+            // let call_args : Vec<ir::Value> = match ty {
+            //     None => panic!("Need type of resume operator"),
+            //     Some(wasmparser::ValType::Ref(wasmparser::RefType { heap_type: wasmparser::HeapType::TypedFunc(i), .. })) => {
+            //         let index = u32::from(i);
+            //         println!("index: {:?}", index);
+            //         let (fref, num_args) = state.get_direct_func(builder.func, index, environ)?;
+            //         println!("fref: {:?}, num args: {:?}", fref, num_args);
+            //         vec![]
+            //     }
+            //     Some(_) => panic!("Expected reference type"),
+            // };
+            let call_args = vec![];
+            let cont = state.pop1();
+            let jmpn = environ.translate_resume(builder.cursor(), cont, &call_args)?;
+            // This assumes cont will be modified in-place
+            state.push1(cont);
+            state.push1(jmpn);
+
+            let mut targets = vec![];
+            for (tag, label) in resumetable.targets().map(|x| x.unwrap()) {
+                let tag = tag as usize;
+                if targets.len() <= tag {
+                    targets.resize(tag + 1, 0) // it's okay to put zeroes because typechecker ensured this makes sense
+                }
+                targets[tag] = label + 1; // We add 1 because of our silly extra block desugar below
+            }
+
+            // We wrap a br_table in a block so we can assign "just keep going"
+            // to the default value (9999 from libcall = br 0)
+            translate_operator(
+                validator,
+                &Operator::Block {
+                    // We want to keep a continuation on the stack for the
+                    // suspend cases. Even though in this case (return) we
+                    // simply drop / deallocate the continuation, we still need to
+                    // keep it around for the clif typechecking
+                    // TODO: i'm choosing some arbitrary type index here to
+                    // represent "a type index" because i believe clif doesn't
+                    // have any coarser type-checking and we simply drop the value
+                    blockty: wasmparser::BlockType::Type(wasmparser::ValType::Ref(
+                        wasmparser::RefType {
+                            nullable: false,
+                            heap_type: wasmparser::HeapType::TypedFunc(42.try_into().unwrap()),
+                        },
+                    )),
+                },
+                builder,
+                state,
+                environ,
+                None,
+            )?;
+            translate_resume_table(builder, state, targets)?;
+            translate_operator(validator, &Operator::End, builder, state, environ, None)?;
+            // We kept a continuation on the stack for the suspend cases, but
+            // on return we have no continuation. so drop that continuation that
+            // is now completely invalidated (something about deallocate?)
+            translate_operator(validator, &Operator::Drop, builder, state, environ, None)?;
+        }
+        Operator::Suspend { tag_index } => {
+            environ.translate_suspend(builder.cursor(), *tag_index);
+        }
+        Operator::ContBind { type_index: _ }
+        | Operator::ResumeThrow {
+            tag_index: _,
+            resumetable: _,
+        }
+        | Operator::Barrier { blockty: _, .. } => todo!("Implement continuation instructions"),
     };
+    Ok(())
+}
+
+// TODO(dhil): Hack, refactor to better fit resumetable.
+fn translate_resume_table(
+    builder: &mut FunctionBuilder,
+    state: &mut FuncTranslationState,
+    targets: Vec<u32>
+) -> WasmResult<()> {
+    let default = 0;
+    let mut min_depth = default;
+    for depth in targets.clone() {
+        if depth < min_depth {
+            min_depth = depth;
+        }
+    }
+    let jump_args_count = {
+        let i = state.control_stack.len() - 1 - (min_depth as usize);
+        let min_depth_frame = &state.control_stack[i];
+        if min_depth_frame.is_loop() {
+            min_depth_frame.num_param_values()
+        } else {
+            min_depth_frame.num_return_values()
+        }
+    };
+    let val = state.pop1();
+    let mut data = Vec::with_capacity(targets.len());
+    if jump_args_count == 0 {
+        // No jump arguments
+        for depth in targets.clone() {
+            let block = {
+                let i = state.control_stack.len() - 1 - (depth as usize);
+                let frame = &mut state.control_stack[i];
+                frame.set_branched_to_exit();
+                frame.br_destination()
+            };
+            data.push(builder.func.dfg.block_call(block, &[]));
+        }
+        let block = {
+            let i = state.control_stack.len() - 1 - (default as usize);
+            let frame = &mut state.control_stack[i];
+            frame.set_branched_to_exit();
+            frame.br_destination()
+        };
+        let block = builder.func.dfg.block_call(block, &[]);
+        let jt = builder.create_jump_table(JumpTableData::new(block, &data));
+        builder.ins().br_table(val, jt);
+    } else {
+        // Here we have jump arguments, but Cranelift's br_table doesn't support them
+        // We then proceed to split the edges going out of the br_table
+        let return_count = jump_args_count;
+        let mut dest_block_sequence = vec![];
+        let mut dest_block_map = HashMap::new();
+        for depth in targets.clone() {
+            let branch_block = match dest_block_map.entry(depth as usize) {
+                hash_map::Entry::Occupied(entry) => *entry.get(),
+                hash_map::Entry::Vacant(entry) => {
+                    let block = builder.create_block();
+                    dest_block_sequence.push((depth as usize, block));
+                    *entry.insert(block)
+                }
+            };
+            data.push(builder.func.dfg.block_call(branch_block, &[]));
+        }
+        let default_branch_block = match dest_block_map.entry(default as usize) {
+            hash_map::Entry::Occupied(entry) => *entry.get(),
+            hash_map::Entry::Vacant(entry) => {
+                let block = builder.create_block();
+                dest_block_sequence.push((default as usize, block));
+                *entry.insert(block)
+            }
+        };
+        let default_branch_block = builder.func.dfg.block_call(default_branch_block, &[]);
+        let jt = builder.create_jump_table(JumpTableData::new(default_branch_block, &data));
+        builder.ins().br_table(val, jt);
+        for (depth, dest_block) in dest_block_sequence {
+            builder.switch_to_block(dest_block);
+            builder.seal_block(dest_block);
+            let real_dest_block = {
+                let i = state.control_stack.len() - 1 - depth;
+                let frame = &mut state.control_stack[i];
+                frame.set_branched_to_exit();
+                frame.br_destination()
+            };
+            let destination_args = state.peekn_mut(return_count);
+            canonicalise_then_jump(builder, real_dest_block, destination_args);
+        }
+        state.popn(return_count);
+    }
+    state.reachable = false;
     Ok(())
 }
 

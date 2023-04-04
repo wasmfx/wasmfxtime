@@ -31,6 +31,7 @@ fn main() -> anyhow::Result<()> {
             test_directory_module(out, "tests/misc_testsuite/memory64", strategy)?;
             test_directory_module(out, "tests/misc_testsuite/component-model", strategy)?;
             test_directory_module(out, "tests/misc_testsuite/function-references", strategy)?;
+            test_directory_module(out, "tests/misc_testsuite/typed-continuations", strategy)?;
             Ok(())
         })?;
 

@@ -241,6 +241,9 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                         Type::Func(wasm_func_ty) => {
                             self.declare_type_func(wasm_func_ty.try_into()?)?;
                         }
+                        Type::Cont(i) => {
+                            self.declare_type_cont(i)?;
+                        }
                     }
                 }
             }
@@ -361,9 +364,19 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
             Payload::TagSection(tags) => {
                 self.validator.tag_section(&tags)?;
 
+                let cnt = usize::try_from(tags.count()).unwrap();
+                self.result.module.tags.reserve_exact(cnt);
+
+                for entry in tags {
+                    let sigindex = entry?.func_type_idx;
+                    let ty = TypeIndex::from_u32(sigindex);
+                    let sig_index = self.result.module.types[ty].unwrap_function();
+                    self.result.module.push_tag(sig_index);
+                }
+
                 // This feature isn't enabled at this time, so we should
                 // never get here.
-                unreachable!();
+                //unreachable!();
             }
 
             Payload::GlobalSection(globals) => {
@@ -808,6 +821,14 @@ and for re-adding support for interface types you can see this issue:
             .module
             .types
             .push(ModuleType::Function(sig_index));
+        Ok(())
+    }
+
+    fn declare_type_cont(&mut self, index: u32) -> WasmResult<()> {
+        self.result
+            .module
+            .types
+            .push(ModuleType::Continuation(TypeIndex::from_u32(index)));
         Ok(())
     }
 

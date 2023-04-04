@@ -776,6 +776,7 @@ impl Default for TableInitialization {
 #[allow(missing_docs)]
 pub enum ModuleType {
     Function(SignatureIndex),
+    Continuation(TypeIndex),
 }
 
 impl ModuleType {
@@ -784,6 +785,7 @@ impl ModuleType {
     pub fn unwrap_function(&self) -> SignatureIndex {
         match self {
             ModuleType::Function(f) => *f,
+            ModuleType::Continuation(_) => panic!("Attempt to unwrap non-function."),
         }
     }
 }
@@ -855,6 +857,9 @@ pub struct Module {
 
     /// WebAssembly global initializers for locally-defined globals.
     pub global_initializers: PrimaryMap<DefinedGlobalIndex, GlobalInit>,
+
+    /// WebAssembly exceptions and typed control tags.
+    pub tags: PrimaryMap<TagIndex, FunctionType>,
 }
 
 /// Initialization routines for creating an instance, encompassing imports,
@@ -1040,6 +1045,14 @@ impl Module {
         self.functions.push(FunctionType {
             signature,
             func_ref,
+        })
+    }
+
+    /// TODO
+    pub fn push_tag(&mut self, signature: SignatureIndex) -> TagIndex {
+        self.tags.push(FunctionType {
+            signature,
+            anyfunc: AnyfuncIndex::reserved_value(),
         })
     }
 }

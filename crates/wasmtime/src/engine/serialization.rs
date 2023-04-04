@@ -169,6 +169,7 @@ struct WasmFeatures {
     relaxed_simd: bool,
     extended_const: bool,
     function_references: bool,
+    typed_continuations: bool,
 }
 
 impl Metadata {
@@ -190,6 +191,7 @@ impl Metadata {
             memory_control,
             function_references,
             gc,
+            typed_continuations,
 
             // Always on; we don't currently have knobs for these.
             mutable_global: _,
@@ -221,6 +223,7 @@ impl Metadata {
                 relaxed_simd,
                 extended_const,
                 function_references,
+                typed_continuations,
             },
         }
     }
@@ -392,6 +395,7 @@ impl Metadata {
             relaxed_simd,
             extended_const,
             function_references,
+            typed_continuations,
         } = self.features;
 
         Self::check_bool(
@@ -445,6 +449,12 @@ impl Metadata {
             function_references,
             other.function_references,
             "WebAssembly function-references support",
+        )?;
+
+        Self::check_bool(
+            typed_continuations,
+            other.typed_continuations,
+            "WebAssembly typed-continuations support",
         )?;
 
         Ok(())

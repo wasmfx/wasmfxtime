@@ -86,6 +86,14 @@ impl FiberStack {
     pub fn top(&self) -> Option<*mut u8> {
         Some(self.top)
     }
+
+    pub unsafe fn parent(&self) -> *mut u8 {
+        self.top.cast::<*mut u8>().offset(-2).read()
+    }
+
+    pub unsafe fn write_parent(&self, tsp: *mut u8) {
+        self.top.cast::<*mut u8>().offset(-2).write(tsp);
+    }
 }
 
 impl Drop for FiberStack {
@@ -156,7 +164,7 @@ impl Fiber {
 }
 
 impl Suspend {
-    pub(crate) fn switch<A, B, C>(&self, result: RunResult<A, B, C>) -> A {
+    pub fn switch<A, B, C>(&self, result: RunResult<A, B, C>) -> A {
         unsafe {
             // Calculate 0xAff8 and then write to it
             (*self.result_location::<A, B, C>()).set(result);
@@ -176,6 +184,10 @@ impl Suspend {
         let ret = self.0.cast::<*const u8>().offset(-1).read();
         assert!(!ret.is_null());
         ret.cast()
+    }
+
+    pub fn from_top_ptr(ptr: *mut u8) -> Self {
+        Suspend(ptr)
     }
 }
 

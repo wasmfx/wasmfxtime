@@ -47,6 +47,7 @@ mod traphandlers;
 mod vmcontext;
 
 pub mod debug_builtins;
+pub mod continuation;
 pub mod libcalls;
 
 pub use wasmtime_jit_debug::gdb_jit_int::GdbJitImageRegistration;

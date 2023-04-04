@@ -829,6 +829,32 @@ impl Config {
         self
     }
 
+    /// Configures whether the WebAssembly exception handling
+    /// [proposal] will be enabled for compilation.
+    ///
+    /// Note that this feature is a work-in-progress and is incomplete.
+    ///
+    /// This is `false` by default.
+    ///
+    /// [proposal]: https://github.com/WebAssembly/exception-handling
+    pub fn wasm_exceptions(&mut self, enable: bool) -> &mut Self {
+        self.features.exceptions = enable;
+        self
+    }
+
+    /// Configures whether the WebAssembly typed-continuations
+    /// [proposal] will be enabled for compilation.
+    ///
+    /// Note that this feature is a work-in-progress and is incomplete.
+    ///
+    /// This is `false` by default.
+    ///
+    /// [proposal]: https://github.com/effect-handlers/wasm-spec
+    pub fn wasm_typed_continuations(&mut self, enable: bool) -> &mut Self {
+        self.features.typed_continuations = enable;
+        self
+    }
+
     /// Configures which compilation strategy will be used for wasm modules.
     ///
     /// This method can be used to configure which compiler is used for wasm

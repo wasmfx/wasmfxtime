@@ -202,9 +202,11 @@ rustix = "0.37.13"
 wit-bindgen = "0.6.0"
 
 # wasm-tools family:
-wasmparser = "0.105.0"
+wasmparser = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-merge" }
+wast = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-merge" }
+#wasmparser = "0.105.0"
 wat = "1.0.64"
-wast = "58.0.0"
+#wast = "58.0.0"
 wasmprinter = "0.2.57"
 wasm-encoder = "0.27.0"
 wasm-smith = "0.12.8"
@@ -312,4 +314,3 @@ debug-assertions = false
 # Omit integer overflow checks, which include failure messages which require
 # string initializers.
 overflow-checks = false
-

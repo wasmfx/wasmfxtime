@@ -27,8 +27,8 @@ asm_func!(
         // Load pointer that we're going to resume at and store where we're going
         // to get resumed from. This is in accordance with the diagram at the top
         // of unix.rs.
-        mov rax, -0x10[rdi]
-        mov -0x10[rdi], rsp
+        mov rax, -0x20[rdi]
+        mov -0x20[rdi], rsp
 
         // Swap stacks and restore all our callee-saved registers
         mov rsp, rax
@@ -59,18 +59,18 @@ asm_func!(
         // The first 16 bytes of stack are reserved for metadata, so we start
         // storing values beneath that.
         lea rax, {start}[rip]
-        mov -0x18[rdi], rax
-        mov -0x20[rdi], rdi   // loaded into rbp during switch
-        mov -0x28[rdi], rsi   // loaded into rbx during switch
-        mov -0x30[rdi], rdx   // loaded into r12 during switch
+        mov -0x28[rdi], rax
+        mov -0x30[rdi], rdi   // loaded into rbp during switch
+        mov -0x38[rdi], rsi   // loaded into rbx during switch
+        mov -0x40[rdi], rdx   // loaded into r12 during switch
 
         // And then we specify the stack pointer resumption should begin at. Our
         // `wasmtime_fiber_switch` function consumes 6 registers plus a return
-        // pointer, and the top 16 bytes are reserved, so that's:
+        // pointer, and the top 32 bytes are reserved, so that's:
         //
-        //	(6 + 1) * 16 + 16 = 0x48
-        lea rax, -0x48[rdi]
-        mov -0x10[rdi], rax
+        //	(6 + 1) * 16 + 32 = 0x58
+        lea rax, -0x58[rdi]
+        mov -0x20[rdi], rax
         ret
     ",
     start = sym super::wasmtime_fiber_start,
