@@ -682,6 +682,11 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
     fn translate_suspend(&mut self, _pos: FuncCursor, _tag_index: u32) {
         todo!()
     }
+
+    fn continuation_arity(&self, _type_index: u32) -> usize {
+        todo!()
+    }
+
 }
 
 impl TargetEnvironment for DummyEnvironment {

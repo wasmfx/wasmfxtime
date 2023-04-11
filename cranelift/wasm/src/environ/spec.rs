@@ -574,6 +574,9 @@ pub trait FuncEnvironment: TargetEnvironment {
 
     /// TODO(dhil): write documentation.
     fn translate_suspend(&mut self, pos: FuncCursor, tag_index: u32);
+
+    /// TODO
+    fn continuation_arity(&self, type_index: u32) -> usize;
 }
 
 /// An object satisfying the `ModuleEnvironment` trait can be passed as argument to the

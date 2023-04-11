@@ -126,7 +126,6 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
     environ: &mut FE,
-    ty: Option<wasmparser::ValType>,
 ) -> WasmResult<()> {
     if !state.reachable {
         translate_unreachable_operator(validator, &op, builder, state, environ)?;
@@ -2414,18 +2413,9 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let r = state.pop1();
             state.push1(environ.translate_cont_new(builder.cursor(), r)?);
         }
-        Operator::Resume { resumetable } => {
-            // let call_args : Vec<ir::Value> = match ty {
-            //     None => panic!("Need type of resume operator"),
-            //     Some(wasmparser::ValType::Ref(wasmparser::RefType { heap_type: wasmparser::HeapType::TypedFunc(i), .. })) => {
-            //         let index = u32::from(i);
-            //         println!("index: {:?}", index);
-            //         let (fref, num_args) = state.get_direct_func(builder.func, index, environ)?;
-            //         println!("fref: {:?}, num args: {:?}", fref, num_args);
-            //         vec![]
-            //     }
-            //     Some(_) => panic!("Expected reference type"),
-            // };
+        Operator::Resume { type_index, resumetable } => {
+            let _arity = environ.continuation_arity(*type_index);
+            //println!("arity: {}", _arity);
             let call_args = vec![];
             let cont = state.pop1();
             let jmpn = environ.translate_resume(builder.cursor(), cont, &call_args)?;
@@ -2464,20 +2454,20 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 builder,
                 state,
                 environ,
-                None,
             )?;
             translate_resume_table(builder, state, targets)?;
-            translate_operator(validator, &Operator::End, builder, state, environ, None)?;
+            translate_operator(validator, &Operator::End, builder, state, environ)?;
             // We kept a continuation on the stack for the suspend cases, but
             // on return we have no continuation. so drop that continuation that
             // is now completely invalidated (something about deallocate?)
-            translate_operator(validator, &Operator::Drop, builder, state, environ, None)?;
+            translate_operator(validator, &Operator::Drop, builder, state, environ)?;
         }
         Operator::Suspend { tag_index } => {
             environ.translate_suspend(builder.cursor(), *tag_index);
         }
-        Operator::ContBind { type_index: _ }
+        Operator::ContBind { src_index: _, dst_index: _ }
         | Operator::ResumeThrow {
+            type_index: _,
             tag_index: _,
             resumetable: _,
         }

@@ -825,10 +825,11 @@ and for re-adding support for interface types you can see this issue:
     }
 
     fn declare_type_cont(&mut self, index: u32) -> WasmResult<()> {
+        let sig_index = self.result.module.types[TypeIndex::from_u32(index)].unwrap_function();
         self.result
             .module
             .types
-            .push(ModuleType::Continuation(TypeIndex::from_u32(index)));
+            .push(ModuleType::Continuation(sig_index));
         Ok(())
     }
 

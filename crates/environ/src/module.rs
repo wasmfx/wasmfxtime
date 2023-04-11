@@ -776,7 +776,7 @@ impl Default for TableInitialization {
 #[allow(missing_docs)]
 pub enum ModuleType {
     Function(SignatureIndex),
-    Continuation(TypeIndex),
+    Continuation(SignatureIndex),
 }
 
 impl ModuleType {
@@ -786,6 +786,15 @@ impl ModuleType {
         match self {
             ModuleType::Function(f) => *f,
             ModuleType::Continuation(_) => panic!("Attempt to unwrap non-function."),
+        }
+    }
+
+    /// Assert his is a `ModuleType::Continuation`, returning the
+    /// underlying `TypeIndex`.
+    pub fn unwrap_continuation(&self) -> SignatureIndex {
+        match self {
+            ModuleType::Continuation(f) => *f,
+            _ => panic!("Attempt to unwrap non-continuation."),
         }
     }
 }

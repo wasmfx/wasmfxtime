@@ -6,7 +6,7 @@
   (elem declare func $noop)
 
   (func $make-cont (result (ref $ct))
-     (cont.new (type $ct) (ref.func $noop)))
+     (cont.new $ct (ref.func $noop)))
 
   (func $f (export "f") (result i32)
      (call $make-cont)

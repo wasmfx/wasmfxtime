@@ -239,10 +239,9 @@ fn parse_function_body<FE: FuncEnvironment + ?Sized>(
         let pos = reader.original_position();
         builder.set_srcloc(cur_srcloc(&reader));
         let op = reader.read_operator()?;
-        let ty = validator.get_operand_type(0).unwrap_or_default();
         validator.op(pos, &op)?;
         environ.before_translate_operator(&op, builder, state)?;
-        translate_operator(validator, &op, builder, state, environ, ty)?;
+        translate_operator(validator, &op, builder, state, environ)?;
         environ.after_translate_operator(&op, builder, state)?;
     }
     environ.after_translate_function(builder, state)?;

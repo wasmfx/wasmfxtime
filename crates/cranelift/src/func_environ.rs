@@ -2230,4 +2230,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         pos.ins()
             .call_indirect(builtin_sig, builtin_addr, &[vmctx, tag_index]);
     }
+
+    fn continuation_arity(&self, index: u32) -> usize {
+        let idx = self.module.types[TypeIndex::from_u32(index)].unwrap_continuation();
+        self.types[idx].params().len()
+    }
 }

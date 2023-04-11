@@ -10,8 +10,7 @@
 
   (func $f (export "f") (result i32)
     (global.set $i (i32.const 99))
-    (resume (cont.new (type $ct)
-                      (ref.func $g)))
+    (resume $ct (cont.new $ct (ref.func $g)))
     (global.get $i))
 )
 
