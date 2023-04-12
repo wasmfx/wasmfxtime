@@ -1,8 +1,8 @@
 //! Continuations TODO
 
-use crate::vmcontext::{VMCallerCheckedFuncRef, VMContext, VMOpaqueContext, VMFunctionBody};
 use crate::instance::TopOfStackPointer;
-use crate::{TrapReason, prepare_host_to_wasm_trampoline};
+use crate::vmcontext::{VMCallerCheckedFuncRef, VMContext, VMFunctionBody, VMOpaqueContext};
+use crate::{prepare_host_to_wasm_trampoline, TrapReason};
 use wasmtime_fiber::{Fiber, FiberStack, Suspend};
 
 /// TODO
@@ -15,12 +15,12 @@ pub fn cont_new(vmctx: *mut VMContext, func: *mut u8) -> *mut u8 {
             move |first_val: (), _suspend: &Suspend<_, u32, _>| {
                 let trampoline = unsafe {
                     std::mem::transmute::<
-                            *const VMFunctionBody,
-                            unsafe extern "C" fn(*mut VMOpaqueContext, *mut VMContext, ()),
-                        >((*func).func_ptr.as_ptr())
+                        *const VMFunctionBody,
+                        unsafe extern "C" fn(*mut VMOpaqueContext, *mut VMContext, ()),
+                    >((*func).func_ptr.as_ptr())
                 };
                 let trampoline = unsafe { prepare_host_to_wasm_trampoline(vmctx, trampoline) };
-                unsafe { trampoline((*func).vmctx , vmctx, first_val) }
+                unsafe { trampoline((*func).vmctx, vmctx, first_val) }
             },
         )
         .unwrap(),
@@ -40,11 +40,15 @@ pub fn resume(vmctx: *mut VMContext, cont: *mut u8) -> Result<u32, TrapReason> {
     inst.set_tsp(TopOfStackPointer::from_raw(cont_stack.top().unwrap()));
     unsafe {
         (*(*(*(*vmctx).instance().store()).vmruntime_limits())
-         .stack_limit
-         .get_mut()) = 0
+            .stack_limit
+            .get_mut()) = 0
     };
     match unsafe { cont.as_mut().unwrap().resume(()) } {
-        Ok(_) => Ok(9999),
+        Ok(_) => {
+            let drop_box: Box<Fiber<_, _, _>> = unsafe { Box::from_raw(cont) };
+            drop(drop_box); // I think this would be covered by the close brace below anyway
+            Ok(9999)
+        }
         Err(y) => Ok(y),
     }
 }
