@@ -143,7 +143,7 @@ impl From<wasmparser::HeapType> for WasmHeapType {
             Func => WasmHeapType::Func,
             Extern => WasmHeapType::Extern,
             TypedFunc(i) => WasmHeapType::Index(i.into()),
-            _ => unimplemented!(),
+            _ => unimplemented!(), // TODO(dhil): heap shapes for GC extension
         }
     }
 }

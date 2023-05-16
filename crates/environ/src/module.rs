@@ -1061,7 +1061,7 @@ impl Module {
     pub fn push_tag(&mut self, signature: SignatureIndex) -> TagIndex {
         self.tags.push(FunctionType {
             signature,
-            anyfunc: AnyfuncIndex::reserved_value(),
+            func_ref: FuncRefIndex::reserved_value(),
         })
     }
 }

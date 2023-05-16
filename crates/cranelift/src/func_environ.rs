@@ -2211,10 +2211,14 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         Ok(pos.func.dfg.first_result(call_inst))
     }
 
-    fn translate_resume_throw(&mut self, _pos: FuncCursor, _tag_index: u32, _cont: ir::Value) -> WasmResult<ir::Value> {
+    fn translate_resume_throw(
+        &mut self,
+        _pos: FuncCursor,
+        _tag_index: u32,
+        _cont: ir::Value,
+    ) -> WasmResult<ir::Value> {
         todo!()
     }
-
 
     fn translate_suspend(
         &mut self,

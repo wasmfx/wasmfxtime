@@ -2413,7 +2413,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let r = state.pop1();
             state.push1(environ.translate_cont_new(builder.cursor(), r)?);
         }
-        Operator::Resume { type_index, resumetable } => {
+        Operator::Resume {
+            type_index,
+            resumetable,
+        } => {
             let _arity = environ.continuation_arity(*type_index);
             //println!("arity: {}", _arity);
             let call_args = vec![];
@@ -2462,7 +2465,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         Operator::Suspend { tag_index } => {
             environ.translate_suspend(builder.cursor(), *tag_index);
         }
-        Operator::ContBind { src_index: _, dst_index: _ }
+        Operator::ContBind {
+            src_index: _,
+            dst_index: _,
+        }
         | Operator::ResumeThrow {
             type_index: _,
             tag_index: _,
@@ -2477,7 +2483,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
 fn translate_resume_table(
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    targets: Vec<u32>
+    targets: Vec<u32>,
 ) -> WasmResult<()> {
     let default = 0;
     let mut min_depth = default;

@@ -1253,9 +1253,7 @@ impl TopOfStackPointer {
 impl Copy for TopOfStackPointer {}
 impl Clone for TopOfStackPointer {
     fn clone(&self) -> Self {
-        TopOfStackPointer {
-            tsp: self.tsp
-        }
+        TopOfStackPointer { tsp: self.tsp }
     }
 }
 

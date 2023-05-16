@@ -190,8 +190,8 @@ impl Metadata {
             extended_const,
             memory_control,
             function_references,
-            gc,
             typed_continuations,
+            gc,
 
             // Always on; we don't currently have knobs for these.
             mutable_global: _,

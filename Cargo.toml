@@ -204,11 +204,12 @@ wit-bindgen = "0.6.0"
 # wasm-tools family:
 wasmparser = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-merge" }
 wast = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-merge" }
+wasm-encoder = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-merge" }
 #wasmparser = "0.105.0"
 wat = "1.0.64"
 #wast = "58.0.0"
 wasmprinter = "0.2.57"
-wasm-encoder = "0.27.0"
+#wasm-encoder = "0.27.0"
 wasm-smith = "0.12.8"
 wasm-mutate = "0.2.25"
 wit-parser = "0.7.1"

@@ -671,11 +671,21 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn translate_resume(&mut self, _pos: FuncCursor, _cont: ir::Value, _call_args: &[ir::Value]) -> WasmResult<ir::Value> {
+    fn translate_resume(
+        &mut self,
+        _pos: FuncCursor,
+        _cont: ir::Value,
+        _call_args: &[ir::Value],
+    ) -> WasmResult<ir::Value> {
         todo!()
     }
 
-    fn translate_resume_throw(&mut self, _pos: FuncCursor, _tag_index: u32, _cont: ir::Value) -> WasmResult<ir::Value> {
+    fn translate_resume_throw(
+        &mut self,
+        _pos: FuncCursor,
+        _tag_index: u32,
+        _cont: ir::Value,
+    ) -> WasmResult<ir::Value> {
         todo!()
     }
 
@@ -686,7 +696,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
     fn continuation_arity(&self, _type_index: u32) -> usize {
         todo!()
     }
-
 }
 
 impl TargetEnvironment for DummyEnvironment {

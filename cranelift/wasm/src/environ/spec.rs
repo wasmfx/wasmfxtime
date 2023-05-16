@@ -567,10 +567,20 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn translate_cont_new(&mut self, pos: FuncCursor, func: ir::Value) -> WasmResult<ir::Value>;
 
     /// TODO(dhil): write documentation.
-    fn translate_resume(&mut self, pos: FuncCursor, cont: ir::Value, call_args: &[ir::Value]) -> WasmResult<ir::Value>;
+    fn translate_resume(
+        &mut self,
+        pos: FuncCursor,
+        cont: ir::Value,
+        call_args: &[ir::Value],
+    ) -> WasmResult<ir::Value>;
 
     /// TODO(dhil): write documentation.
-    fn translate_resume_throw(&mut self, pos: FuncCursor, tag_index: u32, cont: ir::Value) -> WasmResult<ir::Value>;
+    fn translate_resume_throw(
+        &mut self,
+        pos: FuncCursor,
+        tag_index: u32,
+        cont: ir::Value,
+    ) -> WasmResult<ir::Value>;
 
     /// TODO(dhil): write documentation.
     fn translate_suspend(&mut self, pos: FuncCursor, tag_index: u32);

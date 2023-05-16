@@ -579,14 +579,14 @@ pub mod relocs {
 
 // Builtins for continuations. These are thin wrappers around the
 // respective definitions in continuation.rs.
-fn cont_new(vmctx: *mut VMContext, func: *mut u8) -> *mut u8 {
-    crate::continuation::cont_new(vmctx, func)
+fn cont_new(instance: &mut Instance, func: *mut u8) -> *mut u8 {
+    crate::continuation::cont_new(instance, func)
 }
 
-fn resume(vmctx: *mut VMContext, cont: *mut u8) -> Result<u32, TrapReason> {
-    crate::continuation::resume(vmctx, cont)
+fn resume(instance: &mut Instance, cont: *mut u8) -> Result<u32, TrapReason> {
+    crate::continuation::resume(instance, cont)
 }
 
-fn suspend(vmctx: *mut VMContext, tag_index: u32) {
-    crate::continuation::suspend(vmctx, tag_index)
+fn suspend(instance: &mut Instance, tag_index: u32) {
+    crate::continuation::suspend(instance, tag_index)
 }
