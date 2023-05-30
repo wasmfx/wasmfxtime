@@ -1075,7 +1075,7 @@ impl TypeConvert for Module {
     fn lookup_heap_type(&self, index: TypeIndex) -> WasmHeapType {
         match self.types[index] {
             ModuleType::Function(i) => WasmHeapType::TypedFunc(i),
-            ModuleType::Continuation(_i) => todo!(),
+            ModuleType::Continuation(i) => WasmHeapType::TypedFunc(i), // TODO(dhil): Perhaps we should have a continuation heap type...
         }
     }
 }
