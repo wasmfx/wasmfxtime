@@ -1,8 +1,12 @@
 #![allow(unused_variables)] // TODO: remove this when more things are implemented
 
-use crate::bindings::{
-    exit, filesystem, monotonic_clock, network, poll, random, streams, wall_clock,
-};
+use crate::bindings::wasi::cli_base::exit;
+use crate::bindings::wasi::clocks::{monotonic_clock, wall_clock};
+use crate::bindings::wasi::filesystem::filesystem;
+use crate::bindings::wasi::io::streams;
+use crate::bindings::wasi::poll::poll;
+use crate::bindings::wasi::random::random;
+use crate::bindings::wasi::sockets::network;
 use core::cell::{Cell, RefCell, RefMut, UnsafeCell};
 use core::cmp::min;
 use core::ffi::c_void;
@@ -26,7 +30,8 @@ use crate::descriptors::{Descriptor, Descriptors, StreamType, Streams};
 pub mod bindings {
     #[cfg(feature = "command")]
     wit_bindgen::generate!({
-        world: "command",
+        path: "../wasi/wit",
+        world: "wasi:preview/command",
         std_feature,
         raw_strings,
         // The generated definition of command will pull in std, so we are defining it
@@ -36,7 +41,8 @@ pub mod bindings {
 
     #[cfg(feature = "reactor")]
     wit_bindgen::generate!({
-        world: "reactor",
+        path: "../wasi/wit",
+        world: "wasi:preview/reactor",
         std_feature,
         raw_strings,
         skip: ["get-directories", "get-environment"],
@@ -557,15 +563,17 @@ pub unsafe extern "C" fn fd_fdstat_set_flags(fd: Fd, flags: Fdflags) -> Errno {
     })
 }
 
-/// Adjust the rights associated with a file descriptor.
-/// This can only be used to remove rights, and returns `errno::notcapable` if called in a way that would attempt to add rights
+/// Does not do anything if `fd` corresponds to a valid descriptor and returns [`wasi::ERRNO_BADF`] otherwise.
 #[no_mangle]
 pub unsafe extern "C" fn fd_fdstat_set_rights(
     fd: Fd,
     fs_rights_base: Rights,
     fs_rights_inheriting: Rights,
 ) -> Errno {
-    unreachable!()
+    State::with(|state| match state.descriptors().get(fd)? {
+        Descriptor::Streams(..) => Ok(()),
+        Descriptor::Closed(..) => Err(wasi::ERRNO_BADF),
+    })
 }
 
 /// Return the attributes of an open file.
@@ -741,10 +749,10 @@ pub unsafe extern "C" fn fd_prestat_get(fd: Fd, buf: *mut Prestat) -> Errno {
 
 /// Return a description of the given preopened file descriptor.
 #[no_mangle]
-pub unsafe extern "C" fn fd_prestat_dir_name(fd: Fd, path: *mut u8, path_len: Size) -> Errno {
+pub unsafe extern "C" fn fd_prestat_dir_name(fd: Fd, path: *mut u8, path_max_len: Size) -> Errno {
     State::with(|state| {
         if let Some(preopen) = state.descriptors().get_preopen(fd) {
-            if preopen.path.len < path_len as usize {
+            if preopen.path.len > path_max_len as usize {
                 Err(ERRNO_NAMETOOLONG)
             } else {
                 ptr::copy_nonoverlapping(preopen.path.ptr, path, preopen.path.len);
@@ -1364,7 +1372,7 @@ pub unsafe extern "C" fn path_open(
     let at_flags = at_flags_from_lookupflags(dirflags);
     let o_flags = o_flags_from_oflags(oflags);
     let flags = descriptor_flags_from_flags(fs_rights_base, fdflags);
-    let mode = filesystem::Modes::READABLE | filesystem::Modes::WRITEABLE;
+    let mode = filesystem::Modes::READABLE | filesystem::Modes::WRITABLE;
     let append = fdflags & wasi::FDFLAGS_APPEND == wasi::FDFLAGS_APPEND;
 
     State::with_mut(|state| {
@@ -1541,11 +1549,10 @@ impl Drop for Pollables {
     }
 }
 
-impl From<network::Error> for Errno {
-    fn from(error: network::Error) -> Errno {
+impl From<network::ErrorCode> for Errno {
+    fn from(error: network::ErrorCode) -> Errno {
         match error {
-            network::Error::Unknown => unreachable!(), // TODO
-            network::Error::Again => ERRNO_AGAIN,
+            network::ErrorCode::Unknown => unreachable!(), // TODO
             /* TODO
             // Use a black box to prevent the optimizer from generating a
             // lookup table, which would require a static initializer.
@@ -1556,8 +1563,8 @@ impl From<network::Error> for Errno {
             NetworkDown => ERRNO_NETDOWN,
             NetworkUnreachable => ERRNO_NETUNREACH,
             Timedout => ERRNO_TIMEDOUT,
-            _ => unreachable!(),
             */
+            _ => unreachable!(),
         }
     }
 }
@@ -2334,7 +2341,7 @@ impl State {
 
     fn get_environment(&self) -> &[StrTuple] {
         if self.env_vars.get().is_none() {
-            #[link(wasm_import_module = "environment")]
+            #[link(wasm_import_module = "wasi:cli-base/environment")]
             extern "C" {
                 #[link_name = "get-environment"]
                 fn get_environment_import(rval: *mut StrTupleList);
@@ -2358,7 +2365,7 @@ impl State {
 
     fn get_args(&self) -> &[WasmStr] {
         if self.args.get().is_none() {
-            #[link(wasm_import_module = "environment")]
+            #[link(wasm_import_module = "wasi:cli-base/environment")]
             extern "C" {
                 #[link_name = "get-arguments"]
                 fn get_args_import(rval: *mut WasmStrList);

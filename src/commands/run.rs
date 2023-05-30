@@ -844,8 +844,6 @@ fn generate_coredump(err: &anyhow::Error, source_name: &str, coredump_path: &str
             instanceidx,
             f.func_index(),
             u32::try_from(f.func_offset().unwrap_or(0)).unwrap(),
-            0, // TODO(dhil): I've pulled this offset out of thin air. It would get fixed by upstream eventually.
-            // We don't currently have access to locals/stack values
             [],
             [],
         );

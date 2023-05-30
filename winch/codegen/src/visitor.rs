@@ -4,13 +4,11 @@
 //! which validates and dispatches to the corresponding
 //! machine code emitter.
 
-use crate::abi::ABI;
 use crate::codegen::CodeGen;
 use crate::masm::{DivKind, MacroAssembler, OperandSize, RegImm, RemKind};
 use crate::stack::Val;
-use wasmparser::ValType;
 use wasmparser::VisitOperator;
-use wasmtime_environ::FuncIndex;
+use wasmtime_environ::{FuncIndex, WasmType};
 
 /// A macro to define unsupported WebAssembly operators.
 ///
@@ -53,14 +51,14 @@ macro_rules! def_unsupported {
     (emit LocalSet $($rest:tt)*) => {};
     (emit Call $($rest:tt)*) => {};
     (emit End $($rest:tt)*) => {};
+    (emit Nop $($rest:tt)*) => {};
 
     (emit $unsupported:tt $($rest:tt)*) => {$($rest)*};
 }
 
-impl<'a, A, M> VisitOperator<'a> for CodeGen<'a, A, M>
+impl<'a, M> VisitOperator<'a> for CodeGen<'a, M>
 where
     M: MacroAssembler,
-    A: ABI,
 {
     type Output = ();
 
@@ -179,7 +177,7 @@ where
             .get_local(index)
             .expect(&format!("valid local at slot = {}", index));
         match slot.ty {
-            ValType::I32 | ValType::I64 => context.stack.push(Val::local(index)),
+            WasmType::I32 | WasmType::I64 => context.stack.push(Val::local(index)),
             _ => panic!("Unsupported type {:?} for local", slot.ty),
         }
     }
@@ -202,14 +200,16 @@ where
         self.emit_call(FuncIndex::from_u32(index));
     }
 
+    fn visit_nop(&mut self) {}
+
     wasmparser::for_each_operator!(def_unsupported);
 }
 
-impl From<ValType> for OperandSize {
-    fn from(ty: ValType) -> OperandSize {
+impl From<WasmType> for OperandSize {
+    fn from(ty: WasmType) -> OperandSize {
         match ty {
-            ValType::I32 => OperandSize::S32,
-            ValType::I64 => OperandSize::S64,
+            WasmType::I32 => OperandSize::S32,
+            WasmType::I64 => OperandSize::S64,
             ty => todo!("unsupported type {:?}", ty),
         }
     }

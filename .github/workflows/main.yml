@@ -126,6 +126,7 @@ jobs:
       test-capi: ${{ steps.calculate.outputs.test-capi }}
       build-fuzz: ${{ steps.calculate.outputs.build-fuzz }}
       audit: ${{ steps.calculate.outputs.audit }}
+      preview1-adapter: ${{ steps.calculate.outputs.preview1-adapter }}
     steps:
     - uses: actions/checkout@v3
     - id: calculate
@@ -159,6 +160,9 @@ jobs:
           if grep -q supply-chain names.log; then
             echo audit=true >> $GITHUB_OUTPUT
           fi
+          if grep -q component-adapter names.log; then
+            echo preview1-adapter=true >> $GITHUB_OUTPUT
+          fi
         fi
         matrix="$(node ./ci/build-test-matrix.js ./commits.log ./names.log $run_full)"
         echo "test-matrix={\"include\":$(echo $matrix)}" >> $GITHUB_OUTPUT
@@ -169,6 +173,7 @@ jobs:
             echo test-capi=true >> $GITHUB_OUTPUT
             echo build-fuzz=true >> $GITHUB_OUTPUT
             echo audit=true >> $GITHUB_OUTPUT
+            echo preview1-adapter=true >> $GITHUB_OUTPUT
         fi
 
   # Build all documentation of Wasmtime, including the C API documentation,
@@ -217,6 +222,7 @@ jobs:
         cargo doc --no-deps --workspace \
           --exclude wasmtime-cli \
           --exclude test-programs \
+          --exclude wasi-http-tests \
           --exclude cranelift-codegen-meta \
           --features component-model
     - run: cargo doc --package cranelift-codegen-meta --document-private-items
@@ -357,8 +363,6 @@ jobs:
     - run: cargo fuzz build --dev -s none
     # Check that the ISLE fuzz targets build too.
     - run: cargo fuzz build --dev -s none --fuzz-dir ./cranelift/isle/fuzz
-    # Check that winch fuzzing builds too.
-    - run: cargo fuzz build --dev -s none --features fuzz-winch
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
@@ -526,7 +530,7 @@ jobs:
   build-preview1-component-adapter:
     name: Build wasi-preview1-component-adapter
     needs: determine
-    if: needs.determine.outputs.run-full
+    if: needs.determine.outputs.preview1-adapter
     runs-on: ubuntu-latest
     permissions:
       deployments: write
@@ -550,7 +554,7 @@ jobs:
     - uses: actions/upload-artifact@v3
       with:
         name: bins-wasi-preview1-component-adapter
-        path: target/wasm32-unknown-unknown/release/wasi_preview1_component_adapter.*.wasm
+        path: target/wasm32-unknown-unknown/release/wasi_snapshot_preview1.*.wasm
 
 
     # common logic to cancel the entire run if this job fails
@@ -636,7 +640,7 @@ jobs:
   # execution by default to help cut down on the time in CI.
   miri:
     needs: determine
-    if: needs.determine.outputs.run-full
+    if: needs.determine.outputs.run-full && github.repository == 'bytecodealliance/wasmtime'
     name: Miri
     runs-on: ubuntu-latest
     env:
@@ -777,6 +781,7 @@ jobs:
       - verify-publish
       - determine
       - miri
+      - build-preview1-component-adapter
     if: always()
     steps:
     - name: Dump needs context

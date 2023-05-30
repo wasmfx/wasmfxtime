@@ -1151,7 +1151,8 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             translate_fcmp(FloatCC::LessThanOrEqual, builder, state)
         }
         Operator::RefNull { hty } => {
-            state.push1(environ.translate_ref_null(builder.cursor(), (*hty).into())?)
+            let hty = environ.convert_heap_type(*hty);
+            state.push1(environ.translate_ref_null(builder.cursor(), hty)?)
         }
         Operator::RefIsNull => {
             let value = state.pop1();
@@ -2242,12 +2243,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             // Note that the variable swaps here are intentional due to
             // the difference of the order of the wasm op and the clif
             // op.
-            //
-            // Additionally note that even on x86 the I16X8 type uses the
-            // `bitselect` instruction since x86 has no corresponding
-            // `blendv`-style instruction for 16-bit operands.
             state.push1(
-                if environ.relaxed_simd_deterministic() || !environ.is_x86() || ty == I16X8 {
+                if environ.relaxed_simd_deterministic()
+                    || !environ.use_x86_blendv_for_relaxed_laneselect(ty)
+                {
                     // Deterministic semantics are a `bitselect` along the lines
                     // of the wasm `v128.bitselect` instruction.
                     builder.ins().bitselect(c, a, b)
@@ -2448,7 +2447,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                     // represent "a type index" because i believe clif doesn't
                     // have any coarser type-checking and we simply drop the value
                     blockty: wasmparser::BlockType::Type(wasmparser::ValType::Ref(
-                        wasmparser::RefType::typed_func(false, 42.try_into().unwrap()).unwrap(),
+                        wasmparser::RefType::indexed_func(false, 42).unwrap(),
                     )),
                 },
                 builder,

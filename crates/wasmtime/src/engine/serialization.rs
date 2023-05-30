@@ -202,7 +202,6 @@ impl Metadata {
 
         assert!(!memory_control);
         assert!(!tail_call);
-        //assert!(!function_references);
         assert!(!gc);
 
         Metadata {
@@ -450,7 +449,6 @@ impl Metadata {
             other.function_references,
             "WebAssembly function-references support",
         )?;
-
         Self::check_bool(
             typed_continuations,
             other.typed_continuations,

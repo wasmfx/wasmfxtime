@@ -110,7 +110,6 @@ members = [
   "fuzz",
   "winch",
   "winch/codegen",
-  "winch/environ"
 ]
 exclude = [
   'crates/wasi-common/WASI/tools/witx-cli',
@@ -176,7 +175,6 @@ cranelift = { path = "cranelift/umbrella", version = "0.97.0" }
 wasmtime-wasi-http = { path = "crates/wasi-http", version = "=10.0.0" }
 
 winch-codegen = { path = "winch/codegen", version = "=0.8.0" }
-winch-environ = { path = "winch/environ", version = "=0.8.0" }
 winch-filetests = { path = "winch/filetests" }
 winch-test-macros = { path = "winch/test-macros" }
 
@@ -190,7 +188,7 @@ regalloc2 = "0.9.0"
 # cap-std family:
 target-lexicon = { version = "0.12.3", default-features = false, features = ["std"] }
 cap-std = "1.0.12"
-cap-rand = "1.0.12"
+cap-rand = { version = "1.0.12", features = ["small_rng"] }
 cap-fs-ext = "1.0.12"
 cap-time-ext = "1.0.0"
 fs-set-times = "0.19.0"
@@ -199,21 +197,18 @@ io-lifetimes = { version = "1.0.0", default-features = false }
 rustix = "0.37.13"
 
 # wit-bindgen:
-wit-bindgen = "0.6.0"
+wit-bindgen = { version = "0.7.0", default-features = false }
 
 # wasm-tools family:
-wasmparser = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-merge" }
-wast = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-merge" }
-wasm-encoder = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-merge" }
-#wasmparser = "0.105.0"
-wat = "1.0.64"
-#wast = "58.0.0"
-wasmprinter = "0.2.57"
-#wasm-encoder = "0.27.0"
-wasm-smith = "0.12.8"
-wasm-mutate = "0.2.25"
-wit-parser = "0.7.1"
-wit-component = "0.9.0"
+wasmparser = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-sync-up-to-release" }
+wat = "1.0.66"
+wast = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-sync-up-to-release" }
+wasmprinter = "0.2.59"
+wasm-encoder = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-sync-up-to-release" }
+wasm-smith = "0.12.10"
+wasm-mutate = "0.2.27"
+wit-parser = "0.8.0"
+wit-component = "0.11.0"
 
 # Non-Bytecode Alliance maintained dependencies:
 # --------------------------
@@ -253,7 +248,8 @@ default = [
   "vtune",
   "wasi-nn",
   "wasi-threads",
-  "wasi-http",
+  # TODO: the WIT needs to be updated
+  #"wasi-http",
   "pooling-allocator",
 ]
 jitdump = ["wasmtime/jitdump"]

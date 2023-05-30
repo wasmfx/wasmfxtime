@@ -9,13 +9,13 @@
 use crate::state::FuncTranslationState;
 use crate::{
     DataIndex, ElemIndex, FuncIndex, Global, GlobalIndex, GlobalInit, Heap, HeapData, Memory,
-    MemoryIndex, SignatureIndex, Table, TableIndex, Tag, TagIndex, TypeIndex, WasmError,
-    WasmFuncType, WasmHeapType, WasmResult,
+    MemoryIndex, SignatureIndex, Table, TableIndex, Tag, TagIndex, TypeConvert, TypeIndex,
+    WasmError, WasmFuncType, WasmHeapType, WasmResult,
 };
 use core::convert::From;
 use cranelift_codegen::cursor::FuncCursor;
 use cranelift_codegen::ir::immediates::Offset32;
-use cranelift_codegen::ir::{self, InstBuilder};
+use cranelift_codegen::ir::{self, InstBuilder, Type};
 use cranelift_codegen::isa::TargetFrontendConfig;
 use cranelift_entity::PrimaryMap;
 use cranelift_frontend::FunctionBuilder;
@@ -44,7 +44,7 @@ pub enum GlobalVariable {
 }
 
 /// Environment affecting the translation of a WebAssembly.
-pub trait TargetEnvironment {
+pub trait TargetEnvironment: TypeConvert {
     /// Get the information needed to produce Cranelift IR for the given target.
     fn target_config(&self) -> TargetFrontendConfig;
 
@@ -587,12 +587,19 @@ pub trait FuncEnvironment: TargetEnvironment {
 
     /// TODO
     fn continuation_arity(&self, type_index: u32) -> usize;
+
+    /// Returns whether the CLIF `x86_blendv` instruction should be used for the
+    /// relaxed simd `*.relaxed_laneselect` instruction for the specified type.
+    fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {
+        let _ = ty;
+        false
+    }
 }
 
 /// An object satisfying the `ModuleEnvironment` trait can be passed as argument to the
 /// [`translate_module`](fn.translate_module.html) function. These methods should not be called
 /// by the user, they are only for `cranelift-wasm` internal use.
-pub trait ModuleEnvironment<'data> {
+pub trait ModuleEnvironment<'data>: TypeConvert {
     /// Provides the number of types up front. By default this does nothing, but
     /// implementations can use this to preallocate memory if desired.
     fn reserve_types(&mut self, _num: u32) -> WasmResult<()> {

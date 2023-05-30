@@ -348,7 +348,7 @@ impl<'a> CompileInputs<'a> {
             }
 
             sigs.extend(translation.module.types.iter().map(|(_, ty)| match ty {
-                ModuleType::Function(ty) => (*ty, translation),
+                ModuleType::Function(ty) | ModuleType::Continuation(ty) => (*ty, translation),
             }));
         }
 
