@@ -2447,7 +2447,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                     // represent "a type index" because i believe clif doesn't
                     // have any coarser type-checking and we simply drop the value
                     blockty: wasmparser::BlockType::Type(wasmparser::ValType::Ref(
-                        wasmparser::RefType::indexed_func(false, 42).unwrap(),
+                        wasmparser::RefType::indexed_func(false, *type_index).unwrap(),
                     )),
                 },
                 builder,
