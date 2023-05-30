@@ -200,11 +200,11 @@ rustix = "0.37.13"
 wit-bindgen = { version = "0.7.0", default-features = false }
 
 # wasm-tools family:
-wasmparser = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-sync-up-to-release" }
+wasmparser = { git = "https://github.com/effect-handlers/wasm-tools", branch = "typed-continuations" }
 wat = "1.0.66"
-wast = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-sync-up-to-release" }
+wast = { git = "https://github.com/effect-handlers/wasm-tools", branch = "typed-continuations" }
 wasmprinter = "0.2.59"
-wasm-encoder = { git = "https://github.com/dhil/wasm-tools", branch = "typed-continuations-sync-up-to-release" }
+wasm-encoder = { git = "https://github.com/effect-handlers/wasm-tools", branch = "typed-continuations" }
 wasm-smith = "0.12.10"
 wasm-mutate = "0.2.27"
 wit-parser = "0.8.0"

@@ -684,7 +684,7 @@ dependencies = [
  "target-lexicon",
  "thiserror",
  "toml",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wat",
 ]
 
@@ -860,7 +860,7 @@ dependencies = [
  "serde",
  "smallvec",
  "target-lexicon",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmtime-types",
  "wat",
 ]
@@ -3659,7 +3659,7 @@ dependencies = [
 [[package]]
 name = "wasm-encoder"
 version = "0.29.0"
-source = "git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release#0afe1c01265d290fb5c23d5d84d98896495efd81"
+source = "git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations#403d7946f07feab87ed4b4b58a8b2130487f488f"
 dependencies = [
  "leb128",
 ]
@@ -3765,7 +3765,7 @@ dependencies = [
 [[package]]
 name = "wasmparser"
 version = "0.107.0"
-source = "git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release#0afe1c01265d290fb5c23d5d84d98896495efd81"
+source = "git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations#403d7946f07feab87ed4b4b58a8b2130487f488f"
 dependencies = [
  "indexmap",
  "semver",
@@ -3814,7 +3814,7 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "wasi-cap-std-sync",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmtime-cache",
  "wasmtime-component-macro",
  "wasmtime-component-util",
@@ -3929,8 +3929,8 @@ dependencies = [
  "test-programs",
  "tokio",
  "walkdir",
- "wasm-encoder 0.29.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasm-encoder 0.29.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmtime",
  "wasmtime-cache",
  "wasmtime-cli-flags",
@@ -3945,7 +3945,7 @@ dependencies = [
  "wasmtime-wasi-nn",
  "wasmtime-wasi-threads",
  "wasmtime-wast",
- "wast 60.0.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wast 60.0.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wat",
  "windows-sys 0.48.0",
 ]
@@ -3998,7 +3998,7 @@ dependencies = [
  "object",
  "target-lexicon",
  "thiserror",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
 ]
@@ -4033,8 +4033,8 @@ dependencies = [
  "serde",
  "target-lexicon",
  "thiserror",
- "wasm-encoder 0.29.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasm-encoder 0.29.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmprinter",
  "wasmtime-component-util",
  "wasmtime-types",
@@ -4049,7 +4049,7 @@ dependencies = [
  "component-fuzz-util",
  "env_logger 0.10.0",
  "libfuzzer-sys",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmprinter",
  "wasmtime-environ",
  "wat",
@@ -4103,7 +4103,7 @@ dependencies = [
  "rand 0.8.5",
  "smallvec",
  "target-lexicon",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmtime",
  "wasmtime-fuzzing",
 ]
@@ -4123,12 +4123,12 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "v8",
- "wasm-encoder 0.29.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasm-encoder 0.29.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasm-mutate",
  "wasm-smith",
  "wasm-spec-interpreter",
  "wasmi",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmprinter",
  "wasmtime",
  "wasmtime-wast",
@@ -4210,7 +4210,7 @@ dependencies = [
  "cranelift-entity",
  "serde",
  "thiserror",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -4297,7 +4297,7 @@ dependencies = [
  "anyhow",
  "log",
  "wasmtime",
- "wast 60.0.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wast 60.0.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -4309,7 +4309,7 @@ dependencies = [
  "gimli",
  "object",
  "target-lexicon",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
  "winch-codegen",
@@ -4348,12 +4348,12 @@ dependencies = [
 [[package]]
 name = "wast"
 version = "60.0.0"
-source = "git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release#0afe1c01265d290fb5c23d5d84d98896495efd81"
+source = "git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations#403d7946f07feab87ed4b4b58a8b2130487f488f"
 dependencies = [
  "leb128",
  "memchr",
  "unicode-width",
- "wasm-encoder 0.29.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasm-encoder 0.29.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -4490,7 +4490,7 @@ dependencies = [
  "regalloc2",
  "smallvec",
  "target-lexicon",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmtime-environ",
 ]
 
@@ -4534,7 +4534,7 @@ dependencies = [
  "similar",
  "target-lexicon",
  "toml",
- "wasmparser 0.107.0 (git+https://github.com/dhil/wasm-tools?branch=typed-continuations-sync-up-to-release)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmtime-environ",
  "wat",
  "winch-codegen",
