@@ -2341,7 +2341,6 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 op
             ));
         }
-
         Operator::BrOnNull { relative_depth } => {
             let r = state.pop1();
             let (br_destination, inputs) = translate_br_if_args(*relative_depth, state);
