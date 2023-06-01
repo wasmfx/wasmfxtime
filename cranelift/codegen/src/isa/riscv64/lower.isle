@@ -515,87 +515,175 @@
   (lower_popcnt_i128 x))
 
 ;;;; Rules for `ishl` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(rule 1 (lower (has_type $I8 (ishl x y)))
-  (rv_sllw x (rv_andi (value_regs_get y 0) (imm12_const 7))))
 
-(rule 2 (lower (has_type $I8 (ishl x (imm12_from_value y))))
-  (rv_slliw x (imm12_and y 7)))
+;; 8/16 bit types need a mask on the shift amount
+(rule 0 (lower (has_type (ty_int (ty_8_or_16 ty)) (ishl x y)))
+  (if-let mask (u64_to_imm12 (shift_mask ty)))
+  (rv_sllw x (rv_andi (value_regs_get y 0) mask)))
 
-(rule 1 (lower (has_type $I16 (ishl x y)))
-  (rv_sllw x (rv_andi (value_regs_get y 0) (imm12_const 15))))
-
-(rule 2 (lower (has_type $I16 (ishl x (imm12_from_value y))))
-  (rv_slliw x (imm12_and y 15)))
-
+;; Using the 32bit version of `sll` automatically masks the shift amount.
 (rule 1 (lower (has_type $I32 (ishl x y)))
   (rv_sllw x (value_regs_get y 0)))
-(rule 2 (lower (has_type $I32 (ishl x (imm12_from_value y))))
-  (rv_slliw x y))
 
-(rule 2 (lower (has_type $I64 (ishl x (imm12_from_value y))))
-  (rv_slli x y))
+;; Similarly, the 64bit version does the right thing.
 (rule 1 (lower (has_type $I64 (ishl x y)))
   (rv_sll x (value_regs_get y 0)))
 
+;; If the shift amount is known. We can mask it and encode it in the instruction.
+(rule 2 (lower (has_type (int_fits_in_32 ty) (ishl x (maybe_uextend (imm12_from_value y)))))
+  (rv_slliw x (imm12_and y (shift_mask ty))))
+
+;; We technically don't need to mask the shift amount here. The instruction
+;; does the right thing. But it's neater when pretty printing it.
+(rule 3 (lower (has_type ty @ $I64 (ishl x (maybe_uextend (imm12_from_value y)))))
+  (rv_slli x (imm12_and y (shift_mask ty))))
+
 ;; With `Zba` we have a shift that zero extends the LHS argument.
-(rule 3 (lower (has_type $I64 (ishl (uextend x @ (value_type $I32)) (maybe_uextend (imm12_from_value y)))))
+(rule 4 (lower (has_type $I64 (ishl (uextend x @ (value_type $I32)) (maybe_uextend (imm12_from_value y)))))
   (if-let $true (has_zba))
   (rv_slliuw x y))
 
 ;; I128 cases
-(rule 0 (lower (has_type $I128 (ishl x y)))
-  (lower_i128_ishl x y))
+(rule 4 (lower (has_type $I128 (ishl x y)))
+  (let ((tmp ValueRegs (gen_shamt $I128 (value_regs_get y 0)))
+        (shamt XReg (value_regs_get tmp 0))
+        (len_sub_shamt XReg (value_regs_get tmp 1))
+        ;;
+        (low XReg (rv_sll (value_regs_get x 0) shamt))
+        ;; high part.
+        (high_part1 XReg (rv_srl (value_regs_get x 0) len_sub_shamt))
+        (high_part2 XReg (gen_select_reg (IntCC.Equal) shamt (zero_reg) (zero_reg) high_part1))
+        ;;
+        (high_part3 XReg (rv_sll (value_regs_get x 1) shamt))
+        (high XReg (rv_or high_part2 high_part3))
+        ;;
+        (const64 XReg (load_u64_constant 64))
+        (shamt_128 XReg (rv_andi (value_regs_get y 0) (imm12_const 127))))
+    (value_regs
+      (gen_select_reg (IntCC.UnsignedGreaterThanOrEqual) shamt_128 const64 (zero_reg) low)
+      (gen_select_reg (IntCC.UnsignedGreaterThanOrEqual) shamt_128 const64 low high))))
+
+;; SIMD Cases
+;; We don't need to mask anything since it is done by the instruction according to SEW.
+
+(rule 5 (lower (has_type (ty_vec_fits_in_register ty) (ishl x y)))
+  (rv_vsll_vx x (value_regs_get y 0) (unmasked) ty))
+
+(rule 6 (lower (has_type (ty_vec_fits_in_register ty) (ishl x (maybe_uextend (uimm5_from_value y)))))
+  (rv_vsll_vi x y (unmasked) ty))
 
 ;;;; Rules for `ushr` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(rule 1 (lower (has_type $I8 (ushr x y)))
-  (rv_srlw (zext x $I8 $I64) (rv_andi (value_regs_get y 0) (imm12_const 7))))
 
-(rule 2 (lower (has_type $I8 (ushr x (imm12_from_value y))))
-  (rv_srliw (zext x $I8 $I64) (imm12_and y 7)))
+;; 8/16 bit types need a mask on the shift amount, and the LHS needs to be
+;; zero extended.
+(rule 0 (lower (has_type (ty_int (fits_in_16 ty)) (ushr x y)))
+  (if-let mask (u64_to_imm12 (shift_mask ty)))
+  (rv_srlw (zext x ty $I64) (rv_andi (value_regs_get y 0) mask)))
 
-(rule 1 (lower (has_type $I16 (ushr x y)))
-  (rv_srlw (zext x $I16 $I64) (rv_andi (value_regs_get y 0) (imm12_const 15))))
-
-(rule 2 (lower (has_type $I16 (ushr x (imm12_from_value y))))
-  (rv_srliw (zext x $I16 $I64) (imm12_and y 15)))
-
+;; Using the 32bit version of `srl` automatically masks the shift amount.
 (rule 1 (lower (has_type $I32 (ushr x y)))
   (rv_srlw x (value_regs_get y 0)))
-(rule 2 (lower (has_type $I32 (ushr x (imm12_from_value y))))
-  (rv_srliw x y))
 
-(rule 2 (lower (has_type $I64 (ushr x (imm12_from_value y))))
-  (rv_srli x y))
+;; Similarly, the 64bit version does the right thing.
 (rule 1 (lower (has_type $I64 (ushr x y)))
   (rv_srl x (value_regs_get y 0)))
 
-(rule 0 (lower (has_type $I128 (ushr x y)))
-  (lower_i128_ushr x y))
+;; When the RHS is known we can just encode it in the instruction.
+(rule 2 (lower (has_type (ty_int (fits_in_16 ty)) (ushr x (maybe_uextend (imm12_from_value y)))))
+  (rv_srliw (zext x ty $I64) (imm12_and y (shift_mask ty))))
 
+(rule 3 (lower (has_type $I32 (ushr x (maybe_uextend (imm12_from_value y)))))
+  (rv_srliw x y))
+
+(rule 3 (lower (has_type $I64 (ushr x (maybe_uextend (imm12_from_value y)))))
+  (rv_srli x y))
+
+(rule 3 (lower (has_type $I128 (ushr x y)))
+  (let ((tmp ValueRegs (gen_shamt $I128 (value_regs_get y 0)))
+        (shamt XReg (value_regs_get tmp 0))
+        (len_sub_shamt XReg (value_regs_get tmp 1))
+        ;; low part.
+        (low_part1 XReg (rv_sll (value_regs_get x 1) len_sub_shamt))
+        (low_part2 XReg (gen_select_reg (IntCC.Equal) shamt (zero_reg) (zero_reg) low_part1))
+        ;;
+        (low_part3 XReg (rv_srl (value_regs_get x 0) shamt))
+        (low XReg (rv_or low_part2 low_part3))
+        ;;
+        (const64 XReg (load_u64_constant 64))
+        ;;
+        (high XReg (rv_srl (value_regs_get x 1) shamt))
+        (shamt_128 XReg (rv_andi (value_regs_get y 0) (imm12_const 127))))
+    (value_regs
+      (gen_select_reg (IntCC.UnsignedGreaterThanOrEqual) shamt_128 const64 high low)
+      (gen_select_reg (IntCC.UnsignedGreaterThanOrEqual) shamt_128 const64 (zero_reg) high))))
+
+;; SIMD Cases
+;; We don't need to mask or extend anything since it is done by the instruction according to SEW.
+
+(rule 4 (lower (has_type (ty_vec_fits_in_register ty) (ushr x y)))
+  (rv_vsrl_vx x (value_regs_get y 0) (unmasked) ty))
+
+(rule 5 (lower (has_type (ty_vec_fits_in_register ty) (ushr x (maybe_uextend (uimm5_from_value y)))))
+  (rv_vsrl_vi x y (unmasked) ty))
 
 ;;;; Rules for `sshr` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(rule 1 (lower (has_type $I8 (sshr x y)))
-  (rv_sra (sext x $I8 $I64) (rv_andi (value_regs_get y 0) (imm12_const 7))))
 
-(rule 2 (lower (has_type $I8 (sshr x (imm12_from_value y))))
-  (rv_srai (sext x $I8 $I64) (imm12_and y 7)))
+;; 8/16 bit types need a mask on the shift amount, and the LHS needs to be
+;; zero extended.
+(rule 0 (lower (has_type (ty_int (fits_in_16 ty)) (sshr x y)))
+  (if-let mask (u64_to_imm12 (shift_mask ty)))
+  (rv_sraw (sext x ty $I64) (rv_andi (value_regs_get y 0) mask)))
 
-(rule 1 (lower (has_type $I16 (sshr x y)))
-  (rv_sra (sext x $I16 $I64) (rv_andi (value_regs_get y 0) (imm12_const 15))))
-
-(rule 2 (lower (has_type $I16 (sshr x (imm12_from_value y))))
-  (rv_srai (sext x $I16 $I64) (imm12_and y 15)))
-
+;; Using the 32bit version of `sra` automatically masks the shift amount.
 (rule 1 (lower (has_type $I32 (sshr x y)))
   (rv_sraw x (value_regs_get y 0)))
-(rule 2 (lower (has_type $I32 (sshr x (imm12_from_value y))))
-  (rv_sraiw x y))
+
+;; Similarly, the 64bit version does the right thing.
 (rule 1 (lower (has_type $I64 (sshr x y)))
   (rv_sra x (value_regs_get y 0)))
-(rule 2 (lower (has_type $I64 (sshr x (imm12_from_value y))))
+
+;; When the RHS is known we can just encode it in the instruction.
+(rule 2 (lower (has_type (ty_int (fits_in_16 ty)) (sshr x (maybe_uextend (imm12_from_value y)))))
+  (rv_sraiw (sext x ty $I64) (imm12_and y (shift_mask ty))))
+
+(rule 3 (lower (has_type $I32 (sshr x (maybe_uextend (imm12_from_value y)))))
+  (rv_sraiw x y))
+
+(rule 3 (lower (has_type $I64 (sshr x (maybe_uextend (imm12_from_value y)))))
   (rv_srai x y))
-(rule 0 (lower (has_type $I128 (sshr x y)))
-  (lower_i128_sshr x (value_regs_get y 0)))
+
+(rule 3 (lower (has_type $I128 (sshr x y)))
+  (let ((tmp ValueRegs (gen_shamt $I128 (value_regs_get y 0)))
+        (shamt XReg (value_regs_get tmp 0))
+        (len_sub_shamt XReg (value_regs_get tmp 1))
+        ;; low part.
+        (low_part1 XReg (rv_sll (value_regs_get x 1) len_sub_shamt))
+        (low_part2 XReg (gen_select_reg (IntCC.Equal) shamt (zero_reg) (zero_reg) low_part1))
+        ;;
+        (low_part3 XReg (rv_srl (value_regs_get x 0) shamt))
+        (low XReg (rv_or low_part2 low_part3))
+        ;;
+        (const64 XReg (load_u64_constant 64))
+        ;;
+        (high XReg (rv_sra (value_regs_get x 1) shamt))
+        ;;
+        (const_neg_1 XReg (load_imm12 -1))
+        ;;
+        (high_replacement XReg (gen_select_reg (IntCC.SignedLessThan) (value_regs_get x 1) (zero_reg) const_neg_1 (zero_reg)))
+        (const64 XReg (load_u64_constant 64))
+        (shamt_128 XReg (rv_andi (value_regs_get y 0) (imm12_const 127))))
+    (value_regs
+      (gen_select_reg (IntCC.UnsignedGreaterThanOrEqual) shamt_128 const64 high low)
+      (gen_select_reg (IntCC.UnsignedGreaterThanOrEqual) shamt_128 const64 high_replacement high))))
+
+;; SIMD Cases
+;; We don't need to mask or extend anything since it is done by the instruction according to SEW.
+
+(rule 4 (lower (has_type (ty_vec_fits_in_register ty) (sshr x y)))
+  (rv_vsra_vx x (value_regs_get y 0) (unmasked) ty))
+
+(rule 5 (lower (has_type (ty_vec_fits_in_register ty) (sshr x (maybe_uextend (uimm5_from_value y)))))
+  (rv_vsra_vi x y (unmasked) ty))
 
 
 ;;;; Rules for `rotl` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1147,7 +1235,7 @@
 
 ;; N.B.: the Ret itself is generated by the ABI.
 (rule (lower (return args))
-      (lower_return (range 0 (value_slice_len args)) args))
+      (lower_return args))
 
 
 ;;; Rules for `get_{frame,stack}_pointer` and `get_return_address` ;;;;;;;;;;;;;
@@ -1271,3 +1359,51 @@
 
 (rule 1 (lower (has_type (ty_vec_fits_in_register ty) (ssub_sat x (splat y))))
   (rv_vssub_vx x y (unmasked) ty))
+
+;;;; Rules for `vall_true` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Here we do a Vector Reduce operation. Get the unsigned minimum value of any
+;; lane in the vector. The fixed input to the reduce operation is a 1.
+;; This way, if any lane is 0, the result will be 0. Otherwise, the result will
+;; be a 1.
+;; The reduce operation leaves the result in the lowest lane, we then move it
+;; into the destination X register.
+(rule (lower (vall_true x @ (value_type (ty_vec_fits_in_register ty))))
+  (if-let one (imm5_from_i8 1))
+  ;; We don't need to broadcast the immediate into all lanes, only into lane 0.
+  ;; I did it this way since it uses one less instruction than with a vmv.s.x.
+  (let ((fixed VReg (rv_vmv_vi one ty))
+        (min VReg (rv_vredminu_vs x fixed (unmasked) ty)))
+    (rv_vmv_xs min ty)))
+
+
+;;;; Rules for `vany_true` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Here we do a Vector Reduce operation. Get the unsigned maximum value of the
+;; input vector register. Move the max to an X register, and do a `snez` on it
+;; to ensure its either 1 or 0.
+(rule (lower (vany_true x @ (value_type (ty_vec_fits_in_register ty))))
+  (let ((max VReg (rv_vredmaxu_vs x x (unmasked) ty))
+        (x_max XReg (rv_vmv_xs max ty)))
+    (rv_snez x_max)))
+
+
+;;;; Rules for `vhigh_bits` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; To check if the MSB of a lane is set, we do a `vmslt` with zero, this sets
+;; the mask bit to 1 if the value is negative (MSB 1) and 0 if not. We can then
+;; just move that mask to an X Register.
+;;
+;; We must ensure that the move to the X register has a SEW with enough bits
+;; to hold the full mask. Additionally, in some cases (e.g. i64x2) we are going
+;; to read some tail bits. These are undefined, so we need to further mask them
+;; off.
+(rule (lower (vhigh_bits x @ (value_type (ty_vec_fits_in_register ty))))
+  (let ((mask VReg (rv_vmslt_vx x (zero_reg) (unmasked) ty))
+        ;; Here we only need I64X1, but emit an AVL of 2 since it
+        ;; saves one vector state change in the case of I64X2.
+        ;;
+        ;; TODO: For types that have more lanes than element bits, we can
+        ;; use the original type as a VState and avoid a state change.
+        (x_mask XReg (rv_vmv_xs mask (vstate_from_type $I64X2))))
+    (gen_andi x_mask (ty_lane_mask ty))))

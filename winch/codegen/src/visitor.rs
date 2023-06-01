@@ -67,6 +67,8 @@ macro_rules! def_unsupported {
     (emit I64GeS $($rest:tt)*) => {};
     (emit I32GeU $($rest:tt)*) => {};
     (emit I64GeU $($rest:tt)*) => {};
+    (emit I32Eqz $($rest:tt)*) => {};
+    (emit I64Eqz $($rest:tt)*) => {};
     (emit LocalGet $($rest:tt)*) => {};
     (emit LocalSet $($rest:tt)*) => {};
     (emit Call $($rest:tt)*) => {};
@@ -268,6 +270,22 @@ where
         self.cmp_i64s(CmpKind::GeU);
     }
 
+    fn visit_i32_eqz(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S32, &mut |masm, reg, size| {
+            masm.cmp_with_set(RegImm::imm(0), reg, CmpKind::Eq, size);
+        });
+    }
+
+    fn visit_i64_eqz(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S64, &mut |masm, reg, size| {
+            masm.cmp_with_set(RegImm::imm(0), reg, CmpKind::Eq, size);
+        });
+    }
+
     fn visit_end(&mut self) {}
 
     fn visit_local_get(&mut self, index: u32) {
@@ -312,14 +330,14 @@ where
     fn cmp_i32s(&mut self, kind: CmpKind) {
         self.context
             .i32_binop(self.masm, &mut |masm, dst, src, size| {
-                masm.cmp_with_set(dst, dst, src, kind, size);
+                masm.cmp_with_set(src, dst, kind, size);
             });
     }
 
     fn cmp_i64s(&mut self, kind: CmpKind) {
         self.context
             .i64_binop(self.masm, &mut move |masm, dst, src, size| {
-                masm.cmp_with_set(dst, dst, src, kind, size);
+                masm.cmp_with_set(src, dst, kind, size);
             });
     }
 }

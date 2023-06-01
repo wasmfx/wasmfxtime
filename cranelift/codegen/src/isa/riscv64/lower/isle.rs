@@ -213,7 +213,7 @@ impl generated_code::Context for RV64IsleContext<'_, '_, MInst, Riscv64Backend> 
         v.clone()
     }
 
-    fn imm12_and(&mut self, imm: Imm12, x: i32) -> Imm12 {
+    fn imm12_and(&mut self, imm: Imm12, x: u64) -> Imm12 {
         Imm12::from_bits(imm.as_i16() & (x as i16))
     }
 
@@ -265,6 +265,10 @@ impl generated_code::Context for RV64IsleContext<'_, '_, MInst, Riscv64Backend> 
     #[inline]
     fn uimm5_from_u8(&mut self, arg0: u8) -> Option<UImm5> {
         UImm5::maybe_from_u8(arg0)
+    }
+    #[inline]
+    fn uimm5_from_u64(&mut self, arg0: u64) -> Option<UImm5> {
+        arg0.try_into().ok().and_then(UImm5::maybe_from_u8)
     }
     #[inline]
     fn writable_zero_reg(&mut self) -> WritableReg {
