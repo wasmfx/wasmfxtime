@@ -22,7 +22,8 @@ wasmtime-runtime = { workspace = true }
 wasmtime-environ = { workspace = true }
 wasmtime-jit = { workspace = true }
 wasmtime-cache = { workspace = true, optional = true }
-wasmtime-fiber = { workspace = true }
+wasmtime-fiber = { workspace = true, optional = true }
+wasmtime-fibre = { workspace = true }
 wasmtime-cranelift = { workspace = true, optional = true }
 wasmtime-winch = { workspace = true, optional = true }
 wasmtime-component-macro = { workspace = true, optional = true }
@@ -100,7 +101,7 @@ cache = ["dep:wasmtime-cache"]
 # Enables support for "async stores" as well as defining host functions as
 # `async fn` and calling functions asynchronously.
 async = [
-#  "dep:wasmtime-fiber",
+  "dep:wasmtime-fiber",
   "wasmtime-runtime/async",
   "dep:async-trait",
   "wasmtime-component-macro?/async",

@@ -95,6 +95,14 @@ impl FiberStack {
         Some(self.top)
     }
 
+    pub unsafe fn parent(&self) -> *mut u8 {
+        self.top.cast::<*mut u8>().offset(-2).read()
+    }
+
+    pub unsafe fn write_parent(&self, tsp: *mut u8) {
+        self.top.cast::<*mut u8>().offset(-2).write(tsp);
+    }
+
     pub fn range(&self) -> Option<Range<usize>> {
         let base = unsafe { self.top.sub(self.len) as usize };
         Some(base..base + self.len)
@@ -117,14 +125,14 @@ pub struct Fiber;
 pub struct Suspend(*mut u8);
 
 extern "C" {
-    fn wasmtime_fiber_init(
+    fn wasmtime_fibre_init(
         top_of_stack: *mut u8,
         entry: extern "C" fn(*mut u8, *mut u8),
         entry_arg0: *mut u8,
     );
-    fn wasmtime_fiber_switch(top_of_stack: *mut u8);
+    fn wasmtime_fibre_switch(top_of_stack: *mut u8);
     #[allow(dead_code)] // only used in inline assembly for some platforms
-    fn wasmtime_fiber_start();
+    fn wasmtime_fibre_start();
 }
 
 extern "C" fn fiber_start<F, A, B, C>(arg0: *mut u8, top_of_stack: *mut u8)
@@ -145,7 +153,7 @@ impl Fiber {
     {
         unsafe {
             let data = Box::into_raw(Box::new(func)).cast();
-            wasmtime_fiber_init(stack.top, fiber_start::<F, A, B, C>, data);
+            wasmtime_fibre_init(stack.top, fiber_start::<F, A, B, C>, data);
         }
 
         Ok(Self)
@@ -160,7 +168,7 @@ impl Fiber {
             let addr = stack.top.cast::<usize>().offset(-1);
             addr.write(result as *const _ as usize);
 
-            wasmtime_fiber_switch(stack.top);
+            wasmtime_fibre_switch(stack.top);
 
             // null this out to help catch use-after-free
             addr.write(0);
@@ -169,11 +177,11 @@ impl Fiber {
 }
 
 impl Suspend {
-    pub(crate) fn switch<A, B, C>(&self, result: RunResult<A, B, C>) -> A {
+    pub fn switch<A, B, C>(&self, result: RunResult<A, B, C>) -> A {
         unsafe {
             // Calculate 0xAff8 and then write to it
             (*self.result_location::<A, B, C>()).set(result);
-            wasmtime_fiber_switch(self.0);
+            wasmtime_fibre_switch(self.0);
             self.take_resume::<A, B, C>()
         }
     }
@@ -190,23 +198,16 @@ impl Suspend {
         assert!(!ret.is_null());
         ret.cast()
     }
+
+    pub fn from_top_ptr(ptr: *mut u8) -> Self {
+        Suspend(ptr)
+    }
 }
 
 cfg_if::cfg_if! {
-    if #[cfg(target_arch = "aarch64")] {
-        mod aarch64;
-    } else if #[cfg(target_arch = "x86_64")] {
+    if #[cfg(target_arch = "x86_64")] {
         mod x86_64;
-    } else if #[cfg(target_arch = "x86")] {
-        mod x86;
-    } else if #[cfg(target_arch = "arm")] {
-        mod arm;
-    } else if #[cfg(target_arch = "s390x")] {
-        // currently `global_asm!` isn't stable on s390x so this is an external
-        // assembler file built with the `build.rs`.
-    } else if #[cfg(target_arch = "riscv64")]  {
-        mod riscv64;
-    }else {
+    } else {
         compile_error!("fibers are not supported on this CPU architecture");
     }
 }

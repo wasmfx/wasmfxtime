@@ -4,7 +4,7 @@ use crate::instance::TopOfStackPointer;
 use crate::vmcontext::{VMContext, VMFuncRef, VMFunctionBody, VMOpaqueContext};
 use crate::{Instance, TrapReason};
 use std::mem;
-use wasmtime_fiber::{Fiber, FiberStack, Suspend};
+use wasmtime_fibre::{Fiber, FiberStack, Suspend};
 
 // NOTE(dhil): Trampolines have disappeared from the wasmtime codebase
 // in favour of another mechanism. Presently, our code depends on
@@ -173,6 +173,6 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) {
     let stack_ptr = TopOfStackPointer::as_raw(instance.tsp());
     let parent = unsafe { stack_ptr.cast::<*mut u8>().offset(-2).read() };
     instance.set_tsp(TopOfStackPointer::from_raw(parent));
-    let suspend = wasmtime_fiber::unix::Suspend::from_top_ptr(stack_ptr);
-    suspend.switch::<(), u32, ()>(wasmtime_fiber::RunResult::Yield(tag_index))
+    let suspend = wasmtime_fibre::unix::Suspend::from_top_ptr(stack_ptr);
+    suspend.switch::<(), u32, ()>(wasmtime_fibre::RunResult::Yield(tag_index))
 }

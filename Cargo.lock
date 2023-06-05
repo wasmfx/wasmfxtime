@@ -3821,6 +3821,7 @@ dependencies = [
  "wasmtime-cranelift",
  "wasmtime-environ",
  "wasmtime-fiber",
+ "wasmtime-fibre",
  "wasmtime-jit",
  "wasmtime-runtime",
  "wasmtime-wasi",
@@ -4081,6 +4082,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmtime-fibre"
+version = "10.0.0"
+dependencies = [
+ "backtrace",
+ "cc",
+ "cfg-if",
+ "rustix",
+ "wasmtime-asm-macros",
+ "windows-sys 0.48.0",
+]
+
+[[package]]
 name = "wasmtime-fuzz"
 version = "0.0.0"
 dependencies = [
@@ -4199,6 +4212,7 @@ dependencies = [
  "wasmtime-asm-macros",
  "wasmtime-environ",
  "wasmtime-fiber",
+ "wasmtime-fibre",
  "wasmtime-jit-debug",
  "windows-sys 0.48.0",
 ]
