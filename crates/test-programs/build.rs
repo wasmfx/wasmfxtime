@@ -10,7 +10,7 @@ use wit_component::ComponentEncoder;
 // NB: this is set to `false` when a breaking change to WIT is made since the
 // wasi-http WIT is currently a submodule and can't be updated atomically with
 // the rest of Wasmtime.
-const BUILD_WASI_HTTP_TESTS: bool = false;
+const BUILD_WASI_HTTP_TESTS: bool = true;
 
 fn main() {
     #[cfg(feature = "test_programs")]
@@ -37,11 +37,8 @@ fn build_and_generate_tests() {
     }
 
     // Build the test programs:
-    let mut cmd = Command::new("rustup");
-    cmd.arg("run")
-        .arg("stable")
-        .arg("cargo")
-        .arg("build")
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
         .arg("--target=wasm32-wasi")
         .arg("--package=wasi-tests")
         .arg("--package=command-tests")

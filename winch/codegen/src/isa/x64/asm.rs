@@ -2,7 +2,7 @@
 
 use crate::{
     isa::reg::Reg,
-    masm::{CalleeKind, DivKind, OperandSize, RemKind},
+    masm::{CalleeKind, CmpKind, DivKind, OperandSize, RemKind},
 };
 use cranelift_codegen::{
     entity::EntityRef,
@@ -77,6 +77,23 @@ impl From<DivKind> for DivSignedness {
     }
 }
 
+impl From<CmpKind> for CC {
+    fn from(value: CmpKind) -> Self {
+        match value {
+            CmpKind::Eq => CC::Z,
+            CmpKind::Ne => CC::NZ,
+            CmpKind::LtS => CC::L,
+            CmpKind::LtU => CC::B,
+            CmpKind::GtS => CC::NLE,
+            CmpKind::GtU => CC::NBE,
+            CmpKind::LeS => CC::LE,
+            CmpKind::LeU => CC::BE,
+            CmpKind::GeS => CC::NL,
+            CmpKind::GeU => CC::NB,
+        }
+    }
+}
+
 /// Low level assembler implementation for x64.
 pub(crate) struct Assembler {
     /// The machine instruction buffer.
@@ -124,7 +141,10 @@ impl Assembler {
 
     /// Return instruction.
     pub fn ret(&mut self) {
-        self.emit(Inst::Ret { rets: vec![] });
+        self.emit(Inst::Ret {
+            rets: vec![],
+            stack_bytes_to_pop: 0,
+        });
     }
 
     /// Move instruction variants.
@@ -146,10 +166,7 @@ impl Assembler {
                 Address::Offset { base, offset: imm } => self.mov_mr(*base, *imm, *reg, size),
             },
 
-            _ => panic!(
-                "Invalid operand combination for mov; src={:?}, dst={:?}",
-                src, dst
-            ),
+            _ => Self::handle_invalid_operand_combination(src, dst),
         }
     }
 
@@ -225,15 +242,12 @@ impl Assembler {
                     self.sub_ir(val, *dst, size)
                 } else {
                     let scratch = regs::scratch();
-                    self.mov_ir(*imm as u64, scratch, size);
+                    self.load_constant(imm, scratch, size);
                     self.sub_rr(scratch, *dst, size);
                 }
             }
             (Operand::Reg(src), Operand::Reg(dst)) => self.sub_rr(*src, *dst, size),
-            _ => panic!(
-                "Invalid operand combination for sub; src = {:?} dst = {:?}",
-                src, dst
-            ),
+            _ => Self::handle_invalid_operand_combination(src, dst),
         }
     }
 
@@ -269,15 +283,12 @@ impl Assembler {
                     self.mul_ir(val, *dst, size);
                 } else {
                     let scratch = regs::scratch();
-                    self.mov_ir(*imm as u64, scratch, size);
+                    self.load_constant(imm, scratch, size);
                     self.mul_rr(scratch, *dst, size);
                 }
             }
             (Operand::Reg(src), Operand::Reg(dst)) => self.mul_rr(*src, *dst, size),
-            _ => panic!(
-                "Invalid operand combination for mul; src = {:?} dst = {:?}",
-                src, dst
-            ),
+            _ => Self::handle_invalid_operand_combination(src, dst),
         }
     }
 
@@ -425,15 +436,12 @@ impl Assembler {
                     self.add_ir(val, *dst, size)
                 } else {
                     let scratch = regs::scratch();
-                    self.mov_ir(*imm as u64, scratch, size);
+                    self.load_constant(imm, scratch, size);
                     self.add_rr(scratch, *dst, size);
                 }
             }
             (Operand::Reg(src), Operand::Reg(dst)) => self.add_rr(*src, *dst, size),
-            _ => panic!(
-                "Invalid operand combination for add; src = {:?} dst = {:?}",
-                src, dst
-            ),
+            _ => Self::handle_invalid_operand_combination(src, dst),
         }
     }
 
@@ -472,6 +480,64 @@ impl Assembler {
         });
     }
 
+    /// Compare two operands and set status register flags.
+    pub fn cmp(&mut self, src: Operand, dst: Operand, size: OperandSize) {
+        match &(src, dst) {
+            (Operand::Imm(imm), Operand::Reg(dst)) => {
+                if let Ok(val) = i32::try_from(*imm) {
+                    self.cmp_ir(val, *dst, size)
+                } else {
+                    let scratch = regs::scratch();
+                    self.load_constant(imm, scratch, size);
+                    self.cmp_rr(scratch, *dst, size);
+                }
+            }
+            (Operand::Reg(src), Operand::Reg(dst)) => self.cmp_rr(*src, *dst, size),
+            _ => Self::handle_invalid_operand_combination(src, dst),
+        }
+    }
+
+    fn cmp_ir(&mut self, imm: i32, dst: Reg, size: OperandSize) {
+        let imm = RegMemImm::imm(imm as u32);
+
+        self.emit(Inst::CmpRmiR {
+            size: size.into(),
+            opcode: CmpOpcode::Cmp,
+            src: GprMemImm::new(imm).expect("valid immediate"),
+            dst: dst.into(),
+        });
+    }
+
+    fn cmp_rr(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        self.emit(Inst::CmpRmiR {
+            size: size.into(),
+            opcode: CmpOpcode::Cmp,
+            src: src.into(),
+            dst: dst.into(),
+        });
+    }
+
+    /// Set value in dst to `0` or `1` based on flags in status register and
+    /// [`CmpKind`].
+    pub fn setcc(&mut self, kind: CmpKind, dst: Operand) {
+        let dst = match dst {
+            Operand::Reg(r) => r,
+            _ => panic!("Invalid operand for dst"),
+        };
+        // Clear the dst register or bits 1 to 31 may be incorrectly set.
+        // Don't use xor since it updates the status register.
+        self.emit(Inst::Imm {
+            dst_size: args::OperandSize::Size32, // Always going to be an i32 result.
+            simm64: 0,
+            dst: dst.into(),
+        });
+        // Copy correct bit from status register into dst register.
+        self.emit(Inst::Setcc {
+            cc: kind.into(),
+            dst: dst.into(),
+        });
+    }
+
     pub fn call(&mut self, callee: CalleeKind) {
         match callee {
             CalleeKind::Indirect(reg) => {
@@ -498,5 +564,13 @@ impl Assembler {
                 });
             }
         }
+    }
+
+    fn load_constant(&mut self, imm: &i64, dst: Reg, size: OperandSize) {
+        self.mov_ir(*imm as u64, dst, size);
+    }
+
+    fn handle_invalid_operand_combination(src: Operand, dst: Operand) {
+        panic!("Invalid operand combination; src={:?}, dst={:?}", src, dst);
     }
 }

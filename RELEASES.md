@@ -12,6 +12,10 @@ Unreleased.
 
 ### Changed
 
+* An `epoch_deadline_callback` now returns an `UpdateDeadline` enum to allow
+  optionally yielding to the async executor after the callback runs.
+  [#6464](https://github.com/bytecodealliance/wasmtime/pull/6464)
+
 * The "raw" representation of `funcref` and `externref` in the embedding API has
   been updated from a `usize` to a `*mut u8` to be compatible with Rust's
   proposed strict provenance rules. This change is additionally reflected into
@@ -26,6 +30,18 @@ Unreleased.
 * Opening directories with WASI on Windows with `NONBLOCK` in flags has been
   fixed.
   [#6348](https://github.com/bytecodealliance/wasmtime/pull/6348)
+
+--------------------------------------------------------------------------------
+
+## 9.0.3
+
+Released 2023-05-31.
+
+### Fixed
+
+* Fix Wasi rights system to work with wasi-testsuite, which exposed a corner case
+  that was missed by the fixes in the 9.0.2 release.
+  [#6479](https://github.com/bytecodealliance/wasmtime/pull/6479)
 
 --------------------------------------------------------------------------------
 

@@ -4,7 +4,7 @@ use super::{
     asm::{Assembler, Operand},
     regs::{self, rbp, rsp},
 };
-use crate::masm::{DivKind, MacroAssembler as Masm, OperandSize, RegImm, RemKind};
+use crate::masm::{CmpKind, DivKind, MacroAssembler as Masm, OperandSize, RegImm, RemKind};
 use crate::{
     abi::{self, align_to, calculate_frame_adjustment, LocalSlot},
     codegen::CodeGenContext,
@@ -254,6 +254,12 @@ impl Masm for MacroAssembler {
 
     fn address_at_reg(&self, reg: Reg, offset: u32) -> Self::Address {
         Address::offset(reg, offset)
+    }
+
+    fn cmp_with_set(&mut self, src: RegImm, dst: RegImm, kind: CmpKind, size: OperandSize) {
+        let dst = dst.into();
+        self.asm.cmp(src.into(), dst, size);
+        self.asm.setcc(kind, dst);
     }
 }
 

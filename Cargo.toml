@@ -139,6 +139,7 @@ wasmtime-runtime = { path = "crates/runtime", version = "=10.0.0" }
 wasmtime-wast = { path = "crates/wast", version = "=10.0.0" }
 wasmtime-wasi = { path = "crates/wasi", version = "10.0.0" }
 wasmtime-wasi-crypto = { path = "crates/wasi-crypto", version = "10.0.0" }
+wasmtime-wasi-http = { path = "crates/wasi-http", version = "=10.0.0" }
 wasmtime-wasi-nn = { path = "crates/wasi-nn", version = "10.0.0" }
 wasmtime-wasi-threads = { path = "crates/wasi-threads", version = "10.0.0" }
 wasmtime-component-util = { path = "crates/component-util", version = "=10.0.0" }
@@ -172,8 +173,6 @@ cranelift-bforest = { path = "cranelift/bforest", version = "0.97.0" }
 cranelift-control = { path = "cranelift/control", version = "0.97.0" }
 cranelift = { path = "cranelift/umbrella", version = "0.97.0" }
 
-wasmtime-wasi-http = { path = "crates/wasi-http", version = "=10.0.0" }
-
 winch-codegen = { path = "winch/codegen", version = "=0.8.0" }
 winch-filetests = { path = "winch/filetests" }
 winch-test-macros = { path = "winch/test-macros" }
@@ -183,7 +182,7 @@ byte-array-literals = { path = "crates/wasi-preview1-component-adapter/byte-arra
 
 # Bytecode Alliance maintained dependencies:
 # ---------------------------
-regalloc2 = "0.9.0"
+regalloc2 = "0.9.1"
 
 # cap-std family:
 target-lexicon = { version = "0.12.3", default-features = false, features = ["std"] }
@@ -239,6 +238,7 @@ cfg-if = "1.0"
 tempfile = "3.1.0"
 filecheck = "0.5.0"
 libc = "0.2.60"
+file-per-thread-logger = "0.2.0"
 
 [features]
 default = [
@@ -248,8 +248,7 @@ default = [
   "vtune",
   "wasi-nn",
   "wasi-threads",
-  # TODO: the WIT needs to be updated
-  #"wasi-http",
+  "wasi-http",
   "pooling-allocator",
 ]
 jitdump = ["wasmtime/jitdump"]

@@ -204,7 +204,8 @@ pub struct StoreInner<T> {
 
     limiter: Option<ResourceLimiterInner<T>>,
     call_hook: Option<CallHookInner<T>>,
-    epoch_deadline_behavior: EpochDeadline<T>,
+    epoch_deadline_behavior:
+        Option<Box<dyn FnMut(StoreContextMut<T>) -> Result<UpdateDeadline> + Send + Sync>>,
     // for comments about `ManuallyDrop`, see `Store::into_data`
     data: ManuallyDrop<T>,
 }
@@ -228,6 +229,18 @@ enum CallHookInner<T> {
     Sync(Box<dyn FnMut(&mut T, CallHook) -> Result<()> + Send + Sync>),
     #[cfg(feature = "async")]
     Async(Box<dyn CallHookHandler<T> + Send + Sync>),
+}
+
+/// What to do after returning from a callback when the engine epoch reaches
+/// the deadline for a Store during execution of a function using that store.
+pub enum UpdateDeadline {
+    /// Extend the deadline by the specified number of ticks.
+    Continue(u64),
+    /// Extend the deadline by the specified number of ticks after yielding to
+    /// the async executor loop. This can only be used with an async [`Store`]
+    /// configured via [`Config::async_support`](crate::Config::async_support).
+    #[cfg(feature = "async")]
+    Yield(u64),
 }
 
 // Forward methods on `StoreOpaque` to also being on `StoreInner<T>`
@@ -422,21 +435,6 @@ enum OutOfGas {
     },
 }
 
-/// What to do when the engine epoch reaches the deadline for a Store
-/// during execution of a function using that store.
-#[derive(Default)]
-enum EpochDeadline<T> {
-    /// Return early with a trap.
-    #[default]
-    Trap,
-    /// Call a custom deadline handler.
-    Callback(Box<dyn FnMut(StoreContextMut<T>) -> Result<u64> + Send + Sync>),
-    /// Extend the deadline by the specified number of ticks after
-    /// yielding to the async executor loop.
-    #[cfg(feature = "async")]
-    YieldAndExtendDeadline { delta: u64 },
-}
-
 impl<T> Store<T> {
     /// Creates a new [`Store`] to be associated with the given [`Engine`] and
     /// `data` provided.
@@ -480,7 +478,7 @@ impl<T> Store<T> {
             },
             limiter: None,
             call_hook: None,
-            epoch_deadline_behavior: EpochDeadline::Trap,
+            epoch_deadline_behavior: None,
             data: ManuallyDrop::new(data),
         });
 
@@ -928,10 +926,17 @@ impl<T> Store<T> {
     /// store and the epoch deadline is reached before completion, the
     /// provided callback function is invoked.
     ///
-    /// This function should return a positive `delta`, which is used to
-    /// update the new epoch, setting it to the current epoch plus
-    /// `delta` ticks. Alternatively, the callback may return an error,
-    /// which will terminate execution.
+    /// This callback should either return an [`UpdateDeadline`], or
+    /// return an error, which will terminate execution with a trap.
+    ///
+    /// The [`UpdateDeadline`] is a positive number of ticks to
+    /// add to the epoch deadline, as well as indicating what
+    /// to do after the callback returns. If the [`Store`] is
+    /// configured with async support, then the callback may return
+    /// [`UpdateDeadline::Yield`] to yield to the async executor before
+    /// updating the epoch deadline. Alternatively, the callback may
+    /// return [`UpdateDeadline::Continue`] to update the epoch deadline
+    /// immediately.
     ///
     /// This setting is intended to allow for coarse-grained
     /// interruption, but not a deterministic deadline of a fixed,
@@ -943,7 +948,7 @@ impl<T> Store<T> {
     /// for an introduction to epoch-based interruption.
     pub fn epoch_deadline_callback(
         &mut self,
-        callback: impl FnMut(StoreContextMut<T>) -> Result<u64> + Send + Sync + 'static,
+        callback: impl FnMut(StoreContextMut<T>) -> Result<UpdateDeadline> + Send + Sync + 'static,
     ) {
         self.inner.epoch_deadline_callback(Box::new(callback));
     }
@@ -1593,6 +1598,7 @@ impl<T> StoreContextMut<'_, T> {
                 fiber,
                 current_poll_cx,
                 engine,
+                state: Some(wasmtime_runtime::AsyncWasmCallState::new()),
             }
         };
         future.await?;
@@ -1603,6 +1609,8 @@ impl<T> StoreContextMut<'_, T> {
             fiber: wasmtime_fiber::Fiber<'a, Result<()>, (), Result<()>>,
             current_poll_cx: *mut *mut Context<'static>,
             engine: Engine,
+            // See comments in `FiberFuture::resume` for this
+            state: Option<wasmtime_runtime::AsyncWasmCallState>,
         }
 
         // This is surely the most dangerous `unsafe impl Send` in the entire
@@ -1668,6 +1676,50 @@ impl<T> StoreContextMut<'_, T> {
         // correct. That's what `unsafe` in Rust is all about, though, right?
         unsafe impl Send for FiberFuture<'_> {}
 
+        impl FiberFuture<'_> {
+            /// This is a helper function to call `resume` on the underlying
+            /// fiber while correctly managing Wasmtime's thread-local data.
+            ///
+            /// Wasmtime's implementation of traps leverages thread-local data
+            /// to get access to metadata during a signal. This thread-local
+            /// data is a linked list of "activations" where the nodes of the
+            /// linked list are stored on the stack. It would be invalid as a
+            /// result to suspend a computation with the head of the linked list
+            /// on this stack then move the stack to another thread and resume
+            /// it. That means that a different thread would point to our stack
+            /// and our thread doesn't point to our stack at all!
+            ///
+            /// Basically management of TLS is required here one way or another.
+            /// The strategy currently settled on is to manage the list of
+            /// activations created by this fiber as a unit. When a fiber
+            /// resumes the linked list is prepended to the current thread's
+            /// list. When the fiber is suspended then the fiber's list of
+            /// activations are all removed en-masse and saved within the fiber.
+            fn resume(&mut self, val: Result<()>) -> Result<Result<()>, ()> {
+                unsafe {
+                    let prev = self.state.take().unwrap().push();
+                    let restore = Restore {
+                        fiber: self,
+                        state: Some(prev),
+                    };
+                    return restore.fiber.fiber.resume(val);
+                }
+
+                struct Restore<'a, 'b> {
+                    fiber: &'a mut FiberFuture<'b>,
+                    state: Option<wasmtime_runtime::PreviousAsyncWasmCallState>,
+                }
+
+                impl Drop for Restore<'_, '_> {
+                    fn drop(&mut self) {
+                        unsafe {
+                            self.fiber.state = Some(self.state.take().unwrap().restore());
+                        }
+                    }
+                }
+            }
+        }
+
         impl Future for FiberFuture<'_> {
             type Output = Result<()>;
 
@@ -1694,13 +1746,34 @@ impl<T> StoreContextMut<'_, T> {
 
                     // After that's set up we resume execution of the fiber, which
                     // may also start the fiber for the first time. This either
-                    // returns `Ok` saying the fiber finished (yay!) or it returns
-                    // `Err` with the payload passed to `suspend`, which in our case
-                    // is `()`. If `Err` is returned that means the fiber polled a
-                    // future but it said "Pending", so we propagate that here.
-                    match self.fiber.resume(Ok(())) {
+                    // returns `Ok` saying the fiber finished (yay!) or it
+                    // returns `Err` with the payload passed to `suspend`, which
+                    // in our case is `()`.
+                    match self.resume(Ok(())) {
                         Ok(result) => Poll::Ready(result),
-                        Err(()) => Poll::Pending,
+
+                        // If `Err` is returned that means the fiber polled a
+                        // future but it said "Pending", so we propagate that
+                        // here.
+                        //
+                        // An additional safety check is performed when leaving
+                        // this function to help bolster the guarantees of
+                        // `unsafe impl Send` above. Notably this future may get
+                        // re-polled on a different thread. Wasmtime's
+                        // thread-local state points to the stack, however,
+                        // meaning that it would be incorrect to leave a pointer
+                        // in TLS when this function returns. This function
+                        // performs a runtime assert to verify that this is the
+                        // case, notably that the one TLS pointer Wasmtime uses
+                        // is not pointing anywhere within the stack. If it is
+                        // then that's a bug indicating that TLS management in
+                        // Wasmtime is incorrect.
+                        Err(()) => {
+                            if let Some(range) = self.fiber.stack().range() {
+                                wasmtime_runtime::AsyncWasmCallState::assert_current_state_not_in_range(range);
+                            }
+                            Poll::Pending
+                        }
                     }
                 }
             }
@@ -1724,13 +1797,15 @@ impl<T> StoreContextMut<'_, T> {
         impl Drop for FiberFuture<'_> {
             fn drop(&mut self) {
                 if !self.fiber.done() {
-                    let result = self.fiber.resume(Err(anyhow!("future dropped")));
+                    let result = self.resume(Err(anyhow!("future dropped")));
                     // This resumption with an error should always complete the
                     // fiber. While it's technically possible for host code to catch
                     // the trap and re-resume, we'd ideally like to signal that to
                     // callers that they shouldn't be doing that.
                     debug_assert!(result.is_ok());
                 }
+
+                self.state.take().unwrap().assert_null();
 
                 unsafe {
                     self.engine
@@ -1806,10 +1881,7 @@ impl AsyncCx {
                 Poll::Pending => {}
             }
 
-            let before = wasmtime_runtime::TlsRestore::take();
-            let res = (*suspend).suspend(());
-            before.replace();
-            res?;
+            (*suspend).suspend(())?;
         }
     }
 }
@@ -1945,29 +2017,31 @@ unsafe impl<T> wasmtime_runtime::Store for StoreInner<T> {
     fn new_epoch(&mut self) -> Result<u64, anyhow::Error> {
         // Temporarily take the configured behavior to avoid mutably borrowing
         // multiple times.
-        let mut behavior = std::mem::take(&mut self.epoch_deadline_behavior);
+        let mut behavior = self.epoch_deadline_behavior.take();
         let delta_result = match &mut behavior {
-            EpochDeadline::Trap => Err(Trap::Interrupt.into()),
-            EpochDeadline::Callback(callback) => {
-                let delta = callback((&mut *self).as_context_mut())?;
+            None => Err(Trap::Interrupt.into()),
+            Some(callback) => callback((&mut *self).as_context_mut()).and_then(|update| {
+                let delta = match update {
+                    UpdateDeadline::Continue(delta) => delta,
+
+                    #[cfg(feature = "async")]
+                    UpdateDeadline::Yield(delta) => {
+                        assert!(
+                            self.async_support(),
+                            "cannot use `UpdateDeadline::Yield` without enabling async support in the config"
+                        );
+                        // Do the async yield. May return a trap if future was
+                        // canceled while we're yielded.
+                        self.async_yield_impl()?;
+                        delta
+                    }
+                };
+
                 // Set a new deadline and return the new epoch deadline so
                 // the Wasm code doesn't have to reload it.
                 self.set_epoch_deadline(delta);
                 Ok(self.get_epoch_deadline())
-            }
-            #[cfg(feature = "async")]
-            EpochDeadline::YieldAndExtendDeadline { delta } => {
-                let delta = *delta;
-                // Do the async yield. May return a trap if future was
-                // canceled while we're yielded.
-                self.async_yield_impl()?;
-                // Set a new deadline.
-                self.set_epoch_deadline(delta);
-
-                // Return the new epoch deadline so the Wasm code
-                // doesn't have to reload it.
-                Ok(self.get_epoch_deadline())
-            }
+            })
         };
 
         // Put back the original behavior which was replaced by `take`.
@@ -1992,14 +2066,14 @@ impl<T> StoreInner<T> {
     }
 
     fn epoch_deadline_trap(&mut self) {
-        self.epoch_deadline_behavior = EpochDeadline::Trap;
+        self.epoch_deadline_behavior = None;
     }
 
     fn epoch_deadline_callback(
         &mut self,
-        callback: Box<dyn FnMut(StoreContextMut<T>) -> Result<u64> + Send + Sync>,
+        callback: Box<dyn FnMut(StoreContextMut<T>) -> Result<UpdateDeadline> + Send + Sync>,
     ) {
-        self.epoch_deadline_behavior = EpochDeadline::Callback(callback);
+        self.epoch_deadline_behavior = Some(callback);
     }
 
     fn epoch_deadline_async_yield_and_update(&mut self, delta: u64) {
@@ -2009,7 +2083,8 @@ impl<T> StoreInner<T> {
         );
         #[cfg(feature = "async")]
         {
-            self.epoch_deadline_behavior = EpochDeadline::YieldAndExtendDeadline { delta };
+            self.epoch_deadline_behavior =
+                Some(Box::new(move |_store| Ok(UpdateDeadline::Yield(delta))));
         }
         let _ = delta; // suppress warning in non-async build
     }

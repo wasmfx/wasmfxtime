@@ -419,6 +419,31 @@ pub(crate) fn emit(
             }
         }
 
+        Inst::UnaryRmRVex { size, op, src, dst } => {
+            let dst = allocs.next(dst.to_reg().to_reg());
+            let src = match src.clone().to_reg_mem().with_allocs(allocs) {
+                RegMem::Reg { reg } => {
+                    RegisterOrAmode::Register(reg.to_real_reg().unwrap().hw_enc().into())
+                }
+                RegMem::Mem { addr } => RegisterOrAmode::Amode(addr.finalize(state, sink)),
+            };
+
+            let (opcode, opcode_ext) = match op {
+                UnaryRmRVexOpcode::Blsr => (0xF3, 1),
+                UnaryRmRVexOpcode::Blsmsk => (0xF3, 2),
+                UnaryRmRVexOpcode::Blsi => (0xF3, 3),
+            };
+
+            VexInstruction::new()
+                .map(OpcodeMap::_0F38)
+                .w(*size == OperandSize::Size64)
+                .opcode(opcode)
+                .reg(opcode_ext)
+                .vvvv(dst.to_real_reg().unwrap().hw_enc())
+                .rm(src)
+                .encode(sink);
+        }
+
         Inst::Not { size, src, dst } => {
             let src = allocs.next(src.to_reg());
             let dst = allocs.next(dst.to_reg().to_reg());
@@ -1602,7 +1627,17 @@ pub(crate) fn emit(
 
         Inst::Args { .. } => {}
 
-        Inst::Ret { .. } => sink.put1(0xC3),
+        Inst::Ret {
+            stack_bytes_to_pop: 0,
+            ..
+        } => sink.put1(0xC3),
+
+        Inst::Ret {
+            stack_bytes_to_pop, ..
+        } => {
+            sink.put1(0xC2);
+            sink.put2(u16::try_from(*stack_bytes_to_pop).unwrap());
+        }
 
         Inst::JmpKnown { dst } => {
             let br_start = sink.cur_offset();
@@ -1932,6 +1967,33 @@ pub(crate) fn emit(
                 .tuple_type(op.tuple_type())
                 .reg(dst.to_real_reg().unwrap().hw_enc())
                 .rm(src)
+                .encode(sink);
+        }
+
+        Inst::XmmUnaryRmRImmEvex { op, src, dst, imm } => {
+            let dst = allocs.next(dst.to_reg().to_reg());
+            let src = match src.clone().to_reg_mem().with_allocs(allocs) {
+                RegMem::Reg { reg } => {
+                    RegisterOrAmode::Register(reg.to_real_reg().unwrap().hw_enc().into())
+                }
+                RegMem::Mem { addr } => RegisterOrAmode::Amode(addr.finalize(state, sink)),
+            };
+
+            let (opcode, opcode_ext, w) = match op {
+                Avx512Opcode::VpsraqImm => (0x72, 4, true),
+                _ => unimplemented!("Opcode {:?} not implemented", op),
+            };
+            EvexInstruction::new()
+                .length(EvexVectorLength::V128)
+                .prefix(LegacyPrefixes::_66)
+                .map(OpcodeMap::_0F)
+                .w(w)
+                .opcode(opcode)
+                .reg(opcode_ext)
+                .vvvvv(dst.to_real_reg().unwrap().hw_enc())
+                .tuple_type(op.tuple_type())
+                .rm(src)
+                .imm(*imm)
                 .encode(sink);
         }
 
@@ -2756,15 +2818,16 @@ pub(crate) fn emit(
                 debug_assert_eq!(src1, dst);
             }
 
-            let (w, opcode) = match op {
-                Avx512Opcode::Vpermi2b => (false, 0x75),
-                Avx512Opcode::Vpmullq => (true, 0x40),
+            let (w, opcode, map) = match op {
+                Avx512Opcode::Vpermi2b => (false, 0x75, OpcodeMap::_0F38),
+                Avx512Opcode::Vpmullq => (true, 0x40, OpcodeMap::_0F38),
+                Avx512Opcode::Vpsraq => (true, 0xE2, OpcodeMap::_0F),
                 _ => unimplemented!("Opcode {:?} not implemented", op),
             };
             EvexInstruction::new()
                 .length(EvexVectorLength::V128)
                 .prefix(LegacyPrefixes::_66)
-                .map(OpcodeMap::_0F38)
+                .map(map)
                 .w(w)
                 .opcode(opcode)
                 .tuple_type(op.tuple_type())

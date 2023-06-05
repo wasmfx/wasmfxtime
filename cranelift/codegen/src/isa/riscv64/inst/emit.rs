@@ -422,7 +422,7 @@ impl Inst {
             | Inst::Args { .. }
             | Inst::Ret { .. }
             | Inst::Extend { .. }
-            | Inst::AjustSp { .. }
+            | Inst::AdjustSp { .. }
             | Inst::Call { .. }
             | Inst::CallInd { .. }
             | Inst::TrapIf { .. }
@@ -722,7 +722,15 @@ impl MachInstEmit for Inst {
                 // Nothing: this is a pseudoinstruction that serves
                 // only to constrain registers at a certain point.
             }
-            &Inst::Ret { .. } => {
+            &Inst::Ret {
+                stack_bytes_to_pop, ..
+            } => {
+                if stack_bytes_to_pop != 0 {
+                    Inst::AdjustSp {
+                        amount: i64::from(stack_bytes_to_pop),
+                    }
+                    .emit(&[], sink, emit_info, state);
+                }
                 //jalr x0, x1, 0
                 let x: u32 = (0b1100111) | (1 << 15);
                 sink.put4(x);
@@ -770,7 +778,7 @@ impl MachInstEmit for Inst {
                     .into_iter()
                     .for_each(|i| i.emit(&[], sink, emit_info, state));
             }
-            &Inst::AjustSp { amount } => {
+            &Inst::AdjustSp { amount } => {
                 if let Some(imm) = Imm12::maybe_from_u64(amount as u64) {
                     Inst::AluRRImm12 {
                         alu_op: AluOPRRI::Addi,
