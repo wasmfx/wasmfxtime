@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
     - main
+    - typed-continuations
     - 'release-*'
 
   # Run full CI on the `main` branch once a day to prime the GitHub Actions
