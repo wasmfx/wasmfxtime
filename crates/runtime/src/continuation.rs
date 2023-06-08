@@ -15,11 +15,10 @@ pub fn cont_new(instance: &mut Instance, func: *mut u8) -> *mut u8 {
     let f = unsafe {
         // TODO(dhil): Not sure whether we should use
         // VMWasmCallFunction or VMNativeCallFunction here.
-        std::mem::transmute::<NonNull<VMWasmCallFunction>,
-                              unsafe extern "C" fn(*mut VMOpaqueContext,
-                                                   *mut VMContext, ()) -> u32,>(
-            (*func).wasm_call.unwrap()
-        )
+        std::mem::transmute::<
+            NonNull<VMWasmCallFunction>,
+            unsafe extern "C" fn(*mut VMOpaqueContext, *mut VMContext, ()) -> u32,
+        >((*func).wasm_call.unwrap())
     };
     let fiber = Box::new(
         Fiber::new(
@@ -31,7 +30,8 @@ pub fn cont_new(instance: &mut Instance, func: *mut u8) -> *mut u8 {
                 // to achieve this instead.
                 unsafe { f(callee_ctx, caller_ctx, ()) }
             },
-        ).unwrap()
+        )
+        .unwrap(),
     );
     let ptr: *mut Fiber<'static, (), u32, u32> = Box::into_raw(fiber);
     ptr as *mut u8
@@ -54,14 +54,14 @@ pub fn resume(instance: &mut Instance, cont: *mut u8) -> Result<u32, TrapReason>
         Ok(result) => {
             let drop_box: Box<Fiber<_, _, _>> = unsafe { Box::from_raw(cont) };
             drop(drop_box); // I think this would be covered by the close brace below anyway
-            // Store the result.
+                            // Store the result.
             let payloads_addr = unsafe { instance.get_typed_continuations_payloads_mut() };
             unsafe {
                 std::ptr::write(payloads_addr, result);
             }
 
             Ok(0) // zero value = return normally.
-            //Ok(9999)
+                  //Ok(9999)
         }
         Err(tag) => {
             // We set the high bit to signal a return via suspend. We
@@ -69,12 +69,12 @@ pub fn resume(instance: &mut Instance, cont: *mut u8) -> Result<u32, TrapReason>
             let signal_mask = 0xf000_0000;
             debug_assert_eq!(tag & signal_mask, 0);
             unsafe {
-                let cont_store_ptr =
-                    instance.get_typed_continuations_store_mut() as *mut *mut Fiber<'static, (), u32, u32>;
+                let cont_store_ptr = instance.get_typed_continuations_store_mut()
+                    as *mut *mut Fiber<'static, (), u32, u32>;
                 cont_store_ptr.write(cont)
             };
             Ok(tag | signal_mask)
-        }, // 0 = suspend //Ok(y),
+        } // 0 = suspend //Ok(y),
     }
 }
 

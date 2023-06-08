@@ -89,7 +89,7 @@ use cranelift_codegen::ir::{
     self, AtomicRmwOp, ConstantData, InstBuilder, JumpTableData, MemFlags, Value, ValueLabel,
 };
 use cranelift_codegen::packed_option::ReservedValue;
-use cranelift_frontend::{FunctionBuilder, Variable, Switch};
+use cranelift_frontend::{FunctionBuilder, Switch, Variable};
 use itertools::Itertools;
 use smallvec::SmallVec;
 use std::convert::TryFrom;
@@ -2407,7 +2407,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             unimplemented!("GC operators not yet implemented")
         }
 
-        Operator::ContNew { type_index  } => {
+        Operator::ContNew { type_index } => {
             let arg_types = environ.continuation_arguments(*type_index).to_vec();
             let r = state.pop1();
             state.push1(environ.translate_cont_new(builder.cursor(), state, r, &arg_types)?);
@@ -2430,7 +2430,8 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let call_arg_types = environ.continuation_arguments(*type_index).to_vec();
 
             // Now, we generate the call instruction.
-            let (base_addr, signal, tag) = environ.translate_resume(builder, state, *cont, &call_arg_types, call_args)?;
+            let (base_addr, signal, tag) =
+                environ.translate_resume(builder, state, *cont, &call_arg_types, call_args)?;
             // Description of results:
             // * The `base_addr` is the base address of VM context.
             // * The `signal` is an encoded boolean indicating whether
@@ -2440,7 +2441,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             // suspend (only valid if `signal` is 1).
 
             // Pop the `resume_args` off the stack.
-            state.popn(arity+1);
+            state.popn(arity + 1);
 
             // Now, construct blocks for the three continuations:
             // 1) `resume` returned normally.
@@ -2484,12 +2485,11 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             // First, initialise the switch structure.
             let mut switch = Switch::new();
             // Second, we consume the resume table entry-wise.
-            let mut case_blocks  = vec![];
+            let mut case_blocks = vec![];
             for (tag, label) in resumetable.targets().map(|x| x.unwrap()) {
                 let case = crate::translation_utils::resumetable_entry_block(builder, environ)?;
                 switch.set_entry(tag as u128, case);
                 builder.switch_to_block(case);
-
 
                 // Load and push arguments
                 let param_types = environ.tag_params(tag);
@@ -2511,7 +2511,8 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             // Note that at this point we haven't actually emitted any code for the switching logic itself,
             // but only filled the Switch structure and created the blocks it jumps to.
 
-            let forwarding_case = crate::translation_utils::resumetable_forwarding_block(builder, environ)?;
+            let forwarding_case =
+                crate::translation_utils::resumetable_forwarding_block(builder, environ)?;
 
             // Switch block (where the actual switching logic is emitted to)
             {
@@ -2546,7 +2547,9 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let params = state.peekn(param_types.len());
             let param_count = params.len();
             let pointer_type = environ.pointer_type();
-            let vmctx = builder.func.create_global_value(ir::GlobalValueData::VMContext);
+            let vmctx = builder
+                .func
+                .create_global_value(ir::GlobalValueData::VMContext);
             let base_addr = builder.cursor().ins().global_value(pointer_type, vmctx);
             environ.typed_continuations_store_payloads(builder, param_types, params, base_addr);
             state.popn(param_count);
@@ -2554,7 +2557,8 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             environ.translate_suspend(builder.cursor(), state, *tag_index);
 
             let return_types = environ.tag_returns(*tag_index);
-            let return_values = environ.typed_continuations_load_payloads(builder, return_types, base_addr);
+            let return_values =
+                environ.typed_continuations_load_payloads(builder, return_types, base_addr);
             state.pushn(&return_values);
         }
         Operator::ContBind {

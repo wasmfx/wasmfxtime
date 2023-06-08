@@ -10,8 +10,8 @@ use cranelift_frontend::FunctionBuilder;
 use cranelift_frontend::Variable;
 use cranelift_wasm::{
     self, FuncIndex, FuncTranslationState, GlobalIndex, GlobalVariable, Heap, HeapData, HeapStyle,
-    MemoryIndex, TableIndex, TagIndex, TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType, WasmResult,
-    WasmType,
+    MemoryIndex, TableIndex, TagIndex, TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType,
+    WasmResult, WasmType,
 };
 use std::convert::TryFrom;
 use std::mem;
@@ -2205,7 +2205,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         mut pos: cranelift_codegen::cursor::FuncCursor<'_>,
         _state: &FuncTranslationState,
         func: ir::Value,
-        _arg_types : &[WasmType]
+        _arg_types: &[WasmType],
     ) -> WasmResult<ir::Value> {
         let builtin_index = BuiltinFunctionIndex::cont_new();
         let builtin_sig = self.builtin_function_signatures.cont_new(&mut pos.func);
@@ -2222,9 +2222,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
-        cont : ir::Value,
+        cont: ir::Value,
         call_arg_types: &[WasmType],
-        call_args: &[ir::Value]
+        call_args: &[ir::Value],
     ) -> WasmResult<(ir::Value, ir::Value, ir::Value)> {
         // Strategy:
         //
@@ -2245,7 +2245,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
         let (vmctx, builtin_addr) =
             self.translate_load_builtin_function_address(&mut builder.cursor(), builtin_index);
-
 
         // Second step: store `call_args` in the typed continuations
         // store.
@@ -2325,14 +2324,21 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         self.types[idx].returns()
     }
 
-    fn typed_continuations_load_payloads(&self, builder: &mut FunctionBuilder, valtypes: &[WasmType], base_addr: ir::Value) -> Vec<ir::Value> {
+    fn typed_continuations_load_payloads(
+        &self,
+        builder: &mut FunctionBuilder,
+        valtypes: &[WasmType],
+        base_addr: ir::Value,
+    ) -> Vec<ir::Value> {
         let memflags = ir::MemFlags::trusted().with_readonly();
         let mut values = vec![];
         if valtypes.len() == 0 {
             // OK
         } else if valtypes.len() == 1 {
             let offset = i32::try_from(self.offsets.vmctx_typed_continuations_payloads()).unwrap();
-            let val = builder.ins().load(convert_type(valtypes[0]), memflags, base_addr, offset);
+            let val = builder
+                .ins()
+                .load(convert_type(valtypes[0]), memflags, base_addr, offset);
             values.push(val)
         } else {
             panic!("Unsupported continuation arity!");
@@ -2340,7 +2346,13 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         values
     }
 
-    fn typed_continuations_store_payloads(&self, builder: &mut FunctionBuilder, valtypes: &[WasmType], values : &[ir::Value], base_addr: ir::Value) {
+    fn typed_continuations_store_payloads(
+        &self,
+        builder: &mut FunctionBuilder,
+        valtypes: &[WasmType],
+        values: &[ir::Value],
+        base_addr: ir::Value,
+    ) {
         //TODO(frank-emrich) what flags exactly do we need here?
         let memflags = ir::MemFlags::trusted();
 
@@ -2348,17 +2360,22 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             // OK
         } else if valtypes.len() == 1 {
             let offset = i32::try_from(self.offsets.vmctx_typed_continuations_payloads()).unwrap();
-             builder.ins().store(memflags,values[0],base_addr, offset);
+            builder.ins().store(memflags, values[0], base_addr, offset);
         } else {
             panic!("Unsupported continuation arity!");
         }
-
     }
 
-    fn typed_continuations_load_continuation_object(&self, builder: &mut FunctionBuilder, base_addr: ir::Value) -> ir::Value {
+    fn typed_continuations_load_continuation_object(
+        &self,
+        builder: &mut FunctionBuilder,
+        base_addr: ir::Value,
+    ) -> ir::Value {
         let memflags = ir::MemFlags::trusted().with_readonly();
         let offset = i32::try_from(self.offsets.vmctx_typed_continuations_store()).unwrap();
-        builder.ins().load(self.pointer_type(), memflags, base_addr, offset)
+        builder
+            .ins()
+            .load(self.pointer_type(), memflags, base_addr, offset)
     }
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {

@@ -673,7 +673,13 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         Ok(pos.ins().iconst(I32, 0))
     }
 
-    fn translate_cont_new(&mut self, _pos: FuncCursor, _state: &FuncTranslationState, _func: ir::Value, _arg_types : &[wasmtime_types::WasmType]) -> WasmResult<ir::Value> {
+    fn translate_cont_new(
+        &mut self,
+        _pos: FuncCursor,
+        _state: &FuncTranslationState,
+        _func: ir::Value,
+        _arg_types: &[wasmtime_types::WasmType],
+    ) -> WasmResult<ir::Value> {
         todo!()
     }
 
@@ -681,9 +687,9 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         &mut self,
         _builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
-        _cont : ir::Value,
+        _cont: ir::Value,
         _call_arg_types: &[WasmType],
-        _call_args: &[ir::Value]
+        _call_args: &[ir::Value],
     ) -> WasmResult<(ir::Value, ir::Value, ir::Value)> {
         todo!()
     }
@@ -698,7 +704,12 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn translate_suspend(&mut self, _pos: FuncCursor, _state: &FuncTranslationState, _tag_index: u32) {
+    fn translate_suspend(
+        &mut self,
+        _pos: FuncCursor,
+        _state: &FuncTranslationState,
+        _tag_index: u32,
+    ) {
         todo!()
     }
 
@@ -718,15 +729,30 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn typed_continuations_load_payloads(&self, _builder: &mut FunctionBuilder, _valtypes: &[WasmType], _base_addr: ir::Value) -> Vec<ir::Value> {
+    fn typed_continuations_load_payloads(
+        &self,
+        _builder: &mut FunctionBuilder,
+        _valtypes: &[WasmType],
+        _base_addr: ir::Value,
+    ) -> Vec<ir::Value> {
         todo!()
     }
 
-    fn typed_continuations_store_payloads(&self, _builder: &mut FunctionBuilder, _valtypes: &[WasmType], _values : &[ir::Value], _base_addr: ir::Value) {
+    fn typed_continuations_store_payloads(
+        &self,
+        _builder: &mut FunctionBuilder,
+        _valtypes: &[WasmType],
+        _values: &[ir::Value],
+        _base_addr: ir::Value,
+    ) {
         todo!()
     }
 
-    fn typed_continuations_load_continuation_object(&self, _builder: &mut FunctionBuilder, _base_addr: ir::Value) -> ir::Value {
+    fn typed_continuations_load_continuation_object(
+        &self,
+        _builder: &mut FunctionBuilder,
+        _base_addr: ir::Value,
+    ) -> ir::Value {
         todo!()
     }
 }

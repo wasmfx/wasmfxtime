@@ -564,7 +564,13 @@ pub trait FuncEnvironment: TargetEnvironment {
     }
 
     /// TODO(dhil): write documentation.
-    fn translate_cont_new(&mut self, pos: FuncCursor, state: &FuncTranslationState, func: ir::Value, arg_types : &[wasmtime_types::WasmType]) -> WasmResult<ir::Value>;
+    fn translate_cont_new(
+        &mut self,
+        pos: FuncCursor,
+        state: &FuncTranslationState,
+        func: ir::Value,
+        arg_types: &[wasmtime_types::WasmType],
+    ) -> WasmResult<ir::Value>;
 
     /// Translates a resume instruction and returns a triple (vmctx,
     /// signal, tag), where vmctx is the base address of the VM
@@ -575,9 +581,9 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
         state: &FuncTranslationState,
-        cont : ir::Value,
+        cont: ir::Value,
         call_arg_types: &[wasmtime_types::WasmType],
-        call_args: &[ir::Value]
+        call_args: &[ir::Value],
     ) -> WasmResult<(ir::Value, ir::Value, ir::Value)>;
 
     /// TODO(dhil): write documentation.
@@ -599,10 +605,21 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn continuation_returns(&self, type_index: u32) -> &[wasmtime_types::WasmType];
 
     /// TODO
-    fn typed_continuations_load_payloads(&self, builder: &mut FunctionBuilder, valtypes: &[wasmtime_types::WasmType], base_addr: ir::Value) -> std::vec::Vec<ir::Value>;
+    fn typed_continuations_load_payloads(
+        &self,
+        builder: &mut FunctionBuilder,
+        valtypes: &[wasmtime_types::WasmType],
+        base_addr: ir::Value,
+    ) -> std::vec::Vec<ir::Value>;
 
     /// TODO
-    fn typed_continuations_store_payloads(&self, builder: &mut FunctionBuilder, valtypes: &[wasmtime_types::WasmType], values : &[ir::Value], base_addr: ir::Value);
+    fn typed_continuations_store_payloads(
+        &self,
+        builder: &mut FunctionBuilder,
+        valtypes: &[wasmtime_types::WasmType],
+        values: &[ir::Value],
+        base_addr: ir::Value,
+    );
 
     /// TODO
     fn tag_params(&self, tag_index: u32) -> &[wasmtime_types::WasmType];
@@ -611,7 +628,11 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn tag_returns(&self, tag_index: u32) -> &[wasmtime_types::WasmType];
 
     /// TODO
-    fn typed_continuations_load_continuation_object(&self, builder: &mut FunctionBuilder, base_addr: ir::Value) -> ir::Value;
+    fn typed_continuations_load_continuation_object(
+        &self,
+        builder: &mut FunctionBuilder,
+        base_addr: ir::Value,
+    ) -> ir::Value;
 
     /// Returns whether the CLIF `x86_blendv` instruction should be used for the
     /// relaxed simd `*.relaxed_laneselect` instruction for the specified type.
