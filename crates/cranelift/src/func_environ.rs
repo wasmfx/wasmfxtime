@@ -10,7 +10,7 @@ use cranelift_frontend::FunctionBuilder;
 use cranelift_frontend::Variable;
 use cranelift_wasm::{
     self, FuncIndex, FuncTranslationState, GlobalIndex, GlobalVariable, Heap, HeapData, HeapStyle,
-    MemoryIndex, TableIndex, TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType, WasmResult,
+    MemoryIndex, TableIndex, TagIndex, TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType, WasmResult,
     WasmType,
 };
 use std::convert::TryFrom;
@@ -2203,7 +2203,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn translate_cont_new(
         &mut self,
         mut pos: cranelift_codegen::cursor::FuncCursor<'_>,
+        _state: &FuncTranslationState,
         func: ir::Value,
+        _arg_types : &[WasmType]
     ) -> WasmResult<ir::Value> {
         let builtin_index = BuiltinFunctionIndex::cont_new();
         let builtin_sig = self.builtin_function_signatures.cont_new(&mut pos.func);
@@ -2218,26 +2220,69 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
     fn translate_resume(
         &mut self,
-        mut pos: cranelift_codegen::cursor::FuncCursor<'_>,
-        cont: ir::Value,
-        _call_args: &[ir::Value],
-    ) -> WasmResult<ir::Value> {
+        builder: &mut FunctionBuilder,
+        _state: &FuncTranslationState,
+        cont : ir::Value,
+        call_arg_types: &[WasmType],
+        call_args: &[ir::Value]
+    ) -> WasmResult<(ir::Value, ir::Value, ir::Value)> {
+        // Strategy:
+        //
+        // First, load the builtin `resume`. As a side effect obtain a
+        // handle to the base of the VM context.
+        //
+        // Second, store the remainder of `call_args` in the
+        // designated typed continuation store in the VM context.
+        //
+        // Third, pack up the arguments and call `resume`.
+        //
+        // Fourth, return the result of the resume call.
+
+        // First step: load the builtin `resume` and as a side-effect
+        // return the address of the vmctx.
         let builtin_index = BuiltinFunctionIndex::resume();
-        let builtin_sig = self.builtin_function_signatures.resume(&mut pos.func);
+        let builtin_sig = self.builtin_function_signatures.resume(&mut builder.func);
+
         let (vmctx, builtin_addr) =
-            self.translate_load_builtin_function_address(&mut pos, builtin_index);
+            self.translate_load_builtin_function_address(&mut builder.cursor(), builtin_index);
 
-        let call_inst = pos
+
+        // Second step: store `call_args` in the typed continuations
+        // store.
+        self.typed_continuations_store_payloads(builder, call_arg_types, call_args, vmctx);
+
+        // Third step: setup the call arguments and apply the builtin
+        // resume function.
+        let real_args = vec![vmctx, cont];
+
+        // Now we perform the call.
+        let call_inst = builder
             .ins()
-            .call_indirect(builtin_sig, builtin_addr, &[vmctx, cont]);
+            .call_indirect(builtin_sig, builtin_addr, &real_args);
 
-        // 0 on suspend (TODO); 9999 on completion
-        Ok(pos.func.dfg.first_result(call_inst))
+        // Fourth step: finally, we return the result of the call.
+        let result = builder.func.dfg.first_result(call_inst);
+
+        // The result encodes whether the return happens via ordinary
+        // means or via a suspend. If the high bit is set, then it is
+        // interpreted as the return happened via a suspend, and the
+        // remainder of the integer is to be interpreted as the index
+        // of the control tag that was supplied to the suspend.
+        let signal_mask = 0xf000_0000;
+        let inverse_signal_mask = 0x0fff_ffff;
+        let signal = builder.ins().band_imm(result, signal_mask);
+        let real_result = builder.ins().band_imm(result, inverse_signal_mask);
+
+        // We return a pointer to the base of the VM context, as the
+        // subsequent codegen needs to project from it. Along with it,
+        // we also return the return signal and the tag.
+        Ok((vmctx, signal, real_result))
     }
 
     fn translate_resume_throw(
         &mut self,
         _pos: FuncCursor,
+        _state: &FuncTranslationState,
         _tag_index: u32,
         _cont: ir::Value,
     ) -> WasmResult<ir::Value> {
@@ -2247,6 +2292,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn translate_suspend(
         &mut self,
         mut pos: cranelift_codegen::cursor::FuncCursor<'_>,
+        _state: &FuncTranslationState,
         tag_index: u32,
     ) {
         let builtin_index = BuiltinFunctionIndex::suspend();
@@ -2259,12 +2305,71 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             .call_indirect(builtin_sig, builtin_addr, &[vmctx, tag_index]);
     }
 
-    fn continuation_arity(&self, index: u32) -> usize {
+    fn continuation_arguments(&self, index: u32) -> &[WasmType] {
         let idx = self.module.types[TypeIndex::from_u32(index)].unwrap_continuation();
-        self.types[idx].params().len()
+        self.types[idx].params()
+    }
+
+    fn continuation_returns(&self, index: u32) -> &[WasmType] {
+        let idx = self.module.types[TypeIndex::from_u32(index)].unwrap_continuation();
+        self.types[idx].returns()
+    }
+
+    fn tag_params(&self, tag_index: u32) -> &[WasmType] {
+        let idx = self.module.tags[TagIndex::from_u32(tag_index)].signature;
+        self.types[idx].params()
+    }
+
+    fn tag_returns(&self, tag_index: u32) -> &[WasmType] {
+        let idx = self.module.tags[TagIndex::from_u32(tag_index)].signature;
+        self.types[idx].returns()
+    }
+
+    fn typed_continuations_load_payloads(&self, builder: &mut FunctionBuilder, valtypes: &[WasmType], base_addr: ir::Value) -> Vec<ir::Value> {
+        let memflags = ir::MemFlags::trusted().with_readonly();
+        let mut values = vec![];
+        if valtypes.len() == 0 {
+            // OK
+        } else if valtypes.len() == 1 {
+            let offset = i32::try_from(self.offsets.vmctx_typed_continuations_payloads()).unwrap();
+            let val = builder.ins().load(convert_type(valtypes[0]), memflags, base_addr, offset);
+            values.push(val)
+        } else {
+            panic!("Unsupported continuation arity!");
+        }
+        values
+    }
+
+    fn typed_continuations_store_payloads(&self, builder: &mut FunctionBuilder, valtypes: &[WasmType], values : &[ir::Value], base_addr: ir::Value) {
+        //TODO(frank-emrich) what flags exactly do we need here?
+        let memflags = ir::MemFlags::trusted();
+
+        if valtypes.len() == 0 {
+            // OK
+        } else if valtypes.len() == 1 {
+            let offset = i32::try_from(self.offsets.vmctx_typed_continuations_payloads()).unwrap();
+             builder.ins().store(memflags,values[0],base_addr, offset);
+        } else {
+            panic!("Unsupported continuation arity!");
+        }
+
+    }
+
+    fn typed_continuations_load_continuation_object(&self, builder: &mut FunctionBuilder, base_addr: ir::Value) -> ir::Value {
+        let memflags = ir::MemFlags::trusted().with_readonly();
+        let offset = i32::try_from(self.offsets.vmctx_typed_continuations_store()).unwrap();
+        builder.ins().load(self.pointer_type(), memflags, base_addr, offset)
     }
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {
         self.isa.has_x86_blendv_lowering(ty)
+    }
+}
+
+fn convert_type(ty: WasmType) -> ir::Type {
+    match ty {
+        WasmType::I32 => ir::types::I32,
+        WasmType::I64 => ir::types::I64,
+        _ => todo!(),
     }
 }

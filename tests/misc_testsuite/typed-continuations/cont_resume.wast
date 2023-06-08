@@ -14,4 +14,4 @@
     (global.get $i))
 )
 
-;; (assert_return (invoke "f") (i32.const 42))
+(assert_return (invoke "f") (i32.const 42))

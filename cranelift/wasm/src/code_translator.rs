@@ -89,7 +89,7 @@ use cranelift_codegen::ir::{
     self, AtomicRmwOp, ConstantData, InstBuilder, JumpTableData, MemFlags, Value, ValueLabel,
 };
 use cranelift_codegen::packed_option::ReservedValue;
-use cranelift_frontend::{FunctionBuilder, Variable};
+use cranelift_frontend::{FunctionBuilder, Variable, Switch};
 use itertools::Itertools;
 use smallvec::SmallVec;
 use std::convert::TryFrom;
@@ -2407,61 +2407,155 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             unimplemented!("GC operators not yet implemented")
         }
 
-        Operator::ContNew { type_index: _ } => {
+        Operator::ContNew { type_index  } => {
+            let arg_types = environ.continuation_arguments(*type_index).to_vec();
             let r = state.pop1();
-            state.push1(environ.translate_cont_new(builder.cursor(), r)?);
+            state.push1(environ.translate_cont_new(builder.cursor(), state, r, &arg_types)?);
         }
         Operator::Resume {
             type_index,
             resumetable,
         } => {
-            let _arity = environ.continuation_arity(*type_index);
-            //println!("arity: {}", _arity);
-            let call_args = vec![];
-            let cont = state.pop1();
-            let jmpn = environ.translate_resume(builder.cursor(), cont, &call_args)?;
-            // This assumes cont will be modified in-place
-            state.push1(cont);
-            state.push1(jmpn);
+            // Idea create wrapper block for handling suspends:
+            // (resume ...)
+            // (if returned_normally then return code else resumetable code)
 
-            let mut targets = vec![];
+            // First we pop the arguments off the stack and bundle
+            // them up. The arguments are laid out on the stack as
+            // follows.
+            //
+            //  [ arg1 ... argN cont ]
+            let arity = environ.continuation_arguments(*type_index).len();
+            let (cont, call_args) = state.peekn(arity + 1).split_last().unwrap();
+            let call_arg_types = environ.continuation_arguments(*type_index).to_vec();
+
+            // Now, we generate the call instruction.
+            let (base_addr, signal, tag) = environ.translate_resume(builder, state, *cont, &call_arg_types, call_args)?;
+            // Description of results:
+            // * The `base_addr` is the base address of VM context.
+            // * The `signal` is an encoded boolean indicating whether
+            // the `resume` returned ordinarily or via a suspend
+            // instruction.
+            // * The `tag` is the index of the control tag supplied to
+            // suspend (only valid if `signal` is 1).
+
+            // Pop the `resume_args` off the stack.
+            state.popn(arity+1);
+
+            // Now, construct blocks for the three continuations:
+            // 1) `resume` returned normally.
+            // 2) `resume` returned via a suspend.
+            // 3) `resume` is forwarding (TODO)
+
+            // Test the signal bit.
+            let is_zero = builder.ins().icmp_imm(IntCC::Equal, signal, 0);
+            let return_block = crate::translation_utils::return_block(builder, environ)?;
+            let suspend_block = crate::translation_utils::suspend_block(builder, environ)?;
+            let switch_block = builder.create_block();
+            // Jump to the return block if the signal is 0, otherwise
+            // jump to the suspend block.
+            canonicalise_brif(builder, is_zero, return_block, &[], suspend_block, &[]);
+
+            // Next, build the suspend block.
+            let cont = {
+                builder.switch_to_block(suspend_block);
+                builder.seal_block(suspend_block);
+
+                // Load the continuation object
+                // TODO(frank-emrich) Is it actually the case that the suspended continuation MUST
+                // be the one we resumed here? In that case we wouldn't actually have to go via memory
+                // but could just re-use the cont object on the (WASM) stack in the beginning
+                let cont = environ.typed_continuations_load_continuation_object(builder, base_addr);
+
+                // We need to terminate this block before being allowed to switch to another one
+                builder.ins().jump(switch_block, &[]);
+                cont
+            };
+
+            // Strategy:
+            //
+            // Translate each each (tag, label) pair in the resume table to a
+            // switch-case of the form "case tag: br label".
+            // The switching logic then ensures that we jump to the block
+            // handling the corresponding tag.
+            //
+            // The fallback/default case performs effect forwarding (TODO).
+            //
+            // First, initialise the switch structure.
+            let mut switch = Switch::new();
+            // Second, we consume the resume table entry-wise.
+            let mut case_blocks  = vec![];
             for (tag, label) in resumetable.targets().map(|x| x.unwrap()) {
-                let tag = tag as usize;
-                if targets.len() <= tag {
-                    targets.resize(tag + 1, 0) // it's okay to put zeroes because typechecker ensured this makes sense
-                }
-                targets[tag] = label + 1; // We add 1 because of our silly extra block desugar below
+                let case = crate::translation_utils::resumetable_entry_block(builder, environ)?;
+                switch.set_entry(tag as u128, case);
+                builder.switch_to_block(case);
+
+
+                // Load and push arguments
+                let param_types = environ.tag_params(tag);
+                let params =
+                    environ.typed_continuations_load_payloads(builder, param_types, base_addr);
+
+                state.pushn(&params);
+                // Push the continuation object
+                state.push1(cont);
+                let count = params.len() + 1;
+                let (br_destination, inputs) = translate_br_if_args(label, state);
+
+                // Now jump to the actual user-defined block handling this tag, as given by the resumetable
+                builder.ins().jump(br_destination, inputs);
+                state.popn(count);
+                case_blocks.push(case);
             }
 
-            // We wrap a br_table in a block so we can assign "just keep going"
-            // to the default value (9999 from libcall = br 0)
-            translate_operator(
-                validator,
-                &Operator::Block {
-                    // We want to keep a continuation on the stack for the
-                    // suspend cases. Even though in this case (return) we
-                    // simply drop / deallocate the continuation, we still need to
-                    // keep it around for the clif typechecking
-                    // TODO: i'm choosing some arbitrary type index here to
-                    // represent "a type index" because i believe clif doesn't
-                    // have any coarser type-checking and we simply drop the value
-                    blockty: wasmparser::BlockType::Type(wasmparser::ValType::Ref(
-                        wasmparser::RefType::indexed_func(false, *type_index).unwrap(),
-                    )),
-                },
-                builder,
-                state,
-                environ,
-            )?;
-            translate_resume_table(builder, state, targets)?;
-            translate_operator(validator, &Operator::End, builder, state, environ)?;
-            // We kept a continuation on the stack for the suspend cases, but
-            // on return we have no continuation. so drop that continuation that
-            // is now completely invalidated (something about deallocate?)
-            translate_operator(validator, &Operator::Drop, builder, state, environ)?;
+            // Note that at this point we haven't actually emitted any code for the switching logic itself,
+            // but only filled the Switch structure and created the blocks it jumps to.
+
+            let forwarding_case = crate::translation_utils::resumetable_forwarding_block(builder, environ)?;
+
+            // Switch block (where the actual switching logic is emitted to)
+            {
+                builder.switch_to_block(switch_block);
+                switch.emit(builder, tag, forwarding_case);
+                builder.seal_block(switch_block);
+                builder.switch_to_block(forwarding_case);
+                builder.seal_block(forwarding_case);
+                // TODO: emit effect forwarding logic.
+                builder.ins().trap(ir::TrapCode::UnreachableCodeReached);
+
+                // We can only seal the blocks we generated for each tag now, after switch.emit ran
+                for case_block in case_blocks {
+                    builder.seal_block(case_block);
+                }
+            }
+
+            // Now, finish the return block
+            {
+                builder.switch_to_block(return_block);
+                builder.seal_block(return_block);
+
+                // Load and push the results
+                let returns = environ.continuation_returns(*type_index);
+                let values = environ.typed_continuations_load_payloads(builder, returns, base_addr);
+                state.pushn(&values);
+            }
         }
         Operator::Suspend { tag_index } => {
-            environ.translate_suspend(builder.cursor(), *tag_index);
+            let param_types = environ.tag_params(*tag_index);
+
+            let params = state.peekn(param_types.len());
+            let param_count = params.len();
+            let pointer_type = environ.pointer_type();
+            let vmctx = builder.func.create_global_value(ir::GlobalValueData::VMContext);
+            let base_addr = builder.cursor().ins().global_value(pointer_type, vmctx);
+            environ.typed_continuations_store_payloads(builder, param_types, params, base_addr);
+            state.popn(param_count);
+
+            environ.translate_suspend(builder.cursor(), state, *tag_index);
+
+            let return_types = environ.tag_returns(*tag_index);
+            let return_values = environ.typed_continuations_load_payloads(builder, return_types, base_addr);
+            state.pushn(&return_values);
         }
         Operator::ContBind {
             src_index: _,
@@ -2474,96 +2568,6 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         }
         | Operator::Barrier { blockty: _, .. } => todo!("Implement continuation instructions"),
     };
-    Ok(())
-}
-
-// TODO(dhil): Hack, refactor to better fit resumetable.
-fn translate_resume_table(
-    builder: &mut FunctionBuilder,
-    state: &mut FuncTranslationState,
-    targets: Vec<u32>,
-) -> WasmResult<()> {
-    let default = 0;
-    let mut min_depth = default;
-    for depth in targets.clone() {
-        if depth < min_depth {
-            min_depth = depth;
-        }
-    }
-    let jump_args_count = {
-        let i = state.control_stack.len() - 1 - (min_depth as usize);
-        let min_depth_frame = &state.control_stack[i];
-        if min_depth_frame.is_loop() {
-            min_depth_frame.num_param_values()
-        } else {
-            min_depth_frame.num_return_values()
-        }
-    };
-    let val = state.pop1();
-    let mut data = Vec::with_capacity(targets.len());
-    if jump_args_count == 0 {
-        // No jump arguments
-        for depth in targets.clone() {
-            let block = {
-                let i = state.control_stack.len() - 1 - (depth as usize);
-                let frame = &mut state.control_stack[i];
-                frame.set_branched_to_exit();
-                frame.br_destination()
-            };
-            data.push(builder.func.dfg.block_call(block, &[]));
-        }
-        let block = {
-            let i = state.control_stack.len() - 1 - (default as usize);
-            let frame = &mut state.control_stack[i];
-            frame.set_branched_to_exit();
-            frame.br_destination()
-        };
-        let block = builder.func.dfg.block_call(block, &[]);
-        let jt = builder.create_jump_table(JumpTableData::new(block, &data));
-        builder.ins().br_table(val, jt);
-    } else {
-        // Here we have jump arguments, but Cranelift's br_table doesn't support them
-        // We then proceed to split the edges going out of the br_table
-        let return_count = jump_args_count;
-        let mut dest_block_sequence = vec![];
-        let mut dest_block_map = HashMap::new();
-        for depth in targets.clone() {
-            let branch_block = match dest_block_map.entry(depth as usize) {
-                hash_map::Entry::Occupied(entry) => *entry.get(),
-                hash_map::Entry::Vacant(entry) => {
-                    let block = builder.create_block();
-                    dest_block_sequence.push((depth as usize, block));
-                    *entry.insert(block)
-                }
-            };
-            data.push(builder.func.dfg.block_call(branch_block, &[]));
-        }
-        let default_branch_block = match dest_block_map.entry(default as usize) {
-            hash_map::Entry::Occupied(entry) => *entry.get(),
-            hash_map::Entry::Vacant(entry) => {
-                let block = builder.create_block();
-                dest_block_sequence.push((default as usize, block));
-                *entry.insert(block)
-            }
-        };
-        let default_branch_block = builder.func.dfg.block_call(default_branch_block, &[]);
-        let jt = builder.create_jump_table(JumpTableData::new(default_branch_block, &data));
-        builder.ins().br_table(val, jt);
-        for (depth, dest_block) in dest_block_sequence {
-            builder.switch_to_block(dest_block);
-            builder.seal_block(dest_block);
-            let real_dest_block = {
-                let i = state.control_stack.len() - 1 - depth;
-                let frame = &mut state.control_stack[i];
-                frame.set_branched_to_exit();
-                frame.br_destination()
-            };
-            let destination_args = state.peekn_mut(return_count);
-            canonicalise_then_jump(builder, real_dest_block, destination_args);
-        }
-        state.popn(return_count);
-    }
-    state.reachable = false;
     Ok(())
 }
 

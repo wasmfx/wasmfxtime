@@ -1187,6 +1187,16 @@ impl Instance {
         }
         fault
     }
+
+    /// TODO
+    pub unsafe fn get_typed_continuations_store_mut(&mut self) -> *mut u32 {
+        self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store())
+    }
+
+    /// TODO
+    pub unsafe fn get_typed_continuations_payloads_mut(&mut self) -> *mut u32 {
+        self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_payloads())
+    }
 }
 
 impl Drop for Instance {
