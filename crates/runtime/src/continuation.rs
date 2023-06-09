@@ -1,9 +1,9 @@
 //! Continuations TODO
 
 use crate::instance::TopOfStackPointer;
-use crate::vmcontext::{VMContext, VMFuncRef, VMOpaqueContext, VMWasmCallFunction};
+use crate::vmcontext::{VMArrayCallFunction, VMFuncRef, VMOpaqueContext, ValRaw};
 use crate::{Instance, TrapReason};
-use std::ptr::NonNull;
+use wasmtime_environ::MAXIMUM_CONTINUATION_PAYLOAD_COUNT;
 use wasmtime_fibre::{Fiber, FiberStack, Suspend};
 
 /// TODO
@@ -11,36 +11,44 @@ use wasmtime_fibre::{Fiber, FiberStack, Suspend};
 pub fn cont_new(instance: &mut Instance, func: *mut u8) -> *mut u8 {
     let func = func as *mut VMFuncRef;
     let callee_ctx = unsafe { (*func).vmctx };
-    let caller_ctx = instance.vmctx();
+    let caller_ctx = VMOpaqueContext::from_vmcontext(instance.vmctx());
     let f = unsafe {
         // TODO(dhil): Not sure whether we should use
         // VMWasmCallFunction or VMNativeCallFunction here.
         std::mem::transmute::<
-            NonNull<VMWasmCallFunction>,
-            unsafe extern "C" fn(*mut VMOpaqueContext, *mut VMContext, ()) -> u32,
-        >((*func).wasm_call.unwrap())
+            VMArrayCallFunction,
+            unsafe extern "C" fn(*mut VMOpaqueContext, *mut VMOpaqueContext, *mut ValRaw, usize),
+        >((*func).array_call)
     };
+    let payload_ptr = unsafe { instance.get_typed_continuations_payloads_mut() as *mut ValRaw };
     let fiber = Box::new(
         Fiber::new(
             FiberStack::new(4096).unwrap(),
-            move |_first_val: (), _suspend: &Suspend<(), u32, u32>| {
+            move |_first_val: (), _suspend: &Suspend<(), u32, ()>| {
                 // TODO(frank-emrich): Need to load arguments (if present) from
                 // payload storage and pass to f.
                 // Consider getting the array_call version from func
                 // to achieve this instead.
-                unsafe { f(callee_ctx, caller_ctx, ()) }
+                unsafe {
+                    f(
+                        callee_ctx,
+                        caller_ctx,
+                        payload_ptr,
+                        MAXIMUM_CONTINUATION_PAYLOAD_COUNT as usize,
+                    )
+                }
             },
         )
         .unwrap(),
     );
-    let ptr: *mut Fiber<'static, (), u32, u32> = Box::into_raw(fiber);
+    let ptr: *mut Fiber<'static, (), u32, ()> = Box::into_raw(fiber);
     ptr as *mut u8
 }
 
 /// TODO
 #[inline(always)]
 pub fn resume(instance: &mut Instance, cont: *mut u8) -> Result<u32, TrapReason> {
-    let cont = cont as *mut Fiber<'static, (), u32, u32>;
+    let cont = cont as *mut Fiber<'static, (), u32, ()>;
     let cont_stack = unsafe { &cont.as_ref().unwrap().stack() };
     let tsp = TopOfStackPointer::as_raw(instance.tsp());
     unsafe { cont_stack.write_parent(tsp) };
@@ -51,14 +59,13 @@ pub fn resume(instance: &mut Instance, cont: *mut u8) -> Result<u32, TrapReason>
             .get_mut()) = 0
     };
     match unsafe { cont.as_mut().unwrap().resume(()) } {
-        Ok(result) => {
+        Ok(()) => {
             let drop_box: Box<Fiber<_, _, _>> = unsafe { Box::from_raw(cont) };
             drop(drop_box); // I think this would be covered by the close brace below anyway
                             // Store the result.
-            let payloads_addr = unsafe { instance.get_typed_continuations_payloads_mut() };
-            unsafe {
-                std::ptr::write(payloads_addr, result);
-            }
+
+            // The result of the continuation was written to the first entry of the payload
+            // store by virtue of using the array calling trampoline to execute it
 
             Ok(0) // zero value = return normally.
                   //Ok(9999)
@@ -70,7 +77,7 @@ pub fn resume(instance: &mut Instance, cont: *mut u8) -> Result<u32, TrapReason>
             debug_assert_eq!(tag & signal_mask, 0);
             unsafe {
                 let cont_store_ptr = instance.get_typed_continuations_store_mut()
-                    as *mut *mut Fiber<'static, (), u32, u32>;
+                    as *mut *mut Fiber<'static, (), u32, ()>;
                 cont_store_ptr.write(cont)
             };
             Ok(tag | signal_mask)

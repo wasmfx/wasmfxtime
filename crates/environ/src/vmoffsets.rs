@@ -40,6 +40,10 @@ fn cast_to_u32(sz: usize) -> u32 {
     u32::try_from(sz).expect("overflow in cast from usize to u32")
 }
 
+/// Maximum number of arguments and return values a continuation can have.
+/// Also maximum number of arguments and return values any tag can have.
+pub const MAXIMUM_CONTINUATION_PAYLOAD_COUNT: u32 = 6;
+
 /// Align an offset used in this module to a specific byte-width by rounding up
 #[inline]
 fn align(offset: u32, width: u32) -> u32 {
@@ -478,8 +482,9 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
             size(typed_continuations_store)
                 = ret.ptr.size(),
             align(16),
+            // `size_of_vmglobal_definition` corresponds to maximum size of a value
             size(typed_continuations_payloads)
-                = cmul(6, ret.ptr.size()),
+                = cmul(MAXIMUM_CONTINUATION_PAYLOAD_COUNT, ret.ptr.size_of_vmglobal_definition()),
             align(16), // TODO(dhil): This could probably be done more
                        // efficiently by packing the pointer into the above 16 byte
                        // alignment
