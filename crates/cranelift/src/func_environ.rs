@@ -16,6 +16,7 @@ use cranelift_wasm::{
 use std::convert::TryFrom;
 use std::mem;
 use wasmparser::Operator;
+use wasmtime_environ::MAXIMUM_CONTINUATION_PAYLOAD_COUNT;
 use wasmtime_environ::{
     BuiltinFunctionIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation, ModuleTypes, PtrSize,
     TableStyle, Tunables, TypeConvert, VMOffsets, WASM_PAGE_SIZE,
@@ -2334,18 +2335,26 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let mut values = vec![];
         if valtypes.len() == 0 {
             // OK
-        } else if valtypes.len() == 1 {
-            let offset = i32::try_from(self.offsets.vmctx_typed_continuations_payloads()).unwrap();
-            let val = builder
-                .ins()
-                .load(convert_type(valtypes[0]), memflags, base_addr, offset);
-            values.push(val)
+        } else if valtypes.len() <= MAXIMUM_CONTINUATION_PAYLOAD_COUNT as usize {
+            let mut offset =
+                i32::try_from(self.offsets.vmctx_typed_continuations_payloads()).unwrap();
+            for valtype in valtypes {
+                let val = builder.ins().load(
+                    super::value_type(self.isa, *valtype),
+                    memflags,
+                    base_addr,
+                    offset,
+                );
+                values.push(val);
+                offset += self.offsets.ptr.maximum_value_size() as i32;
+            }
         } else {
             panic!("Unsupported continuation arity!");
         }
         values
     }
 
+    //TODO(frank-emrich) Consider removing `valtypes` argument, as values are inherently typed
     fn typed_continuations_store_payloads(
         &self,
         builder: &mut FunctionBuilder,
@@ -2358,9 +2367,13 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
         if valtypes.len() == 0 {
             // OK
-        } else if valtypes.len() == 1 {
-            let offset = i32::try_from(self.offsets.vmctx_typed_continuations_payloads()).unwrap();
-            builder.ins().store(memflags, values[0], base_addr, offset);
+        } else if valtypes.len() <= MAXIMUM_CONTINUATION_PAYLOAD_COUNT as usize {
+            let mut offset =
+                i32::try_from(self.offsets.vmctx_typed_continuations_payloads()).unwrap();
+            for value in values {
+                builder.ins().store(memflags, *value, base_addr, offset);
+                offset += self.offsets.ptr.maximum_value_size() as i32;
+            }
         } else {
             panic!("Unsupported continuation arity!");
         }
@@ -2380,13 +2393,5 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {
         self.isa.has_x86_blendv_lowering(ty)
-    }
-}
-
-fn convert_type(ty: WasmType) -> ir::Type {
-    match ty {
-        WasmType::I32 => ir::types::I32,
-        WasmType::I64 => ir::types::I64,
-        _ => todo!(),
     }
 }

@@ -163,6 +163,12 @@ pub trait PtrSize {
         16
     }
 
+    /// This is the size of the largest value type (i.e. a V128).
+    #[inline]
+    fn maximum_value_size(&self) -> u8 {
+        self.size_of_vmglobal_definition()
+    }
+
     // Offsets within `VMRuntimeLimits`
 
     /// Return the offset of the `stack_limit` field of `VMRuntimeLimits`
@@ -482,9 +488,8 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
             size(typed_continuations_store)
                 = ret.ptr.size(),
             align(16),
-            // `size_of_vmglobal_definition` corresponds to maximum size of a value
             size(typed_continuations_payloads)
-                = cmul(MAXIMUM_CONTINUATION_PAYLOAD_COUNT, ret.ptr.size_of_vmglobal_definition()),
+                = cmul(MAXIMUM_CONTINUATION_PAYLOAD_COUNT, ret.ptr.maximum_value_size()),
             align(16), // TODO(dhil): This could probably be done more
                        // efficiently by packing the pointer into the above 16 byte
                        // alignment
