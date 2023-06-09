@@ -645,4 +645,107 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     ) -> cranelift_wasm::WasmResult<ir::Inst> {
         unimplemented!()
     }
+
+    /// TODO(dhil): write documentation.
+    fn translate_cont_new(
+        &mut self,
+        pos: cranelift_codegen::cursor::FuncCursor,
+        state: &cranelift_wasm::FuncTranslationState,
+        func: ir::Value,
+        arg_types: &[wasmtime_types::WasmType],
+    ) -> cranelift_wasm::WasmResult<ir::Value> {
+        self.inner.translate_cont_new(pos, state, func, arg_types)
+    }
+
+    /// Translates a resume instruction and returns a triple (vmctx,
+    /// signal, tag), where vmctx is the base address of the VM
+    /// context, signal is high bit of the resume result, and tag is
+    /// the index of the control tag supplied to suspend (if the
+    /// signal is 1).
+    fn translate_resume(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        state: &cranelift_wasm::FuncTranslationState,
+        cont: ir::Value,
+        call_arg_types: &[wasmtime_types::WasmType],
+        call_args: &[ir::Value],
+    ) -> cranelift_wasm::WasmResult<(ir::Value, ir::Value, ir::Value)> {
+        self.inner
+            .translate_resume(builder, state, cont, call_arg_types, call_args)
+    }
+
+    /// TODO(dhil): write documentation.
+    fn translate_resume_throw(
+        &mut self,
+        pos: cranelift_codegen::cursor::FuncCursor,
+        state: &cranelift_wasm::FuncTranslationState,
+        tag_index: u32,
+        cont: ir::Value,
+    ) -> cranelift_wasm::WasmResult<ir::Value> {
+        self.inner
+            .translate_resume_throw(pos, state, tag_index, cont)
+    }
+
+    /// TODO(dhil): write documentation.
+    fn translate_suspend(
+        &mut self,
+        pos: cranelift_codegen::cursor::FuncCursor,
+        state: &cranelift_wasm::FuncTranslationState,
+        tag_index: u32,
+    ) {
+        self.inner.translate_suspend(pos, state, tag_index)
+    }
+
+    /// TODO
+    fn continuation_arguments(&self, type_index: u32) -> &[wasmtime_types::WasmType] {
+        self.inner.continuation_arguments(type_index)
+    }
+
+    /// TODO
+    fn continuation_returns(&self, type_index: u32) -> &[wasmtime_types::WasmType] {
+        self.inner.continuation_returns(type_index)
+    }
+
+    /// TODO
+    fn typed_continuations_load_payloads(
+        &self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        valtypes: &[wasmtime_types::WasmType],
+        base_addr: ir::Value,
+    ) -> std::vec::Vec<ir::Value> {
+        self.inner
+            .typed_continuations_load_payloads(builder, valtypes, base_addr)
+    }
+
+    /// TODO
+    fn typed_continuations_store_payloads(
+        &self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        valtypes: &[wasmtime_types::WasmType],
+        values: &[ir::Value],
+        base_addr: ir::Value,
+    ) {
+        self.inner
+            .typed_continuations_store_payloads(builder, valtypes, values, base_addr)
+    }
+
+    /// TODO
+    fn tag_params(&self, tag_index: u32) -> &[wasmtime_types::WasmType] {
+        self.inner.tag_params(tag_index)
+    }
+
+    /// TODO
+    fn tag_returns(&self, tag_index: u32) -> &[wasmtime_types::WasmType] {
+        self.inner.tag_returns(tag_index)
+    }
+
+    /// TODO
+    fn typed_continuations_load_continuation_object(
+        &self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        base_addr: ir::Value,
+    ) -> ir::Value {
+        self.inner
+            .typed_continuations_load_continuation_object(builder, base_addr)
+    }
 }

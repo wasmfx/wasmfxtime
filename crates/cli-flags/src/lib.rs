@@ -626,7 +626,7 @@ mod test {
             multi_memory,
             memory64,
             function_references,
-            exceptions,
+            exceptions: _,
             typed_continuations,
         } = options.wasm_features.unwrap();
 

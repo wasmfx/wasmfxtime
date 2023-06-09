@@ -685,6 +685,7 @@ dependencies = [
  "thiserror",
  "toml",
  "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
+ "wasmtime-types",
  "wat",
 ]
 

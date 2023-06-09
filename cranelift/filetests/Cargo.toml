@@ -33,3 +33,4 @@ serde = { workspace = true }
 cranelift-wasm.workspace = true
 wasmparser.workspace = true
 cranelift.workspace = true
+wasmtime-types = { workspace = true }
