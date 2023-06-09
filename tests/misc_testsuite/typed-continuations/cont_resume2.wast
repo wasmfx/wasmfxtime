@@ -60,5 +60,5 @@
     (resume $cont_int_to_int)
     ))
 
-;; TODO(frank-emrich) This is test is currently broken
-;; (assert_return (invoke "f") (i32.const 100))
+
+(assert_return (invoke "f") (i32.const 100))

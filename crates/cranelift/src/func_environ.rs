@@ -2330,7 +2330,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         valtypes: &[WasmType],
         base_addr: ir::Value,
     ) -> Vec<ir::Value> {
-        let memflags = ir::MemFlags::trusted().with_readonly();
+        let memflags = ir::MemFlags::trusted();
         let mut values = vec![];
         if valtypes.len() == 0 {
             // OK
