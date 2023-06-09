@@ -296,6 +296,11 @@ impl VecAluOpRRR {
             VecAluOpRRR::VssubuVV | VecAluOpRRR::VssubuVX => 0b100010,
             VecAluOpRRR::VssubVV | VecAluOpRRR::VssubVX => 0b100011,
             VecAluOpRRR::VfsgnjnVV => 0b001001,
+            VecAluOpRRR::VrgatherVV | VecAluOpRRR::VrgatherVX => 0b001100,
+            VecAluOpRRR::VwadduVV | VecAluOpRRR::VwadduVX => 0b110000,
+            VecAluOpRRR::VwaddVV | VecAluOpRRR::VwaddVX => 0b110001,
+            VecAluOpRRR::VwadduWV | VecAluOpRRR::VwadduWX => 0b110100,
+            VecAluOpRRR::VwaddWV | VecAluOpRRR::VwaddWX => 0b110101,
             VecAluOpRRR::VmsltVX => 0b011011,
         }
     }
@@ -318,12 +323,21 @@ impl VecAluOpRRR {
             | VecAluOpRRR::VminVV
             | VecAluOpRRR::VmaxuVV
             | VecAluOpRRR::VmaxVV
-            | VecAluOpRRR::VmergeVVM => VecOpCategory::OPIVV,
-            VecAluOpRRR::VmulVV
+            | VecAluOpRRR::VmergeVVM
+            | VecAluOpRRR::VrgatherVV => VecOpCategory::OPIVV,
+            VecAluOpRRR::VwaddVV
+            | VecAluOpRRR::VwaddWV
+            | VecAluOpRRR::VwadduVV
+            | VecAluOpRRR::VwadduWV
+            | VecAluOpRRR::VmulVV
             | VecAluOpRRR::VmulhVV
             | VecAluOpRRR::VmulhuVV
             | VecAluOpRRR::VredmaxuVS
             | VecAluOpRRR::VredminuVS => VecOpCategory::OPMVV,
+            VecAluOpRRR::VwaddVX
+            | VecAluOpRRR::VwadduVX
+            | VecAluOpRRR::VwadduWX
+            | VecAluOpRRR::VwaddWX => VecOpCategory::OPMVX,
             VecAluOpRRR::VaddVX
             | VecAluOpRRR::VsaddVX
             | VecAluOpRRR::VsadduVX
@@ -343,7 +357,8 @@ impl VecAluOpRRR {
             | VecAluOpRRR::VmaxVX
             | VecAluOpRRR::VslidedownVX
             | VecAluOpRRR::VmergeVXM
-            | VecAluOpRRR::VmsltVX => VecOpCategory::OPIVX,
+            | VecAluOpRRR::VmsltVX
+            | VecAluOpRRR::VrgatherVX => VecOpCategory::OPIVX,
             VecAluOpRRR::VfaddVV
             | VecAluOpRRR::VfsubVV
             | VecAluOpRRR::VfmulVV
@@ -366,6 +381,23 @@ impl VecAluOpRRR {
             VecOpCategory::OPIVX | VecOpCategory::OPMVX => RegClass::Int,
             VecOpCategory::OPFVF => RegClass::Float,
             _ => unreachable!(),
+        }
+    }
+
+    /// Some instructions do not allow the source and destination registers to overlap.
+    pub fn forbids_src_dst_overlaps(&self) -> bool {
+        match self {
+            VecAluOpRRR::VrgatherVV
+            | VecAluOpRRR::VrgatherVX
+            | VecAluOpRRR::VwadduVV
+            | VecAluOpRRR::VwadduVX
+            | VecAluOpRRR::VwaddVV
+            | VecAluOpRRR::VwaddVX
+            | VecAluOpRRR::VwadduWV
+            | VecAluOpRRR::VwadduWX
+            | VecAluOpRRR::VwaddWV
+            | VecAluOpRRR::VwaddWX => true,
+            _ => false,
         }
     }
 }
@@ -408,6 +440,7 @@ impl VecAluOpRRImm5 {
             VecAluOpRRImm5::VmergeVIM => 0b010111,
             VecAluOpRRImm5::VsadduVI => 0b100000,
             VecAluOpRRImm5::VsaddVI => 0b100001,
+            VecAluOpRRImm5::VrgatherVI => 0b001100,
         }
     }
 
@@ -424,7 +457,8 @@ impl VecAluOpRRImm5 {
             | VecAluOpRRImm5::VslidedownVI
             | VecAluOpRRImm5::VmergeVIM
             | VecAluOpRRImm5::VsadduVI
-            | VecAluOpRRImm5::VsaddVI => VecOpCategory::OPIVI,
+            | VecAluOpRRImm5::VsaddVI
+            | VecAluOpRRImm5::VrgatherVI => VecOpCategory::OPIVI,
         }
     }
 
@@ -433,7 +467,8 @@ impl VecAluOpRRImm5 {
             VecAluOpRRImm5::VsllVI
             | VecAluOpRRImm5::VsrlVI
             | VecAluOpRRImm5::VsraVI
-            | VecAluOpRRImm5::VslidedownVI => true,
+            | VecAluOpRRImm5::VslidedownVI
+            | VecAluOpRRImm5::VrgatherVI => true,
             VecAluOpRRImm5::VaddVI
             | VecAluOpRRImm5::VrsubVI
             | VecAluOpRRImm5::VandVI
@@ -442,6 +477,14 @@ impl VecAluOpRRImm5 {
             | VecAluOpRRImm5::VmergeVIM
             | VecAluOpRRImm5::VsadduVI
             | VecAluOpRRImm5::VsaddVI => false,
+        }
+    }
+
+    /// Some instructions do not allow the source and destination registers to overlap.
+    pub fn forbids_src_dst_overlaps(&self) -> bool {
+        match self {
+            VecAluOpRRImm5::VrgatherVI => true,
+            _ => false,
         }
     }
 }
@@ -476,6 +519,12 @@ impl VecAluOpRR {
             VecAluOpRR::VmvSX | VecAluOpRR::VmvXS | VecAluOpRR::VfmvSF | VecAluOpRR::VfmvFS => {
                 0b010000
             }
+            VecAluOpRR::VzextVF2
+            | VecAluOpRR::VzextVF4
+            | VecAluOpRR::VzextVF8
+            | VecAluOpRR::VsextVF2
+            | VecAluOpRR::VsextVF4
+            | VecAluOpRR::VsextVF8 => 0b010010,
             VecAluOpRR::VfsqrtV => 0b010011,
             VecAluOpRR::VmvVV | VecAluOpRR::VmvVX | VecAluOpRR::VfmvVF => 0b010111,
         }
@@ -484,7 +533,13 @@ impl VecAluOpRR {
     pub fn category(&self) -> VecOpCategory {
         match self {
             VecAluOpRR::VmvSX => VecOpCategory::OPMVX,
-            VecAluOpRR::VmvXS => VecOpCategory::OPMVV,
+            VecAluOpRR::VmvXS
+            | VecAluOpRR::VzextVF2
+            | VecAluOpRR::VzextVF4
+            | VecAluOpRR::VzextVF8
+            | VecAluOpRR::VsextVF2
+            | VecAluOpRR::VsextVF4
+            | VecAluOpRR::VsextVF8 => VecOpCategory::OPMVV,
             VecAluOpRR::VfmvSF | VecAluOpRR::VfmvVF => VecOpCategory::OPFVF,
             VecAluOpRR::VfmvFS | VecAluOpRR::VfsqrtV => VecOpCategory::OPFVV,
             VecAluOpRR::VmvVV => VecOpCategory::OPIVV,
@@ -505,6 +560,13 @@ impl VecAluOpRR {
             VecAluOpRR::VfmvFS => 0b00000,
             // VFUNARY1
             VecAluOpRR::VfsqrtV => 0b00000,
+            // VXUNARY0
+            VecAluOpRR::VzextVF8 => 0b00010,
+            VecAluOpRR::VsextVF8 => 0b00011,
+            VecAluOpRR::VzextVF4 => 0b00100,
+            VecAluOpRR::VsextVF4 => 0b00101,
+            VecAluOpRR::VzextVF2 => 0b00110,
+            VecAluOpRR::VsextVF2 => 0b00111,
             // These don't have a explicit encoding table, but Section 11.16 Vector Integer Move Instruction states:
             // > The first operand specifier (vs2) must contain v0, and any other vector register number in vs2 is reserved.
             VecAluOpRR::VmvVV | VecAluOpRR::VmvVX | VecAluOpRR::VfmvVF => 0,
@@ -516,7 +578,15 @@ impl VecAluOpRR {
     /// other way around. As far as I can tell only vmv.v.* are backwards.
     pub fn vs_is_vs2_encoded(&self) -> bool {
         match self {
-            VecAluOpRR::VmvXS | VecAluOpRR::VfmvFS | VecAluOpRR::VfsqrtV => true,
+            VecAluOpRR::VmvXS
+            | VecAluOpRR::VfmvFS
+            | VecAluOpRR::VfsqrtV
+            | VecAluOpRR::VzextVF2
+            | VecAluOpRR::VzextVF4
+            | VecAluOpRR::VzextVF8
+            | VecAluOpRR::VsextVF2
+            | VecAluOpRR::VsextVF4
+            | VecAluOpRR::VsextVF8 => true,
             VecAluOpRR::VmvSX
             | VecAluOpRR::VfmvSF
             | VecAluOpRR::VmvVV
@@ -532,7 +602,13 @@ impl VecAluOpRR {
             | VecAluOpRR::VmvVV
             | VecAluOpRR::VmvVX
             | VecAluOpRR::VfmvVF
-            | VecAluOpRR::VfsqrtV => RegClass::Vector,
+            | VecAluOpRR::VfsqrtV
+            | VecAluOpRR::VzextVF2
+            | VecAluOpRR::VzextVF4
+            | VecAluOpRR::VzextVF8
+            | VecAluOpRR::VsextVF2
+            | VecAluOpRR::VsextVF4
+            | VecAluOpRR::VsextVF8 => RegClass::Vector,
             VecAluOpRR::VmvXS => RegClass::Int,
             VecAluOpRR::VfmvFS => RegClass::Float,
         }
@@ -540,11 +616,31 @@ impl VecAluOpRR {
 
     pub fn src_regclass(&self) -> RegClass {
         match self {
-            VecAluOpRR::VmvXS | VecAluOpRR::VfmvFS | VecAluOpRR::VmvVV | VecAluOpRR::VfsqrtV => {
-                RegClass::Vector
-            }
+            VecAluOpRR::VmvXS
+            | VecAluOpRR::VfmvFS
+            | VecAluOpRR::VmvVV
+            | VecAluOpRR::VfsqrtV
+            | VecAluOpRR::VzextVF2
+            | VecAluOpRR::VzextVF4
+            | VecAluOpRR::VzextVF8
+            | VecAluOpRR::VsextVF2
+            | VecAluOpRR::VsextVF4
+            | VecAluOpRR::VsextVF8 => RegClass::Vector,
             VecAluOpRR::VfmvSF | VecAluOpRR::VfmvVF => RegClass::Float,
             VecAluOpRR::VmvSX | VecAluOpRR::VmvVX => RegClass::Int,
+        }
+    }
+
+    /// Some instructions do not allow the source and destination registers to overlap.
+    pub fn forbids_src_dst_overlaps(&self) -> bool {
+        match self {
+            VecAluOpRR::VzextVF2
+            | VecAluOpRR::VzextVF4
+            | VecAluOpRR::VzextVF8
+            | VecAluOpRR::VsextVF2
+            | VecAluOpRR::VsextVF4
+            | VecAluOpRR::VsextVF8 => true,
+            _ => false,
         }
     }
 }
@@ -557,6 +653,12 @@ impl fmt::Display for VecAluOpRR {
             VecAluOpRR::VfmvSF => "vfmv.s.f",
             VecAluOpRR::VfmvFS => "vfmv.f.s",
             VecAluOpRR::VfsqrtV => "vfsqrt.v",
+            VecAluOpRR::VzextVF2 => "vzext.vf2",
+            VecAluOpRR::VzextVF4 => "vzext.vf4",
+            VecAluOpRR::VzextVF8 => "vzext.vf8",
+            VecAluOpRR::VsextVF2 => "vsext.vf2",
+            VecAluOpRR::VsextVF4 => "vsext.vf4",
+            VecAluOpRR::VsextVF8 => "vsext.vf8",
             VecAluOpRR::VmvVV => "vmv.v.v",
             VecAluOpRR::VmvVX => "vmv.v.x",
             VecAluOpRR::VfmvVF => "vfmv.v.f",
