@@ -229,11 +229,6 @@ fn ignore(testsuite: &str, testname: &str, strategy: &str) -> bool {
                 return true;
             }
 
-            // The memory64 testsuite has a single SIMD test that we don't pass yet.
-            if testname == "simd" && testsuite == "memory64" {
-                return true;
-            }
-
             let known_failure = [
                 "canonicalize_nan",
                 "cvt_from_uint",
@@ -249,22 +244,15 @@ fn ignore(testsuite: &str, testname: &str, strategy: &str) -> bool {
                 "simd_f64x2_rounding",
                 "simd_i16x8_arith2",
                 "simd_i16x8_cmp",
-                "simd_i16x8_extadd_pairwise_i8x16",
                 "simd_i16x8_q15mulr_sat_s",
-                "simd_i32x4_arith2",
                 "simd_i32x4_cmp",
-                "simd_i32x4_dot_i16x8",
-                "simd_i32x4_extadd_pairwise_i16x8",
                 "simd_i32x4_trunc_sat_f32x4",
                 "simd_i32x4_trunc_sat_f64x2",
-                "simd_i64x2_arith2",
                 "simd_i64x2_cmp",
                 "simd_i8x16_arith2",
                 "simd_i8x16_cmp",
                 "simd_load",
-                "simd_load_zero",
                 "simd_splat",
-                "v128_select",
             ]
             .contains(&testname);
 

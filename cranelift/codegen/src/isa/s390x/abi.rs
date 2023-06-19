@@ -232,6 +232,12 @@ impl ABIMachineSpec for S390xMachineDeps {
     where
         I: IntoIterator<Item = &'a ir::AbiParam>,
     {
+        assert_ne!(
+            call_conv,
+            isa::CallConv::Tail,
+            "s390x does not support the 'tail' calling convention yet"
+        );
+
         let mut next_gpr = 0;
         let mut next_fpr = 0;
         let mut next_vr = 0;
@@ -753,6 +759,7 @@ impl ABIMachineSpec for S390xMachineDeps {
         _tmp: Writable<Reg>,
         _callee_conv: isa::CallConv,
         _caller_conv: isa::CallConv,
+        _callee_pop_size: u32,
     ) -> SmallVec<[Inst; 2]> {
         unreachable!();
     }

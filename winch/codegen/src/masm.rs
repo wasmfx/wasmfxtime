@@ -2,7 +2,7 @@ use crate::abi::{self, align_to, LocalSlot};
 use crate::codegen::CodeGenContext;
 use crate::isa::reg::Reg;
 use crate::regalloc::RegAlloc;
-use cranelift_codegen::{Final, MachBufferFinalized};
+use cranelift_codegen::{Final, MachBufferFinalized, MachLabel};
 use std::{fmt::Debug, ops::Range};
 use wasmtime_environ::PtrSize;
 
@@ -25,7 +25,7 @@ pub(crate) enum RemKind {
 /// Kinds of binary comparison in WebAssembly. The [`masm`] implementation for
 /// each ISA is responsible for emitting the correct sequence of instructions
 /// when lowering to machine code.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum CmpKind {
     /// Equal.
     Eq,
@@ -72,6 +72,24 @@ pub(crate) enum OperandSize {
     S32,
     /// 64 bits.
     S64,
+}
+
+impl OperandSize {
+    /// The number of bits in the operand.
+    pub fn num_bits(&self) -> i32 {
+        match self {
+            OperandSize::S32 => 32,
+            OperandSize::S64 => 64,
+        }
+    }
+
+    /// The binary logarithm of the number of bits in the operand.
+    pub fn log2(&self) -> u8 {
+        match self {
+            OperandSize::S32 => 5,
+            OperandSize::S64 => 6,
+        }
+    }
 }
 
 /// An abstraction over a register or immediate.
@@ -229,6 +247,16 @@ pub(crate) trait MacroAssembler {
     /// This function will potentially emit a series of instructions.
     fn cmp_with_set(&mut self, src: RegImm, dst: RegImm, kind: CmpKind, size: OperandSize);
 
+    /// Count the number of leading zeroes in src and put the result in dst.
+    /// In x64, this will emit multiple instructions if the `has_lzcnt` flag is
+    /// false.
+    fn clz(&mut self, src: Reg, dst: Reg, size: OperandSize);
+
+    /// Count the number of trailing zeroes in src and put the result in dst.
+    /// In x64, this will emit multiple instructions if the `has_tzcnt` flag is
+    /// false.
+    fn ctz(&mut self, src: Reg, dst: Reg, size: OperandSize);
+
     /// Push the register to the stack, returning the offset.
     fn push(&mut self, src: Reg) -> u32;
 
@@ -237,6 +265,10 @@ pub(crate) trait MacroAssembler {
 
     /// Zero a particular register.
     fn zero(&mut self, reg: Reg);
+
+    /// Count the number of 1 bits in src and put the result in dst. In x64,
+    /// this will emit multiple instructions if the `has_popcnt` flag is false.
+    fn popcnt(&mut self, context: &mut CodeGenContext, size: OperandSize);
 
     /// Zero a given memory range.
     ///
@@ -285,4 +317,27 @@ pub(crate) trait MacroAssembler {
             }
         }
     }
+
+    /// Generate a label.
+    fn get_label(&mut self) -> MachLabel;
+
+    /// Bind the given label at the current code offset.
+    fn bind(&mut self, label: MachLabel);
+
+    /// Conditional branch.
+    ///
+    /// Performs a comparison between the two operands,
+    /// and immediately after emits a jump to the given
+    /// label destination if the condition is met.
+    fn branch(
+        &mut self,
+        kind: CmpKind,
+        lhs: RegImm,
+        rhs: RegImm,
+        taken: MachLabel,
+        size: OperandSize,
+    );
+
+    /// Emits and unconditional jump to the given label.
+    fn jmp(&mut self, target: MachLabel);
 }

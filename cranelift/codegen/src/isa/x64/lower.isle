@@ -1155,14 +1155,48 @@
 
 ;;;; Rules for `iabs` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(rule 1 (lower (has_type $I8X16 (iabs x)))
+        (if-let $true (use_ssse3))
+        (x64_pabsb x))
+
+;; Note the use of `pminub` with signed inputs will produce the positive signed
+;; result which is what is desired here. The `pmaxub` isn't available until
+;; SSE4.1 in which case the single-instruction above lowering would apply.
 (rule (lower (has_type $I8X16 (iabs x)))
-      (x64_pabsb x))
+      (let (
+          (x Xmm x)
+          (negated Xmm (x64_psubb (xmm_zero $I8X16) x))
+        )
+        (x64_pminub x negated)))
+
+(rule 1 (lower (has_type $I16X8 (iabs x)))
+        (if-let $true (use_ssse3))
+        (x64_pabsw x))
 
 (rule (lower (has_type $I16X8 (iabs x)))
-      (x64_pabsw x))
+      (let (
+          (x Xmm x)
+          (negated Xmm (x64_psubw (xmm_zero $I16X8) x))
+        )
+        (x64_pmaxsw x negated)))
 
+(rule 1 (lower (has_type $I32X4 (iabs x)))
+        (if-let $true (use_ssse3))
+        (x64_pabsd x))
+
+;; Generate a `negative_mask` which is either numerically -1 or 0 depending on
+;; if the lane is negative. If the lane is positive then the xor operation
+;; won't change the lane but otherwise it'll bit-flip everything. By then
+;; subtracting the mask this subtracts 0 for positive lanes (does nothing) or
+;; ends up adding one for negative lanes. This means that for a negative lane
+;; `x` the result is `!x + 1` which is the result of negating it.
 (rule (lower (has_type $I32X4 (iabs x)))
-      (x64_pabsd x))
+      (let (
+          (x Xmm x)
+          (negative_mask Xmm (x64_psrad x (xmi_imm 31)))
+          (flipped_if_negative Xmm (x64_pxor x negative_mask))
+        )
+        (x64_psubd flipped_if_negative negative_mask)))
 
 ;; When AVX512 is available, we can use a single `vpabsq` instruction.
 (rule 2 (lower (has_type $I64X2 (iabs x)))
@@ -2183,23 +2217,18 @@
 ;;
 ;; __m128i lookup = _mm_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
 
-(decl popcount_4bit_table () VCodeConstant)  ;; bits-per-nibble table `lookup` above
-(extern constructor popcount_4bit_table popcount_4bit_table)
-
-(decl popcount_low_mask () VCodeConstant)    ;; mask for low nibbles: 0x0f * 16
-(extern constructor popcount_low_mask popcount_low_mask)
 
 (rule (lower (has_type $I8X16
                        (popcnt src)))
-      (let ((nibble_table_const VCodeConstant (popcount_4bit_table))
-            (low_mask XmmMem (popcount_low_mask))
+      (let ((low_mask XmmMem (emit_u128_le_const 0x0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f))
             (low_nibbles Xmm (sse_and $I8X16 src low_mask))
             ;; Note that this is a 16x8 shift, but that's OK; we mask
             ;; off anything that traverses from one byte to the next
             ;; with the low_mask below.
             (shifted_src Xmm (x64_psrlw src (xmi_imm 4)))
             (high_nibbles Xmm (sse_and $I8X16 shifted_src low_mask))
-            (lookup Xmm (x64_xmm_load_const $I8X16 (popcount_4bit_table)))
+            (lookup Xmm (x64_xmm_load_const $I8X16
+              (emit_u128_le_const 0x04030302_03020201_03020201_02010100)))
             (bit_counts_low Xmm (x64_pshufb lookup low_nibbles))
             (bit_counts_high Xmm (x64_pshufb lookup high_nibbles)))
         (x64_paddb bit_counts_low bit_counts_high)))
@@ -3253,9 +3282,7 @@
 (rule 0 (lower (fcvt_from_sint a @ (value_type $I32X4)))
       (x64_cvtdq2ps a))
 
-;; Rules for `fcvt_low_from_sint` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(rule (lower (fcvt_low_from_sint a))
+(rule 1 (lower (has_type $F64X2 (fcvt_from_sint (swiden_low a @ (value_type $I32X4)))))
       (x64_cvtdq2pd a))
 
 ;; Rules for `fcvt_from_uint` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3274,9 +3301,9 @@
 ;; every value of the mantissa represents a corresponding uint32 number.
 ;; When we subtract 0x1.0p52 we are left with double(src).
 (rule 1 (lower (has_type $F64X2 (fcvt_from_uint (uwiden_low val @ (value_type $I32X4)))))
-      (let ((uint_mask XmmMem (fcvt_uint_mask_const))
+      (let ((uint_mask XmmMem (emit_u128_le_const 0x43300000_43300000))
             (res Xmm (x64_unpcklps val uint_mask))
-            (uint_mask_high XmmMem (fcvt_uint_mask_high_const)))
+            (uint_mask_high XmmMem (emit_u128_le_const 0x4330000000000000_4330000000000000)))
         (x64_subpd res uint_mask_high)))
 
 ;; When AVX512VL and AVX512F are available,
@@ -3469,52 +3496,108 @@
 
 ;; Rules for `iadd_pairwise` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(rule (lower (has_type $I8X16 (iadd_pairwise x y)))
+      (let (
+          ;; Shuffle all the even lanes of `x` and `y` into one register
+          (even_lane_mask Xmm (x64_movdqu_load (emit_u128_le_const 0x00ff_00ff_00ff_00ff_00ff_00ff_00ff_00ff)))
+          (x_evens Xmm (x64_pand x even_lane_mask))
+          (y_evens Xmm (x64_pand y even_lane_mask))
+          (evens Xmm (x64_packuswb x_evens y_evens))
+
+          ;; Shuffle all the odd lanes of `x` and `y` into one register
+          (x_odds Xmm (x64_psrlw x (xmi_imm 8)))
+          (y_odds Xmm (x64_psrlw y (xmi_imm 8)))
+          (odds Xmm (x64_packuswb x_odds y_odds))
+        )
+        (x64_paddb evens odds)))
+
+
+(rule 1 (lower (has_type $I16X8 (iadd_pairwise x y)))
+        (if-let $true (use_ssse3))
+        (x64_phaddw x y))
+
 (rule (lower (has_type $I16X8 (iadd_pairwise x y)))
-      (x64_phaddw x y))
+      (let (
+          (x Xmm x)
+          (y Xmm y)
+
+          ;; Shuffle the even-numbered 16-bit lanes into low four lanes of each
+          ;; vector by shuffling 16-bit lanes then shuffling 32-bit lanes.
+          ;; With these in place generate a new vector from the two low 64-bits
+          ;; of each vector (the low four 16-bit lanes).
+          ;;
+          ;; 0xe8 == 0b11_10_10_00
+          (x_evens Xmm (x64_pshufd (x64_pshufhw (x64_pshuflw x 0xe8) 0xe8) 0xe8))
+          (y_evens Xmm (x64_pshufd (x64_pshufhw (x64_pshuflw y 0xe8) 0xe8) 0xe8))
+          (evens Xmm (x64_punpcklqdq x_evens y_evens))
+
+          ;; Shuffle the odd-numbered 16-bit lanes into the low 8 lanes by
+          ;; performing `sshr` operation on 32-bit lanes, effectively moving the
+          ;; odd lanes into even lanes while leaving their sign bits in the
+          ;; odd lanes. The `packssdw` instruction then conveniently will
+          ;; put everything into one vector for us.
+          (x_shifted Xmm (x64_psrad x (xmi_imm 16)))
+          (y_shifted Xmm (x64_psrad y (xmi_imm 16)))
+          (odds Xmm (x64_packssdw x_shifted y_shifted))
+        )
+      (x64_paddw evens odds)))
+
+(rule 1 (lower (has_type $I32X4 (iadd_pairwise x y)))
+        (if-let $true (use_ssse3))
+        (x64_phaddd x y))
 
 (rule (lower (has_type $I32X4 (iadd_pairwise x y)))
-      (x64_phaddd x y))
+      (let (
+          (x Xmm x)
+          (y Xmm y)
+          ;; evens = [ x[0] x[2] y[0] y[2] ]
+          (evens Xmm (x64_shufps x y 0b10_00_10_00))
+          ;; odds  = [ x[1] x[3] y[1] y[3] ]
+          (odds  Xmm (x64_shufps x y 0b11_01_11_01))
+        )
+      (x64_paddd evens odds)))
 
 ;; special case for the `i16x8.extadd_pairwise_i8x16_s` wasm instruction
-(rule 1 (lower
+(rule 2 (lower
         (has_type $I16X8 (iadd_pairwise
                            (swiden_low val @ (value_type $I8X16))
                            (swiden_high val))))
-      (let ((mul_const Xmm (x64_xmm_load_const $I8X16 (iadd_pairwise_mul_const_16))))
+      (let ((mul_const Xmm (x64_xmm_load_const $I8X16
+              (emit_u128_le_const 0x01010101010101010101010101010101))))
         (x64_pmaddubsw mul_const val)))
 
 ;; special case for the `i32x4.extadd_pairwise_i16x8_s` wasm instruction
-(rule 1 (lower
+(rule 2 (lower
         (has_type $I32X4 (iadd_pairwise
                            (swiden_low val @ (value_type $I16X8))
                            (swiden_high val))))
-      (let ((mul_const XmmMem (iadd_pairwise_mul_const_32)))
+      (let ((mul_const XmmMem (emit_u128_le_const 0x0001_0001_0001_0001_0001_0001_0001_0001)))
         (x64_pmaddwd val mul_const)))
 
 ;; special case for the `i16x8.extadd_pairwise_i8x16_u` wasm instruction
-(rule 1 (lower
+(rule 2 (lower
         (has_type $I16X8 (iadd_pairwise
                            (uwiden_low val @ (value_type $I8X16))
                            (uwiden_high val))))
-      (let ((mul_const XmmMem (iadd_pairwise_mul_const_16)))
+      (let ((mul_const XmmMem (emit_u128_le_const 0x01010101010101010101010101010101)))
         (x64_pmaddubsw val mul_const)))
 
 ;; special case for the `i32x4.extadd_pairwise_i16x8_u` wasm instruction
-(rule 1 (lower
+(rule 2 (lower
         (has_type $I32X4 (iadd_pairwise
                            (uwiden_low val @ (value_type $I16X8))
                            (uwiden_high val))))
-      (let ((xor_const XmmMem (iadd_pairwise_xor_const_32))
+      (let ((xor_const XmmMem (emit_u128_le_const 0x8000_8000_8000_8000_8000_8000_8000_8000))
             (dst Xmm (x64_pxor val xor_const))
 
-            (madd_const XmmMem (iadd_pairwise_mul_const_32))
+            (madd_const XmmMem (emit_u128_le_const 0x0001_0001_0001_0001_0001_0001_0001_0001))
             (dst Xmm (x64_pmaddwd dst madd_const))
 
-            (addd_const XmmMem (iadd_pairwise_addd_const_32)))
+            (addd_const XmmMem (emit_u128_le_const 0x00010000_00010000_00010000_00010000)))
         (x64_paddd dst addd_const)))
 
 ;; special case for the `i32x4.dot_i16x8_s` wasm instruction
-(rule 1 (lower
+(rule 2 (lower
         (has_type $I32X4 (iadd_pairwise
                            (imul (swiden_low x) (swiden_low y))
                            (imul (swiden_high x) (swiden_high y)))))
@@ -3645,7 +3728,9 @@
             ;; CVTTPD2DQ xmm_y, xmm_y
 
             (tmp1 Xmm (x64_cmppd a a (FcmpImm.Equal)))
-            (umax_mask XmmMem (snarrow_umax_mask))
+
+            ;; 2147483647.0 is equivalent to 0x41DFFFFFFFC00000
+            (umax_mask XmmMem (emit_u128_le_const 0x41DFFFFFFFC00000_41DFFFFFFFC00000))
 
             ;; ANDPD xmm_y, [wasm_f64x2_splat(2147483647.0)]
             (tmp1 Xmm (x64_andps tmp1 umax_mask))
@@ -4155,7 +4240,7 @@
 ;; Wasm SIMD semantics for this instruction. The instruction format maps to
 ;; variables like: %dst = swizzle %src, %mask
 (rule (lower (swizzle src mask))
-      (let ((mask Xmm (x64_paddusb mask (swizzle_zero_mask))))
+      (let ((mask Xmm (x64_paddusb mask (emit_u128_le_const 0x70707070707070707070707070707070))))
         (x64_pshufb src mask)))
 
 ;; Rules for `x86_pshufb` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -4428,7 +4513,7 @@
       (let ((src1 Xmm qx)
             (src2 Xmm qy)
 
-            (mask XmmMem (sqmul_round_sat_mask))
+            (mask XmmMem (emit_u128_le_const 0x8000_8000_8000_8000_8000_8000_8000_8000))
             (dst Xmm (x64_pmulhrsw src1 src2))
             (cmp Xmm (x64_pcmpeqw dst mask)))
         (x64_pxor dst cmp)))
@@ -4461,7 +4546,8 @@
             (zeros Xmm (xmm_zero $F64X2))
             (dst Xmm (x64_maxpd src zeros))
 
-            (umax_mask XmmMem (uunarrow_umax_mask))
+            ;; 4294967295.0 is equivalent to 0x41EFFFFFFFE00000
+            (umax_mask XmmMem (emit_u128_le_const 0x41EFFFFFFFE00000_41EFFFFFFFE00000))
 
             ;; MINPD xmm_y, [wasm_f64x2_splat(4294967295.0)]
             (dst Xmm (x64_minpd dst umax_mask))
@@ -4470,7 +4556,8 @@
             (dst Xmm (x64_round $F64X2 dst (RoundImm.RoundZero)))
 
             ;; ADDPD xmm_y, [wasm_f64x2_splat(0x1.0p+52)]
-            (uint_mask XmmMem (uunarrow_uint_mask))
+            (uint_mask XmmMem (emit_u128_le_const 0x4330000000000000_4330000000000000))
+
             (dst Xmm (x64_addpd dst uint_mask)))
 
         ;; SHUFPS xmm_y, xmm_xmp, 0x88

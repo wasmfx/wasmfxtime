@@ -13,7 +13,9 @@ use crate::{
     stack::Val,
 };
 use crate::{isa::reg::Reg, masm::CalleeKind};
-use cranelift_codegen::{isa::x64::settings as x64_settings, settings, Final, MachBufferFinalized};
+use cranelift_codegen::{
+    isa::x64::settings as x64_settings, settings, Final, MachBufferFinalized, MachLabel,
+};
 
 /// x64 MacroAssembler.
 pub(crate) struct MacroAssembler {
@@ -21,6 +23,8 @@ pub(crate) struct MacroAssembler {
     sp_offset: u32,
     /// Low level assembler.
     asm: Assembler,
+    /// ISA flags.
+    flags: x64_settings::Flags,
 }
 
 // Conversions between generic masm arguments and x64 operands.
@@ -337,6 +341,144 @@ impl Masm for MacroAssembler {
         self.asm.cmp(src.into(), dst, size);
         self.asm.setcc(kind, dst);
     }
+
+    fn clz(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        if self.flags.has_lzcnt() {
+            self.asm.lzcnt(src, dst, size);
+        } else {
+            let scratch = regs::scratch();
+
+            // Use the following approach:
+            // dst = size.num_bits() - bsr(src) - is_not_zero
+            //     = size.num.bits() + -bsr(src) - is_not_zero.
+            self.asm.bsr(src.into(), dst.into(), size);
+            self.asm.setcc(CmpKind::Ne, scratch.into());
+            self.asm.neg(dst, dst, size);
+            self.asm.add_ir(size.num_bits(), dst, size);
+            self.asm.sub_rr(scratch, dst, size);
+        }
+    }
+
+    fn ctz(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        if self.flags.has_bmi1() {
+            self.asm.tzcnt(src, dst, size);
+        } else {
+            let scratch = regs::scratch();
+
+            // Use the following approach:
+            // dst = bsf(src) + (is_zero * size.num_bits())
+            //     = bsf(src) + (is_zero << size.log2()).
+            // BSF outputs the correct value for every value except 0.
+            // When the value is 0, BSF outputs 0, correct output for ctz is
+            // the number of bits.
+            self.asm.bsf(src.into(), dst.into(), size);
+            self.asm.setcc(CmpKind::Eq, scratch.into());
+            self.asm
+                .shift_ir(size.log2(), scratch, ShiftKind::Shl, size);
+            self.asm.add_rr(scratch, dst, size);
+        }
+    }
+
+    fn get_label(&mut self) -> MachLabel {
+        let buffer = self.asm.buffer_mut();
+        buffer.get_label()
+    }
+
+    fn bind(&mut self, label: MachLabel) {
+        let buffer = self.asm.buffer_mut();
+        buffer.bind_label(label, &mut Default::default());
+    }
+
+    fn branch(
+        &mut self,
+        kind: CmpKind,
+        lhs: RegImm,
+        rhs: RegImm,
+        taken: MachLabel,
+        size: OperandSize,
+    ) {
+        use CmpKind::*;
+
+        match &(lhs, rhs) {
+            (RegImm::Reg(rlhs), RegImm::Reg(rrhs)) => {
+                // If the comparision kind is zero or not zero and both operands
+                // are the same register, emit a test instruction. Else we emit
+                // a normal comparison.
+                if (kind == Eq || kind == Ne) && (rlhs == rrhs) {
+                    self.asm.test_rr(*rrhs, *rlhs, size);
+                } else {
+                    self.asm.cmp(lhs.into(), rhs.into(), size);
+                }
+            }
+            _ => self.asm.cmp(lhs.into(), rhs.into(), size),
+        }
+        self.asm.jmp_if(kind, taken);
+    }
+
+    fn jmp(&mut self, target: MachLabel) {
+        self.asm.jmp(target);
+    }
+
+    fn popcnt(&mut self, context: &mut CodeGenContext, size: OperandSize) {
+        let src = context.pop_to_reg(self, None, size);
+        if self.flags.has_popcnt() {
+            self.asm.popcnt(src, size);
+            context.stack.push(Val::reg(src));
+        } else {
+            // The fallback functionality here is based on `MacroAssembler::popcnt64` in:
+            // https://searchfox.org/mozilla-central/source/js/src/jit/x64/MacroAssembler-x64-inl.h#495
+
+            let tmp = context.any_gpr(self);
+            let dst = src;
+            let (masks, shift_amt) = match size {
+                OperandSize::S64 => (
+                    [
+                        0x5555555555555555, // m1
+                        0x3333333333333333, // m2
+                        0x0f0f0f0f0f0f0f0f, // m4
+                        0x0101010101010101, // h01
+                    ],
+                    56u8,
+                ),
+                // 32-bit popcount is the same, except the masks are half as
+                // wide and we shift by 24 at the end rather than 56
+                OperandSize::S32 => (
+                    [0x55555555i64, 0x33333333i64, 0x0f0f0f0fi64, 0x01010101i64],
+                    24u8,
+                ),
+            };
+            self.asm.mov_rr(src, tmp, size);
+
+            // x -= (x >> 1) & m1;
+            self.asm.shift_ir(1u8, dst, ShiftKind::ShrU, size);
+            self.asm.and(RegImm::imm(masks[0]).into(), dst.into(), size);
+            self.asm.sub_rr(dst, tmp, size);
+
+            // x = (x & m2) + ((x >> 2) & m2);
+            self.asm.mov_rr(tmp, dst, size);
+            // Load `0x3333...` into the scratch reg once, allowing us to use
+            // `and_rr` and avoid inadvertently loading it twice as with `and`
+            let scratch = regs::scratch();
+            self.asm.load_constant(&masks[1], scratch, size);
+            self.asm.and_rr(scratch, dst.into(), size);
+            self.asm.shift_ir(2u8, tmp, ShiftKind::ShrU, size);
+            self.asm.and_rr(scratch, tmp, size);
+            self.asm.add_rr(dst, tmp, size);
+
+            // x = (x + (x >> 4)) & m4;
+            self.asm.mov(tmp.into(), dst.into(), size);
+            self.asm.shift_ir(4u8, dst, ShiftKind::ShrU, size);
+            self.asm.add_rr(tmp, dst, size);
+            self.asm.and(RegImm::imm(masks[2]).into(), dst.into(), size);
+
+            // (x * h01) >> shift_amt
+            self.asm.mul(RegImm::imm(masks[3]).into(), dst.into(), size);
+            self.asm.shift_ir(shift_amt, dst, ShiftKind::ShrU, size);
+
+            context.stack.push(Val::reg(dst));
+            context.free_gpr(tmp);
+        }
+    }
 }
 
 impl MacroAssembler {
@@ -344,7 +486,8 @@ impl MacroAssembler {
     pub fn new(shared_flags: settings::Flags, isa_flags: x64_settings::Flags) -> Self {
         Self {
             sp_offset: 0,
-            asm: Assembler::new(shared_flags, isa_flags),
+            asm: Assembler::new(shared_flags, isa_flags.clone()),
+            flags: isa_flags,
         }
     }
 
