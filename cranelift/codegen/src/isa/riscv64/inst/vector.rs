@@ -1,8 +1,8 @@
 use crate::isa::riscv64::inst::AllocationConsumer;
 use crate::isa::riscv64::inst::EmitState;
 use crate::isa::riscv64::lower::isle::generated_code::{
-    VecAMode, VecAluOpRImm5, VecAluOpRR, VecAluOpRRImm5, VecAluOpRRR, VecAvl, VecElementWidth,
-    VecLmul, VecMaskMode, VecOpCategory, VecOpMasking, VecTailMode,
+    VecAMode, VecAluOpRImm5, VecAluOpRR, VecAluOpRRImm5, VecAluOpRRR, VecAluOpRRRImm5, VecAvl,
+    VecElementWidth, VecLmul, VecMaskMode, VecOpCategory, VecOpMasking, VecTailMode,
 };
 use crate::machinst::RegClass;
 use crate::Reg;
@@ -252,6 +252,51 @@ impl VecOpMasking {
     }
 }
 
+impl VecAluOpRRRImm5 {
+    pub fn opcode(&self) -> u32 {
+        // Vector Opcode
+        0x57
+    }
+    pub fn funct3(&self) -> u32 {
+        self.category().encode()
+    }
+
+    pub fn funct6(&self) -> u32 {
+        // See: https://github.com/riscv/riscv-v-spec/blob/master/inst-table.adoc
+        match self {
+            VecAluOpRRRImm5::VslideupVI => 0b001110,
+        }
+    }
+
+    pub fn category(&self) -> VecOpCategory {
+        match self {
+            VecAluOpRRRImm5::VslideupVI => VecOpCategory::OPIVI,
+        }
+    }
+
+    pub fn imm_is_unsigned(&self) -> bool {
+        match self {
+            VecAluOpRRRImm5::VslideupVI => true,
+        }
+    }
+
+    /// Some instructions do not allow the source and destination registers to overlap.
+    pub fn forbids_src_dst_overlaps(&self) -> bool {
+        match self {
+            VecAluOpRRRImm5::VslideupVI => true,
+        }
+    }
+}
+
+impl fmt::Display for VecAluOpRRRImm5 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut s = format!("{self:?}");
+        s.make_ascii_lowercase();
+        let (opcode, category) = s.split_at(s.len() - 2);
+        f.write_str(&format!("{opcode}.{category}"))
+    }
+}
+
 impl VecAluOpRRR {
     pub fn opcode(&self) -> u32 {
         // Vector Opcode
@@ -272,7 +317,7 @@ impl VecAluOpRRR {
             | VecAluOpRRR::VfsubVV
             | VecAluOpRRR::VfsubVF => 0b000010,
             VecAluOpRRR::VrsubVX => 0b000011,
-            VecAluOpRRR::VmulVV => 0b100101,
+            VecAluOpRRR::VmulVV | VecAluOpRRR::VmulVX => 0b100101,
             VecAluOpRRR::VmulhVV => 0b100111,
             VecAluOpRRR::VmulhuVV | VecAluOpRRR::VfmulVV | VecAluOpRRR::VfmulVF => 0b100100,
             VecAluOpRRR::VsllVV | VecAluOpRRR::VsllVX => 0b100101,
@@ -287,7 +332,10 @@ impl VecAluOpRRR {
             VecAluOpRRR::VmaxVV | VecAluOpRRR::VmaxVX => 0b000111,
             VecAluOpRRR::VslidedownVX => 0b001111,
             VecAluOpRRR::VfrsubVF => 0b100111,
-            VecAluOpRRR::VmergeVVM | VecAluOpRRR::VmergeVXM | VecAluOpRRR::VfmergeVFM => 0b010111,
+            VecAluOpRRR::VmergeVVM
+            | VecAluOpRRR::VmergeVXM
+            | VecAluOpRRR::VfmergeVFM
+            | VecAluOpRRR::VcompressVM => 0b010111,
             VecAluOpRRR::VfdivVV
             | VecAluOpRRR::VfdivVF
             | VecAluOpRRR::VsadduVV
@@ -299,8 +347,12 @@ impl VecAluOpRRR {
             VecAluOpRRR::VrgatherVV | VecAluOpRRR::VrgatherVX => 0b001100,
             VecAluOpRRR::VwadduVV | VecAluOpRRR::VwadduVX => 0b110000,
             VecAluOpRRR::VwaddVV | VecAluOpRRR::VwaddVX => 0b110001,
+            VecAluOpRRR::VwsubuVV | VecAluOpRRR::VwsubuVX => 0b110010,
+            VecAluOpRRR::VwsubVV | VecAluOpRRR::VwsubVX => 0b110011,
             VecAluOpRRR::VwadduWV | VecAluOpRRR::VwadduWX => 0b110100,
             VecAluOpRRR::VwaddWV | VecAluOpRRR::VwaddWX => 0b110101,
+            VecAluOpRRR::VwsubuWV | VecAluOpRRR::VwsubuWX => 0b110110,
+            VecAluOpRRR::VwsubWV | VecAluOpRRR::VwsubWX => 0b110111,
             VecAluOpRRR::VmsltVX => 0b011011,
         }
     }
@@ -329,15 +381,25 @@ impl VecAluOpRRR {
             | VecAluOpRRR::VwaddWV
             | VecAluOpRRR::VwadduVV
             | VecAluOpRRR::VwadduWV
+            | VecAluOpRRR::VwsubVV
+            | VecAluOpRRR::VwsubWV
+            | VecAluOpRRR::VwsubuVV
+            | VecAluOpRRR::VwsubuWV
             | VecAluOpRRR::VmulVV
             | VecAluOpRRR::VmulhVV
             | VecAluOpRRR::VmulhuVV
             | VecAluOpRRR::VredmaxuVS
-            | VecAluOpRRR::VredminuVS => VecOpCategory::OPMVV,
+            | VecAluOpRRR::VredminuVS
+            | VecAluOpRRR::VcompressVM => VecOpCategory::OPMVV,
             VecAluOpRRR::VwaddVX
             | VecAluOpRRR::VwadduVX
             | VecAluOpRRR::VwadduWX
-            | VecAluOpRRR::VwaddWX => VecOpCategory::OPMVX,
+            | VecAluOpRRR::VwaddWX
+            | VecAluOpRRR::VwsubVX
+            | VecAluOpRRR::VwsubuVX
+            | VecAluOpRRR::VwsubuWX
+            | VecAluOpRRR::VwsubWX
+            | VecAluOpRRR::VmulVX => VecOpCategory::OPMVX,
             VecAluOpRRR::VaddVX
             | VecAluOpRRR::VsaddVX
             | VecAluOpRRR::VsadduVX
@@ -389,6 +451,7 @@ impl VecAluOpRRR {
         match self {
             VecAluOpRRR::VrgatherVV
             | VecAluOpRRR::VrgatherVX
+            | VecAluOpRRR::VcompressVM
             | VecAluOpRRR::VwadduVV
             | VecAluOpRRR::VwadduVX
             | VecAluOpRRR::VwaddVV
@@ -396,7 +459,15 @@ impl VecAluOpRRR {
             | VecAluOpRRR::VwadduWV
             | VecAluOpRRR::VwadduWX
             | VecAluOpRRR::VwaddWV
-            | VecAluOpRRR::VwaddWX => true,
+            | VecAluOpRRR::VwaddWX
+            | VecAluOpRRR::VwsubuVV
+            | VecAluOpRRR::VwsubuVX
+            | VecAluOpRRR::VwsubVV
+            | VecAluOpRRR::VwsubVX
+            | VecAluOpRRR::VwsubuWV
+            | VecAluOpRRR::VwsubuWX
+            | VecAluOpRRR::VwsubWV
+            | VecAluOpRRR::VwsubWX => true,
             _ => false,
         }
     }
@@ -437,10 +508,12 @@ impl VecAluOpRRImm5 {
             VecAluOpRRImm5::VorVI => 0b001010,
             VecAluOpRRImm5::VxorVI => 0b001011,
             VecAluOpRRImm5::VslidedownVI => 0b001111,
+            VecAluOpRRImm5::VssrlVI => 0b101010,
             VecAluOpRRImm5::VmergeVIM => 0b010111,
             VecAluOpRRImm5::VsadduVI => 0b100000,
             VecAluOpRRImm5::VsaddVI => 0b100001,
             VecAluOpRRImm5::VrgatherVI => 0b001100,
+            VecAluOpRRImm5::VmvrV => 0b100111,
         }
     }
 
@@ -454,11 +527,13 @@ impl VecAluOpRRImm5 {
             | VecAluOpRRImm5::VandVI
             | VecAluOpRRImm5::VorVI
             | VecAluOpRRImm5::VxorVI
+            | VecAluOpRRImm5::VssrlVI
             | VecAluOpRRImm5::VslidedownVI
             | VecAluOpRRImm5::VmergeVIM
             | VecAluOpRRImm5::VsadduVI
             | VecAluOpRRImm5::VsaddVI
-            | VecAluOpRRImm5::VrgatherVI => VecOpCategory::OPIVI,
+            | VecAluOpRRImm5::VrgatherVI
+            | VecAluOpRRImm5::VmvrV => VecOpCategory::OPIVI,
         }
     }
 
@@ -466,9 +541,11 @@ impl VecAluOpRRImm5 {
         match self {
             VecAluOpRRImm5::VsllVI
             | VecAluOpRRImm5::VsrlVI
+            | VecAluOpRRImm5::VssrlVI
             | VecAluOpRRImm5::VsraVI
             | VecAluOpRRImm5::VslidedownVI
-            | VecAluOpRRImm5::VrgatherVI => true,
+            | VecAluOpRRImm5::VrgatherVI
+            | VecAluOpRRImm5::VmvrV => true,
             VecAluOpRRImm5::VaddVI
             | VecAluOpRRImm5::VrsubVI
             | VecAluOpRRImm5::VandVI

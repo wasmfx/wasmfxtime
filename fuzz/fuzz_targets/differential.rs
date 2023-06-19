@@ -81,8 +81,10 @@ fn execute_one(data: &[u8]) -> Result<()> {
     // When fuzzing Winch, explicitly override the compiler strategy, which by
     // default its arbitrary implementation unconditionally returns
     // `Cranelift`.
+    // We also explicitly disable multi-value support.
     if fuzz_winch {
         config.wasmtime.compiler_strategy = CompilerStrategy::Winch;
+        config.module_config.config.multi_value_enabled = false;
     }
 
     // Choose an engine that Wasmtime will be differentially executed against.
@@ -344,11 +346,20 @@ fn winch_supports_module(module: &[u8]) -> bool {
                         | I64Rotl { .. }
                         | I32Rotr { .. }
                         | I64Rotr { .. }
+                        | I32Clz { .. }
+                        | I64Clz { .. }
+                        | I32Ctz { .. }
+                        | I64Ctz { .. }
+                        | I32Popcnt { .. }
+                        | I64Popcnt { .. }
                         | LocalGet { .. }
                         | LocalSet { .. }
                         | Call { .. }
                         | Nop { .. }
-                        | End { .. } => {}
+                        | End { .. }
+                        | If { .. }
+                        | Else { .. }
+                        | Block { .. } => {}
                         _ => {
                             supported = false;
                             break 'main;

@@ -98,6 +98,10 @@
   (VwadduVV)
   (VwadduWV)
   (VsubVV)
+  (VwsubVV)
+  (VwsubWV)
+  (VwsubuVV)
+  (VwsubuWV)
   (VssubVV)
   (VssubuVV)
   (VmulVV)
@@ -122,6 +126,7 @@
   (VredmaxuVS)
   (VredminuVS)
   (VrgatherVV)
+  (VcompressVM)
 
   ;; Vector-Scalar Opcodes
   (VaddVX)
@@ -133,8 +138,13 @@
   (VwadduWX)
   (VsubVX)
   (VrsubVX)
+  (VwsubVX)
+  (VwsubWX)
+  (VwsubuVX)
+  (VwsubuWX)
   (VssubVX)
   (VssubuVX)
+  (VmulVX)
   (VsllVX)
   (VsrlVX)
   (VsraVX)
@@ -158,6 +168,13 @@
   (VmsltVX)
 ))
 
+
+
+;; Register-Imm ALU Ops that modify the destination register
+(type VecAluOpRRRImm5 (enum
+  (VslideupVI)
+))
+
 ;; Register-Imm ALU Ops
 (type VecAluOpRRImm5 (enum
   ;; Regular VI Opcodes
@@ -171,9 +188,13 @@
   (VandVI)
   (VorVI)
   (VxorVI)
+  (VssrlVI)
   (VslidedownVI)
   (VmergeVIM)
   (VrgatherVI)
+  ;; This opcode represents multiple instructions `vmv1r`/`vmv2r`/`vmv4r`/etc...
+  ;; The immediate field specifies how many registers should be copied.
+  (VmvrV)
 ))
 
 ;; Imm only ALU Ops
@@ -267,6 +288,21 @@
 ;; source register and rs1 is the second source register. This is the opposite
 ;; of the usual RISC-V register order.
 ;; See Section 10.1 of the RISC-V Vector Extension Specification.
+
+
+;; Helper for emitting `MInst.VecAluRRRImm5` instructions.
+;; These instructions modify the destination register.
+(decl vec_alu_rrr_imm5 (VecAluOpRRRImm5 VReg VReg Imm5 VecOpMasking  VState) VReg)
+(rule (vec_alu_rrr_imm5 op vd_src vs2 imm mask vstate)
+      (let ((vd WritableVReg (temp_writable_vreg))
+            (_ Unit (emit (MInst.VecAluRRRImm5 op vd vd_src vs2 imm mask vstate))))
+        vd))
+
+;; Helper for emitting `MInst.VecAluRRRImm5` instructions where the immediate
+;; is zero extended instead of sign extended.
+(decl vec_alu_rrr_uimm5 (VecAluOpRRRImm5 VReg VReg UImm5 VecOpMasking VState) VReg)
+(rule (vec_alu_rrr_uimm5 op vd_src vs2 imm mask vstate)
+      (vec_alu_rrr_imm5 op vd_src vs2 (uimm5_bitcast_to_imm5 imm) mask vstate))
 
 ;; Helper for emitting `MInst.VecAluRRR` instructions.
 (decl vec_alu_rrr (VecAluOpRRR Reg Reg VecOpMasking VState) Reg)
@@ -432,6 +468,62 @@
 (rule (rv_vrsub_vx vs2 vs1 mask vstate)
   (vec_alu_rrr (VecAluOpRRR.VrsubVX) vs2 vs1 mask vstate))
 
+;; Helper for emitting the `vwsub.vv` instruction.
+;;
+;;  Widening integer sub, 2*SEW = SEW + SEW
+(decl rv_vwsub_vv (VReg VReg VecOpMasking VState) VReg)
+(rule (rv_vwsub_vv vs2 vs1 mask vstate)
+  (vec_alu_rrr (VecAluOpRRR.VwsubVV) vs2 vs1 mask vstate))
+
+;; Helper for emitting the `vwsub.vx` instruction.
+;;
+;;  Widening integer sub, 2*SEW = SEW + SEW
+(decl rv_vwsub_vx (VReg XReg VecOpMasking VState) VReg)
+(rule (rv_vwsub_vx vs2 vs1 mask vstate)
+  (vec_alu_rrr (VecAluOpRRR.VwsubVX) vs2 vs1 mask vstate))
+
+;; Helper for emitting the `vwsub.wv` instruction.
+;;
+;;  Widening integer sub, 2*SEW = 2*SEW + SEW
+(decl rv_vwsub_wv (VReg VReg VecOpMasking VState) VReg)
+(rule (rv_vwsub_wv vs2 vs1 mask vstate)
+  (vec_alu_rrr (VecAluOpRRR.VwsubWV) vs2 vs1 mask vstate))
+
+;; Helper for emitting the `vwsub.wx` instruction.
+;;
+;;  Widening integer sub, 2*SEW = 2*SEW + SEW
+(decl rv_vwsub_wx (VReg XReg VecOpMasking VState) VReg)
+(rule (rv_vwsub_wx vs2 vs1 mask vstate)
+  (vec_alu_rrr (VecAluOpRRR.VwsubWX) vs2 vs1 mask vstate))
+
+;; Helper for emitting the `vwsubu.vv` instruction.
+;;
+;; Widening unsigned integer sub, 2*SEW = SEW + SEW
+(decl rv_vwsubu_vv (VReg VReg VecOpMasking VState) VReg)
+(rule (rv_vwsubu_vv vs2 vs1 mask vstate)
+  (vec_alu_rrr (VecAluOpRRR.VwsubuVV) vs2 vs1 mask vstate))
+
+;; Helper for emitting the `vwsubu.vv` instruction.
+;;
+;; Widening unsigned integer sub, 2*SEW = SEW + SEW
+(decl rv_vwsubu_vx (VReg XReg VecOpMasking VState) VReg)
+(rule (rv_vwsubu_vx vs2 vs1 mask vstate)
+  (vec_alu_rrr (VecAluOpRRR.VwsubuVX) vs2 vs1 mask vstate))
+
+;; Helper for emitting the `vwsubu.wv` instruction.
+;;
+;;  Widening integer sub, 2*SEW = 2*SEW + SEW
+(decl rv_vwsubu_wv (VReg VReg VecOpMasking VState) VReg)
+(rule (rv_vwsubu_wv vs2 vs1 mask vstate)
+  (vec_alu_rrr (VecAluOpRRR.VwsubuWV) vs2 vs1 mask vstate))
+
+;; Helper for emitting the `vwsubu.wx` instruction.
+;;
+;;  Widening integer sub, 2*SEW = 2*SEW + SEW
+(decl rv_vwsubu_wx (VReg XReg VecOpMasking VState) VReg)
+(rule (rv_vwsubu_wx vs2 vs1 mask vstate)
+  (vec_alu_rrr (VecAluOpRRR.VwsubuWX) vs2 vs1 mask vstate))
+
 ;; Helper for emitting the `vssub.vv` instruction.
 (decl rv_vssub_vv (VReg VReg VecOpMasking VState) VReg)
 (rule (rv_vssub_vv vs2 vs1 mask vstate)
@@ -466,6 +558,11 @@
 (decl rv_vmul_vv (VReg VReg VecOpMasking VState) VReg)
 (rule (rv_vmul_vv vs2 vs1 mask vstate)
   (vec_alu_rrr (VecAluOpRRR.VmulVV) vs2 vs1 mask vstate))
+
+;; Helper for emitting the `vmul.vx` instruction.
+(decl rv_vmul_vx (VReg XReg VecOpMasking VState) VReg)
+(rule (rv_vmul_vx vs2 vs1 mask vstate)
+  (vec_alu_rrr (VecAluOpRRR.VmulVX) vs2 vs1 mask vstate))
 
 ;; Helper for emitting the `vmulh.vv` instruction.
 (decl rv_vmulh_vv (VReg VReg VecOpMasking VState) VReg)
@@ -566,6 +663,15 @@
 (decl rv_vxor_vi (VReg Imm5 VecOpMasking VState) VReg)
 (rule (rv_vxor_vi vs2 imm mask vstate)
   (vec_alu_rr_imm5 (VecAluOpRRImm5.VxorVI) vs2 imm mask vstate))
+
+;; Helper for emitting the `vssrl.vi` instruction.
+;;
+;; vd[i] = (unsigned(vs2[i]) >> imm) + r
+;;
+;; `r` here is the rounding mode currently selected.
+(decl rv_vssrl_vi (VReg UImm5 VecOpMasking VState) VReg)
+(rule (rv_vssrl_vi vs2 imm mask vstate)
+  (vec_alu_rr_uimm5 (VecAluOpRRImm5.VssrlVI) vs2 imm mask vstate))
 
 ;; Helper for emitting the `vnot.v` instruction.
 ;; This is just a mnemonic for `vxor.vi vd, vs, -1`
@@ -694,6 +800,14 @@
 (rule (rv_vslidedown_vi vs2 imm mask vstate)
   (vec_alu_rr_uimm5 (VecAluOpRRImm5.VslidedownVI) vs2 imm mask vstate))
 
+;; Helper for emitting the `vslideup.vi` instruction.
+;; Unlike other `vi` instructions the immediate is zero extended.
+;; This is implemented as a 2 source operand instruction, since it only
+;; partially modifies the destination register.
+(decl rv_vslideup_vvi (VReg VReg UImm5 VecOpMasking VState) VReg)
+(rule (rv_vslideup_vvi vd vs2 imm mask vstate)
+  (vec_alu_rrr_uimm5 (VecAluOpRRRImm5.VslideupVI) vd vs2 imm mask vstate))
+
 ;; Helper for emitting the `vmv.x.s` instruction.
 ;; This instruction copies the first element of the source vector to the destination X register.
 ;; Masked versions of this instuction are not supported.
@@ -814,6 +928,17 @@
 (rule (rv_vrgather_vi vs2 imm mask vstate)
   (vec_alu_rr_uimm5 (VecAluOpRRImm5.VrgatherVI) vs2 imm mask vstate))
 
+;; Helper for emitting the `vcompress.vm` instruction.
+;;
+;; The vector compress instruction allows elements selected by a vector mask
+;; register from a source vector register group to be packed into contiguous
+;; elements at the start of the destination vector register group.
+;;
+;; The mask register is specified through vs1
+(decl rv_vcompress_vm (VReg VReg VState) VReg)
+(rule (rv_vcompress_vm vs2 vs1 vstate)
+  (vec_alu_rrr (VecAluOpRRR.VcompressVM) vs2 vs1 (unmasked) vstate))
+
 ;; Helper for emitting the `vmslt.vx` (Vector Mask Set Less Than) instruction.
 (decl rv_vmslt_vx (VReg XReg VecOpMasking VState) VReg)
 (rule (rv_vmslt_vx vs2 vs1 mask vstate)
@@ -881,14 +1006,17 @@
 
 
 ;; Build a vector mask from a u64
-;; TODO: We should merge this with the `vconst` rules, and take advantage of
-;; the other existing `vconst` rules. One example is using `vmv.v.i` which
-;; can represent some of these masks.
+;; TODO(#6571): We should merge this with the `vconst` rules, and take advantage of
+;; the other existing `vconst` rules.
 (decl gen_vec_mask (u64) VReg)
+
+;; When the immediate fits in a 5-bit immediate, we can use `vmv.v.i` directly.
+(rule 1 (gen_vec_mask (imm5_from_u64 imm))
+  (rv_vmv_vi imm (vstate_from_type $I64X2)))
 
 ;; Materialize the mask into an X register, and move it into the bottom of
 ;; the vector register.
-(rule (gen_vec_mask mask)
+(rule 0 (gen_vec_mask mask)
   (rv_vmv_sx (imm $I64 mask) (vstate_from_type $I64X2)))
 
 

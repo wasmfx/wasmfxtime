@@ -5,9 +5,10 @@
 //! machine code emitter.
 
 use crate::codegen::CodeGen;
+use crate::codegen::ControlStackFrame;
 use crate::masm::{CmpKind, DivKind, MacroAssembler, OperandSize, RegImm, RemKind, ShiftKind};
 use crate::stack::Val;
-use wasmparser::VisitOperator;
+use wasmparser::{BlockType, VisitOperator};
 use wasmtime_environ::{FuncIndex, WasmType};
 
 /// A macro to define unsupported WebAssembly operators.
@@ -85,11 +86,20 @@ macro_rules! def_unsupported {
     (emit I64Rotl $($rest:tt)*) => {};
     (emit I32Rotr $($rest:tt)*) => {};
     (emit I64Rotr $($rest:tt)*) => {};
+    (emit I32Clz $($rest:tt)*) => {};
+    (emit I64Clz $($rest:tt)*) => {};
+    (emit I32Ctz $($rest:tt)*) => {};
+    (emit I64Ctz $($rest:tt)*) => {};
+    (emit I32Popcnt $($rest:tt)*) => {};
+    (emit I64Popcnt $($rest:tt)*) => {};
     (emit LocalGet $($rest:tt)*) => {};
     (emit LocalSet $($rest:tt)*) => {};
     (emit Call $($rest:tt)*) => {};
     (emit End $($rest:tt)*) => {};
     (emit Nop $($rest:tt)*) => {};
+    (emit If $($rest:tt)*) => {};
+    (emit Else $($rest:tt)*) => {};
+    (emit Block $($rest:tt)*) => {};
 
     (emit $unsupported:tt $($rest:tt)*) => {$($rest)*};
 }
@@ -284,7 +294,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S32, &mut |masm, reg, size| {
-            masm.cmp_with_set(RegImm::imm(0), reg, CmpKind::Eq, size);
+            masm.cmp_with_set(RegImm::imm(0), reg.into(), CmpKind::Eq, size);
         });
     }
 
@@ -292,7 +302,39 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S64, &mut |masm, reg, size| {
-            masm.cmp_with_set(RegImm::imm(0), reg, CmpKind::Eq, size);
+            masm.cmp_with_set(RegImm::imm(0), reg.into(), CmpKind::Eq, size);
+        });
+    }
+
+    fn visit_i32_clz(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S32, &mut |masm, reg, size| {
+            masm.clz(reg, reg, size);
+        });
+    }
+
+    fn visit_i64_clz(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S64, &mut |masm, reg, size| {
+            masm.clz(reg, reg, size);
+        });
+    }
+
+    fn visit_i32_ctz(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S32, &mut |masm, reg, size| {
+            masm.ctz(reg, reg, size);
+        });
+    }
+
+    fn visit_i64_ctz(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S64, &mut |masm, reg, size| {
+            masm.ctz(reg, reg, size);
         });
     }
 
@@ -402,7 +444,24 @@ where
         self.masm.shift(&mut self.context, Rotr, S64);
     }
 
-    fn visit_end(&mut self) {}
+    fn visit_end(&mut self) {
+        if let Some(control) = self.control_frames.last_mut() {
+            control.emit_end(self.masm, &mut self.context);
+            // Pop control frame.
+            self.control_frames.truncate(self.control_frames.len() - 1);
+        }
+    }
+
+    fn visit_i32_popcnt(&mut self) {
+        use OperandSize::*;
+        self.masm.popcnt(&mut self.context, S32);
+    }
+
+    fn visit_i64_popcnt(&mut self) {
+        use OperandSize::*;
+
+        self.masm.popcnt(&mut self.context, S64);
+    }
 
     fn visit_local_get(&mut self, index: u32) {
         let context = &mut self.context;
@@ -435,6 +494,31 @@ where
     }
 
     fn visit_nop(&mut self) {}
+
+    fn visit_if(&mut self, blockty: BlockType) {
+        self.control_frames.push(ControlStackFrame::if_(
+            &self.env.resolve_block_type(blockty),
+            self.masm,
+            &mut self.context,
+        ));
+    }
+
+    fn visit_else(&mut self) {
+        let control = self
+            .control_frames
+            .last_mut()
+            .unwrap_or_else(|| panic!("Expected active control stack frame for else"));
+
+        control.emit_else(self.masm, &mut self.context);
+    }
+
+    fn visit_block(&mut self, blockty: BlockType) {
+        self.control_frames.push(ControlStackFrame::block(
+            &self.env.resolve_block_type(blockty),
+            self.masm,
+            &mut self.context,
+        ));
+    }
 
     wasmparser::for_each_operator!(def_unsupported);
 }

@@ -324,6 +324,15 @@
       (probe_count u32)
       (tmp WritableReg))
 
+    (VecAluRRRImm5
+      (op VecAluOpRRRImm5)
+      (vd WritableReg)
+      (vd_src Reg)
+      (vs2 Reg)
+      (imm Imm5)
+      (mask VecOpMasking)
+      (vstate VState))
+
     (VecAluRRR
       (op VecAluOpRRR)
       (vd WritableReg)
@@ -2663,18 +2672,6 @@
   (if-let $false (has_zbb))
   (gen_select_reg (IntCC.SignedGreaterThan) x y x y))
 
-
-(decl lower_iabs (Type XReg) XReg)
-
-; I64 and lower
-; Generate the following code:
-;   sext.{b,h,w} a0, a0
-;   neg a1, a0
-;   max a0, a0, a1
-(rule (lower_iabs (fits_in_64 ty) val)
-  (let ((extended XReg (sext val ty $I64))
-        (negated XReg (rv_neg extended)))
-    (max $I64 extended negated)))
 
 (decl gen_trapif (XReg TrapCode) InstOutput)
 (rule
