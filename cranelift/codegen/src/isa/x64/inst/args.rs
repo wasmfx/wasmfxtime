@@ -537,7 +537,7 @@ impl SyntheticAmode {
         match self {
             SyntheticAmode::Real(addr) => addr.clone(),
             SyntheticAmode::NominalSPOffset { simm32 } => {
-                let off = *simm32 as i64 + state.virtual_sp_offset;
+                let off = *simm32 as i64 + state.virtual_sp_offset();
                 // TODO will require a sequence of add etc.
                 assert!(
                     off <= u32::max_value() as i64,
@@ -1248,7 +1248,6 @@ impl SseOpcode {
             | SseOpcode::Pcmpgtd
             | SseOpcode::Pextrw
             | SseOpcode::Pinsrw
-            | SseOpcode::Pmaddubsw
             | SseOpcode::Pmaddwd
             | SseOpcode::Pmaxsw
             | SseOpcode::Pmaxub
@@ -1303,6 +1302,7 @@ impl SseOpcode {
             | SseOpcode::Pshufb
             | SseOpcode::Phaddw
             | SseOpcode::Phaddd
+            | SseOpcode::Pmaddubsw
             | SseOpcode::Movddup => SSSE3,
 
             SseOpcode::Blendvpd

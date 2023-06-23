@@ -784,13 +784,13 @@
 ;; feature sets. To remedy this, a small dance is done with an unsigned right
 ;; shift plus some extra ops.
 (rule 3 (lower (has_type ty @ $I64X2 (sshr src (iconst n))))
-        (if-let $true (use_avx512vl_simd))
-        (if-let $true (use_avx512f_simd))
+        (if-let $true (use_avx512vl))
+        (if-let $true (use_avx512f))
         (x64_vpsraq_imm src (shift_amount_masked ty n)))
 
 (rule 2 (lower (has_type ty @ $I64X2 (sshr src amt)))
-        (if-let $true (use_avx512vl_simd))
-        (if-let $true (use_avx512f_simd))
+        (if-let $true (use_avx512vl))
+        (if-let $true (use_avx512f))
         (let ((masked Gpr (x64_and $I64 amt (RegMemImm.Imm (shift_mask ty)))))
           (x64_vpsraq src (x64_movd_to_xmm masked))))
 
@@ -1018,8 +1018,8 @@
 ;; With AVX-512 we can implement `i64x2` multiplication with a single
 ;; instruction.
 (rule 3 (lower (has_type (multi_lane 64 2) (imul x y)))
-      (if-let $true (use_avx512vl_simd))
-      (if-let $true (use_avx512dq_simd))
+      (if-let $true (use_avx512vl))
+      (if-let $true (use_avx512dq))
       (x64_vpmullq x y))
 
 ;; Otherwise, for i64x2 multiplication we describe a lane A as being composed of
@@ -1200,8 +1200,8 @@
 
 ;; When AVX512 is available, we can use a single `vpabsq` instruction.
 (rule 2 (lower (has_type $I64X2 (iabs x)))
-      (if-let $true (use_avx512vl_simd))
-      (if-let $true (use_avx512f_simd))
+      (if-let $true (use_avx512vl))
+      (if-let $true (use_avx512f))
       (x64_vpabsq x))
 
 ;; Otherwise, we use a separate register, `neg`, to contain the results of `0 -
@@ -2095,11 +2095,11 @@
 
 ;; Rules for `popcnt` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(rule 3 (lower (has_type (ty_32_or_64 ty) (popcnt src)))
+(rule 4 (lower (has_type (ty_32_or_64 ty) (popcnt src)))
       (if-let $true (use_popcnt))
       (x64_popcnt ty src))
 
-(rule 2 (lower (has_type (ty_8_or_16 ty) (popcnt src)))
+(rule 3 (lower (has_type (ty_8_or_16 ty) (popcnt src)))
       (if-let $true (use_popcnt))
       (x64_popcnt $I32 (extend_to_gpr src $I32 (ExtendKind.Zero))))
 
@@ -2192,9 +2192,9 @@
         final))
 
 
-(rule 1 (lower (has_type $I8X16 (popcnt src)))
-      (if-let $true (use_avx512vl_simd))
-      (if-let $true (use_avx512bitalg_simd))
+(rule 2 (lower (has_type $I8X16 (popcnt src)))
+      (if-let $true (use_avx512vl))
+      (if-let $true (use_avx512bitalg))
       (x64_vpopcntb src))
 
 
@@ -2218,8 +2218,8 @@
 ;; __m128i lookup = _mm_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
 
 
-(rule (lower (has_type $I8X16
-                       (popcnt src)))
+(rule 1 (lower (has_type $I8X16 (popcnt src)))
+      (if-let $true (use_ssse3))
       (let ((low_mask XmmMem (emit_u128_le_const 0x0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f))
             (low_nibbles Xmm (sse_and $I8X16 src low_mask))
             ;; Note that this is a 16x8 shift, but that's OK; we mask
@@ -2232,6 +2232,19 @@
             (bit_counts_low Xmm (x64_pshufb lookup low_nibbles))
             (bit_counts_high Xmm (x64_pshufb lookup high_nibbles)))
         (x64_paddb bit_counts_low bit_counts_high)))
+
+;; A modified version of the popcnt method from Hacker's Delight.
+(rule (lower (has_type $I8X16 (popcnt src)))
+      (let ((mask1 XmmMem (emit_u128_le_const 0x77777777777777777777777777777777))
+            (src Xmm src)
+            (shifted Xmm (x64_pand (x64_psrlq src (xmi_imm 1)) mask1))
+            (src Xmm (x64_psubb src shifted))
+            (shifted Xmm (x64_pand (x64_psrlq shifted (xmi_imm 1)) mask1))
+            (src Xmm (x64_psubb src shifted))
+            (shifted Xmm (x64_pand (x64_psrlq shifted (xmi_imm 1)) mask1))
+            (src Xmm (x64_psubb src shifted))
+            (src Xmm (x64_paddb src (x64_psrlw src (xmi_imm 4)))))
+        (x64_pand src (emit_u128_le_const 0x0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f))))
 
 ;; Rules for `bitrev` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -2400,6 +2413,7 @@
 ;; Rules for `x86_pmaddubsw` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (rule (lower (has_type $I16X8 (x86_pmaddubsw x y)))
+      (if-let $true (use_ssse3))
       (x64_pmaddubsw y x))
 
 ;; Rules for `fadd` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2957,6 +2971,7 @@
                     (has_type $I16 (extractlane value (u8_from_uimm8 n)))
                     address
                     offset))
+      (if-let $true (use_sse41))
       (side_effect
        (x64_pextrw_store (to_amode flags address offset) value n)))
 (rule 2 (lower (store flags
@@ -3309,8 +3324,8 @@
 ;; When AVX512VL and AVX512F are available,
 ;; `fcvt_from_uint` can be lowered to a single instruction.
 (rule 2 (lower (has_type $F32X4 (fcvt_from_uint src)))
-      (if-let $true (use_avx512vl_simd))
-      (if-let $true (use_avx512f_simd))
+      (if-let $true (use_avx512vl))
+      (if-let $true (use_avx512f))
       (x64_vcvtudq2ps src))
 
 ;; Converting packed unsigned integers to packed floats
@@ -3562,6 +3577,7 @@
         (has_type $I16X8 (iadd_pairwise
                            (swiden_low val @ (value_type $I8X16))
                            (swiden_high val))))
+      (if-let $true (use_ssse3))
       (let ((mul_const Xmm (x64_xmm_load_const $I8X16
               (emit_u128_le_const 0x01010101010101010101010101010101))))
         (x64_pmaddubsw mul_const val)))
@@ -3579,6 +3595,7 @@
         (has_type $I16X8 (iadd_pairwise
                            (uwiden_low val @ (value_type $I8X16))
                            (uwiden_high val))))
+      (if-let $true (use_ssse3))
       (let ((mul_const XmmMem (emit_u128_le_const 0x01010101010101010101010101010101)))
         (x64_pmaddubsw val mul_const)))
 
@@ -3641,10 +3658,12 @@
 ;; to the lower lanes first.
 (rule 1 (lower (has_type $I16X8 (swiden_high val @ (value_type $I8X16))))
         (if-let $true (use_sse41))
+        (if-let $true (use_ssse3))
         (let ((x Xmm val))
           (x64_pmovsxbw (x64_palignr x x 8))))
 (rule 1 (lower (has_type $I32X4 (swiden_high val @ (value_type $I16X8))))
         (if-let $true (use_sse41))
+        (if-let $true (use_ssse3))
         (let ((x Xmm val))
           (x64_pmovsxwd (x64_palignr x x 8))))
 (rule 1 (lower (has_type $I64X2 (swiden_high val @ (value_type $I32X4))))
@@ -4105,6 +4124,7 @@
 ;; operand as the low-order bytes and the first operand as high-order bytes,
 ;; so put `a` second.
 (rule 13 (lower (shuffle a b (palignr_imm_from_immediate n)))
+         (if-let $true (use_ssse3))
          (x64_palignr b a n))
 (decl palignr_imm_from_immediate (u8) Immediate)
 (extern extractor palignr_imm_from_immediate palignr_imm_from_immediate)
@@ -4178,7 +4198,8 @@
 ;; more efficient to execute the `pshufb` here-and-now with an xor'd-to-be-zero
 ;; register.
 (rule 6 (lower (shuffle a _ (u128_from_immediate 0)))
-      (x64_pshufb a (xmm_zero $I8X16)))
+        (if-let $true (use_ssse3))
+        (x64_pshufb a (xmm_zero $I8X16)))
 
 ;; Special case for the `shufps` instruction which will select two 32-bit values
 ;; from the first operand and two 32-bit values from the second operand. Note
@@ -4206,21 +4227,22 @@
 ;; indices (may not be completely necessary: verification could fail incorrect
 ;; mask values) and fix the indexes to all point to the `dst` vector.
 (rule 3 (lower (shuffle a a (vec_mask_from_immediate mask)))
-      (x64_pshufb a (shuffle_0_31_mask mask)))
+        (if-let $true (use_ssse3))
+        (x64_pshufb a (shuffle_0_31_mask mask)))
 
 ;; For the case where the shuffle mask contains out-of-bounds values (values
 ;; greater than 31) we must mask off those resulting values in the result of
 ;; `vpermi2b`.
 (rule 2 (lower (shuffle a b (vec_mask_from_immediate (perm_from_mask_with_zeros mask zeros))))
-      (if-let $true (use_avx512vl_simd))
-      (if-let $true (use_avx512vbmi_simd))
+      (if-let $true (use_avx512vl))
+      (if-let $true (use_avx512vbmi))
       (x64_andps (x64_vpermi2b (x64_xmm_load_const $I8X16 mask) a b) zeros))
 
 ;; However, if the shuffle mask contains no out-of-bounds values, we can use
 ;; `vpermi2b` without any masking.
 (rule 1 (lower (shuffle a b (vec_mask_from_immediate mask)))
-      (if-let $true (use_avx512vl_simd))
-      (if-let $true (use_avx512vbmi_simd))
+      (if-let $true (use_avx512vl))
+      (if-let $true (use_avx512vbmi))
       (x64_vpermi2b (x64_xmm_load_const $I8X16 (perm_from_mask mask)) a b))
 
 ;; If `lhs` and `rhs` are different, we must shuffle each separately and then OR
@@ -4228,8 +4250,8 @@
 ;; above, we build the `constructed_mask` for each case statically.
 (rule (lower (shuffle a b (vec_mask_from_immediate mask)))
       (x64_por
-        (x64_pshufb a (shuffle_0_15_mask mask))
-        (x64_pshufb b (shuffle_16_31_mask mask))))
+        (lower_pshufb a (shuffle_0_15_mask mask))
+        (lower_pshufb b (shuffle_16_31_mask mask))))
 
 ;; Rules for `swizzle` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -4241,12 +4263,27 @@
 ;; variables like: %dst = swizzle %src, %mask
 (rule (lower (swizzle src mask))
       (let ((mask Xmm (x64_paddusb mask (emit_u128_le_const 0x70707070707070707070707070707070))))
-        (x64_pshufb src mask)))
+        (lower_pshufb src mask)))
 
 ;; Rules for `x86_pshufb` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (rule (lower (x86_pshufb src mask))
+      (if-let $true (use_ssse3))
       (x64_pshufb src mask))
+
+;; A helper function to generate either the `pshufb` instruction or a libcall to
+;; the `X86Pshufb` libcall. Note that the libcall is not exactly the most
+;; performant thing in the world so this is primarily here for completeness
+;; of lowerings on all x86 cpus but if rules are ideally gated on the presence
+;; of SSSE3 to use the `pshufb` instruction itself.
+(decl lower_pshufb (Xmm RegMem) Xmm)
+(rule 1 (lower_pshufb src mask)
+        (if-let $true (use_ssse3))
+        (x64_pshufb src mask))
+(rule (lower_pshufb src (RegMem.Reg mask))
+      (libcall_2 (LibCall.X86Pshufb) src mask))
+(rule (lower_pshufb src (RegMem.Mem addr))
+      (lower_pshufb src (x64_movdqu_load addr)))
 
 ;; Rules for `extractlane` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -4340,15 +4377,19 @@
 ;; i8x16 splats: use `vpbroadcastb` on AVX2 and otherwise `pshufb` broadcasts
 ;; with a mask of zero which is calculated with an xor-against-itself register.
 (rule 0 (lower (has_type $I8X16 (splat src)))
-        (x64_pshufb (bitcast_gpr_to_xmm $I32 src) (xmm_zero $I8X16)))
+        (let ((src Xmm (x64_movd_to_xmm src)))
+          (x64_pshufd (x64_pshuflw (x64_punpcklbw src src) 0) 0)))
 (rule 1 (lower (has_type $I8X16 (splat src)))
-        (if-let $true (use_avx2_simd))
+        (if-let $true (use_ssse3))
+        (x64_pshufb (bitcast_gpr_to_xmm $I32 src) (xmm_zero $I8X16)))
+(rule 2 (lower (has_type $I8X16 (splat src)))
+        (if-let $true (use_avx2))
         (x64_vpbroadcastb (bitcast_gpr_to_xmm $I32 src)))
-(rule 2 (lower (has_type $I8X16 (splat (sinkable_load_exact addr))))
+(rule 3 (lower (has_type $I8X16 (splat (sinkable_load_exact addr))))
         (if-let $true (use_sse41))
         (x64_pshufb (x64_pinsrb (xmm_uninit_value) addr 0) (xmm_zero $I8X16)))
-(rule 3 (lower (has_type $I8X16 (splat (sinkable_load_exact addr))))
-        (if-let $true (use_avx2_simd))
+(rule 4 (lower (has_type $I8X16 (splat (sinkable_load_exact addr))))
+        (if-let $true (use_avx2))
         (x64_vpbroadcastb addr))
 
 ;; i16x8 splats: use `vpbroadcastw` on AVX2 and otherwise a 16-bit value is
@@ -4359,12 +4400,12 @@
 (rule 0 (lower (has_type $I16X8 (splat src)))
         (x64_pshufd (x64_pshuflw (bitcast_gpr_to_xmm $I32 src) 0) 0))
 (rule 1 (lower (has_type $I16X8 (splat src)))
-        (if-let $true (use_avx2_simd))
+        (if-let $true (use_avx2))
         (x64_vpbroadcastw (bitcast_gpr_to_xmm $I32 src)))
 (rule 2 (lower (has_type $I16X8 (splat (sinkable_load_exact addr))))
         (x64_pshufd (x64_pshuflw (x64_pinsrw (xmm_uninit_value) addr 0) 0) 0))
 (rule 3 (lower (has_type $I16X8 (splat (sinkable_load_exact addr))))
-        (if-let $true (use_avx2_simd))
+        (if-let $true (use_avx2))
         (x64_vpbroadcastw addr))
 
 ;; i32x4.splat - use `vpbroadcastd` on AVX2 and otherwise `pshufd` can be
@@ -4374,7 +4415,7 @@
 (rule 0 (lower (has_type $I32X4 (splat src)))
         (x64_pshufd (bitcast_gpr_to_xmm $I32 src) 0))
 (rule 1 (lower (has_type $I32X4 (splat src)))
-        (if-let $true (use_avx2_simd))
+        (if-let $true (use_avx2))
         (x64_vpbroadcastd (bitcast_gpr_to_xmm $I32 src)))
 
 ;; f32x4.splat - the source is already in an xmm register so `shufps` is all
@@ -4384,7 +4425,7 @@
         (let ((tmp Xmm src))
           (x64_shufps src src 0)))
 (rule 1 (lower (has_type $F32X4 (splat src)))
-        (if-let $true (use_avx2_simd))
+        (if-let $true (use_avx2))
         (x64_vbroadcastss src))
 
 ;; t32x4.splat of a load - use a `movss` to load into an xmm register and then
@@ -4395,12 +4436,12 @@
 ;; that the memory-operand encoding of `vbroadcastss` is usable with AVX, but
 ;; the register-based encoding is only available with AVX2. With the
 ;; `sinkable_load` extractor this should be guaranteed to use the memory-based
-;; encoding hence the `use_avx_simd` test.
-(rule 4 (lower (has_type (multi_lane 32 4) (splat (sinkable_load addr))))
+;; encoding hence the `use_avx` test.
+(rule 5 (lower (has_type (multi_lane 32 4) (splat (sinkable_load addr))))
         (let ((tmp Xmm (x64_movss_load addr)))
           (x64_shufps tmp tmp 0)))
-(rule 5 (lower (has_type (multi_lane 32 4) (splat (sinkable_load addr))))
-        (if-let $true (use_avx_simd))
+(rule 6 (lower (has_type (multi_lane 32 4) (splat (sinkable_load addr))))
+        (if-let $true (use_avx))
         (x64_vbroadcastss addr))
 
 ;; t64x2.splat - use `pshufd` to broadcast the lower 64-bit lane to the upper
@@ -4410,7 +4451,7 @@
         (x64_pshufd (bitcast_gpr_to_xmm $I64 src) 0b01_00_01_00))
 (rule 0 (lower (has_type $F64X2 (splat src)))
         (x64_pshufd src 0b01_00_01_00))
-(rule 5 (lower (has_type (multi_lane 64 2) (splat (sinkable_load addr))))
+(rule 6 (lower (has_type (multi_lane 64 2) (splat (sinkable_load addr))))
         (if-let $true (use_ssse3))
         (x64_movddup addr))
 
@@ -4509,18 +4550,50 @@
 
 ;; Rules for `sqmul_round_sat` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(rule (lower (sqmul_round_sat qx @ (value_type $I16X8) qy))
-      (let ((src1 Xmm qx)
-            (src2 Xmm qy)
+(rule 1 (lower (sqmul_round_sat qx @ (value_type $I16X8) qy))
+        (if-let $true (use_ssse3))
+        (let ((src1 Xmm qx)
+              (src2 Xmm qy)
 
-            (mask XmmMem (emit_u128_le_const 0x8000_8000_8000_8000_8000_8000_8000_8000))
-            (dst Xmm (x64_pmulhrsw src1 src2))
-            (cmp Xmm (x64_pcmpeqw dst mask)))
-        (x64_pxor dst cmp)))
+              (mask XmmMem (emit_u128_le_const 0x8000_8000_8000_8000_8000_8000_8000_8000))
+              (dst Xmm (x64_pmulhrsw src1 src2))
+              (cmp Xmm (x64_pcmpeqw dst mask)))
+          (x64_pxor dst cmp)))
+
+;; This operation is defined in wasm as:
+;;
+;;    S.SignedSaturate((x * y + 0x4000) >> 15)
+;;
+;; so perform all those operations here manually with a lack of the native
+;; instruction.
+(rule (lower (sqmul_round_sat qx @ (value_type $I16X8) qy))
+      (let (
+          (qx Xmm qx)
+          (qy Xmm qy)
+          ;; Multiply `qx` and `qy` generating 32-bit intermediate results. The
+          ;; 32-bit results have their low-halves stored in `mul_lsb` and the
+          ;; high halves are stored in `mul_msb`. These are then shuffled into
+          ;; `mul_lo` and `mul_hi` which represent the low 4 multiplications
+          ;; and the upper 4 multiplications.
+          (mul_lsb Xmm (x64_pmullw qx qy))
+          (mul_msb Xmm (x64_pmulhw qx qy))
+          (mul_lo Xmm (x64_punpcklwd mul_lsb mul_msb))
+          (mul_hi Xmm (x64_punpckhwd mul_lsb mul_msb))
+          ;; Add the 0x4000 constant to all multiplications
+          (val Xmm (x64_movdqu_load (emit_u128_le_const 0x00004000_00004000_00004000_00004000)))
+          (mul_lo Xmm (x64_paddd mul_lo val))
+          (mul_hi Xmm (x64_paddd mul_hi val))
+          ;; Perform the right-shift by 15 to all multiplications
+          (lo Xmm (x64_psrad mul_lo (xmi_imm 15)))
+          (hi Xmm (x64_psrad mul_hi (xmi_imm 15)))
+        )
+        ;; And finally perform a saturating 32-to-16-bit conversion.
+        (x64_packssdw lo hi)))
 
 ;; Rules for `x86_pmulhrsw` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (rule (lower (x86_pmulhrsw qx @ (value_type $I16X8) qy))
+      (if-let $true (use_ssse3))
       (x64_pmulhrsw qx qy))
 
 ;; Rules for `uunarrow` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

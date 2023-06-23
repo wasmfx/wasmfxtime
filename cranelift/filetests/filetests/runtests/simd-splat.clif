@@ -2,8 +2,8 @@
 test run
 target aarch64
 target s390x
-set enable_simd
 target x86_64
+target x86_64 ssse3
 target x86_64 sse41
 target x86_64 sse41 has_avx
 target x86_64 sse41 has_avx has_avx2

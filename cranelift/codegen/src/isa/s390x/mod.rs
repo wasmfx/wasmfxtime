@@ -186,6 +186,18 @@ impl TargetIsa for S390xBackend {
     fn has_x86_blendv_lowering(&self, _: Type) -> bool {
         false
     }
+
+    fn has_x86_pshufb_lowering(&self) -> bool {
+        false
+    }
+
+    fn has_x86_pmulhrsw_lowering(&self) -> bool {
+        false
+    }
+
+    fn has_x86_pmaddubsw_lowering(&self) -> bool {
+        false
+    }
 }
 
 impl fmt::Display for S390xBackend {

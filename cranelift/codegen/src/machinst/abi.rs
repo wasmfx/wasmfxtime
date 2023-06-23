@@ -322,6 +322,7 @@ pub trait IsaFlags: Clone {
 pub struct ArgsAccumulator<'a> {
     sig_set_abi_args: &'a mut Vec<ABIArg>,
     start: usize,
+    non_formal_flag: bool,
 }
 
 impl<'a> ArgsAccumulator<'a> {
@@ -330,11 +331,19 @@ impl<'a> ArgsAccumulator<'a> {
         ArgsAccumulator {
             sig_set_abi_args,
             start,
+            non_formal_flag: false,
         }
     }
 
     #[inline]
     pub fn push(&mut self, arg: ABIArg) {
+        debug_assert!(!self.non_formal_flag);
+        self.sig_set_abi_args.push(arg)
+    }
+
+    #[inline]
+    pub fn push_non_formal(&mut self, arg: ABIArg) {
+        self.non_formal_flag = true;
         self.sig_set_abi_args.push(arg)
     }
 
@@ -388,7 +397,9 @@ pub trait ABIMachineSpec {
     /// and stack slots.
     ///
     /// The argument locations should be pushed onto the given `ArgsAccumulator`
-    /// in order.
+    /// in order. Any extra arguments added (such as return area pointers)
+    /// should come at the end of the list so that the first N lowered
+    /// parameters align with the N clif parameters.
     ///
     /// Returns the stack-space used (rounded up to as alignment requires), and
     /// if `add_ret_area_ptr` was passed, the index of the extra synthetic arg
@@ -2193,7 +2204,7 @@ impl<M: ABIMachineSpec> CallSite<M> {
         from_regs: ValueRegs<Reg>,
     ) {
         match &ctx.sigs().args(self.sig)[idx] {
-            &ABIArg::Slots { .. } => {}
+            &ABIArg::Slots { .. } | &ABIArg::ImplicitPtrArg { .. } => {}
             &ABIArg::StructArg { offset, size, .. } => {
                 let src_ptr = from_regs.only_reg().unwrap();
                 let dst_ptr = ctx.alloc_tmp(M::word_type()).only_reg().unwrap();
@@ -2220,7 +2231,6 @@ impl<M: ABIMachineSpec> CallSite<M> {
                     ctx.emit(insn);
                 }
             }
-            &ABIArg::ImplicitPtrArg { .. } => unimplemented!(), // Only supported via ISLE.
         }
     }
 
@@ -2260,6 +2270,7 @@ impl<M: ABIMachineSpec> CallSite<M> {
                     &ABIArgSlot::Stack { .. } => 0,
                 })
                 .sum(),
+            ABIArg::ImplicitPtrArg { .. } => 1,
             _ => 0,
         };
         let mut temps: SmallVec<[Writable<Reg>; 16]> = (0..needed_tmps)
@@ -2355,7 +2366,36 @@ impl<M: ABIMachineSpec> CallSite<M> {
             &ABIArg::StructArg { pointer, .. } => {
                 assert!(pointer.is_none()); // Only supported via ISLE.
             }
-            &ABIArg::ImplicitPtrArg { .. } => unimplemented!(), // Only supported via ISLE.
+            &ABIArg::ImplicitPtrArg {
+                offset,
+                pointer,
+                ty,
+                purpose: _,
+            } => {
+                assert_eq!(from_regs.len(), 1);
+                let vreg = from_regs.regs()[0];
+                let amode = StackAMode::SPOffset(offset, ty);
+                let tmp = temps[0];
+                insts.push(M::gen_get_stack_addr(amode, tmp, ty));
+                let tmp = tmp.to_reg();
+                insts.push(M::gen_store_base_offset(tmp, 0, vreg, ty));
+                match pointer {
+                    ABIArgSlot::Reg { reg, .. } => {
+                        self.uses.push(CallArgPair {
+                            vreg: tmp,
+                            preg: reg.into(),
+                        });
+                    }
+                    ABIArgSlot::Stack { offset, .. } => {
+                        let ty = M::word_type();
+                        insts.push(M::gen_store_stack(
+                            StackAMode::SPOffset(offset, ty),
+                            tmp,
+                            ty,
+                        ));
+                    }
+                };
+            }
         }
         insts
     }
