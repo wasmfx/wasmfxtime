@@ -106,16 +106,12 @@ impl ABIMachineSpec for Riscv64MachineDeps {
         let (x_start, x_end, f_start, f_end) = match (call_conv, args_or_rets) {
             (isa::CallConv::Tail, _) => (9, 29, 0, 31),
             (_, ArgsOrRets::Args) => (10, 17, 10, 17),
-            (_, ArgsOrRets::Rets) => {
-                let end = if call_conv.extends_wasmtime() { 10 } else { 11 };
-                (10, end, 10, end)
-            }
+            (_, ArgsOrRets::Rets) => (10, 11, 10, 11),
         };
         let mut next_x_reg = x_start;
         let mut next_f_reg = f_start;
         // Stack space.
         let mut next_stack: u32 = 0;
-        let mut return_one_register_used = false;
 
         for param in params {
             if let ir::ArgumentPurpose::StructArgument(size) = param.purpose {
@@ -135,27 +131,17 @@ impl ABIMachineSpec for Riscv64MachineDeps {
             let (rcs, reg_tys) = Inst::rc_for_type(param.value_type)?;
             let mut slots = ABIArgSlotVec::new();
             for (rc, reg_ty) in rcs.iter().zip(reg_tys.iter()) {
-                let next_reg =
-                    if (next_x_reg <= x_end) && *rc == RegClass::Int && !return_one_register_used {
-                        let x = Some(x_reg(next_x_reg));
-                        if args_or_rets == ArgsOrRets::Rets && call_conv.extends_wasmtime() {
-                            return_one_register_used = true;
-                        }
-                        next_x_reg += 1;
-                        x
-                    } else if (next_f_reg <= f_end)
-                        && *rc == RegClass::Float
-                        && !return_one_register_used
-                    {
-                        let x = Some(f_reg(next_f_reg));
-                        if args_or_rets == ArgsOrRets::Rets && call_conv.extends_wasmtime() {
-                            return_one_register_used = true;
-                        }
-                        next_f_reg += 1;
-                        x
-                    } else {
-                        None
-                    };
+                let next_reg = if (next_x_reg <= x_end) && *rc == RegClass::Int {
+                    let x = Some(x_reg(next_x_reg));
+                    next_x_reg += 1;
+                    x
+                } else if (next_f_reg <= f_end) && *rc == RegClass::Float {
+                    let x = Some(f_reg(next_f_reg));
+                    next_f_reg += 1;
+                    x
+                } else {
+                    None
+                };
                 if let Some(reg) = next_reg {
                     slots.push(ABIArgSlot::Reg {
                         reg: reg.to_real_reg().unwrap(),
@@ -163,20 +149,10 @@ impl ABIMachineSpec for Riscv64MachineDeps {
                         extension: param.extension,
                     });
                 } else {
-                    // Compute size. For the wasmtime ABI it differs from native
-                    // ABIs in how multiple values are returned, so we take a
-                    // leaf out of arm64's book by not rounding everything up to
-                    // 8 bytes. For all ABI arguments, and other ABI returns,
-                    // though, each slot takes a minimum of 8 bytes.
-                    //
-                    // Note that in all cases 16-byte stack alignment happens
+                    // Compute size and 16-byte stack alignment happens
                     // separately after all args.
                     let size = reg_ty.bits() / 8;
-                    let size = if args_or_rets == ArgsOrRets::Rets && call_conv.extends_wasmtime() {
-                        size
-                    } else {
-                        std::cmp::max(size, 8)
-                    };
+                    let size = std::cmp::max(size, 8);
                     // Align.
                     debug_assert!(size.is_power_of_two());
                     next_stack = align_to(next_stack, size);
@@ -286,11 +262,16 @@ impl ABIMachineSpec for Riscv64MachineDeps {
         }
     }
 
-    fn get_stacklimit_reg() -> Reg {
+    fn get_stacklimit_reg(_call_conv: isa::CallConv) -> Reg {
         spilltmp_reg()
     }
 
-    fn gen_add_imm(into_reg: Writable<Reg>, from_reg: Reg, imm: u32) -> SmallInstVec<Inst> {
+    fn gen_add_imm(
+        _call_conv: isa::CallConv,
+        into_reg: Writable<Reg>,
+        from_reg: Reg,
+        imm: u32,
+    ) -> SmallInstVec<Inst> {
         let mut insts = SmallInstVec::new();
         if let Some(imm12) = Imm12::maybe_from_u64(imm as u64) {
             insts.push(Inst::AluRRImm12 {
@@ -686,7 +667,12 @@ impl ABIMachineSpec for Riscv64MachineDeps {
         || fixed_frame_storage_size > 0
     }
 
-    fn gen_inline_probestack(insts: &mut SmallInstVec<Self::I>, frame_size: u32, guard_size: u32) {
+    fn gen_inline_probestack(
+        insts: &mut SmallInstVec<Self::I>,
+        call_conv: isa::CallConv,
+        frame_size: u32,
+        guard_size: u32,
+    ) {
         // Unroll at most n consecutive probes, before falling back to using a loop
         const PROBE_MAX_UNROLL: u32 = 3;
         // Number of probes that we need to perform
@@ -695,7 +681,7 @@ impl ABIMachineSpec for Riscv64MachineDeps {
         if probe_count <= PROBE_MAX_UNROLL {
             Self::gen_probestack_unroll(insts, guard_size, probe_count)
         } else {
-            Self::gen_probestack_loop(insts, guard_size, probe_count)
+            Self::gen_probestack_loop(insts, call_conv, guard_size, probe_count)
         }
     }
 }
@@ -940,11 +926,21 @@ impl Riscv64MachineDeps {
         }
     }
 
-    fn gen_probestack_loop(insts: &mut SmallInstVec<Inst>, guard_size: u32, probe_count: u32) {
+    fn gen_probestack_loop(
+        insts: &mut SmallInstVec<Inst>,
+        call_conv: isa::CallConv,
+        guard_size: u32,
+        probe_count: u32,
+    ) {
+        // Must be a caller-saved register that is not an argument.
+        let tmp = match call_conv {
+            isa::CallConv::Tail => Writable::from_reg(x_reg(1)),
+            _ => Writable::from_reg(x_reg(28)), // t3
+        };
         insts.push(Inst::StackProbeLoop {
             guard_size,
             probe_count,
-            tmp: Writable::from_reg(x_reg(28)), // t3
+            tmp,
         });
     }
 }

@@ -225,7 +225,7 @@ fn ignore(testsuite: &str, testname: &str, strategy: &str) -> bool {
         }
 
         "riscv64" => {
-            if testname.contains("memory_multi") || testsuite.contains("relaxed_simd") {
+            if testsuite.contains("relaxed_simd") {
                 return true;
             }
 
@@ -234,13 +234,7 @@ fn ignore(testsuite: &str, testname: &str, strategy: &str) -> bool {
                 "cvt_from_uint",
                 "issue_3327_bnot_lowering",
                 "simd_conversions",
-                "simd_f32x4",
-                "simd_f32x4_cmp",
-                "simd_f32x4_pmin_pmax",
                 "simd_f32x4_rounding",
-                "simd_f64x2",
-                "simd_f64x2_cmp",
-                "simd_f64x2_pmin_pmax",
                 "simd_f64x2_rounding",
                 "simd_i32x4_trunc_sat_f32x4",
                 "simd_i32x4_trunc_sat_f64x2",
