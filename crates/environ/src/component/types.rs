@@ -449,7 +449,7 @@ impl ComponentTypesBuilder {
             types::Type::Instance(_) | types::Type::Func(_) | types::Type::Array(_) => {
                 unreachable!()
             }
-            types::Type::Resource(_) | types::Type::Cont(_)  => unimplemented!(),
+            types::Type::Resource(_) | types::Type::Cont(_) => unimplemented!(),
         })
     }
 
