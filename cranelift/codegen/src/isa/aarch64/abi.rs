@@ -130,17 +130,8 @@ impl ABIMachineSpec for AArch64MachineDeps {
             // number of register values returned in the other class. That is,
             // we can return values in up to 8 integer and
             // 8 vector registers at once.
-            //
-            // In Wasmtime, we can only use one register for return
-            // value for all the register classes. That is, we can't
-            // return values in both one integer and one vector
-            // register; only one return value may be in a register.
             ArgsOrRets::Rets => {
-                if call_conv.extends_wasmtime() {
-                    (1, 1) // x0 or v0, but not both
-                } else {
-                    (8, 16) // x0-x7 and v0-v7
-                }
+                (8, 16) // x0-x7 and v0-v7
             }
         };
 
@@ -290,10 +281,8 @@ impl ABIMachineSpec for AArch64MachineDeps {
             // Compute the stack slot's size.
             let size = (ty_bits(param.value_type) / 8) as u32;
 
-            let size = if is_apple_cc
-                || (call_conv.extends_wasmtime() && args_or_rets == ArgsOrRets::Rets)
-            {
-                // MacOS aarch64 and Wasmtime allow stack slots with
+            let size = if is_apple_cc {
+                // MacOS aarch64 allows stack slots with
                 // sizes less than 8 bytes. They still need to be
                 // properly aligned on their natural data alignment,
                 // though.
@@ -431,7 +420,12 @@ impl ABIMachineSpec for AArch64MachineDeps {
         }
     }
 
-    fn gen_add_imm(into_reg: Writable<Reg>, from_reg: Reg, imm: u32) -> SmallInstVec<Inst> {
+    fn gen_add_imm(
+        _call_conv: isa::CallConv,
+        into_reg: Writable<Reg>,
+        from_reg: Reg,
+        imm: u32,
+    ) -> SmallInstVec<Inst> {
         let imm = imm as u64;
         let mut insts = SmallVec::new();
         if let Some(imm12) = Imm12::maybe_from_u64(imm) {
@@ -486,7 +480,7 @@ impl ABIMachineSpec for AArch64MachineDeps {
         Inst::LoadAddr { rd: into_reg, mem }
     }
 
-    fn get_stacklimit_reg() -> Reg {
+    fn get_stacklimit_reg(_call_conv: isa::CallConv) -> Reg {
         spilltmp_reg()
     }
 
@@ -657,7 +651,12 @@ impl ABIMachineSpec for AArch64MachineDeps {
         unimplemented!("Stack probing is unimplemented on AArch64");
     }
 
-    fn gen_inline_probestack(insts: &mut SmallInstVec<Self::I>, frame_size: u32, guard_size: u32) {
+    fn gen_inline_probestack(
+        insts: &mut SmallInstVec<Self::I>,
+        _call_conv: isa::CallConv,
+        frame_size: u32,
+        guard_size: u32,
+    ) {
         // The stack probe loop currently takes 6 instructions and each inline
         // probe takes 2 (ish, these numbers sort of depend on the constants).
         // Set this to 3 to keep the max size of the probe to 6 instructions.
