@@ -170,38 +170,38 @@ impl Context for IsleContext<'_, '_, MInst, X64Backend> {
     }
 
     #[inline]
-    fn use_avx_simd(&mut self) -> bool {
-        self.backend.x64_flags.use_avx_simd()
+    fn use_avx(&mut self) -> bool {
+        self.backend.x64_flags.use_avx()
     }
 
     #[inline]
-    fn use_avx2_simd(&mut self) -> bool {
-        self.backend.x64_flags.use_avx2_simd()
+    fn use_avx2(&mut self) -> bool {
+        self.backend.x64_flags.use_avx2()
     }
 
     #[inline]
-    fn use_avx512vl_simd(&mut self) -> bool {
-        self.backend.x64_flags.use_avx512vl_simd()
+    fn use_avx512vl(&mut self) -> bool {
+        self.backend.x64_flags.use_avx512vl()
     }
 
     #[inline]
-    fn use_avx512dq_simd(&mut self) -> bool {
-        self.backend.x64_flags.use_avx512dq_simd()
+    fn use_avx512dq(&mut self) -> bool {
+        self.backend.x64_flags.use_avx512dq()
     }
 
     #[inline]
-    fn use_avx512f_simd(&mut self) -> bool {
-        self.backend.x64_flags.use_avx512f_simd()
+    fn use_avx512f(&mut self) -> bool {
+        self.backend.x64_flags.use_avx512f()
     }
 
     #[inline]
-    fn use_avx512bitalg_simd(&mut self) -> bool {
-        self.backend.x64_flags.use_avx512bitalg_simd()
+    fn use_avx512bitalg(&mut self) -> bool {
+        self.backend.x64_flags.use_avx512bitalg()
     }
 
     #[inline]
-    fn use_avx512vbmi_simd(&mut self) -> bool {
-        self.backend.x64_flags.use_avx512vbmi_simd()
+    fn use_avx512vbmi(&mut self) -> bool {
+        self.backend.x64_flags.use_avx512vbmi()
     }
 
     #[inline]
@@ -638,6 +638,24 @@ impl Context for IsleContext<'_, '_, MInst, X64Backend> {
             &self.backend.triple,
             libcall.clone(),
             &[a],
+            &[output_reg],
+        )
+        .expect("Failed to emit LibCall");
+
+        output_reg.to_reg()
+    }
+
+    fn libcall_2(&mut self, libcall: &LibCall, a: Reg, b: Reg) -> Reg {
+        let call_conv = self.lower_ctx.abi().call_conv(self.lower_ctx.sigs());
+        let ret_ty = libcall.signature(call_conv, I64).returns[0].value_type;
+        let output_reg = self.lower_ctx.alloc_tmp(ret_ty).only_reg().unwrap();
+
+        emit_vm_call(
+            self.lower_ctx,
+            &self.backend.flags,
+            &self.backend.triple,
+            libcall.clone(),
+            &[a, b],
             &[output_reg],
         )
         .expect("Failed to emit LibCall");
