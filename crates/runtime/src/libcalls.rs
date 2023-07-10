@@ -627,14 +627,75 @@ pub mod relocs {
 
 // Builtins for continuations. These are thin wrappers around the
 // respective definitions in continuation.rs.
-fn cont_new(instance: &mut Instance, func: *mut u8) -> *mut u8 {
-    crate::continuation::cont_new(instance, func)
+fn cont_new(
+    instance: &mut Instance,
+    func: *mut u8,
+    param_count: u64,
+    result_count: u64,
+) -> *mut u8 {
+    crate::continuation::cont_new(instance, func, param_count as usize, result_count as usize)
+        as *mut u8
 }
 
-fn resume(instance: &mut Instance, cont: *mut u8) -> Result<u32, TrapReason> {
-    crate::continuation::resume(instance, cont)
+fn resume(instance: &mut Instance, contobj: *mut u8) -> Result<u32, TrapReason> {
+    crate::continuation::resume(
+        instance,
+        contobj as *mut crate::continuation::ContinuationObject,
+    )
 }
 
 fn suspend(instance: &mut Instance, tag_index: u32) {
     crate::continuation::suspend(instance, tag_index)
+}
+
+fn cont_obj_get_results(_instance: &mut Instance, contobj: *mut u8) -> *mut u8 {
+    crate::continuation::cont_obj_get_results(
+        contobj as *mut crate::continuation::ContinuationObject,
+    ) as *mut u8
+}
+
+fn cont_obj_occupy_next_args_slots(
+    _instance: &mut Instance,
+    contobj: *mut u8,
+    arg_count: u32,
+) -> *mut u8 {
+    crate::continuation::cont_obj_occupy_next_args_slots(
+        contobj as *mut crate::continuation::ContinuationObject,
+        arg_count as usize,
+    ) as *mut u8
+}
+
+fn new_cont_ref(_instance: &mut Instance, contobj: *mut u8) -> *mut u8 {
+    crate::continuation::new_cont_ref(contobj as *mut crate::continuation::ContinuationObject)
+        as *mut u8
+}
+
+fn cont_ref_get_cont_obj(
+    _instance: &mut Instance,
+    contref: *mut u8,
+) -> Result<*mut u8, TrapReason> {
+    Ok(crate::continuation::cont_ref_get_cont_obj(
+        contref as *mut crate::continuation::ContinuationReference,
+    )? as *mut u8)
+}
+
+fn cont_obj_has_state_invoked(
+    _instance: &mut Instance,
+    contobj: *mut u8,
+) -> Result<u32, TrapReason> {
+    Ok(crate::continuation::cont_obj_has_state_invoked(
+        contobj as *mut crate::continuation::ContinuationObject,
+    ) as u32)
+}
+
+fn alllocate_payload_buffer(instance: &mut Instance, element_count: u32) -> *mut u8 {
+    crate::continuation::alllocate_payload_buffer(instance, element_count as usize) as *mut u8
+}
+
+fn dealllocate_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) {
+    crate::continuation::dealllocate_payload_buffer(instance, expected_element_capacity as usize);
+}
+
+fn get_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) -> *mut u8 {
+    crate::continuation::get_payload_buffer(instance, expected_element_capacity as usize) as *mut u8
 }

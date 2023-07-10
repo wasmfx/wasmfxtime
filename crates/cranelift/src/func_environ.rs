@@ -13,10 +13,10 @@ use cranelift_wasm::{
     MemoryIndex, TableIndex, TagIndex, TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType,
     WasmResult, WasmType,
 };
+
 use std::convert::TryFrom;
 use std::mem;
 use wasmparser::Operator;
-use wasmtime_environ::MAXIMUM_CONTINUATION_PAYLOAD_COUNT;
 use wasmtime_environ::{
     BuiltinFunctionIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation, ModuleTypes, PtrSize,
     TableStyle, Tunables, TypeConvert, VMOffsets, WASM_PAGE_SIZE,
@@ -859,6 +859,59 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         builder.switch_to_block(continuation_block);
         result_param
     }
+
+    fn generate_builtin_call(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        index: BuiltinFunctionIndex,
+        sig: ir::SigRef,
+        args: Vec<ir::Value>,
+    ) -> (ir::Value, ir::Value) {
+        let mut args = args;
+        let (vmctx, addr) =
+            self.translate_load_builtin_function_address(&mut builder.cursor(), index);
+        args.insert(0, vmctx);
+        let call_inst = builder.ins().call_indirect(sig, addr, &args);
+        let result_value = builder.func.dfg.first_result(call_inst);
+        return (vmctx, result_value);
+    }
+
+    fn generate_builtin_call_no_return_val(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        index: BuiltinFunctionIndex,
+        sig: ir::SigRef,
+        args: Vec<ir::Value>,
+    ) -> ir::Value {
+        let mut args = args;
+        let (vmctx, addr) =
+            self.translate_load_builtin_function_address(&mut builder.cursor(), index);
+        args.insert(0, vmctx);
+        builder.ins().call_indirect(sig, addr, &args);
+        return vmctx;
+    }
+}
+
+macro_rules! generate_builtin_call {
+    ($self : ident, $builder: ident, $builtin_name: ident, $args: expr) => {{
+        let index = BuiltinFunctionIndex::$builtin_name();
+        let sig = $self
+            .builtin_function_signatures
+            .$builtin_name(&mut $builder.func);
+        let args = $args.to_vec();
+        $self.generate_builtin_call($builder, index, sig, args)
+    }};
+}
+
+macro_rules! generate_builtin_call_no_return_val {
+    ($self : ident, $builder: ident, $builtin_name: ident, $args: expr) => {{
+        let index = BuiltinFunctionIndex::$builtin_name();
+        let sig = $self
+            .builtin_function_signatures
+            .$builtin_name(&mut $builder.func);
+        let args = $args.to_vec();
+        $self.generate_builtin_call_no_return_val($builder, index, sig, args)
+    }};
 }
 
 impl TypeConvert for FuncEnvironment<'_> {
@@ -2203,65 +2256,46 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
     fn translate_cont_new(
         &mut self,
-        mut pos: cranelift_codegen::cursor::FuncCursor<'_>,
+        builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
         func: ir::Value,
-        _arg_types: &[WasmType],
+        arg_types: &[WasmType],
+        return_types: &[WasmType],
     ) -> WasmResult<ir::Value> {
-        let builtin_index = BuiltinFunctionIndex::cont_new();
-        let builtin_sig = self.builtin_function_signatures.cont_new(&mut pos.func);
-        let (vmctx, builtin_addr) =
-            self.translate_load_builtin_function_address(&mut pos, builtin_index);
+        let nargs = builder.ins().iconst(I64, arg_types.len() as i64);
+        let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
 
-        let call_inst = pos
-            .ins()
-            .call_indirect(builtin_sig, builtin_addr, &[vmctx, func]);
-        Ok(pos.func.dfg.first_result(call_inst))
+        let (_vmctx, contref) =
+            generate_builtin_call!(self, builder, cont_new, [func, nargs, nreturns]);
+
+        Ok(contref)
     }
 
+    // TODO(dhil): Currently, this function invokes
+    // `translate_load_builtin_function_address` multiple times, which
+    // causes repeated allocation of values pointing to the vmctx. We
+    // should refactor or inline this logic at some point.
     fn translate_resume(
         &mut self,
         builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
-        cont: ir::Value,
-        call_arg_types: &[WasmType],
+        contobj: ir::Value,
+        _call_arg_types: &[WasmType],
         call_args: &[ir::Value],
     ) -> WasmResult<(ir::Value, ir::Value, ir::Value)> {
         // Strategy:
         //
-        // First, load the builtin `resume`. As a side effect obtain a
-        // handle to the base of the VM context.
         //
-        // Second, store the remainder of `call_args` in the
+        // First, store the remainder of `call_args` in the
         // designated typed continuation store in the VM context.
         //
-        // Third, pack up the arguments and call `resume`.
-        //
-        // Fourth, return the result of the resume call.
+        // Second: Call the `resume` builtin
 
-        // First step: load the builtin `resume` and as a side-effect
-        // return the address of the vmctx.
-        let builtin_index = BuiltinFunctionIndex::resume();
-        let builtin_sig = self.builtin_function_signatures.resume(&mut builder.func);
+        if call_args.len() > 0 {
+            self.typed_continuations_store_resume_args(builder, call_args, contobj);
+        }
 
-        let (vmctx, builtin_addr) =
-            self.translate_load_builtin_function_address(&mut builder.cursor(), builtin_index);
-
-        // Second step: store `call_args` in the typed continuations
-        // store.
-        self.typed_continuations_store_payloads(builder, call_arg_types, call_args, vmctx);
-
-        // Third step: setup the call arguments and apply the builtin
-        // resume function.
-        let real_args = vec![vmctx, cont];
-
-        // Now we perform the call.
-        let call_inst = builder
-            .ins()
-            .call_indirect(builtin_sig, builtin_addr, &real_args);
-
-        // Fourth step: finally, we return the result of the call.
-        let result = builder.func.dfg.first_result(call_inst);
+        let (vmctx, result) = generate_builtin_call!(self, builder, resume, [contobj]);
 
         // The result encodes whether the return happens via ordinary
         // means or via a suspend. If the high bit is set, then it is
@@ -2291,18 +2325,13 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
     fn translate_suspend(
         &mut self,
-        mut pos: cranelift_codegen::cursor::FuncCursor<'_>,
+        builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
         tag_index: u32,
     ) {
-        let builtin_index = BuiltinFunctionIndex::suspend();
-        let builtin_sig = self.builtin_function_signatures.suspend(&mut pos.func);
-        let (vmctx, builtin_addr) =
-            self.translate_load_builtin_function_address(&mut pos, builtin_index);
+        let tag_index = builder.ins().iconst(I32, tag_index as i64);
 
-        let tag_index = pos.ins().iconst(I32, tag_index as i64);
-        pos.ins()
-            .call_indirect(builtin_sig, builtin_addr, &[vmctx, tag_index]);
+        generate_builtin_call_no_return_val!(self, builder, suspend, [tag_index]);
     }
 
     fn continuation_arguments(&self, index: u32) -> &[WasmType] {
@@ -2326,56 +2355,133 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     }
 
     fn typed_continuations_load_payloads(
-        &self,
+        &mut self,
         builder: &mut FunctionBuilder,
         valtypes: &[WasmType],
-        base_addr: ir::Value,
     ) -> Vec<ir::Value> {
         let memflags = ir::MemFlags::trusted();
         let mut values = vec![];
-        if valtypes.len() == 0 {
-            // OK
-        } else if valtypes.len() <= MAXIMUM_CONTINUATION_PAYLOAD_COUNT as usize {
-            let mut offset =
-                i32::try_from(self.offsets.vmctx_typed_continuations_payloads()).unwrap();
+
+        if valtypes.len() > 0 {
+            let nargs = builder.ins().iconst(I32, valtypes.len() as i64);
+
+            let (_vmctx, payload_ptr) =
+                generate_builtin_call!(self, builder, get_payload_buffer, [nargs]);
+
+            let mut offset = 0;
             for valtype in valtypes {
                 let val = builder.ins().load(
                     super::value_type(self.isa, *valtype),
                     memflags,
-                    base_addr,
+                    payload_ptr,
                     offset,
                 );
                 values.push(val);
                 offset += self.offsets.ptr.maximum_value_size() as i32;
             }
-        } else {
-            panic!("Unsupported continuation arity!");
+
+            generate_builtin_call_no_return_val!(
+                self,
+                builder,
+                dealllocate_payload_buffer,
+                [nargs]
+            );
         }
         values
     }
 
+    /// TODO
+    fn typed_continuations_cont_ref_get_cont_obj(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contref: ir::Value,
+    ) -> ir::Value {
+        let (_vmctx, contobj) =
+            generate_builtin_call!(self, builder, cont_ref_get_cont_obj, [contref]);
+        return contobj;
+    }
+
+    /// TODO
+    fn typed_continuations_store_resume_args(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        values: &[ir::Value],
+        contobj: ir::Value,
+    ) {
+        let nargs = builder.ins().iconst(I32, values.len() as i64);
+
+        if values.len() > 0 {
+            let use_args_block = builder.create_block();
+            let use_payloads_block = builder.create_block();
+            let store_data_block = builder.create_block();
+            builder.append_block_param(store_data_block, self.pointer_type());
+
+            let (_vmctx, is_invoked) =
+                generate_builtin_call!(self, builder, cont_obj_has_state_invoked, [contobj]);
+
+            builder
+                .ins()
+                .brif(is_invoked, use_payloads_block, &[], use_args_block, &[]);
+
+            {
+                builder.switch_to_block(use_args_block);
+                builder.seal_block(use_args_block);
+                let (_vmctx, ptr) = generate_builtin_call!(
+                    self,
+                    builder,
+                    cont_obj_occupy_next_args_slots,
+                    [contobj, nargs]
+                );
+                builder.ins().jump(store_data_block, &[ptr]);
+            }
+
+            {
+                builder.switch_to_block(use_payloads_block);
+                builder.seal_block(use_payloads_block);
+                let (_vmctx, ptr) =
+                    generate_builtin_call!(self, builder, alllocate_payload_buffer, [nargs]);
+                builder.ins().jump(store_data_block, &[ptr]);
+            }
+
+            {
+                builder.switch_to_block(store_data_block);
+                builder.seal_block(store_data_block);
+
+                let ptr = builder.block_params(store_data_block)[0];
+
+                // Store the values.
+                let memflags = ir::MemFlags::trusted();
+                let mut offset = 0;
+                for value in values {
+                    builder.ins().store(memflags, *value, ptr, offset);
+                    offset += self.offsets.ptr.maximum_value_size() as i32;
+                }
+            }
+        }
+    }
+
     //TODO(frank-emrich) Consider removing `valtypes` argument, as values are inherently typed
     fn typed_continuations_store_payloads(
-        &self,
+        &mut self,
         builder: &mut FunctionBuilder,
         valtypes: &[WasmType],
         values: &[ir::Value],
-        base_addr: ir::Value,
     ) {
         //TODO(frank-emrich) what flags exactly do we need here?
         let memflags = ir::MemFlags::trusted();
 
-        if valtypes.len() == 0 {
-            // OK
-        } else if valtypes.len() <= MAXIMUM_CONTINUATION_PAYLOAD_COUNT as usize {
-            let mut offset =
-                i32::try_from(self.offsets.vmctx_typed_continuations_payloads()).unwrap();
+        assert_eq!(values.len(), valtypes.len());
+        if valtypes.len() > 0 {
+            let nargs = builder.ins().iconst(I32, values.len() as i64);
+
+            let (_vmctx, payload_addr) =
+                generate_builtin_call!(self, builder, alllocate_payload_buffer, [nargs]);
+
+            let mut offset = 0;
             for value in values {
-                builder.ins().store(memflags, *value, base_addr, offset);
+                builder.ins().store(memflags, *value, payload_addr, offset);
                 offset += self.offsets.ptr.maximum_value_size() as i32;
             }
-        } else {
-            panic!("Unsupported continuation arity!");
         }
     }
 
@@ -2389,6 +2495,43 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder
             .ins()
             .load(self.pointer_type(), memflags, base_addr, offset)
+    }
+
+    fn typed_continuations_new_cont_ref(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj_addr: ir::Value,
+    ) -> ir::Value {
+        let (_vmctx, contref) = generate_builtin_call!(self, builder, new_cont_ref, [contobj_addr]);
+        return contref;
+    }
+
+    fn typed_continuations_load_return_values(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        valtypes: &[WasmType],
+        contobj: ir::Value,
+    ) -> std::vec::Vec<ir::Value> {
+        let mut values = vec![];
+
+        if valtypes.len() > 0 {
+            let (_vmctx, result_buffer_addr) =
+                generate_builtin_call!(self, builder, cont_obj_get_results, [contobj]);
+
+            let mut offset = 0;
+            let memflags = ir::MemFlags::trusted();
+            for valtype in valtypes {
+                let val = builder.ins().load(
+                    super::value_type(self.isa, *valtype),
+                    memflags,
+                    result_buffer_addr,
+                    offset,
+                );
+                values.push(val);
+                offset += self.offsets.ptr.maximum_value_size() as i32;
+            }
+        }
+        return values;
     }
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {

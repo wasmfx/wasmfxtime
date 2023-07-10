@@ -40,10 +40,6 @@ fn cast_to_u32(sz: usize) -> u32 {
     u32::try_from(sz).expect("overflow in cast from usize to u32")
 }
 
-/// Maximum number of arguments and return values a continuation can have.
-/// Also maximum number of arguments and return values any tag can have.
-pub const MAXIMUM_CONTINUATION_PAYLOAD_COUNT: u32 = 6;
-
 /// Align an offset used in this module to a specific byte-width by rounding up
 #[inline]
 fn align(offset: u32, width: u32) -> u32 {
@@ -99,7 +95,7 @@ pub struct VMOffsets<P> {
     // NOTE(dhil): The following field is used as "global" to store
     // the arguments of continuations and payloads of suspensions.
     typed_continuations_store: u32,
-    typed_continuations_payloads: u32,
+    typed_continuations_payloads_ptr: u32,
 }
 
 /// Trait used for the `ptr` representation of the field of `VMOffsets`
@@ -367,7 +363,7 @@ impl<P: PtrSize> VMOffsets<P> {
         }
 
         calculate_sizes! {
-            typed_continuations_payloads: "typed continuations payloads",
+            typed_continuations_payloads_ptr: "typed continuations payloads",
             typed_continuations_store: "typed continuations store",
             defined_func_refs: "module functions",
             defined_globals: "defined globals",
@@ -422,7 +418,7 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
             defined_func_refs: 0,
             size: 0,
             typed_continuations_store: 0,
-            typed_continuations_payloads: 0,
+            typed_continuations_payloads_ptr: 0,
         };
 
         // Convenience functions for checked addition and multiplication.
@@ -487,9 +483,7 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
             ),
             size(typed_continuations_store)
                 = ret.ptr.size(),
-            align(16),
-            size(typed_continuations_payloads)
-                = cmul(MAXIMUM_CONTINUATION_PAYLOAD_COUNT, ret.ptr.maximum_value_size()),
+            size(typed_continuations_payloads_ptr) = ret.ptr.size(),
             align(16), // TODO(dhil): This could probably be done more
                        // efficiently by packing the pointer into the above 16 byte
                        // alignment
@@ -763,10 +757,10 @@ impl<P: PtrSize> VMOffsets<P> {
         self.typed_continuations_store
     }
 
-    /// The offset of the typed continuations payloads store.
+    /// The offset of the typed continuations payloads pointer.
     #[inline]
-    pub fn vmctx_typed_continuations_payloads(&self) -> u32 {
-        self.typed_continuations_payloads
+    pub fn vmctx_typed_continuations_payloads_ptr(&self) -> u32 {
+        self.typed_continuations_payloads_ptr
     }
 
     /// Return the size of the `VMContext` allocation.

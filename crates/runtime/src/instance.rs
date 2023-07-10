@@ -1194,8 +1194,8 @@ impl Instance {
     }
 
     /// TODO
-    pub unsafe fn get_typed_continuations_payloads_mut(&mut self) -> *mut u32 {
-        self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_payloads())
+    pub unsafe fn get_typed_continuations_payloads_ptr_mut(&mut self) -> *mut u32 {
+        self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_payloads_ptr())
     }
 }
 

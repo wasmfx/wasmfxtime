@@ -2415,8 +2415,15 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
 
         Operator::ContNew { type_index } => {
             let arg_types = environ.continuation_arguments(*type_index).to_vec();
+            let result_types = environ.continuation_returns(*type_index).to_vec();
             let r = state.pop1();
-            state.push1(environ.translate_cont_new(builder.cursor(), state, r, &arg_types)?);
+            state.push1(environ.translate_cont_new(
+                builder,
+                state,
+                r,
+                &arg_types,
+                &result_types,
+            )?);
         }
         Operator::Resume {
             type_index,
@@ -2432,12 +2439,19 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             //
             //  [ arg1 ... argN cont ]
             let arity = environ.continuation_arguments(*type_index).len();
-            let (cont, call_args) = state.peekn(arity + 1).split_last().unwrap();
+            let (original_contref, call_args) = state.peekn(arity + 1).split_last().unwrap();
+            let original_contobj =
+                environ.typed_continuations_cont_ref_get_cont_obj(builder, *original_contref);
             let call_arg_types = environ.continuation_arguments(*type_index).to_vec();
 
             // Now, we generate the call instruction.
-            let (base_addr, signal, tag) =
-                environ.translate_resume(builder, state, *cont, &call_arg_types, call_args)?;
+            let (base_addr, signal, tag) = environ.translate_resume(
+                builder,
+                state,
+                original_contobj,
+                &call_arg_types,
+                call_args,
+            )?;
             // Description of results:
             // * The `base_addr` is the base address of VM context.
             // * The `signal` is an encoded boolean indicating whether
@@ -2464,7 +2478,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             canonicalise_brif(builder, is_zero, return_block, &[], suspend_block, &[]);
 
             // Next, build the suspend block.
-            let cont = {
+            let contref = {
                 builder.switch_to_block(suspend_block);
                 builder.seal_block(suspend_block);
 
@@ -2472,11 +2486,22 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 // TODO(frank-emrich) Is it actually the case that the suspended continuation MUST
                 // be the one we resumed here? In that case we wouldn't actually have to go via memory
                 // but could just re-use the cont object on the (WASM) stack in the beginning
-                let cont = environ.typed_continuations_load_continuation_object(builder, base_addr);
+
+                // ANSWER(dhil): Yes, in general it will be a
+                // completely different object. If we had some static
+                // information to tell us that the previous
+                // continuation object wasn't ever invoked again, then
+                // we could reuse it. A different question is how to
+                // avoid allocation of the intermediary "continuation
+                // proxy objects", though, for that I reckon we need
+                // fat pointers.
+                let contobj =
+                    environ.typed_continuations_load_continuation_object(builder, base_addr);
+                let contref = environ.typed_continuations_new_cont_ref(builder, contobj);
 
                 // We need to terminate this block before being allowed to switch to another one
                 builder.ins().jump(switch_block, &[]);
-                cont
+                contref
             };
 
             // Strategy:
@@ -2497,30 +2522,33 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 switch.set_entry(tag as u128, case);
                 builder.switch_to_block(case);
 
-                // Load and push arguments
-                let param_types = environ.tag_params(tag);
-                let params =
-                    environ.typed_continuations_load_payloads(builder, param_types, base_addr);
+                // Load and push arguments.
+                let param_types = environ.tag_params(tag).to_vec();
+                let params = environ.typed_continuations_load_payloads(builder, &param_types);
 
                 state.pushn(&params);
-                // Push the continuation object
-                state.push1(cont);
+                // Push the continuation reference.
+                state.push1(contref);
                 let count = params.len() + 1;
                 let (br_destination, inputs) = translate_br_if_args(label, state);
 
-                // Now jump to the actual user-defined block handling this tag, as given by the resumetable
+                // Now jump to the actual user-defined block handling
+                // this tag, as given by the resumetable.
                 builder.ins().jump(br_destination, inputs);
                 state.popn(count);
                 case_blocks.push(case);
             }
 
-            // Note that at this point we haven't actually emitted any code for the switching logic itself,
-            // but only filled the Switch structure and created the blocks it jumps to.
+            // Note that at this point we haven't actually emitted any
+            // code for the switching logic itself, but only filled
+            // the Switch structure and created the blocks it jumps
+            // to.
 
             let forwarding_case =
                 crate::translation_utils::resumetable_forwarding_block(builder, environ)?;
 
-            // Switch block (where the actual switching logic is emitted to)
+            // Switch block (where the actual switching logic is
+            // emitted to).
             {
                 builder.switch_to_block(switch_block);
                 switch.emit(builder, tag, forwarding_case);
@@ -2530,41 +2558,42 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 // TODO: emit effect forwarding logic.
                 builder.ins().trap(ir::TrapCode::UnreachableCodeReached);
 
-                // We can only seal the blocks we generated for each tag now, after switch.emit ran
+                // We can only seal the blocks we generated for each
+                // tag now, after switch.emit ran.
                 for case_block in case_blocks {
                     builder.seal_block(case_block);
                 }
             }
 
-            // Now, finish the return block
+            // Now, finish the return block.
             {
                 builder.switch_to_block(return_block);
                 builder.seal_block(return_block);
 
-                // Load and push the results
-                let returns = environ.continuation_returns(*type_index);
-                let values = environ.typed_continuations_load_payloads(builder, returns, base_addr);
+                // Load and push the results.
+                let returns = environ.continuation_returns(*type_index).to_vec();
+                let values = environ.typed_continuations_load_return_values(
+                    builder,
+                    &returns,
+                    original_contobj,
+                );
                 state.pushn(&values);
             }
         }
         Operator::Suspend { tag_index } => {
-            let param_types = environ.tag_params(*tag_index);
+            let param_types = environ.tag_params(*tag_index).to_vec();
 
             let params = state.peekn(param_types.len());
             let param_count = params.len();
-            let pointer_type = environ.pointer_type();
-            let vmctx = builder
-                .func
-                .create_global_value(ir::GlobalValueData::VMContext);
-            let base_addr = builder.cursor().ins().global_value(pointer_type, vmctx);
-            environ.typed_continuations_store_payloads(builder, param_types, params, base_addr);
+
+            environ.typed_continuations_store_payloads(builder, &param_types, params);
             state.popn(param_count);
 
-            environ.translate_suspend(builder.cursor(), state, *tag_index);
+            environ.translate_suspend(builder, state, *tag_index);
 
-            let return_types = environ.tag_returns(*tag_index);
-            let return_values =
-                environ.typed_continuations_load_payloads(builder, return_types, base_addr);
+            let return_types = environ.tag_returns(*tag_index).to_vec();
+            let return_values = environ.typed_continuations_load_payloads(builder, &return_types);
+
             state.pushn(&return_values);
         }
         Operator::ContBind {

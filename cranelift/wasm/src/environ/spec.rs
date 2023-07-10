@@ -566,10 +566,11 @@ pub trait FuncEnvironment: TargetEnvironment {
     /// TODO(dhil): write documentation.
     fn translate_cont_new(
         &mut self,
-        pos: FuncCursor,
+        builder: &mut FunctionBuilder,
         state: &FuncTranslationState,
         func: ir::Value,
         arg_types: &[wasmtime_types::WasmType],
+        return_types: &[wasmtime_types::WasmType],
     ) -> WasmResult<ir::Value>;
 
     /// Translates a resume instruction and returns a triple (vmctx,
@@ -596,7 +597,12 @@ pub trait FuncEnvironment: TargetEnvironment {
     ) -> WasmResult<ir::Value>;
 
     /// TODO(dhil): write documentation.
-    fn translate_suspend(&mut self, pos: FuncCursor, state: &FuncTranslationState, tag_index: u32);
+    fn translate_suspend(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        state: &FuncTranslationState,
+        tag_index: u32,
+    );
 
     /// TODO
     fn continuation_arguments(&self, type_index: u32) -> &[wasmtime_types::WasmType];
@@ -605,20 +611,34 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn continuation_returns(&self, type_index: u32) -> &[wasmtime_types::WasmType];
 
     /// TODO
-    fn typed_continuations_load_payloads(
-        &self,
+    fn typed_continuations_load_return_values(
+        &mut self,
         builder: &mut FunctionBuilder,
         valtypes: &[wasmtime_types::WasmType],
-        base_addr: ir::Value,
+        contobj: ir::Value,
+    ) -> std::vec::Vec<ir::Value>;
+
+    /// TODO
+    fn typed_continuations_load_payloads(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        valtypes: &[wasmtime_types::WasmType],
     ) -> std::vec::Vec<ir::Value>;
 
     /// TODO
     fn typed_continuations_store_payloads(
-        &self,
+        &mut self,
         builder: &mut FunctionBuilder,
         valtypes: &[wasmtime_types::WasmType],
         values: &[ir::Value],
-        base_addr: ir::Value,
+    );
+
+    /// TODO
+    fn typed_continuations_store_resume_args(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        values: &[ir::Value],
+        contobj: ir::Value,
     );
 
     /// TODO
@@ -632,6 +652,20 @@ pub trait FuncEnvironment: TargetEnvironment {
         &self,
         builder: &mut FunctionBuilder,
         base_addr: ir::Value,
+    ) -> ir::Value;
+
+    /// TODO
+    fn typed_continuations_new_cont_ref(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj_addr: ir::Value,
+    ) -> ir::Value;
+
+    /// TODO
+    fn typed_continuations_cont_ref_get_cont_obj(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contref: ir::Value,
     ) -> ir::Value;
 
     /// Returns whether the CLIF `x86_blendv` instruction should be used for the

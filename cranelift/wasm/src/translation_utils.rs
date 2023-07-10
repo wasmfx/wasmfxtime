@@ -169,3 +169,16 @@ pub fn return_block<PE: TargetEnvironment + ?Sized>(
 
     Ok(block)
 }
+
+/// Compute the maximum number of arguments that a suspension may
+/// supply.
+pub fn resumetable_max_num_tag_payloads<PE: crate::FuncEnvironment + ?Sized>(
+    tags: &[u32],
+    environ: &PE,
+) -> WasmResult<usize> {
+    Ok(tags
+        .iter()
+        .map(|tag| environ.tag_params(*tag).len())
+        .max()
+        .unwrap())
+}

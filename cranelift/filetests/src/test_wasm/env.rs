@@ -653,12 +653,14 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     /// TODO(dhil): write documentation.
     fn translate_cont_new(
         &mut self,
-        pos: cranelift_codegen::cursor::FuncCursor,
+        builder: &mut cranelift_frontend::FunctionBuilder,
         state: &cranelift_wasm::FuncTranslationState,
         func: ir::Value,
         arg_types: &[wasmtime_types::WasmType],
+        return_types: &[wasmtime_types::WasmType],
     ) -> cranelift_wasm::WasmResult<ir::Value> {
-        self.inner.translate_cont_new(pos, state, func, arg_types)
+        self.inner
+            .translate_cont_new(builder, state, func, arg_types, return_types)
     }
 
     /// Translates a resume instruction and returns a triple (vmctx,
@@ -693,11 +695,11 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     /// TODO(dhil): write documentation.
     fn translate_suspend(
         &mut self,
-        pos: cranelift_codegen::cursor::FuncCursor,
+        builder: &mut cranelift_frontend::FunctionBuilder,
         state: &cranelift_wasm::FuncTranslationState,
         tag_index: u32,
     ) {
-        self.inner.translate_suspend(pos, state, tag_index)
+        self.inner.translate_suspend(builder, state, tag_index)
     }
 
     /// TODO
@@ -712,25 +714,23 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
 
     /// TODO
     fn typed_continuations_load_payloads(
-        &self,
+        &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
         valtypes: &[wasmtime_types::WasmType],
-        base_addr: ir::Value,
     ) -> std::vec::Vec<ir::Value> {
         self.inner
-            .typed_continuations_load_payloads(builder, valtypes, base_addr)
+            .typed_continuations_load_payloads(builder, valtypes)
     }
 
     /// TODO
     fn typed_continuations_store_payloads(
-        &self,
+        &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
         valtypes: &[wasmtime_types::WasmType],
         values: &[ir::Value],
-        base_addr: ir::Value,
     ) {
         self.inner
-            .typed_continuations_store_payloads(builder, valtypes, values, base_addr)
+            .typed_continuations_store_payloads(builder, valtypes, values)
     }
 
     /// TODO
@@ -751,5 +751,45 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     ) -> ir::Value {
         self.inner
             .typed_continuations_load_continuation_object(builder, base_addr)
+    }
+
+    fn typed_continuations_load_return_values(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        valtypes: &[wasmtime_types::WasmType],
+        contobj: ir::Value,
+    ) -> std::vec::Vec<ir::Value> {
+        self.inner
+            .typed_continuations_load_return_values(builder, valtypes, contobj)
+    }
+
+    fn typed_continuations_store_resume_args(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        values: &[ir::Value],
+        contobj: ir::Value,
+    ) {
+        self.inner
+            .typed_continuations_store_resume_args(builder, values, contobj)
+    }
+
+    /// TODO
+    fn typed_continuations_new_cont_ref(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        contobj_addr: ir::Value,
+    ) -> ir::Value {
+        self.inner
+            .typed_continuations_new_cont_ref(builder, contobj_addr)
+    }
+
+    /// TODO
+    fn typed_continuations_cont_ref_get_cont_obj(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        contref: ir::Value,
+    ) -> ir::Value {
+        self.inner
+            .typed_continuations_cont_ref_get_cont_obj(builder, contref)
     }
 }
