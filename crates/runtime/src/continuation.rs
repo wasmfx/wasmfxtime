@@ -11,20 +11,35 @@ use wasmtime_fibre::{Fiber, FiberStack, Suspend};
 type ContinuationFiber = Fiber<'static, (), u32, ()>;
 type Yield = Suspend<(), u32, ()>;
 
-struct Args {
+struct Payloads {
     length: usize,
     capacity: usize,
     /// This is null if and only if capacity (and thus also `length`) are 0.
     data: *mut u128,
 }
 
-impl Args {
-    fn empty() -> Args {
-        return Args {
-            length: 0,
-            capacity: 0,
-            data: ptr::null_mut(),
+impl Payloads {
+    fn new(capacity: usize) -> Payloads {
+        let data = if capacity == 0 {
+            ptr::null_mut()
+        } else {
+            let mut args = Vec::with_capacity(capacity);
+            let args_ptr = args.as_mut_ptr();
+            args.leak();
+            args_ptr
         };
+        return Payloads {
+            length: 0,
+            capacity,
+            data,
+        };
+    }
+
+    fn occupy_next(&mut self, count: usize) -> *mut u128 {
+        let original_length = self.length;
+        assert!(self.length + count <= self.capacity);
+        self.length += count;
+        return unsafe { self.data.offset(original_length as isize) };
     }
 }
 
@@ -54,7 +69,12 @@ pub struct ContinuationObject {
     /// 1. The arguments to the function passed to cont.new
     /// 2. The return values of that function
     /// Note that this is *not* used for tag payloads.
-    args: Args,
+    args: Payloads,
+
+    // Once a continuation is suspended, this buffer is used to hold payloads
+    // provided by cont.bind and resume and received at the suspend site.
+    // In particular, this may only be Some when `state` is `Invoked`.
+    tag_return_values: Option<Box<Payloads>>,
 
     state: State,
 }
@@ -102,10 +122,47 @@ pub fn cont_obj_occupy_next_args_slots(
     arg_count: usize,
 ) -> *mut u128 {
     assert!(unsafe { (*obj).state == State::Allocated });
-    let args_len = unsafe { (*obj).args.length };
-    unsafe { (*obj).args.length += arg_count };
-    assert!(unsafe { (*obj).args.length <= (*obj).args.capacity });
-    unsafe { (*obj).args.data.offset(args_len as isize) }
+    let args = &mut unsafe { obj.as_mut() }.unwrap().args;
+    return args.occupy_next(arg_count);
+}
+
+/// TODO
+#[inline(always)]
+pub fn cont_obj_occupy_next_tag_returns_slots(
+    obj: *mut ContinuationObject,
+    arg_count: usize,
+    remaining_arg_count: usize,
+) -> *mut u128 {
+    let obj = unsafe { obj.as_mut().unwrap() };
+    assert!(obj.state == State::Invoked);
+    let payloads = obj
+        .tag_return_values
+        .get_or_insert_with(|| Box::new(Payloads::new(remaining_arg_count)));
+    return payloads.occupy_next(arg_count);
+}
+
+/// TODO
+pub fn cont_obj_get_tag_return_values_buffer(
+    obj: *mut ContinuationObject,
+    expected_value_count: usize,
+) -> *mut u128 {
+    let obj = unsafe { obj.as_mut().unwrap() };
+    assert!(obj.state == State::Invoked);
+
+    let payloads = &mut obj.tag_return_values.as_ref().unwrap();
+    assert_eq!(payloads.length, expected_value_count);
+    assert_eq!(payloads.length, payloads.capacity);
+    assert!(!payloads.data.is_null());
+    return payloads.data;
+}
+
+/// TODO
+pub fn cont_obj_deallocate_tag_return_values_buffer(obj: *mut ContinuationObject) {
+    let obj = unsafe { obj.as_mut().unwrap() };
+    assert!(obj.state == State::Invoked);
+    let existing = obj.tag_return_values.take().unwrap();
+    mem::drop((*existing).data);
+    obj.tag_return_values = None;
 }
 
 /// TODO
@@ -133,8 +190,12 @@ pub fn drop_cont_obj(contobj: *mut ContinuationObject) {
     mem::drop(unsafe { (*contobj).fiber });
     unsafe {
         mem::drop((*contobj).args.data);
+    };
+    let tag_return_vals = &mut unsafe { contobj.as_mut().unwrap() }.tag_return_values;
+    match tag_return_vals {
+        None => (),
+        Some(b) => mem::drop((*b).data),
     }
-    mem::drop(contobj)
 }
 
 /// TODO
@@ -212,18 +273,7 @@ pub fn cont_new(
     };
     let capacity = cmp::max(param_count, result_count);
 
-    let payload = if capacity == 0 {
-        Args::empty()
-    } else {
-        let mut args = Vec::with_capacity(capacity);
-        let args_ptr = args.as_mut_ptr();
-        args.leak();
-        Args {
-            length: 0,
-            capacity,
-            data: args_ptr,
-        }
-    };
+    let payload = Payloads::new(capacity);
 
     let args_ptr = payload.data;
     let fiber = Box::new(
@@ -239,6 +289,7 @@ pub fn cont_new(
     let contobj = Box::new(ContinuationObject {
         fiber: Box::into_raw(fiber),
         args: payload,
+        tag_return_values: None,
         state: State::Allocated,
     });
     let contref = new_cont_ref(Box::into_raw(contobj));
@@ -264,6 +315,13 @@ pub fn resume(
             .get_mut()) = 0
     };
     unsafe { (*contobj).state = State::Invoked };
+    // This is to make sure that after we resume from a suspend, we can load the continuation object
+    // to access the tag return values.
+    unsafe {
+        let cont_store_ptr =
+            instance.get_typed_continuations_store_mut() as *mut *mut ContinuationObject;
+        cont_store_ptr.write(contobj)
+    };
     match unsafe { fiber.as_mut().unwrap().resume(()) } {
         Ok(()) => {
             // The result of the continuation was written to the first

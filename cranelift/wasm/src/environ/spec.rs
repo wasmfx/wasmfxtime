@@ -602,7 +602,7 @@ pub trait FuncEnvironment: TargetEnvironment {
         builder: &mut FunctionBuilder,
         state: &FuncTranslationState,
         tag_index: u32,
-    );
+    ) -> ir::Value;
 
     /// TODO
     fn continuation_arguments(&self, type_index: u32) -> &[wasmtime_types::WasmType];
@@ -626,6 +626,14 @@ pub trait FuncEnvironment: TargetEnvironment {
     ) -> std::vec::Vec<ir::Value>;
 
     /// TODO
+    fn typed_continuations_load_tag_return_values(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+        valtypes: &[wasmtime_types::WasmType],
+    ) -> std::vec::Vec<ir::Value>;
+
+    /// TODO
     fn typed_continuations_store_payloads(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -638,6 +646,7 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
         values: &[ir::Value],
+        remaining_arg_count: ir::Value,
         contobj: ir::Value,
     );
 

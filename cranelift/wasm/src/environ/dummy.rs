@@ -710,7 +710,7 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         _builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
         _tag_index: u32,
-    ) {
+    ) -> ir::Value {
         todo!()
     }
 
@@ -738,10 +738,20 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
+    fn typed_continuations_load_tag_return_values(
+        &mut self,
+        _builder: &mut FunctionBuilder,
+        _contobj: ir::Value,
+        _valtypes: &[WasmType],
+    ) -> Vec<ir::Value> {
+        todo!()
+    }
+
     fn typed_continuations_store_resume_args(
         &mut self,
         _builder: &mut FunctionBuilder,
         _values: &[ir::Value],
+        _remaining_arg_count: ir::Value,
         _contref: ir::Value,
     ) {
         todo!()

@@ -2292,7 +2292,8 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         // Second: Call the `resume` builtin
 
         if call_args.len() > 0 {
-            self.typed_continuations_store_resume_args(builder, call_args, contobj);
+            let count = builder.ins().iconst(I32, call_args.len() as i64);
+            self.typed_continuations_store_resume_args(builder, call_args, count, contobj);
         }
 
         let (vmctx, result) = generate_builtin_call!(self, builder, resume, [contobj]);
@@ -2328,10 +2329,11 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
         tag_index: u32,
-    ) {
+    ) -> ir::Value {
         let tag_index = builder.ins().iconst(I32, tag_index as i64);
 
-        generate_builtin_call_no_return_val!(self, builder, suspend, [tag_index]);
+        // Returns the vmctx
+        return generate_builtin_call_no_return_val!(self, builder, suspend, [tag_index]);
     }
 
     fn continuation_arguments(&self, index: u32) -> &[WasmType] {
@@ -2390,6 +2392,47 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         values
     }
 
+    fn typed_continuations_load_tag_return_values(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+        valtypes: &[WasmType],
+    ) -> Vec<ir::Value> {
+        let memflags = ir::MemFlags::trusted();
+        let mut values = vec![];
+
+        if valtypes.len() > 0 {
+            let nargs = builder.ins().iconst(I32, valtypes.len() as i64);
+
+            let (_vmctx, payload_ptr) = generate_builtin_call!(
+                self,
+                builder,
+                cont_obj_get_tag_return_values_buffer,
+                [contobj, nargs]
+            );
+
+            let mut offset = 0;
+            for valtype in valtypes {
+                let val = builder.ins().load(
+                    super::value_type(self.isa, *valtype),
+                    memflags,
+                    payload_ptr,
+                    offset,
+                );
+                values.push(val);
+                offset += self.offsets.ptr.maximum_value_size() as i32;
+            }
+
+            generate_builtin_call_no_return_val!(
+                self,
+                builder,
+                cont_obj_deallocate_tag_return_values_buffer,
+                [contobj]
+            );
+        }
+        values
+    }
+
     /// TODO
     fn typed_continuations_cont_ref_get_cont_obj(
         &mut self,
@@ -2406,6 +2449,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         values: &[ir::Value],
+        remaining_arg_count: ir::Value,
         contobj: ir::Value,
     ) {
         let nargs = builder.ins().iconst(I32, values.len() as i64);
@@ -2438,8 +2482,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             {
                 builder.switch_to_block(use_payloads_block);
                 builder.seal_block(use_payloads_block);
-                let (_vmctx, ptr) =
-                    generate_builtin_call!(self, builder, alllocate_payload_buffer, [nargs]);
+                let (_vmctx, ptr) = generate_builtin_call!(
+                    self,
+                    builder,
+                    cont_obj_occupy_next_tag_returns_slots,
+                    [contobj, nargs, remaining_arg_count]
+                );
                 builder.ins().jump(store_data_block, &[ptr]);
             }
 

@@ -698,8 +698,8 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
         builder: &mut cranelift_frontend::FunctionBuilder,
         state: &cranelift_wasm::FuncTranslationState,
         tag_index: u32,
-    ) {
-        self.inner.translate_suspend(builder, state, tag_index)
+    ) -> ir::Value {
+        return self.inner.translate_suspend(builder, state, tag_index);
     }
 
     /// TODO
@@ -767,10 +767,15 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
         values: &[ir::Value],
+        remaining_arg_count: ir::Value,
         contobj: ir::Value,
     ) {
-        self.inner
-            .typed_continuations_store_resume_args(builder, values, contobj)
+        self.inner.typed_continuations_store_resume_args(
+            builder,
+            values,
+            remaining_arg_count,
+            contobj,
+        )
     }
 
     /// TODO
@@ -791,5 +796,16 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     ) -> ir::Value {
         self.inner
             .typed_continuations_cont_ref_get_cont_obj(builder, contref)
+    }
+
+    fn typed_continuations_load_tag_return_values(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        contobj: ir::Value,
+        valtypes: &[wasmtime_types::WasmType],
+    ) -> Vec<ir::Value> {
+        return self
+            .inner
+            .typed_continuations_load_tag_return_values(builder, contobj, valtypes);
     }
 }

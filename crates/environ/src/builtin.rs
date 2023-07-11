@@ -52,6 +52,7 @@ macro_rules! foreach_builtin_function {
             /// Invoked when we reach a new epoch.
             new_epoch(vmctx: vmctx) -> i64;
             /// Creates a new continuation from a funcref.
+
             cont_new(vmctx: vmctx, r: pointer, param_count: i64, result_count: i64) -> pointer;
             /// Resumes a continuation.
             resume(vmctx: vmctx, contobj: pointer) -> i32;
@@ -74,20 +75,37 @@ macro_rules! foreach_builtin_function {
             //cont_obj_drop(vmctx: vmctx, contobj: pointer);
             /// Crates a new continuation reference.
             new_cont_ref(vmctx: vmctx, contobj: pointer) -> pointer;
+
+
             /// Allocates a buffer large enough for storing `element_count` tag
             /// payloads and stores it in the `VMContext` in such a way that
             /// subsequent calls to `get_payload_buffer` will return the same
             /// buffer.
             /// Returns a pointer to that buffer.
+            /// Such a payload buffer is only used to store payloads provided
+            /// at a suspend site and read in a corresponding handler.
             alllocate_payload_buffer(vmctx: vmctx, element_count: i32) -> pointer;
             /// Counterpart to `alllocate_payload_buffer`, deallocating the
             /// buffer. For debugging purposes, `expected_element_capacity`
             /// should be the same value passed when allocating.
             dealllocate_payload_buffer(vmctx: vmctx, expected_element_capacity: i32);
-            /// Returns pointer to the payload buffer. For debugging purposes,
+            /// Returns pointer to the payload buffer, whose function was described earlier.
             /// `expected_element_capacity` should be the same value passed when
             /// allocating.
             get_payload_buffer(vmctx: vmctx, expected_element_capacity: i32) -> pointer;
+
+
+            /// Returns a pointer to the next empty slot within the tag return value buffer
+            /// of the given continuation object.
+            /// Such a buffer is used to store payloads provided by cont.bind and resume
+            /// and received at a suspend site.
+            /// The next `arg_count` slots within the buffer are marked as used.
+            /// If no such buffer currently exists, a new one is allocated.
+            cont_obj_occupy_next_tag_returns_slots(vmctx: vmctx, contobj: pointer, arg_count : i32, remaining_arg_count : i32) -> pointer;
+            /// Returns a pointer to the beginning of the tag return value buffer
+            cont_obj_get_tag_return_values_buffer(vmctx: vmctx, contobj: pointer, expected_count : i32) -> pointer;
+            /// Deallocated the tag return value buffer within the continuation object.
+            cont_obj_deallocate_tag_return_values_buffer(vmctx: vmctx, contobj: pointer);
         }
     };
 }

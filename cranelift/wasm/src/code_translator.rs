@@ -2589,18 +2589,37 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             environ.typed_continuations_store_payloads(builder, &param_types, params);
             state.popn(param_count);
 
-            environ.translate_suspend(builder, state, *tag_index);
+            let vmctx = environ.translate_suspend(builder, state, *tag_index);
+
+            let contobj = environ.typed_continuations_load_continuation_object(builder, vmctx);
 
             let return_types = environ.tag_returns(*tag_index).to_vec();
-            let return_values = environ.typed_continuations_load_payloads(builder, &return_types);
+            let return_values =
+                environ.typed_continuations_load_tag_return_values(builder, contobj, &return_types);
 
             state.pushn(&return_values);
         }
         Operator::ContBind {
-            src_index: _,
-            dst_index: _,
+            src_index,
+            dst_index,
+        } => {
+            let src_arity = environ.continuation_arguments(*src_index).len();
+            let dst_arity = environ.continuation_arguments(*dst_index).len();
+            let arg_count = src_arity - dst_arity;
+
+            let (original_contref, args) = state.peekn(arg_count + 1).split_last().unwrap();
+            let contobj =
+                environ.typed_continuations_cont_ref_get_cont_obj(builder, *original_contref);
+
+            let src_arity_value = builder.ins().iconst(I32, src_arity as i64);
+            environ.typed_continuations_store_resume_args(builder, args, src_arity_value, contobj);
+
+            let new_contref = environ.typed_continuations_new_cont_ref(builder, contobj);
+
+            state.popn(arg_count + 1);
+            state.push1(new_contref);
         }
-        | Operator::ResumeThrow {
+        Operator::ResumeThrow {
             type_index: _,
             tag_index: _,
             resumetable: _,
