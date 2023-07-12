@@ -84,11 +84,11 @@ macro_rules! foreach_builtin_function {
             /// Returns a pointer to that buffer.
             /// Such a payload buffer is only used to store payloads provided
             /// at a suspend site and read in a corresponding handler.
-            alllocate_payload_buffer(vmctx: vmctx, element_count: i32) -> pointer;
+            allocate_payload_buffer(vmctx: vmctx, element_count: i32) -> pointer;
             /// Counterpart to `alllocate_payload_buffer`, deallocating the
             /// buffer. For debugging purposes, `expected_element_capacity`
             /// should be the same value passed when allocating.
-            dealllocate_payload_buffer(vmctx: vmctx, expected_element_capacity: i32);
+            deallocate_payload_buffer(vmctx: vmctx, expected_element_capacity: i32);
             /// Returns pointer to the payload buffer, whose function was described earlier.
             /// `expected_element_capacity` should be the same value passed when
             /// allocating.
@@ -106,6 +106,8 @@ macro_rules! foreach_builtin_function {
             cont_obj_get_tag_return_values_buffer(vmctx: vmctx, contobj: pointer, expected_count : i32) -> pointer;
             /// Deallocated the tag return value buffer within the continuation object.
             cont_obj_deallocate_tag_return_values_buffer(vmctx: vmctx, contobj: pointer);
+            /// TODO
+            drop_cont_obj(vmctx: vmctx, contobj: pointer);
         }
     };
 }

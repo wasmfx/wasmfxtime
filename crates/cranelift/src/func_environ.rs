@@ -2382,12 +2382,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 offset += self.offsets.ptr.maximum_value_size() as i32;
             }
 
-            generate_builtin_call_no_return_val!(
-                self,
-                builder,
-                dealllocate_payload_buffer,
-                [nargs]
-            );
+            generate_builtin_call_no_return_val!(self, builder, deallocate_payload_buffer, [nargs]);
         }
         values
     }
@@ -2523,7 +2518,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             let nargs = builder.ins().iconst(I32, values.len() as i64);
 
             let (_vmctx, payload_addr) =
-                generate_builtin_call!(self, builder, alllocate_payload_buffer, [nargs]);
+                generate_builtin_call!(self, builder, allocate_payload_buffer, [nargs]);
 
             let mut offset = 0;
             for value in values {
@@ -2552,6 +2547,15 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     ) -> ir::Value {
         let (_vmctx, contref) = generate_builtin_call!(self, builder, new_cont_ref, [contobj_addr]);
         return contref;
+    }
+
+    /// TODO
+    fn typed_continuations_drop_cont_obj(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+    ) {
+        generate_builtin_call_no_return_val!(self, builder, drop_cont_obj, [contobj]);
     }
 
     fn typed_continuations_load_return_values(

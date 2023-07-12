@@ -651,6 +651,13 @@ pub trait FuncEnvironment: TargetEnvironment {
     );
 
     /// TODO
+    fn typed_continuations_drop_cont_obj(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+    );
+
+    /// TODO
     fn tag_params(&self, tag_index: u32) -> &[wasmtime_types::WasmType];
 
     /// TODO

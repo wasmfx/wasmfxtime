@@ -718,14 +718,18 @@ fn cont_obj_deallocate_tag_return_values_buffer(_instance: &mut Instance, contob
     );
 }
 
-fn alllocate_payload_buffer(instance: &mut Instance, element_count: u32) -> *mut u8 {
-    crate::continuation::alllocate_payload_buffer(instance, element_count as usize) as *mut u8
+fn allocate_payload_buffer(instance: &mut Instance, element_count: u32) -> *mut u8 {
+    crate::continuation::allocate_payload_buffer(instance, element_count as usize) as *mut u8
 }
 
-fn dealllocate_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) {
-    crate::continuation::dealllocate_payload_buffer(instance, expected_element_capacity as usize);
+fn deallocate_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) {
+    crate::continuation::deallocate_payload_buffer(instance, expected_element_capacity as usize);
 }
 
 fn get_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) -> *mut u8 {
     crate::continuation::get_payload_buffer(instance, expected_element_capacity as usize) as *mut u8
+}
+
+fn drop_cont_obj(_instance: &mut Instance, contobj: *mut u8) {
+    crate::continuation::drop_cont_obj(contobj as *mut crate::continuation::ContinuationObject)
 }

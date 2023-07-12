@@ -2577,6 +2577,12 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                     &returns,
                     original_contobj,
                 );
+
+                // The continuation has returned and all `ContinuationReferences`
+                // to it should have been be invalidated. We may safely deallocate
+                // it.
+                environ.typed_continuations_drop_cont_obj(builder, original_contobj);
+
                 state.pushn(&values);
             }
         }

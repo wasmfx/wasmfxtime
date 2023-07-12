@@ -798,6 +798,16 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
             .typed_continuations_cont_ref_get_cont_obj(builder, contref)
     }
 
+    /// TODO
+    fn typed_continuations_drop_cont_obj(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        contobj: ir::Value,
+    ) {
+        self.inner
+            .typed_continuations_drop_cont_obj(builder, contobj)
+    }
+
     fn typed_continuations_load_tag_return_values(
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,

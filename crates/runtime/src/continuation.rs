@@ -160,8 +160,9 @@ pub fn cont_obj_get_tag_return_values_buffer(
 pub fn cont_obj_deallocate_tag_return_values_buffer(obj: *mut ContinuationObject) {
     let obj = unsafe { obj.as_mut().unwrap() };
     assert!(obj.state == State::Invoked);
-    let existing = obj.tag_return_values.take().unwrap();
-    mem::drop((*existing).data);
+    let payloads: Box<Payloads> = obj.tag_return_values.take().unwrap();
+    let _: Vec<u128> =
+        unsafe { Vec::from_raw_parts((*payloads).data, (*payloads).length, (*payloads).capacity) };
     obj.tag_return_values = None;
 }
 
@@ -187,19 +188,24 @@ pub fn new_cont_ref(contobj: *mut ContinuationObject) -> *mut ContinuationRefere
 /// TODO
 #[inline(always)]
 pub fn drop_cont_obj(contobj: *mut ContinuationObject) {
-    mem::drop(unsafe { (*contobj).fiber });
+    let _: Box<ContinuationFiber> = unsafe { Box::from_raw((*contobj).fiber) };
+    //mem::drop(unsafe { (*contobj).fiber });
     unsafe {
-        mem::drop((*contobj).args.data);
+        let _: Vec<u128> = Vec::from_raw_parts(
+            (*contobj).args.data,
+            (*contobj).args.length,
+            (*contobj).args.capacity,
+        );
     };
     let tag_return_vals = &mut unsafe { contobj.as_mut().unwrap() }.tag_return_values;
     match tag_return_vals {
         None => (),
-        Some(b) => mem::drop((*b).data),
+        Some(_) => cont_obj_deallocate_tag_return_values_buffer(contobj),
     }
 }
 
 /// TODO
-pub fn alllocate_payload_buffer(instance: &mut Instance, element_count: usize) -> *mut u128 {
+pub fn allocate_payload_buffer(instance: &mut Instance, element_count: usize) -> *mut u128 {
     // In the current design, we allocate a `Vec<u128>` and store a pointer to
     // it in the `VMContext` payloads pointer slot. We then return the pointer
     // to the `Vec`'s data, not to the `Vec` itself.
@@ -226,7 +232,7 @@ pub fn alllocate_payload_buffer(instance: &mut Instance, element_count: usize) -
 }
 
 /// TODO
-pub fn dealllocate_payload_buffer(instance: &mut Instance, element_count: usize) {
+pub fn deallocate_payload_buffer(instance: &mut Instance, element_count: usize) {
     let payload_ptr =
         unsafe { instance.get_typed_continuations_payloads_ptr_mut() as *mut *mut Vec<u128> };
 

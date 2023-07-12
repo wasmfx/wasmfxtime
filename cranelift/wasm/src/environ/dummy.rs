@@ -798,6 +798,15 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
     ) -> ir::Value {
         unimplemented!()
     }
+
+    /// TODO
+    fn typed_continuations_drop_cont_obj(
+        &mut self,
+        _builder: &mut FunctionBuilder,
+        _contobj: ir::Value,
+    ) {
+        unimplemented!()
+    }
 }
 
 impl TypeConvert for DummyEnvironment {
