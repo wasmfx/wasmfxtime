@@ -32,6 +32,7 @@
 #![allow(unused_macros)]
 
 use crate::RunResult;
+use std::alloc::{alloc, dealloc, Layout};
 use std::cell::Cell;
 use std::io;
 use std::ops::Range;
@@ -83,6 +84,14 @@ impl FiberStack {
         }
     }
 
+    pub fn malloc(size: usize) -> io::Result<Self> {
+        unsafe {
+            let layout = Layout::array::<u8>(size).unwrap();
+            let base = alloc(layout);
+            FiberStack::from_raw_parts(base, size)
+        }
+    }
+
     pub unsafe fn from_raw_parts(base: *mut u8, len: usize) -> io::Result<Self> {
         Ok(Self {
             top: base.add(len),
@@ -115,6 +124,9 @@ impl Drop for FiberStack {
             if self.mmap {
                 let ret = rustix::mm::munmap(self.top.sub(self.len) as _, self.len);
                 debug_assert!(ret.is_ok());
+            } else {
+                let layout = Layout::array::<u8>(self.len).unwrap();
+                dealloc(self.top.sub(self.len), layout);
             }
         }
     }

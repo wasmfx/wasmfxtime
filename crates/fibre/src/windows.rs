@@ -15,6 +15,10 @@ impl FiberStack {
         Ok(Self(size))
     }
 
+    pub fn malloc(_size: usize) -> io::Result<Self> {
+        unimplemented!()
+    }
+
     pub unsafe fn from_raw_parts(_base: *mut u8, _len: usize) -> io::Result<Self> {
         Err(io::Error::from_raw_os_error(ERROR_NOT_SUPPORTED as i32))
     }
