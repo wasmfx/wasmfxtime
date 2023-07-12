@@ -268,6 +268,15 @@ component-model = [
 ]
 winch = ["wasmtime/winch"]
 
+# Until we implement proper reference counting for `ContinuationReference` objects,
+# we may use this flag to bypass the creation of ContinuationReference objects,
+# directly using the corresponding ContinuationObject instead.
+# This is to allow running benchmarks that may create a lot of such objects and
+# may otherwise run out of memory.
+# Note that enabling this is highly unsafe, as it makes it impossible to detect
+# at runtime when an already taken continuation is used again.
+use_contobj_as_contref = []
+
 [[test]]
 name = "host_segfault"
 harness = false

@@ -2265,10 +2265,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let nargs = builder.ins().iconst(I64, arg_types.len() as i64);
         let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
 
-        let (_vmctx, contref) =
+        let (_vmctx, contobj) =
             generate_builtin_call!(self, builder, cont_new, [func, nargs, nreturns]);
 
-        Ok(contref)
+        Ok(contobj)
     }
 
     // TODO(dhil): Currently, this function invokes
@@ -2434,9 +2434,14 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         contref: ir::Value,
     ) -> ir::Value {
-        let (_vmctx, contobj) =
-            generate_builtin_call!(self, builder, cont_ref_get_cont_obj, [contref]);
-        return contobj;
+        if cfg!(feature = "use_contobj_as_contref") {
+            // The "contref" is a contobj already
+            return contref;
+        } else {
+            let (_vmctx, contobj) =
+                generate_builtin_call!(self, builder, cont_ref_get_cont_obj, [contref]);
+            return contobj;
+        }
     }
 
     /// TODO
@@ -2545,8 +2550,13 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         contobj_addr: ir::Value,
     ) -> ir::Value {
-        let (_vmctx, contref) = generate_builtin_call!(self, builder, new_cont_ref, [contobj_addr]);
-        return contref;
+        if cfg!(feature = "use_contobj_as_contref") {
+            return contobj_addr;
+        } else {
+            let (_vmctx, contref) =
+                generate_builtin_call!(self, builder, new_cont_ref, [contobj_addr]);
+            return contref;
+        }
     }
 
     /// TODO

@@ -92,6 +92,10 @@ pub fn cont_ref_get_cont_obj(
     contref: *mut ContinuationReference,
 ) -> Result<*mut ContinuationObject, TrapReason> {
     //FIXME rename to indicate that this invalidates the cont ref
+
+    // If this is enabled, we should never call this function.
+    assert!(!cfg!(feature = "use_contobj_as_contref"));
+
     let contopt = unsafe { contref.as_mut().unwrap().0 };
     match contopt {
         None => Err(TrapReason::user_with_backtrace(anyhow::Error::msg(
@@ -181,6 +185,9 @@ pub fn cont_obj_has_state_invoked(obj: *mut ContinuationObject) -> bool {
 /// TODO
 #[inline(always)]
 pub fn new_cont_ref(contobj: *mut ContinuationObject) -> *mut ContinuationReference {
+    // If this is enabled, we should never call this function.
+    assert!(!cfg!(feature = "use_contobj_as_contref"));
+
     let contref = Box::new(ContinuationReference(Some(contobj)));
     Box::into_raw(contref)
 }
@@ -267,7 +274,7 @@ pub fn cont_new(
     func: *mut u8,
     param_count: usize,
     result_count: usize,
-) -> *mut ContinuationReference {
+) -> *mut ContinuationObject {
     let func = func as *mut VMFuncRef;
     let callee_ctx = unsafe { (*func).vmctx };
     let caller_ctx = VMOpaqueContext::from_vmcontext(instance.vmctx());
@@ -298,9 +305,9 @@ pub fn cont_new(
         tag_return_values: None,
         state: State::Allocated,
     });
-    let contref = new_cont_ref(Box::into_raw(contobj));
-    contref // TODO(dhil): we need memory clean up of
-            // continuation reference objects.
+    // TODO(dhil): we need memory clean up of
+    // continuation reference objects.
+    return Box::into_raw(contobj);
 }
 
 /// TODO
