@@ -201,9 +201,9 @@ wit-bindgen = { version = "0.7.0", default-features = false }
 
 # wasm-tools family:
 wasmparser = { git = "https://github.com/effect-handlers/wasm-tools", branch = "typed-continuations" }
-wat = "1.0.66"
+wat = { git = "https://github.com/effect-handlers/wasm-tools", branch = "typed-continuations" }
 wast = { git = "https://github.com/effect-handlers/wasm-tools", branch = "typed-continuations" }
-wasmprinter = "0.2.59"
+wasmprinter = { git = "https://github.com/effect-handlers/wasm-tools", branch = "typed-continuations" }
 wasm-encoder = { git = "https://github.com/effect-handlers/wasm-tools", branch = "typed-continuations" }
 wasm-smith = "0.12.10"
 wasm-mutate = "0.2.27"

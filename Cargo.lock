@@ -686,7 +686,7 @@ dependencies = [
  "toml",
  "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmtime-types",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -846,7 +846,7 @@ dependencies = [
  "thiserror",
  "toml",
  "walkdir",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -864,7 +864,7 @@ dependencies = [
  "target-lexicon",
  "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmtime-types",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -3421,7 +3421,7 @@ version = "11.0.0"
 dependencies = [
  "anyhow",
  "wasmparser 0.92.0",
- "wat",
+ "wat 1.0.66 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3713,7 +3713,7 @@ version = "0.0.0"
 dependencies = [
  "ocaml-interop",
  "once_cell",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -3785,11 +3785,10 @@ dependencies = [
 [[package]]
 name = "wasmprinter"
 version = "0.2.59"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc960b30b84abca377768f3c62cff3a1c74db8c0f6759ed581827da0bd3a3fed"
+source = "git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations#403d7946f07feab87ed4b4b58a8b2130487f488f"
 dependencies = [
  "anyhow",
- "wasmparser 0.107.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -3828,7 +3827,7 @@ dependencies = [
  "wasmtime-runtime",
  "wasmtime-wasi",
  "wasmtime-winch",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "windows-sys 0.48.0",
 ]
 
@@ -3854,7 +3853,7 @@ dependencies = [
  "wasmtime-wasi",
  "wasmtime-wasi-crypto",
  "wasmtime-wasi-nn",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -3870,7 +3869,7 @@ dependencies = [
  "wasmtime",
  "wasmtime-c-api-macros",
  "wasmtime-wasi",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -3949,7 +3948,7 @@ dependencies = [
  "wasmtime-wasi-threads",
  "wasmtime-wast",
  "wast 60.0.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "windows-sys 0.48.0",
 ]
 
@@ -4041,7 +4040,7 @@ dependencies = [
  "wasmprinter",
  "wasmtime-component-util",
  "wasmtime-types",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -4055,7 +4054,7 @@ dependencies = [
  "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmprinter",
  "wasmtime-environ",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -4147,7 +4146,7 @@ dependencies = [
  "wasmprinter",
  "wasmtime",
  "wasmtime-wast",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
 ]
 
 [[package]]
@@ -4382,6 +4381,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "wat"
+version = "1.0.66"
+source = "git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations#403d7946f07feab87ed4b4b58a8b2130487f488f"
+dependencies = [
+ "wast 60.0.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
+]
+
+[[package]]
 name = "web-sys"
 version = "0.3.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4522,7 +4529,7 @@ dependencies = [
  "target-lexicon",
  "toml",
  "wasmtime-environ",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "winch-codegen",
  "winch-test-macros",
 ]
@@ -4552,7 +4559,7 @@ dependencies = [
  "toml",
  "wasmparser 0.107.0 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "wasmtime-environ",
- "wat",
+ "wat 1.0.66 (git+https://github.com/effect-handlers/wasm-tools?branch=typed-continuations)",
  "winch-codegen",
  "winch-filetests",
  "winch-test-macros",
