@@ -199,19 +199,21 @@ pub fn new_cont_ref(contobj: *mut ContinuationObject) -> *mut ContinuationRefere
 /// TODO
 #[inline(always)]
 pub fn drop_cont_obj(contobj: *mut ContinuationObject) {
-    let _: Box<ContinuationFiber> = unsafe { Box::from_raw((*contobj).fiber) };
-    //mem::drop(unsafe { (*contobj).fiber });
+    let contobj: Box<ContinuationObject> = unsafe { Box::from_raw(contobj) };
+    let _: Box<ContinuationFiber> = unsafe { Box::from_raw(contobj.fiber) };
     unsafe {
         let _: Vec<u128> = Vec::from_raw_parts(
-            (*contobj).args.data,
-            (*contobj).args.length,
-            (*contobj).args.capacity,
+            contobj.args.data,
+            contobj.args.length,
+            contobj.args.capacity,
         );
     };
-    let tag_return_vals = &mut unsafe { contobj.as_mut().unwrap() }.tag_return_values;
-    match tag_return_vals {
+    match contobj.tag_return_values {
         None => (),
-        Some(_) => cont_obj_deallocate_tag_return_values_buffer(contobj),
+        Some(payloads) => unsafe {
+            let _: Vec<u128> =
+                Vec::from_raw_parts(payloads.data, payloads.length, payloads.capacity);
+        },
     }
 }
 
