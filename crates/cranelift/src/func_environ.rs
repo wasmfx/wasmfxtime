@@ -2434,7 +2434,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         contref: ir::Value,
     ) -> ir::Value {
-        if cfg!(feature = "use_contobj_as_contref") {
+        if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
             // The "contref" is a contobj already
             return contref;
         } else {
@@ -2550,7 +2550,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         contobj_addr: ir::Value,
     ) -> ir::Value {
-        if cfg!(feature = "use_contobj_as_contref") {
+        if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
             return contobj_addr;
         } else {
             let (_vmctx, contref) =

@@ -94,7 +94,9 @@ pub fn cont_ref_get_cont_obj(
     //FIXME rename to indicate that this invalidates the cont ref
 
     // If this is enabled, we should never call this function.
-    assert!(!cfg!(feature = "use_contobj_as_contref"));
+    assert!(!cfg!(
+        feature = "unsafe_disable_continuation_linearity_check"
+    ));
 
     let contopt = unsafe { contref.as_mut().unwrap().0 };
     match contopt {
@@ -186,7 +188,9 @@ pub fn cont_obj_has_state_invoked(obj: *mut ContinuationObject) -> bool {
 #[inline(always)]
 pub fn new_cont_ref(contobj: *mut ContinuationObject) -> *mut ContinuationReference {
     // If this is enabled, we should never call this function.
-    assert!(!cfg!(feature = "use_contobj_as_contref"));
+    assert!(!cfg!(
+        feature = "unsafe_disable_continuation_linearity_check"
+    ));
 
     let contref = Box::new(ContinuationReference(Some(contobj)));
     Box::into_raw(contref)
