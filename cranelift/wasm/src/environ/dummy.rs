@@ -849,6 +849,10 @@ impl<'data> ModuleEnvironment<'data> for DummyEnvironment {
         Ok(())
     }
 
+    fn declare_type_cont(&mut self, _type_index: u32) -> WasmResult<()> {
+        unimplemented!()
+    }
+
     fn declare_func_import(
         &mut self,
         index: TypeIndex,
