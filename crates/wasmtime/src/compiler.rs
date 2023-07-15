@@ -630,7 +630,7 @@ impl FunctionIndices {
                     .types
                     .iter()
                     .map(|(_, ty)| match ty {
-                        ModuleType::Function(ty) | ModuleType::Continuation(ty)  => *ty,
+                        ModuleType::Function(ty) | ModuleType::Continuation(ty) => *ty,
                     })
                     .collect::<BTreeSet<_>>();
                 let wasm_to_native_trampolines = unique_and_sorted_sigs
