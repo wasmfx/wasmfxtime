@@ -723,6 +723,9 @@ pub trait ModuleEnvironment<'data>: TypeConvert {
     /// Declares a function signature to the environment.
     fn declare_type_func(&mut self, wasm_func_type: WasmFuncType) -> WasmResult<()>;
 
+    /// Declares a continuation signature to the environment.
+    fn declare_type_cont(&mut self, type_index: u32) -> WasmResult<()>;
+
     /// Translates a type index to its signature index, only called for type
     /// indices which point to functions.
     fn type_to_signature(&self, index: TypeIndex) -> WasmResult<SignatureIndex> {

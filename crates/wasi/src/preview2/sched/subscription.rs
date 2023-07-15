@@ -1,11 +1,12 @@
 use crate::preview2::{
-    clocks::WasiMonotonicClock,
+    clocks::HostMonotonicClock,
     stream::{InputStream, OutputStream},
 };
 use anyhow::Error;
 use bitflags::bitflags;
 
 bitflags! {
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
     pub struct RwEventFlags: u32 {
         const HANGUP = 0b1;
     }
@@ -61,7 +62,7 @@ impl<'a> RwSubscription<'a> {
 }
 
 pub struct MonotonicClockSubscription<'a> {
-    pub clock: &'a dyn WasiMonotonicClock,
+    pub clock: &'a dyn HostMonotonicClock,
     pub absolute_deadline: u64,
 }
 
