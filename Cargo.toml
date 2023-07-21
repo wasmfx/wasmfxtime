@@ -70,7 +70,7 @@ wasmtime-wast = { workspace = true, features = ['component-model'] }
 wasmtime-component-util = { workspace = true }
 component-macro-test = { path = "crates/misc/component-macro-test" }
 component-test-util = { workspace = true }
-bstr = "0.2.17"
+bstr = "1.6.0"
 libc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -203,15 +203,15 @@ rustix = "0.38.4"
 wit-bindgen = { version = "0.7.0", default-features = false }
 
 # wasm-tools family:
-wasmparser = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.36" }
-wat = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.36" }
-wast = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.36" }
-wasmprinter = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.36" }
-wasm-encoder = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.36" }
-wasm-smith = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.36" }
-wasm-mutate = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.36" }
-wit-parser = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.36" }
-wit-component = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.36" }
+wasmparser = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
+wat = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
+wast = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
+wasmprinter = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
+wasm-encoder = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
+wasm-smith = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
+wasm-mutate = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
+wit-parser = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
+wit-component = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
 
 # Non-Bytecode Alliance maintained dependencies:
 # --------------------------
