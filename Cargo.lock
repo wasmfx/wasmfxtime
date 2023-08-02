@@ -732,9 +732,9 @@ dependencies = [
  "target-lexicon",
  "thiserror",
  "toml",
- "wasmparser 0.109.0",
+ "wasmparser 0.110.0",
  "wasmtime-types",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
@@ -894,7 +894,7 @@ dependencies = [
  "thiserror",
  "toml",
  "walkdir",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
@@ -910,9 +910,9 @@ dependencies = [
  "serde",
  "smallvec",
  "target-lexicon",
- "wasmparser 0.109.0",
+ "wasmparser 0.110.0",
  "wasmtime-types",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
@@ -1435,12 +1435,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures"
+version = "0.3.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "531ac96c6ff5fd7c62263c5e3c67a603af4fcaee2e1a0ae5565ba3a11e69e549"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "955518d47e09b25bbebc7a18df10b81f0c766eaf4c4f1cccef2fca5f2a4fb5f2"
 dependencies = [
  "futures-core",
+ "futures-sink",
 ]
 
 [[package]]
@@ -1448,6 +1463,12 @@ name = "futures-core"
 version = "0.3.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4bca583b7e26f571124fe5b7561d49cb2868d79116cfa0eefce955557c6fee8c"
+
+[[package]]
+name = "futures-io"
+version = "0.3.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fff74096e71ed47f8e023204cfd0aa1289cd54ae5430a9523be060cdb849964"
 
 [[package]]
 name = "futures-sink"
@@ -1468,6 +1489,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26b01e40b772d54cf6c6d721c1d1abd0647a0106a12ecaa1c186273392a69533"
 dependencies = [
  "futures-core",
+ "futures-sink",
  "futures-task",
  "pin-project-lite",
  "pin-utils",
@@ -3231,7 +3253,7 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wasmtime-wasi-http",
- "wit-component 0.13.0",
+ "wit-component 0.13.1",
 ]
 
 [[package]]
@@ -3525,7 +3547,7 @@ version = "12.0.0"
 dependencies = [
  "anyhow",
  "wasmparser 0.92.0",
- "wat 1.0.68 (registry+https://github.com/rust-lang/crates.io-index)",
+ "wat 1.0.69 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3659,7 +3681,7 @@ dependencies = [
  "byte-array-literals",
  "object",
  "wasi 0.11.0+wasi-snapshot-preview1",
- "wasm-encoder 0.31.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wasm-encoder 0.31.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
  "wit-bindgen",
 ]
 
@@ -3754,17 +3776,17 @@ dependencies = [
 
 [[package]]
 name = "wasm-encoder"
-version = "0.31.0"
+version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06a3d1b4a575ffb873679402b2aedb3117555eb65c27b1b86c8a91e574bc2a2a"
+checksum = "41763f20eafed1399fff1afb466496d3a959f58241436cfdc17e3f5ca954de16"
 dependencies = [
  "leb128",
 ]
 
 [[package]]
 name = "wasm-encoder"
-version = "0.31.0"
-source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37#fb41ef7ac1dbda1cdf27fd1a2046f3dd78113a1d"
+version = "0.31.1"
+source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38#83ec1b60e01048abbc4a6783dd90847857877013"
 dependencies = [
  "leb128",
 ]
@@ -3784,42 +3806,42 @@ dependencies = [
 
 [[package]]
 name = "wasm-metadata"
-version = "0.10.0"
-source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37#fb41ef7ac1dbda1cdf27fd1a2046f3dd78113a1d"
+version = "0.10.1"
+source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38#83ec1b60e01048abbc4a6783dd90847857877013"
 dependencies = [
  "anyhow",
  "indexmap 2.0.0",
  "serde",
  "serde_json",
  "spdx",
- "wasm-encoder 0.31.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
- "wasmparser 0.109.0",
+ "wasm-encoder 0.31.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
+ "wasmparser 0.110.0",
 ]
 
 [[package]]
 name = "wasm-mutate"
-version = "0.2.29"
-source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37#fb41ef7ac1dbda1cdf27fd1a2046f3dd78113a1d"
+version = "0.2.30"
+source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38#83ec1b60e01048abbc4a6783dd90847857877013"
 dependencies = [
  "egg",
  "log",
  "rand 0.8.5",
  "thiserror",
- "wasm-encoder 0.31.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
- "wasmparser 0.109.0",
+ "wasm-encoder 0.31.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
+ "wasmparser 0.110.0",
 ]
 
 [[package]]
 name = "wasm-smith"
-version = "0.12.12"
-source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37#fb41ef7ac1dbda1cdf27fd1a2046f3dd78113a1d"
+version = "0.12.13"
+source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38#83ec1b60e01048abbc4a6783dd90847857877013"
 dependencies = [
  "arbitrary",
  "flagset",
  "indexmap 2.0.0",
  "leb128",
- "wasm-encoder 0.31.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
- "wasmparser 0.109.0",
+ "wasm-encoder 0.31.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
+ "wasmparser 0.110.0",
 ]
 
 [[package]]
@@ -3828,7 +3850,7 @@ version = "0.0.0"
 dependencies = [
  "ocaml-interop",
  "once_cell",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
@@ -3881,8 +3903,8 @@ dependencies = [
 
 [[package]]
 name = "wasmparser"
-version = "0.109.0"
-source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37#fb41ef7ac1dbda1cdf27fd1a2046f3dd78113a1d"
+version = "0.110.0"
+source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38#83ec1b60e01048abbc4a6783dd90847857877013"
 dependencies = [
  "indexmap 2.0.0",
  "semver",
@@ -3899,11 +3921,11 @@ dependencies = [
 
 [[package]]
 name = "wasmprinter"
-version = "0.2.61"
-source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37#fb41ef7ac1dbda1cdf27fd1a2046f3dd78113a1d"
+version = "0.2.62"
+source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38#83ec1b60e01048abbc4a6783dd90847857877013"
 dependencies = [
  "anyhow",
- "wasmparser 0.109.0",
+ "wasmparser 0.110.0",
 ]
 
 [[package]]
@@ -3930,7 +3952,8 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "wasi-cap-std-sync",
- "wasmparser 0.109.0",
+ "wasm-encoder 0.31.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
+ "wasmparser 0.110.0",
  "wasmtime-cache",
  "wasmtime-component-macro",
  "wasmtime-component-util",
@@ -3942,7 +3965,7 @@ dependencies = [
  "wasmtime-runtime",
  "wasmtime-wasi",
  "wasmtime-winch",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
  "windows-sys 0.48.0",
 ]
 
@@ -3968,7 +3991,7 @@ dependencies = [
  "wasmtime-wasi",
  "wasmtime-wasi-crypto",
  "wasmtime-wasi-nn",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
@@ -3984,7 +4007,7 @@ dependencies = [
  "wasmtime",
  "wasmtime-c-api-macros",
  "wasmtime-wasi",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
@@ -4046,8 +4069,8 @@ dependencies = [
  "test-programs",
  "tokio",
  "walkdir",
- "wasm-encoder 0.31.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
- "wasmparser 0.109.0",
+ "wasm-encoder 0.31.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
+ "wasmparser 0.110.0",
  "wasmtime",
  "wasmtime-cache",
  "wasmtime-cli-flags",
@@ -4062,8 +4085,8 @@ dependencies = [
  "wasmtime-wasi-nn",
  "wasmtime-wasi-threads",
  "wasmtime-wast",
- "wast 62.0.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wast 62.0.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
  "windows-sys 0.48.0",
 ]
 
@@ -4092,7 +4115,7 @@ dependencies = [
  "wasmtime",
  "wasmtime-component-util",
  "wasmtime-wit-bindgen",
- "wit-parser 0.9.1",
+ "wit-parser 0.9.2",
 ]
 
 [[package]]
@@ -4115,7 +4138,7 @@ dependencies = [
  "object",
  "target-lexicon",
  "thiserror",
- "wasmparser 0.109.0",
+ "wasmparser 0.110.0",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
  "wasmtime-versioned-export-macros",
@@ -4151,12 +4174,12 @@ dependencies = [
  "serde",
  "target-lexicon",
  "thiserror",
- "wasm-encoder 0.31.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
- "wasmparser 0.109.0",
+ "wasm-encoder 0.31.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
+ "wasmparser 0.110.0",
  "wasmprinter",
  "wasmtime-component-util",
  "wasmtime-types",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
@@ -4167,10 +4190,10 @@ dependencies = [
  "component-fuzz-util",
  "env_logger 0.10.0",
  "libfuzzer-sys",
- "wasmparser 0.109.0",
+ "wasmparser 0.110.0",
  "wasmprinter",
  "wasmtime-environ",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
@@ -4234,7 +4257,7 @@ dependencies = [
  "rand 0.8.5",
  "smallvec",
  "target-lexicon",
- "wasmparser 0.109.0",
+ "wasmparser 0.110.0",
  "wasmtime",
  "wasmtime-fuzzing",
 ]
@@ -4254,16 +4277,16 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "v8",
- "wasm-encoder 0.31.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wasm-encoder 0.31.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
  "wasm-mutate",
  "wasm-smith",
  "wasm-spec-interpreter",
  "wasmi",
- "wasmparser 0.109.0",
+ "wasmparser 0.110.0",
  "wasmprinter",
  "wasmtime",
  "wasmtime-wast",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
@@ -4328,6 +4351,7 @@ dependencies = [
  "rand 0.8.5",
  "rustix 0.38.4",
  "sptr",
+ "wasm-encoder 0.31.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
  "wasmtime-asm-macros",
  "wasmtime-environ",
  "wasmtime-fiber",
@@ -4344,7 +4368,7 @@ dependencies = [
  "cranelift-entity",
  "serde",
  "thiserror",
- "wasmparser 0.109.0",
+ "wasmparser 0.110.0",
 ]
 
 [[package]]
@@ -4363,16 +4387,20 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bitflags 2.3.3",
+ "bytes",
  "cap-fs-ext",
  "cap-rand",
  "cap-std",
  "cap-time-ext",
  "fs-set-times",
+ "futures",
  "io-extras",
  "libc",
+ "once_cell",
  "rustix 0.38.4",
  "system-interface",
  "thiserror",
+ "tokio",
  "tracing",
  "wasi-cap-std-sync",
  "wasi-common",
@@ -4440,7 +4468,7 @@ dependencies = [
  "anyhow",
  "log",
  "wasmtime",
- "wast 62.0.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wast 62.0.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
@@ -4452,7 +4480,7 @@ dependencies = [
  "gimli",
  "object",
  "target-lexicon",
- "wasmparser 0.109.0",
+ "wasmparser 0.110.0",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
  "winch-codegen",
@@ -4464,7 +4492,7 @@ version = "12.0.0"
 dependencies = [
  "anyhow",
  "heck",
- "wit-parser 0.9.1",
+ "wit-parser 0.9.2",
 ]
 
 [[package]]
@@ -4478,42 +4506,42 @@ dependencies = [
 
 [[package]]
 name = "wast"
-version = "62.0.0"
+version = "62.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7f7ee878019d69436895f019b65f62c33da63595d8e857cbdc87c13ecb29a32"
+checksum = "b8ae06f09dbe377b889fbd620ff8fa21e1d49d1d9d364983c0cdbf9870cb9f1f"
 dependencies = [
  "leb128",
  "memchr",
  "unicode-width",
- "wasm-encoder 0.31.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "wasm-encoder 0.31.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "wast"
-version = "62.0.0"
-source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37#fb41ef7ac1dbda1cdf27fd1a2046f3dd78113a1d"
+version = "62.0.1"
+source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38#83ec1b60e01048abbc4a6783dd90847857877013"
 dependencies = [
  "leb128",
  "memchr",
  "unicode-width",
- "wasm-encoder 0.31.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wasm-encoder 0.31.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
 name = "wat"
-version = "1.0.68"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "295572bf24aa5b685a971a83ad3e8b6e684aaad8a9be24bc7bf59bed84cc1c08"
+checksum = "842e15861d203fb4a96d314b0751cdeaf0f6f8b35e8d81d2953af2af5e44e637"
 dependencies = [
- "wast 62.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "wast 62.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "wat"
-version = "1.0.68"
-source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37#fb41ef7ac1dbda1cdf27fd1a2046f3dd78113a1d"
+version = "1.0.69"
+source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38#83ec1b60e01048abbc4a6783dd90847857877013"
 dependencies = [
- "wast 62.0.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wast 62.0.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
 ]
 
 [[package]]
@@ -4641,7 +4669,7 @@ dependencies = [
  "regalloc2",
  "smallvec",
  "target-lexicon",
- "wasmparser 0.109.0",
+ "wasmparser 0.110.0",
  "wasmtime-environ",
 ]
 
@@ -4657,7 +4685,7 @@ dependencies = [
  "target-lexicon",
  "toml",
  "wasmtime-environ",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
  "winch-codegen",
  "winch-test-macros",
 ]
@@ -4685,9 +4713,9 @@ dependencies = [
  "similar",
  "target-lexicon",
  "toml",
- "wasmparser 0.109.0",
+ "wasmparser 0.110.0",
  "wasmtime-environ",
- "wat 1.0.68 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
+ "wat 1.0.69 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
  "winch-codegen",
  "winch-filetests",
  "winch-test-macros",
@@ -4911,17 +4939,17 @@ dependencies = [
 
 [[package]]
 name = "wit-component"
-version = "0.13.0"
-source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37#fb41ef7ac1dbda1cdf27fd1a2046f3dd78113a1d"
+version = "0.13.1"
+source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38#83ec1b60e01048abbc4a6783dd90847857877013"
 dependencies = [
  "anyhow",
  "bitflags 2.3.3",
  "indexmap 2.0.0",
  "log",
- "wasm-encoder 0.31.0 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37)",
- "wasm-metadata 0.10.0",
- "wasmparser 0.109.0",
- "wit-parser 0.9.1",
+ "wasm-encoder 0.31.1 (git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38)",
+ "wasm-metadata 0.10.1",
+ "wasmparser 0.110.0",
+ "wit-parser 0.9.2",
 ]
 
 [[package]]
@@ -4942,8 +4970,8 @@ dependencies = [
 
 [[package]]
 name = "wit-parser"
-version = "0.9.1"
-source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.37#fb41ef7ac1dbda1cdf27fd1a2046f3dd78113a1d"
+version = "0.9.2"
+source = "git+https://github.com/effect-handlers/wasm-tools?tag=wasmfx-tools-1.0.38#83ec1b60e01048abbc4a6783dd90847857877013"
 dependencies = [
  "anyhow",
  "id-arena",
