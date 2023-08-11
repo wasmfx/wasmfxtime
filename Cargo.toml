@@ -203,15 +203,15 @@ rustix = "0.38.4"
 wit-bindgen = { version = "0.7.0", default-features = false }
 
 # wasm-tools family:
-wasmparser = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
-wat = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
-wast = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
-wasmprinter = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
-wasm-encoder = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
-wasm-smith = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
-wasm-mutate = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
-wit-parser = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
-wit-component = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.37" }
+wasmparser = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.38" }
+wat = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.38" }
+wast = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.38" }
+wasmprinter = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.38" }
+wasm-encoder = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.38" }
+wasm-smith = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.38" }
+wasm-mutate = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.38" }
+wit-parser = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.38" }
+wit-component = { git = "https://github.com/effect-handlers/wasm-tools", tag = "wasmfx-tools-1.0.38" }
 
 # Non-Bytecode Alliance maintained dependencies:
 # --------------------------
@@ -243,6 +243,9 @@ tempfile = "3.1.0"
 filecheck = "0.5.0"
 libc = "0.2.60"
 file-per-thread-logger = "0.2.0"
+tokio = { version = "1.26.0" }
+bytes = "1.4"
+futures = { version = "0.3.27", default-features = false }
 indexmap = "2.0.0"
 pretty_env_logger = "0.5.0"
 syn = "2.0.25"

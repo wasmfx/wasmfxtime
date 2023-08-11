@@ -195,9 +195,6 @@ indices! {
     /// component model.
     pub struct LoweredIndex(u32);
 
-    /// Same as `LoweredIndex` but for the `CoreDef::AlwaysTrap` variant.
-    pub struct RuntimeAlwaysTrapIndex(u32);
-
     /// Index representing a linear memory extracted from a wasm instance
     /// which is stored in a `VMComponentContext`. This is used to deduplicate
     /// references to the same linear memory where it's only stored once in a
@@ -213,21 +210,13 @@ indices! {
     /// Same as `RuntimeMemoryIndex` except for the `post-return` function.
     pub struct RuntimePostReturnIndex(u32);
 
-    /// Index into the list of transcoders identified during compilation.
+    /// Index for all trampolines that are compiled in Cranelift for a
+    /// component.
     ///
-    /// This is used to index the `VMFuncRef` slots reserved for string encoders
-    /// which reference linear memories defined within a component.
-    pub struct RuntimeTranscoderIndex(u32);
-
-    /// Index into the list of `resource.new` intrinsics used by a component.
-    ///
-    /// This is used to allocate space in `VMComponentContext` and record
-    /// `VMFuncRef`s corresponding to the definition of the intrinsic.
-    pub struct RuntimeResourceNewIndex(u32);
-    /// Same as `RuntimeResourceNewIndex`, but for `resource.rep`
-    pub struct RuntimeResourceDropIndex(u32);
-    /// Same as `RuntimeResourceNewIndex`, but for `resource.drop`
-    pub struct RuntimeResourceRepIndex(u32);
+    /// This is used to point to various bits of metadata within a compiled
+    /// component and is stored in the final compilation artifact. This does not
+    /// have a direct corresponance to any wasm definition.
+    pub struct TrampolineIndex(u32);
 }
 
 // Reexport for convenience some core-wasm indices which are also used in the
@@ -878,6 +867,12 @@ impl ComponentTypesBuilder {
         self.type_information(ty).flat.as_flat_types()
     }
 
+    /// Returns whether the type specified contains any borrowed resources
+    /// within it.
+    pub fn ty_contains_borrow_resource(&self, ty: &InterfaceType) -> bool {
+        self.type_information(ty).has_borrow
+    }
+
     fn type_information(&self, ty: &InterfaceType) -> &TypeInformation {
         match ty {
             InterfaceType::U8
@@ -888,9 +883,16 @@ impl ComponentTypesBuilder {
             | InterfaceType::U32
             | InterfaceType::S32
             | InterfaceType::Char
-            | InterfaceType::Own(_)
-            | InterfaceType::Borrow(_) => {
+            | InterfaceType::Own(_) => {
                 static INFO: TypeInformation = TypeInformation::primitive(FlatType::I32);
+                &INFO
+            }
+            InterfaceType::Borrow(_) => {
+                static INFO: TypeInformation = {
+                    let mut info = TypeInformation::primitive(FlatType::I32);
+                    info.has_borrow = true;
+                    info
+                };
                 &INFO
             }
             InterfaceType::U64 | InterfaceType::S64 => {
@@ -1722,6 +1724,7 @@ struct TypeInformationCache {
 struct TypeInformation {
     depth: u32,
     flat: FlatTypesStorage,
+    has_borrow: bool,
 }
 
 impl TypeInformation {
@@ -1729,6 +1732,7 @@ impl TypeInformation {
         TypeInformation {
             depth: 0,
             flat: FlatTypesStorage::new(),
+            has_borrow: false,
         }
     }
 
@@ -1758,6 +1762,7 @@ impl TypeInformation {
         self.depth = 1;
         for info in types {
             self.depth = self.depth.max(1 + info.depth);
+            self.has_borrow = self.has_borrow || info.has_borrow;
             match info.flat.as_flat_types() {
                 Some(types) => {
                     for (t32, t64) in types.memory32.iter().zip(types.memory64) {
@@ -1800,6 +1805,7 @@ impl TypeInformation {
                 None => continue,
             };
             self.depth = self.depth.max(1 + info.depth);
+            self.has_borrow = self.has_borrow || info.has_borrow;
 
             // If this variant is already unrepresentable in a flat
             // representation then this can be skipped.
@@ -1909,5 +1915,6 @@ impl TypeInformation {
         *self = TypeInformation::string();
         let info = types.type_information(&ty.element);
         self.depth += info.depth;
+        self.has_borrow = info.has_borrow;
     }
 }
