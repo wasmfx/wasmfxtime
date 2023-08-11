@@ -1,6 +1,6 @@
-use crate::preview2::bindings::cli_base::{preopens, stderr, stdin, stdout};
+use crate::preview2::bindings::cli_base::{stderr, stdin, stdout};
 use crate::preview2::bindings::clocks::{monotonic_clock, wall_clock};
-use crate::preview2::bindings::filesystem::filesystem;
+use crate::preview2::bindings::filesystem::{preopens, types as filesystem};
 use crate::preview2::bindings::io::streams;
 use crate::preview2::filesystem::TableFsExt;
 use crate::preview2::preview2::filesystem::TableReaddirExt;
@@ -15,7 +15,7 @@ use std::slice;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use wiggle::tracing::instrument;
-use wiggle::{GuestPtr, GuestSliceMut, GuestStrCow, GuestType};
+use wiggle::{GuestError, GuestPtr, GuestSliceMut, GuestStrCow, GuestType};
 
 #[derive(Clone, Debug)]
 struct File {
@@ -36,9 +36,9 @@ struct File {
 
 #[derive(Clone, Debug)]
 enum Descriptor {
-    Stdin(preopens::InputStream),
-    Stdout(preopens::OutputStream),
-    Stderr(preopens::OutputStream),
+    Stdin(streams::InputStream),
+    Stdout(streams::OutputStream),
+    Stderr(streams::OutputStream),
     PreopenDirectory((filesystem::Descriptor, String)),
     File(File),
 }
@@ -101,14 +101,14 @@ impl Descriptors {
     }
 
     /// Returns next descriptor number, which was never assigned
-    fn unused(&self) -> ErrnoResult<u32> {
+    fn unused(&self) -> Result<u32> {
         match self.last_key_value() {
             Some((fd, _)) => {
                 if let Some(fd) = fd.checked_add(1) {
                     return Ok(fd);
                 }
                 if self.len() == u32::MAX as usize {
-                    return Err(types::Errno::Loop);
+                    return Err(types::Errno::Loop.into());
                 }
                 // TODO: Optimize
                 Ok((0..u32::MAX)
@@ -131,7 +131,7 @@ impl Descriptors {
     /// Pushes the [Descriptor] returning corresponding number.
     /// This operation will try to reuse numbers previously removed via [`Self::remove`]
     /// and rely on [`Self::unused`] if no free numbers are recorded
-    fn push(&mut self, desc: Descriptor) -> ErrnoResult<u32> {
+    fn push(&mut self, desc: Descriptor) -> Result<u32> {
         let fd = if let Some(fd) = self.free.pop() {
             fd
         } else {
@@ -142,7 +142,7 @@ impl Descriptors {
     }
 
     /// Like [Self::push], but for [`File`]
-    fn push_file(&mut self, file: File) -> ErrnoResult<u32> {
+    fn push_file(&mut self, file: File) -> Result<u32> {
         self.push(Descriptor::File(file))
     }
 }
@@ -188,33 +188,35 @@ impl<T: WasiPreview1View + ?Sized> Transaction<'_, T> {
     /// # Errors
     ///
     /// Returns [`types::Errno::Badf`] if no [`Descriptor`] is found
-    fn get_descriptor(&mut self, fd: types::Fd) -> ErrnoResult<&Descriptor> {
+    fn get_descriptor(&mut self, fd: types::Fd) -> Result<&Descriptor> {
         let fd = fd.into();
-        self.descriptors
+        let desc = self
+            .descriptors
             .get_mut()
             .get(&fd)
-            .ok_or(types::Errno::Badf)
+            .ok_or(types::Errno::Badf)?;
+        Ok(desc)
     }
 
     /// Borrows [`File`] corresponding to `fd`
     /// if it describes a [`Descriptor::File`] of [`crate::preview2::filesystem::File`] type
-    fn get_file(&mut self, fd: types::Fd) -> ErrnoResult<&File> {
+    fn get_file(&mut self, fd: types::Fd) -> Result<&File> {
         let fd = fd.into();
         match self.descriptors.get_mut().get(&fd) {
             Some(Descriptor::File(file @ File { fd, .. })) if self.view.table().is_file(*fd) => {
                 Ok(file)
             }
-            _ => Err(types::Errno::Badf),
+            _ => Err(types::Errno::Badf.into()),
         }
     }
 
     /// Mutably borrows [`File`] corresponding to `fd`
     /// if it describes a [`Descriptor::File`] of [`crate::preview2::filesystem::File`] type
-    fn get_file_mut(&mut self, fd: types::Fd) -> ErrnoResult<&mut File> {
+    fn get_file_mut(&mut self, fd: types::Fd) -> Result<&mut File> {
         let fd = fd.into();
         match self.descriptors.get_mut().get_mut(&fd) {
             Some(Descriptor::File(file)) if self.view.table().is_file(file.fd) => Ok(file),
-            _ => Err(types::Errno::Badf),
+            _ => Err(types::Errno::Badf.into()),
         }
     }
 
@@ -224,7 +226,7 @@ impl<T: WasiPreview1View + ?Sized> Transaction<'_, T> {
     /// # Errors
     ///
     /// Returns [`types::Errno::Spipe`] if the descriptor corresponds to stdio
-    fn get_seekable(&mut self, fd: types::Fd) -> ErrnoResult<&File> {
+    fn get_seekable(&mut self, fd: types::Fd) -> Result<&File> {
         let fd = fd.into();
         match self.descriptors.get_mut().get(&fd) {
             Some(Descriptor::File(file @ File { fd, .. })) if self.view.table().is_file(*fd) => {
@@ -232,14 +234,14 @@ impl<T: WasiPreview1View + ?Sized> Transaction<'_, T> {
             }
             Some(Descriptor::Stdin(..) | Descriptor::Stdout(..) | Descriptor::Stderr(..)) => {
                 // NOTE: legacy implementation returns SPIPE here
-                Err(types::Errno::Spipe)
+                Err(types::Errno::Spipe.into())
             }
-            _ => Err(types::Errno::Badf),
+            _ => Err(types::Errno::Badf.into()),
         }
     }
 
     /// Returns [`filesystem::Descriptor`] corresponding to `fd`
-    fn get_fd(&mut self, fd: types::Fd) -> ErrnoResult<filesystem::Descriptor> {
+    fn get_fd(&mut self, fd: types::Fd) -> Result<filesystem::Descriptor> {
         match self.get_descriptor(fd)? {
             Descriptor::File(File { fd, .. }) => Ok(*fd),
             Descriptor::PreopenDirectory((fd, _)) => Ok(*fd),
@@ -250,19 +252,19 @@ impl<T: WasiPreview1View + ?Sized> Transaction<'_, T> {
 
     /// Returns [`filesystem::Descriptor`] corresponding to `fd`
     /// if it describes a [`Descriptor::File`] of [`crate::preview2::filesystem::File`] type
-    fn get_file_fd(&mut self, fd: types::Fd) -> ErrnoResult<filesystem::Descriptor> {
+    fn get_file_fd(&mut self, fd: types::Fd) -> Result<filesystem::Descriptor> {
         self.get_file(fd).map(|File { fd, .. }| *fd)
     }
 
     /// Returns [`filesystem::Descriptor`] corresponding to `fd`
     /// if it describes a [`Descriptor::File`] or [`Descriptor::PreopenDirectory`]
     /// of [`crate::preview2::filesystem::Dir`] type
-    fn get_dir_fd(&mut self, fd: types::Fd) -> ErrnoResult<filesystem::Descriptor> {
+    fn get_dir_fd(&mut self, fd: types::Fd) -> Result<filesystem::Descriptor> {
         let fd = fd.into();
         match self.descriptors.get_mut().get(&fd) {
             Some(Descriptor::File(File { fd, .. })) if self.view.table().is_dir(*fd) => Ok(*fd),
             Some(Descriptor::PreopenDirectory((fd, _))) => Ok(*fd),
-            _ => Err(types::Errno::Badf),
+            _ => Err(types::Errno::Badf.into()),
         }
     }
 }
@@ -319,8 +321,8 @@ pub fn add_to_linker<
     T: WasiPreview1View
         + bindings::cli_base::environment::Host
         + bindings::cli_base::exit::Host
-        + bindings::cli_base::preopens::Host
-        + bindings::filesystem::filesystem::Host
+        + bindings::filesystem::types::Host
+        + bindings::filesystem::preopens::Host
         + bindings::sync_io::poll::poll::Host
         + bindings::random::random::Host
         + bindings::io::streams::Host
@@ -356,13 +358,9 @@ impl wiggle::GuestErrorType for types::Errno {
     }
 }
 
-fn systimespec(
-    set: bool,
-    ts: types::Timestamp,
-    now: bool,
-) -> ErrnoResult<filesystem::NewTimestamp> {
+fn systimespec(set: bool, ts: types::Timestamp, now: bool) -> Result<filesystem::NewTimestamp> {
     if set && now {
-        Err(types::Errno::Inval)
+        Err(types::Errno::Inval.into())
     } else if set {
         Ok(filesystem::NewTimestamp::Timestamp(filesystem::Datetime {
             seconds: ts / 1_000_000_000,
@@ -499,6 +497,41 @@ impl From<filesystem::ErrorCode> for types::Errno {
     }
 }
 
+impl From<std::num::TryFromIntError> for types::Error {
+    fn from(_: std::num::TryFromIntError) -> Self {
+        types::Errno::Overflow.into()
+    }
+}
+
+impl From<GuestError> for types::Error {
+    fn from(err: GuestError) -> Self {
+        use wiggle::GuestError::*;
+        match err {
+            InvalidFlagValue { .. } => types::Errno::Inval.into(),
+            InvalidEnumValue { .. } => types::Errno::Inval.into(),
+            // As per
+            // https://github.com/WebAssembly/wasi/blob/main/legacy/tools/witx-docs.md#pointers
+            //
+            // > If a misaligned pointer is passed to a function, the function
+            // > shall trap.
+            // >
+            // > If an out-of-bounds pointer is passed to a function and the
+            // > function needs to dereference it, the function shall trap.
+            //
+            // so this turns OOB and misalignment errors into traps.
+            PtrOverflow { .. } | PtrOutOfBounds { .. } | PtrNotAligned { .. } => {
+                types::Error::trap(err.into())
+            }
+            PtrBorrowed { .. } => types::Errno::Fault.into(),
+            InvalidUtf8 { .. } => types::Errno::Ilseq.into(),
+            TryFromIntError { .. } => types::Errno::Overflow.into(),
+            SliceLengthsDiffer { .. } => types::Errno::Fault.into(),
+            BorrowCheckerOutOfHandles { .. } => types::Errno::Fault.into(),
+            InFunc { err, .. } => types::Error::from(*err),
+        }
+    }
+}
+
 impl From<filesystem::ErrorCode> for types::Error {
     fn from(code: filesystem::ErrorCode) -> Self {
         types::Errno::from(code).into()
@@ -533,78 +566,63 @@ impl From<TableError> for types::Error {
     }
 }
 
-type ErrnoResult<T> = Result<T, types::Errno>;
+type Result<T, E = types::Error> = std::result::Result<T, E>;
 
 fn write_bytes<'a>(
     ptr: impl Borrow<GuestPtr<'a, u8>>,
     buf: impl AsRef<[u8]>,
-) -> ErrnoResult<GuestPtr<'a, u8>> {
+) -> Result<GuestPtr<'a, u8>, types::Error> {
     // NOTE: legacy implementation always returns Inval errno
 
     let buf = buf.as_ref();
-    let len = buf.len().try_into().or(Err(types::Errno::Inval))?;
+    let len = buf.len().try_into()?;
 
     let ptr = ptr.borrow();
-    ptr.as_array(len)
-        .copy_from_slice(buf)
-        .or(Err(types::Errno::Inval))?;
-    ptr.add(len).or(Err(types::Errno::Inval))
+    ptr.as_array(len).copy_from_slice(buf)?;
+    let next = ptr.add(len)?;
+    Ok(next)
 }
 
-fn write_byte<'a>(ptr: impl Borrow<GuestPtr<'a, u8>>, byte: u8) -> ErrnoResult<GuestPtr<'a, u8>> {
+fn write_byte<'a>(ptr: impl Borrow<GuestPtr<'a, u8>>, byte: u8) -> Result<GuestPtr<'a, u8>> {
     let ptr = ptr.borrow();
-    ptr.write(byte).or(Err(types::Errno::Inval))?;
-    ptr.add(1).or(Err(types::Errno::Inval))
+    ptr.write(byte)?;
+    let next = ptr.add(1)?;
+    Ok(next)
 }
 
-fn read_str<'a>(ptr: impl Borrow<GuestPtr<'a, str>>) -> ErrnoResult<GuestStrCow<'a>> {
-    // NOTE: legacy implementation always returns Inval errno
-    ptr.borrow().as_cow().or(Err(types::Errno::Inval))
+fn read_str<'a>(ptr: impl Borrow<GuestPtr<'a, str>>) -> Result<GuestStrCow<'a>> {
+    let s = ptr.borrow().as_cow()?;
+    Ok(s)
 }
 
-fn read_string<'a>(ptr: impl Borrow<GuestPtr<'a, str>>) -> ErrnoResult<String> {
+fn read_string<'a>(ptr: impl Borrow<GuestPtr<'a, str>>) -> Result<String> {
     read_str(ptr).map(|s| s.to_string())
 }
 
 // Find first non-empty buffer.
-fn first_non_empty_ciovec(ciovs: &types::CiovecArray<'_>) -> ErrnoResult<Option<Vec<u8>>> {
-    ciovs
-        .iter()
-        .map(|iov| {
-            let iov = iov
-                .or(Err(types::Errno::Inval))?
-                .read()
-                .or(Err(types::Errno::Inval))?;
-            if iov.buf_len == 0 {
-                return Ok(None);
-            }
-            iov.buf
-                .as_array(iov.buf_len)
-                .to_vec()
-                .or(Err(types::Errno::Inval))
-                .map(Some)
-        })
-        .find_map(Result::transpose)
-        .transpose()
+fn first_non_empty_ciovec(ciovs: &types::CiovecArray<'_>) -> Result<Option<Vec<u8>>> {
+    for iov in ciovs.iter() {
+        let iov = iov?.read()?;
+        if iov.buf_len == 0 {
+            continue;
+        }
+        return Ok(Some(iov.buf.as_array(iov.buf_len).to_vec()?));
+    }
+    Ok(None)
 }
 
 // Find first non-empty buffer.
 fn first_non_empty_iovec<'a>(
     iovs: &types::IovecArray<'a>,
-) -> ErrnoResult<Option<GuestSliceMut<'a, u8>>> {
+) -> Result<Option<GuestSliceMut<'a, u8>>> {
     iovs.iter()
         .map(|iov| {
-            let iov = iov
-                .or(Err(types::Errno::Inval))?
-                .read()
-                .or(Err(types::Errno::Inval))?;
+            let iov = iov?.read()?;
             if iov.buf_len == 0 {
                 return Ok(None);
             }
-            iov.buf
-                .as_array(iov.buf_len)
-                .as_slice_mut()
-                .map_err(|_| types::Errno::Inval)
+            let slice = iov.buf.as_array(iov.buf_len).as_slice_mut()?;
+            Ok(slice)
         })
         .find_map(Result::transpose)
         .transpose()
@@ -618,9 +636,9 @@ impl<
         T: WasiPreview1View
             + bindings::cli_base::environment::Host
             + bindings::cli_base::exit::Host
-            + bindings::cli_base::preopens::Host
-            + bindings::filesystem::filesystem::Host
-            + bindings::sync_io::poll::poll::Host
+            + bindings::filesystem::preopens::Host
+            + bindings::filesystem::types::Host
+            + bindings::poll::poll::Host
             + bindings::random::random::Host
             + bindings::io::streams::Host
             + bindings::clocks::monotonic_clock::Host
@@ -637,20 +655,15 @@ impl<
             .context("failed to call `get-arguments`")
             .map_err(types::Error::trap)?
             .into_iter()
-            .try_fold(
-                (*argv, *argv_buf),
-                |(argv, argv_buf), arg| -> ErrnoResult<_> {
-                    // NOTE: legacy implementation always returns Inval errno
+            .try_fold((*argv, *argv_buf), |(argv, argv_buf), arg| -> Result<_> {
+                argv.write(argv_buf)?;
+                let argv = argv.add(1)?;
 
-                    argv.write(argv_buf).map_err(|_| types::Errno::Inval)?;
-                    let argv = argv.add(1).map_err(|_| types::Errno::Inval)?;
+                let argv_buf = write_bytes(argv_buf, arg)?;
+                let argv_buf = write_byte(argv_buf, 0)?;
 
-                    let argv_buf = write_bytes(argv_buf, arg)?;
-                    let argv_buf = write_byte(argv_buf, 0)?;
-
-                    Ok((argv, argv_buf))
-                },
-            )?;
+                Ok((argv, argv_buf))
+            })?;
         Ok(())
     }
 
@@ -682,13 +695,9 @@ impl<
             .into_iter()
             .try_fold(
                 (*environ, *environ_buf),
-                |(environ, environ_buf), (k, v)| -> ErrnoResult<_> {
-                    // NOTE: legacy implementation always returns Inval errno
-
-                    environ
-                        .write(environ_buf)
-                        .map_err(|_| types::Errno::Inval)?;
-                    let environ = environ.add(1).map_err(|_| types::Errno::Inval)?;
+                |(environ, environ_buf), (k, v)| -> Result<_, types::Error> {
+                    environ.write(environ_buf)?;
+                    let environ = environ.add(1)?;
 
                     let environ_buf = write_bytes(environ_buf, k)?;
                     let environ_buf = write_byte(environ_buf, b'=')?;
@@ -707,16 +716,12 @@ impl<
             .get_environment()
             .context("failed to call `get-environment`")
             .map_err(types::Error::trap)?;
-        let num = environ
-            .len()
-            .try_into()
-            .map_err(|_| types::Errno::Overflow)?;
+        let num = environ.len().try_into()?;
         let len = environ
             .iter()
             .map(|(k, v)| k.len() + 1 + v.len() + 1) // Key/value pairs are expected to be joined with `=`s, and terminated with `\0`s.
             .sum::<usize>()
-            .try_into()
-            .map_err(|_| types::Errno::Overflow)?;
+            .try_into()?;
         Ok((num, len))
     }
 
@@ -1005,8 +1010,6 @@ impl<
             }
             Descriptor::PreopenDirectory((fd, _)) | Descriptor::File(File { fd, .. }) => {
                 let filesystem::DescriptorStat {
-                    device: dev,
-                    inode: ino,
                     type_,
                     link_count: nlink,
                     size,
@@ -1018,13 +1021,18 @@ impl<
                         .context("failed to call `stat`")
                         .unwrap_or_else(types::Error::trap)
                 })?;
+                let metadata_hash = self.metadata_hash(fd).await.map_err(|e| {
+                    e.try_into()
+                        .context("failed to call `metadata_hash`")
+                        .unwrap_or_else(types::Error::trap)
+                })?;
                 let filetype = type_.try_into().map_err(types::Error::trap)?;
                 let atim = data_access_timestamp.try_into()?;
                 let mtim = data_modification_timestamp.try_into()?;
                 let ctim = status_change_timestamp.try_into()?;
                 Ok(types::Filestat {
-                    dev,
-                    ino,
+                    dev: 1,
+                    ino: metadata_hash.lower,
                     filetype,
                     nlink,
                     size,
@@ -1115,7 +1123,7 @@ impl<
                 }
                 .map_err(|_| types::Errno::Io)?;
 
-                let n = read.len().try_into().or(Err(types::Errno::Overflow))?;
+                let n = read.len().try_into()?;
                 let pos = pos.checked_add(n).ok_or(types::Errno::Overflow)?;
                 position.store(pos, Ordering::Relaxed);
 
@@ -1141,7 +1149,7 @@ impl<
         }
         let (buf, _) = buf.split_at_mut(read.len());
         buf.copy_from_slice(&read);
-        let n = read.len().try_into().or(Err(types::Errno::Overflow))?;
+        let n = read.len().try_into()?;
         Ok(n)
     }
 
@@ -1190,7 +1198,7 @@ impl<
         }
         let (buf, _) = buf.split_at_mut(read.len());
         buf.copy_from_slice(&read);
-        let n = read.len().try_into().or(Err(types::Errno::Overflow))?;
+        let n = read.len().try_into()?;
         Ok(n)
     }
 
@@ -1252,7 +1260,7 @@ impl<
             }
             _ => return Err(types::Errno::Badf.into()),
         };
-        let n = n.try_into().or(Err(types::Errno::Overflow))?;
+        let n = n.try_into()?;
         Ok(n)
     }
 
@@ -1289,7 +1297,7 @@ impl<
             }
             _ => return Err(types::Errno::Badf.into()),
         };
-        let n = n.try_into().or(Err(types::Errno::Overflow))?;
+        let n = n.try_into()?;
         Ok(n)
     }
 
@@ -1297,7 +1305,7 @@ impl<
     #[instrument(skip(self))]
     fn fd_prestat_get(&mut self, fd: types::Fd) -> Result<types::Prestat, types::Error> {
         if let Descriptor::PreopenDirectory((_, p)) = self.transact()?.get_descriptor(fd)? {
-            let pr_name_len = p.len().try_into().or(Err(types::Errno::Overflow))?;
+            let pr_name_len = p.len().try_into()?;
             return Ok(types::Prestat::Dir(types::PrestatDir { pr_name_len }));
         }
         Err(types::Errno::Badf.into()) // NOTE: legacy implementation returns BADF here
@@ -1311,7 +1319,7 @@ impl<
         path: &GuestPtr<'a, u8>,
         path_max_len: types::Size,
     ) -> Result<(), types::Error> {
-        let path_max_len = path_max_len.try_into().or(Err(types::Errno::Overflow))?;
+        let path_max_len = path_max_len.try_into()?;
         if let Descriptor::PreopenDirectory((_, p)) = self.transact()?.get_descriptor(fd)? {
             if p.len() > path_max_len {
                 return Err(types::Errno::Nametoolong.into());
@@ -1403,11 +1411,9 @@ impl<
                 .context("failed to call `read-directory`")
                 .unwrap_or_else(types::Error::trap)
         })?;
-        let filesystem::DescriptorStat {
-            inode: fd_inode, ..
-        } = self.stat(fd).await.map_err(|e| {
+        let dir_metadata_hash = self.metadata_hash(fd).await.map_err(|e| {
             e.try_into()
-                .context("failed to call `stat`")
+                .context("failed to call `metadata-hash`")
                 .unwrap_or_else(types::Error::trap)
         })?;
         let cookie = cookie.try_into().map_err(|_| types::Errno::Overflow)?;
@@ -1416,7 +1422,7 @@ impl<
             (
                 types::Dirent {
                     d_next: 1u64.to_le(),
-                    d_ino: fd_inode.to_le(),
+                    d_ino: dir_metadata_hash.lower.to_le(),
                     d_type: types::Filetype::Directory,
                     d_namlen: 1u32.to_le(),
                 },
@@ -1425,40 +1431,47 @@ impl<
             (
                 types::Dirent {
                     d_next: 2u64.to_le(),
-                    d_ino: fd_inode.to_le(), // NOTE: incorrect, but legacy implementation returns `fd` inode here
+                    d_ino: dir_metadata_hash.lower.to_le(), // NOTE: incorrect, but legacy implementation returns `fd` inode here
                     d_type: types::Filetype::Directory,
                     d_namlen: 2u32.to_le(),
                 },
                 "..".into(),
             ),
-        ]
-        .into_iter()
-        .map(Ok::<_, types::Error>);
+        ];
 
-        let dir = self
+        let mut dir = Vec::new();
+        for (entry, d_next) in self
             .table_mut()
             // remove iterator from table and use it directly:
             .delete_readdir(stream)?
             .into_iter()
             .zip(3u64..)
-            .map(|(entry, d_next)| {
-                let filesystem::DirectoryEntry { inode, type_, name } = entry.map_err(|e| {
+        {
+            let filesystem::DirectoryEntry { type_, name } = entry.map_err(|e| {
+                e.try_into()
+                    .context("failed to inspect `read-directory` entry")
+                    .unwrap_or_else(types::Error::trap)
+            })?;
+            let metadata_hash = self
+                .metadata_hash_at(fd, filesystem::PathFlags::empty(), name.clone())
+                .await
+                .map_err(|e| {
                     e.try_into()
-                        .context("failed to inspect `read-directory` entry")
+                        .context("failed to call `metadata-hash-at`")
                         .unwrap_or_else(types::Error::trap)
                 })?;
-                let d_type = type_.try_into().map_err(types::Error::trap)?;
-                let d_namlen: u32 = name.len().try_into().map_err(|_| types::Errno::Overflow)?;
-                Ok((
-                    types::Dirent {
-                        d_next: d_next.to_le(),
-                        d_ino: inode.unwrap_or_default().to_le(),
-                        d_type, // endian-invariant
-                        d_namlen: d_namlen.to_le(),
-                    },
-                    name,
-                ))
-            });
+            let d_type = type_.try_into().map_err(types::Error::trap)?;
+            let d_namlen: u32 = name.len().try_into().map_err(|_| types::Errno::Overflow)?;
+            dir.push((
+                types::Dirent {
+                    d_next: d_next.to_le(),
+                    d_ino: metadata_hash.lower.to_le(),
+                    d_type, // endian-invariant
+                    d_namlen: d_namlen.to_le(),
+                },
+                name,
+            ))
+        }
 
         // assume that `types::Dirent` size always fits in `u32`
         const DIRENT_SIZE: u32 = size_of::<types::Dirent>() as _;
@@ -1469,9 +1482,7 @@ impl<
         );
         let mut buf = *buf;
         let mut cap = buf_len;
-        for entry in head.chain(dir).skip(cookie) {
-            let (ref entry, mut path) = entry?;
-
+        for (ref entry, mut path) in head.into_iter().chain(dir.into_iter()).skip(cookie) {
             assert_eq!(
                 1,
                 size_of_val(&entry.d_type),
@@ -1526,26 +1537,35 @@ impl<
         let dirfd = self.get_dir_fd(dirfd)?;
         let path = read_string(path)?;
         let filesystem::DescriptorStat {
-            device: dev,
-            inode: ino,
             type_,
             link_count: nlink,
             size,
             data_access_timestamp,
             data_modification_timestamp,
             status_change_timestamp,
-        } = self.stat_at(dirfd, flags.into(), path).await.map_err(|e| {
-            e.try_into()
-                .context("failed to call `stat-at`")
-                .unwrap_or_else(types::Error::trap)
-        })?;
+        } = self
+            .stat_at(dirfd, flags.into(), path.clone())
+            .await
+            .map_err(|e| {
+                e.try_into()
+                    .context("failed to call `stat-at`")
+                    .unwrap_or_else(types::Error::trap)
+            })?;
+        let metadata_hash = self
+            .metadata_hash_at(dirfd, flags.into(), path)
+            .await
+            .map_err(|e| {
+                e.try_into()
+                    .context("failed to call `metadata-hash-at`")
+                    .unwrap_or_else(types::Error::trap)
+            })?;
         let filetype = type_.try_into().map_err(types::Error::trap)?;
         let atim = data_access_timestamp.try_into()?;
         let mtim = data_modification_timestamp.try_into()?;
         let ctim = status_change_timestamp.try_into()?;
         Ok(types::Filestat {
-            dev,
-            ino,
+            dev: 1,
+            ino: metadata_hash.lower,
             filetype,
             nlink,
             size,
@@ -1769,7 +1789,7 @@ impl<
         path: &GuestPtr<'a, str>,
     ) -> Result<(), types::Error> {
         let dirfd = self.get_dir_fd(dirfd)?;
-        let path = path.as_cow().map_err(|_| types::Errno::Inval)?.to_string();
+        let path = path.as_cow()?.to_string();
         self.unlink_file_at(dirfd, path).await.map_err(|e| {
             e.try_into()
                 .context("failed to call `unlink-file-at`")

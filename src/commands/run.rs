@@ -6,6 +6,7 @@ use once_cell::sync::Lazy;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use wasmtime::{
@@ -16,19 +17,8 @@ use wasmtime_cli_flags::{CommonOptions, WasiModules};
 use wasmtime_wasi::maybe_exit_on_error;
 use wasmtime_wasi::sync::{ambient_authority, Dir, TcpListener, WasiCtxBuilder};
 
-#[cfg(any(
-    feature = "wasi-crypto",
-    feature = "wasi-nn",
-    feature = "wasi-threads",
-    feature = "wasi-http"
-))]
-use std::sync::Arc;
-
 #[cfg(feature = "wasi-nn")]
 use wasmtime_wasi_nn::WasiNnCtx;
-
-#[cfg(feature = "wasi-crypto")]
-use wasmtime_wasi_crypto::WasiCryptoCtx;
 
 #[cfg(feature = "wasi-threads")]
 use wasmtime_wasi_threads::WasiThreadsCtx;
@@ -670,8 +660,6 @@ impl RunCommand {
 #[derive(Default, Clone)]
 struct Host {
     wasi: Option<wasmtime_wasi::WasiCtx>,
-    #[cfg(feature = "wasi-crypto")]
-    wasi_crypto: Option<Arc<WasiCryptoCtx>>,
     #[cfg(feature = "wasi-nn")]
     wasi_nn: Option<Arc<WasiNnCtx>>,
     #[cfg(feature = "wasi-threads")]
@@ -698,7 +686,7 @@ fn populate_with_wasi(
         wasmtime_wasi::add_to_linker(linker, |host| host.wasi.as_mut().unwrap())?;
 
         let mut builder = WasiCtxBuilder::new();
-        builder = builder.inherit_stdio().args(argv)?;
+        builder.inherit_stdio().args(argv)?;
 
         for (key, value) in vars {
             let value = match value {
@@ -706,49 +694,25 @@ fn populate_with_wasi(
                 None => std::env::var(key)
                     .map_err(|_| anyhow!("environment varialbe `{key}` not found"))?,
             };
-            builder = builder.env(key, &value)?;
+            builder.env(key, &value)?;
         }
 
         let mut num_fd: usize = 3;
 
         if listenfd {
-            let (n, b) = ctx_set_listenfd(num_fd, builder)?;
-            num_fd = n;
-            builder = b;
+            num_fd = ctx_set_listenfd(num_fd, &mut builder)?;
         }
 
         for listener in tcplisten.drain(..) {
-            builder = builder.preopened_socket(num_fd as _, listener)?;
+            builder.preopened_socket(num_fd as _, listener)?;
             num_fd += 1;
         }
 
         for (name, dir) in preopen_dirs.into_iter() {
-            builder = builder.preopened_dir(dir, name)?;
+            builder.preopened_dir(dir, name)?;
         }
 
         store.data_mut().wasi = Some(builder.build());
-    }
-
-    if wasi_modules.wasi_crypto {
-        #[cfg(not(feature = "wasi-crypto"))]
-        {
-            bail!("Cannot enable wasi-crypto when the binary is not compiled with this feature.");
-        }
-        #[cfg(feature = "wasi-crypto")]
-        {
-            wasmtime_wasi_crypto::add_to_linker(linker, |host| {
-                // This WASI proposal is currently not protected against
-                // concurrent access--i.e., when wasi-threads is actively
-                // spawning new threads, we cannot (yet) safely allow access and
-                // fail if more than one thread has `Arc`-references to the
-                // context. Once this proposal is updated (as wasi-common has
-                // been) to allow concurrent access, this `Arc::get_mut`
-                // limitation can be removed.
-                Arc::get_mut(host.wasi_crypto.as_mut().unwrap())
-                    .expect("wasi-crypto is not implemented with multi-threading support")
-            })?;
-            store.data_mut().wasi_crypto = Some(Arc::new(WasiCryptoCtx::new()));
-        }
     }
 
     if wasi_modules.wasi_nn {
@@ -759,7 +723,13 @@ fn populate_with_wasi(
         #[cfg(feature = "wasi-nn")]
         {
             wasmtime_wasi_nn::add_to_linker(linker, |host| {
-                // See documentation for wasi-crypto for why this is needed.
+                // This WASI proposal is currently not protected against
+                // concurrent access--i.e., when wasi-threads is actively
+                // spawning new threads, we cannot (yet) safely allow access and
+                // fail if more than one thread has `Arc`-references to the
+                // context. Once this proposal is updated (as wasi-common has
+                // been) to allow concurrent access, this `Arc::get_mut`
+                // limitation can be removed.
                 Arc::get_mut(host.wasi_nn.as_mut().unwrap())
                     .expect("wasi-nn is not implemented with multi-threading support")
             })?;
@@ -807,20 +777,17 @@ fn populate_with_wasi(
 }
 
 #[cfg(not(unix))]
-fn ctx_set_listenfd(num_fd: usize, builder: WasiCtxBuilder) -> Result<(usize, WasiCtxBuilder)> {
-    Ok((num_fd, builder))
+fn ctx_set_listenfd(num_fd: usize, _builder: &mut WasiCtxBuilder) -> Result<usize> {
+    Ok(num_fd)
 }
 
 #[cfg(unix)]
-fn ctx_set_listenfd(num_fd: usize, builder: WasiCtxBuilder) -> Result<(usize, WasiCtxBuilder)> {
+fn ctx_set_listenfd(mut num_fd: usize, builder: &mut WasiCtxBuilder) -> Result<usize> {
     use listenfd::ListenFd;
-
-    let mut builder = builder;
-    let mut num_fd = num_fd;
 
     for env in ["LISTEN_FDS", "LISTEN_FDNAMES"] {
         if let Ok(val) = std::env::var(env) {
-            builder = builder.env(env, &val)?;
+            builder.env(env, &val)?;
         }
     }
 
@@ -830,12 +797,12 @@ fn ctx_set_listenfd(num_fd: usize, builder: WasiCtxBuilder) -> Result<(usize, Wa
         if let Some(stdlistener) = listenfd.take_tcp_listener(i)? {
             let _ = stdlistener.set_nonblocking(true)?;
             let listener = TcpListener::from_std(stdlistener);
-            builder = builder.preopened_socket((3 + i) as _, listener)?;
+            builder.preopened_socket((3 + i) as _, listener)?;
             num_fd = 3 + i;
         }
     }
 
-    Ok((num_fd, builder))
+    Ok(num_fd)
 }
 
 fn generate_coredump(err: &anyhow::Error, source_name: &str, coredump_path: &str) -> Result<()> {
