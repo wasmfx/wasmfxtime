@@ -2697,7 +2697,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         base_addr: ir::Value,
     ) -> ir::Value {
-        let memflags = ir::MemFlags::trusted().with_readonly();
+        let memflags = ir::MemFlags::trusted();
         let offset = i32::try_from(self.offsets.vmctx_typed_continuations_store()).unwrap();
         builder
             .ins()
