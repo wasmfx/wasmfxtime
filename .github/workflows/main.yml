@@ -266,6 +266,7 @@ jobs:
     - run: cargo check -p wasmtime --no-default-features --features component-model
     - run: cargo check -p wasmtime --no-default-features --features cranelift,wat,async,cache
     - run: cargo check -p wasmtime --no-default-features --features winch
+    - run: cargo check -p wasmtime --no-default-features --features wmemcheck
     - run: cargo check --features component-model
     - run: cargo check -p wasmtime --features incremental-cache
 
@@ -373,7 +374,7 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     env:
-      QEMU_BUILD_VERSION: 7.2.0
+      QEMU_BUILD_VERSION: 8.0.4
     strategy:
       fail-fast: true
       matrix: ${{ fromJson(needs.determine.outputs.test-matrix) }}
@@ -453,6 +454,12 @@ jobs:
       env:
         RUST_BACKTRACE: 1
       if: matrix.target == '' && matrix.os != 'windows-latest' && needs.determine.outputs.test-capi
+
+    # Ensure wit definitions are in sync: both wasmtime-wasi and wasmtime-wasi-http need their own
+    # copy of the wit definitions so publishing works, but we need to ensure they are identical copies.
+    - name: Check that the wasi and wasi-http wit directories agree
+      run: |
+        diff -ru crates/wasi/wit crates/wasi-http/wit
 
     # Build and test all features
     - run: ./ci/run-tests.sh --locked

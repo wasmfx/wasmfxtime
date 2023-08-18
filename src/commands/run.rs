@@ -23,8 +23,8 @@ use wasmtime_wasi_nn::WasiNnCtx;
 #[cfg(feature = "wasi-threads")]
 use wasmtime_wasi_threads::WasiThreadsCtx;
 
-#[cfg(feature = "wasi-http")]
-use wasmtime_wasi_http::WasiHttp;
+// #[cfg(feature = "wasi-http")]
+// use wasmtime_wasi_http::WasiHttpCtx;
 
 fn parse_env_var(s: &str) -> Result<(String, Option<String>)> {
     let mut parts = s.splitn(2, '=');
@@ -224,6 +224,12 @@ pub struct RunCommand {
     #[clap(long)]
     trap_on_grow_failure: bool,
 
+    /// Enables memory error checking.
+    ///
+    /// See wmemcheck.md for documentation on how to use.
+    #[clap(long)]
+    wmemcheck: bool,
+
     /// The WebAssembly module to run and arguments to pass to it.
     ///
     /// Arguments passed to the wasm module will be configured as WASI CLI
@@ -259,6 +265,8 @@ impl RunCommand {
             }
             None => {}
         }
+
+        config.wmemcheck(self.wmemcheck);
 
         let engine = Engine::new(&config)?;
 
@@ -664,8 +672,8 @@ struct Host {
     wasi_nn: Option<Arc<WasiNnCtx>>,
     #[cfg(feature = "wasi-threads")]
     wasi_threads: Option<Arc<WasiThreadsCtx<Host>>>,
-    #[cfg(feature = "wasi-http")]
-    wasi_http: Option<WasiHttp>,
+    // #[cfg(feature = "wasi-http")]
+    // wasi_http: Option<Arc<WasiHttpCtx>>,
     limits: StoreLimits,
     guest_profiler: Option<Arc<GuestProfiler>>,
 }
@@ -722,7 +730,7 @@ fn populate_with_wasi(
         }
         #[cfg(feature = "wasi-nn")]
         {
-            wasmtime_wasi_nn::add_to_linker(linker, |host| {
+            wasmtime_wasi_nn::witx::add_to_linker(linker, |host| {
                 // This WASI proposal is currently not protected against
                 // concurrent access--i.e., when wasi-threads is actively
                 // spawning new threads, we cannot (yet) safely allow access and
@@ -733,7 +741,7 @@ fn populate_with_wasi(
                 Arc::get_mut(host.wasi_nn.as_mut().unwrap())
                     .expect("wasi-nn is not implemented with multi-threading support")
             })?;
-            store.data_mut().wasi_nn = Some(Arc::new(WasiNnCtx::new()?));
+            store.data_mut().wasi_nn = Some(Arc::new(WasiNnCtx::default()));
         }
     }
 
@@ -765,11 +773,7 @@ fn populate_with_wasi(
         }
         #[cfg(feature = "wasi-http")]
         {
-            let w_http = WasiHttp::new();
-            wasmtime_wasi_http::add_to_linker(linker, |host: &mut Host| {
-                host.wasi_http.as_mut().unwrap()
-            })?;
-            store.data_mut().wasi_http = Some(w_http);
+            bail!("wasi-http support will be swapped over to component CLI support soon");
         }
     }
 
