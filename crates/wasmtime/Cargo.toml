@@ -133,8 +133,3 @@ component-model = [
 ]
 
 wmemcheck = ["wasmtime-runtime/wmemcheck", "wasmtime-cranelift/wmemcheck"]
-
-unsafe_disable_continuation_linearity_check = [
-  "wasmtime-cranelift/unsafe_disable_continuation_linearity_check",
-  "wasmtime-runtime/unsafe_disable_continuation_linearity_check"
-]
