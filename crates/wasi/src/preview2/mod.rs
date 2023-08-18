@@ -20,11 +20,11 @@ pub mod command;
 mod ctx;
 mod error;
 mod filesystem;
+mod host;
 pub mod pipe;
 mod poll;
 #[cfg(feature = "preview1-on-preview2")]
 pub mod preview1;
-mod preview2;
 mod random;
 mod stdio;
 mod stream;
@@ -36,7 +36,10 @@ pub use self::error::I32Exit;
 pub use self::filesystem::{DirPerms, FilePerms};
 pub use self::poll::{ClosureFuture, HostPollable, MakeFuture, PollableFuture, TablePollableExt};
 pub use self::random::{thread_rng, Deterministic};
-pub use self::stream::{HostInputStream, HostOutputStream, StreamState, TableStreamExt};
+pub use self::stdio::{stderr, stdin, stdout, IsATTY, Stderr, Stdin, Stdout};
+pub use self::stream::{
+    HostInputStream, HostOutputStream, StreamRuntimeError, StreamState, TableStreamExt,
+};
 pub use self::table::{OccupiedEntry, Table, TableError};
 pub use cap_fs_ext::SystemTimeSpec;
 pub use cap_rand::RngCore;
@@ -53,7 +56,6 @@ pub mod bindings {
             ",
                 tracing: true,
                 trappable_error_type: {
-                    "wasi:io/streams"::"stream-error": Error,
                     "wasi:filesystem/types"::"error-code": Error,
                 },
                 with: {
@@ -62,22 +64,6 @@ pub mod bindings {
             });
         }
         pub use self::_internal::wasi::{filesystem, io, poll};
-
-        impl From<super::io::streams::StreamError> for io::streams::StreamError {
-            fn from(other: super::io::streams::StreamError) -> Self {
-                let super::io::streams::StreamError { dummy } = other;
-                Self { dummy }
-            }
-        }
-
-        impl From<super::io::streams::Error> for io::streams::Error {
-            fn from(other: super::io::streams::Error) -> Self {
-                match other.downcast() {
-                    Ok(se) => io::streams::Error::from(io::streams::StreamError::from(se)),
-                    Err(e) => io::streams::Error::trap(e),
-                }
-            }
-        }
     }
 
     pub(crate) mod _internal_clocks {
@@ -104,7 +90,6 @@ pub mod bindings {
             tracing: true,
             async: true,
             trappable_error_type: {
-                "wasi:io/streams"::"stream-error": Error,
                 "wasi:filesystem/types"::"error-code": Error,
             },
             with: {
@@ -122,16 +107,20 @@ pub mod bindings {
               import wasi:random/random
               import wasi:random/insecure
               import wasi:random/insecure-seed
-              import wasi:cli-base/environment
-              import wasi:cli-base/exit
-              import wasi:cli-base/stdin
-              import wasi:cli-base/stdout
-              import wasi:cli-base/stderr
+              import wasi:cli/environment
+              import wasi:cli/exit
+              import wasi:cli/stdin
+              import wasi:cli/stdout
+              import wasi:cli/stderr
+              import wasi:cli/terminal-input
+              import wasi:cli/terminal-output
+              import wasi:cli/terminal-stdin
+              import wasi:cli/terminal-stdout
+              import wasi:cli/terminal-stderr
             ",
         tracing: true,
         trappable_error_type: {
             "wasi:filesystem/types"::"error-code": Error,
-            "wasi:io/streams"::"stream-error": Error,
         },
         with: {
             "wasi:clocks/wall-clock": crate::preview2::bindings::clocks::wall_clock,
@@ -142,7 +131,7 @@ pub mod bindings {
         });
     }
 
-    pub use self::_internal_rest::wasi::{cli_base, random};
+    pub use self::_internal_rest::wasi::{cli, random};
     pub mod filesystem {
         pub use super::_internal_io::wasi::filesystem::types;
         pub use super::_internal_rest::wasi::filesystem::preopens;
