@@ -113,28 +113,24 @@ pub trait PtrSize {
     }
 
     /// The offset of the `native_call` field.
-    #[allow(clippy::erasing_op)]
     #[inline]
     fn vm_func_ref_native_call(&self) -> u8 {
         0 * self.size()
     }
 
     /// The offset of the `array_call` field.
-    #[allow(clippy::erasing_op)]
     #[inline]
     fn vm_func_ref_array_call(&self) -> u8 {
         1 * self.size()
     }
 
     /// The offset of the `wasm_call` field.
-    #[allow(clippy::erasing_op)]
     #[inline]
     fn vm_func_ref_wasm_call(&self) -> u8 {
         2 * self.size()
     }
 
     /// The offset of the `type_index` field.
-    #[allow(clippy::identity_op)]
     #[inline]
     fn vm_func_ref_type_index(&self) -> u8 {
         3 * self.size()
@@ -203,14 +199,12 @@ pub trait PtrSize {
     // Offsets within `VMMemoryDefinition`
 
     /// The offset of the `base` field.
-    #[allow(clippy::erasing_op)]
     #[inline]
     fn vmmemory_definition_base(&self) -> u8 {
         0 * self.size()
     }
 
     /// The offset of the `current_length` field.
-    #[allow(clippy::identity_op)]
     #[inline]
     fn vmmemory_definition_current_length(&self) -> u8 {
         1 * self.size()
@@ -502,28 +496,24 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
 
 impl<P: PtrSize> VMOffsets<P> {
     /// The offset of the `wasm_call` field.
-    #[allow(clippy::erasing_op)]
     #[inline]
     pub fn vmfunction_import_wasm_call(&self) -> u8 {
         0 * self.pointer_size()
     }
 
     /// The offset of the `native_call` field.
-    #[allow(clippy::erasing_op)]
     #[inline]
     pub fn vmfunction_import_native_call(&self) -> u8 {
         1 * self.pointer_size()
     }
 
     /// The offset of the `array_call` field.
-    #[allow(clippy::erasing_op)]
     #[inline]
     pub fn vmfunction_import_array_call(&self) -> u8 {
         2 * self.pointer_size()
     }
 
     /// The offset of the `vmctx` field.
-    #[allow(clippy::identity_op)]
     #[inline]
     pub fn vmfunction_import_vmctx(&self) -> u8 {
         3 * self.pointer_size()
@@ -539,7 +529,6 @@ impl<P: PtrSize> VMOffsets<P> {
 /// Offsets for `*const VMFunctionBody`.
 impl<P: PtrSize> VMOffsets<P> {
     /// The size of the `current_elements` field.
-    #[allow(clippy::identity_op)]
     pub fn size_of_vmfunction_body_ptr(&self) -> u8 {
         1 * self.pointer_size()
     }
@@ -548,14 +537,12 @@ impl<P: PtrSize> VMOffsets<P> {
 /// Offsets for `VMTableImport`.
 impl<P: PtrSize> VMOffsets<P> {
     /// The offset of the `from` field.
-    #[allow(clippy::erasing_op)]
     #[inline]
     pub fn vmtable_import_from(&self) -> u8 {
         0 * self.pointer_size()
     }
 
     /// The offset of the `vmctx` field.
-    #[allow(clippy::identity_op)]
     #[inline]
     pub fn vmtable_import_vmctx(&self) -> u8 {
         1 * self.pointer_size()
@@ -571,14 +558,12 @@ impl<P: PtrSize> VMOffsets<P> {
 /// Offsets for `VMTableDefinition`.
 impl<P: PtrSize> VMOffsets<P> {
     /// The offset of the `base` field.
-    #[allow(clippy::erasing_op)]
     #[inline]
     pub fn vmtable_definition_base(&self) -> u8 {
         0 * self.pointer_size()
     }
 
     /// The offset of the `current_elements` field.
-    #[allow(clippy::identity_op)]
     pub fn vmtable_definition_current_elements(&self) -> u8 {
         1 * self.pointer_size()
     }
@@ -599,14 +584,12 @@ impl<P: PtrSize> VMOffsets<P> {
 /// Offsets for `VMMemoryImport`.
 impl<P: PtrSize> VMOffsets<P> {
     /// The offset of the `from` field.
-    #[allow(clippy::erasing_op)]
     #[inline]
     pub fn vmmemory_import_from(&self) -> u8 {
         0 * self.pointer_size()
     }
 
     /// The offset of the `vmctx` field.
-    #[allow(clippy::identity_op)]
     #[inline]
     pub fn vmmemory_import_vmctx(&self) -> u8 {
         1 * self.pointer_size()
@@ -622,14 +605,12 @@ impl<P: PtrSize> VMOffsets<P> {
 /// Offsets for `VMGlobalImport`.
 impl<P: PtrSize> VMOffsets<P> {
     /// The offset of the `from` field.
-    #[allow(clippy::erasing_op)]
     #[inline]
     pub fn vmglobal_import_from(&self) -> u8 {
         0 * self.pointer_size()
     }
 
     /// Return the size of `VMGlobalImport`.
-    #[allow(clippy::identity_op)]
     #[inline]
     pub fn size_of_vmglobal_import(&self) -> u8 {
         1 * self.pointer_size()
@@ -690,14 +671,12 @@ impl<P: PtrSize> VMOffsets<P> {
     }
 
     /// The offset of the `tables` array.
-    #[allow(clippy::erasing_op)]
     #[inline]
     pub fn vmctx_imported_functions_begin(&self) -> u32 {
         self.imported_functions
     }
 
     /// The offset of the `tables` array.
-    #[allow(clippy::identity_op)]
     #[inline]
     pub fn vmctx_imported_tables_begin(&self) -> u32 {
         self.imported_tables

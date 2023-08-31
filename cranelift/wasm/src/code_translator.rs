@@ -114,11 +114,6 @@ macro_rules! unwrap_or_return_unreachable_state {
     };
 }
 
-// Clippy warns about "align: _" but its important to document that the flags field is ignored
-#[cfg_attr(
-    feature = "cargo-clippy",
-    allow(clippy::unneeded_field_pattern, clippy::cognitive_complexity)
-)]
 /// Translates wasm operators into Cranelift IR instructions.
 pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
     validator: &mut FuncValidator<impl WasmModuleResources>,
@@ -1956,12 +1951,29 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             state.push1(builder.ins().fmin(a, b))
         }
         Operator::F32x4PMax | Operator::F64x2PMax => {
-            let (a, b) = pop2_with_bitcast(state, type_of(op), builder);
-            state.push1(builder.ins().fmax_pseudo(a, b))
+            // Note the careful ordering here with respect to `fcmp` and
+            // `bitselect`. This matches the spec definition of:
+            //
+            //  fpmax(z1, z2) =
+            //      * If z1 is less than z2 then return z2.
+            //      * Else return z1.
+            let ty = type_of(op);
+            let (a, b) = pop2_with_bitcast(state, ty, builder);
+            let cmp = builder.ins().fcmp(FloatCC::LessThan, a, b);
+            let cmp = optionally_bitcast_vector(cmp, ty, builder);
+            state.push1(builder.ins().bitselect(cmp, b, a))
         }
         Operator::F32x4PMin | Operator::F64x2PMin => {
-            let (a, b) = pop2_with_bitcast(state, type_of(op), builder);
-            state.push1(builder.ins().fmin_pseudo(a, b))
+            // Note the careful ordering here which is similar to `pmax` above:
+            //
+            //  fpmin(z1, z2) =
+            //      * If z2 is less than z1 then return z2.
+            //      * Else return z1.
+            let ty = type_of(op);
+            let (a, b) = pop2_with_bitcast(state, ty, builder);
+            let cmp = builder.ins().fcmp(FloatCC::LessThan, b, a);
+            let cmp = optionally_bitcast_vector(cmp, ty, builder);
+            state.push1(builder.ins().bitselect(cmp, b, a))
         }
         Operator::F32x4Sqrt | Operator::F64x2Sqrt => {
             let a = pop1_with_bitcast(state, type_of(op), builder);
@@ -2243,27 +2255,39 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         }
 
         Operator::F32x4RelaxedMax | Operator::F64x2RelaxedMax => {
-            let (a, b) = pop2_with_bitcast(state, type_of(op), builder);
+            let ty = type_of(op);
+            let (a, b) = pop2_with_bitcast(state, ty, builder);
             state.push1(
                 if environ.relaxed_simd_deterministic() || !environ.is_x86() {
                     // Deterministic semantics match the `fmax` instruction, or
                     // the `fAAxBB.max` wasm instruction.
                     builder.ins().fmax(a, b)
                 } else {
-                    builder.ins().fmax_pseudo(a, b)
+                    // Note that this matches the `pmax` translation which has
+                    // careful ordering of its operands to trigger
+                    // pattern-matches in the x86 backend.
+                    let cmp = builder.ins().fcmp(FloatCC::LessThan, a, b);
+                    let cmp = optionally_bitcast_vector(cmp, ty, builder);
+                    builder.ins().bitselect(cmp, b, a)
                 },
             )
         }
 
         Operator::F32x4RelaxedMin | Operator::F64x2RelaxedMin => {
-            let (a, b) = pop2_with_bitcast(state, type_of(op), builder);
+            let ty = type_of(op);
+            let (a, b) = pop2_with_bitcast(state, ty, builder);
             state.push1(
                 if environ.relaxed_simd_deterministic() || !environ.is_x86() {
                     // Deterministic semantics match the `fmin` instruction, or
                     // the `fAAxBB.min` wasm instruction.
                     builder.ins().fmin(a, b)
                 } else {
-                    builder.ins().fmin_pseudo(a, b)
+                    // Note that this matches the `pmin` translation which has
+                    // careful ordering of its operands to trigger
+                    // pattern-matches in the x86 backend.
+                    let cmp = builder.ins().fcmp(FloatCC::LessThan, b, a);
+                    let cmp = optionally_bitcast_vector(cmp, ty, builder);
+                    builder.ins().bitselect(cmp, b, a)
                 },
             );
         }
@@ -2738,8 +2762,6 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
     Ok(())
 }
 
-// Clippy warns us of some fields we are deliberately ignoring
-#[cfg_attr(feature = "cargo-clippy", allow(clippy::unneeded_field_pattern))]
 /// Deals with a Wasm instruction located in an unreachable portion of the code. Most of them
 /// are dropped but special ones like `End` or `Else` signal the potential end of the unreachable
 /// portion so the translation state must be updated accordingly.

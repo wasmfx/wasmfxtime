@@ -244,13 +244,13 @@ WASMTIME_CONFIG_PROP(void, cranelift_debug_verifier, bool)
  * When Cranelift is used as a code generation backend this will configure
  * it to replace NaNs with a single canonical value. This is useful for users
  * requiring entirely deterministic WebAssembly computation.
- * 
+ *
  * This is not required by the WebAssembly spec, so it is not enabled by default.
- * 
+ *
  * The default value for this is `false`
  */
 WASMTIME_CONFIG_PROP(void, cranelift_nan_canonicalization, bool)
-  
+
 /**
  * \brief Configures Cranelift's optimization level for JIT code.
  *
@@ -300,6 +300,24 @@ WASMTIME_CONFIG_PROP(void, static_memory_guard_size, uint64_t)
 WASMTIME_CONFIG_PROP(void, dynamic_memory_guard_size, uint64_t)
 
 /**
+ * \brief Configures the size, in bytes, of the extra virtual memory space reserved after a “dynamic” memory for growing into.
+ *
+ * For more information see the Rust documentation at
+ * https://docs.wasmtime.dev/api/wasmtime/struct.Config.html#method.dynamic_memory_reserved_for_growth
+ */
+WASMTIME_CONFIG_PROP(void, dynamic_memory_reserved_for_growth, uint64_t)
+
+/**
+ * \brief Configures whether to generate native unwind information (e.g. .eh_frame on Linux).
+ *
+ * This option defaults to true.
+ *
+ * For more information see the Rust documentation at
+ * https://docs.wasmtime.dev/api/wasmtime/struct.Config.html#method.native_unwind_info
+ */
+WASMTIME_CONFIG_PROP(void, native_unwind_info, bool)
+
+/**
  * \brief Enables Wasmtime's cache and loads configuration from the specified
  * path.
  *
@@ -312,6 +330,42 @@ WASMTIME_CONFIG_PROP(void, dynamic_memory_guard_size, uint64_t)
  * cache could not be enabled.
  */
 WASM_API_EXTERN wasmtime_error_t* wasmtime_config_cache_config_load(wasm_config_t*, const char*);
+
+/**
+ * \brief Configures the target triple that this configuration will produce
+ * machine code for.
+ *
+ * This option defaults to the native host. Calling this method will
+ * additionally disable inference of the native features of the host (e.g.
+ * detection of SSE4.2 on x86_64 hosts). Native features can be reenabled with
+ * the `cranelift_flag_{set,enable}` properties.
+ *
+ * For more information see the Rust documentation at
+ * https://docs.wasmtime.dev/api/wasmtime/struct.Config.html#method.config
+ */
+WASMTIME_CONFIG_PROP(wasmtime_error_t*, target, const char*)
+
+/**
+ * \brief Enables a target-specific flag in Cranelift.
+ *
+ * This can be used, for example, to enable SSE4.2 on x86_64 hosts. Settings can
+ * be explored with `wasmtime settings` on the CLI.
+ *
+ * For more information see the Rust documentation at
+ * https://docs.wasmtime.dev/api/wasmtime/struct.Config.html#method.cranelift_flag_enable
+ */
+WASM_API_EXTERN void wasmtime_config_cranelift_flag_enable(wasm_config_t*, const char*);
+
+/**
+ * \brief Sets a target-specific flag in Cranelift to the specified value.
+ *
+ * This can be used, for example, to enable SSE4.2 on x86_64 hosts. Settings can
+ * be explored with `wasmtime settings` on the CLI.
+ *
+ * For more information see the Rust documentation at
+ * https://docs.wasmtime.dev/api/wasmtime/struct.Config.html#method.cranelift_flag_set
+ */
+WASM_API_EXTERN void wasmtime_config_cranelift_flag_set(wasm_config_t*, const char *key, const char *value);
 
 #ifdef __cplusplus
 }  // extern "C"
