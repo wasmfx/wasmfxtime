@@ -6,7 +6,7 @@ on:
   # `release-*` branches will run full CI.
   pull_request:
     branches:
-    - 'typed-continuations'
+    - 'main'
 
   # Run full CI on the `typed-continuations` branch once a day to prime the GitHub Actions
   # caches used by PRs and the merge queue.
