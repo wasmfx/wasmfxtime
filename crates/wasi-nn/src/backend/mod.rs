@@ -2,33 +2,46 @@
 //! this crate. The `Box<dyn ...>` types returned by these interfaces allow
 //! implementations to maintain backend-specific state between calls.
 
-mod openvino;
+pub mod openvino;
 
 use self::openvino::OpenvinoBackend;
-use crate::wit::types::{ExecutionTarget, Tensor};
-use crate::{ExecutionContext, Graph};
+use crate::wit::types::{ExecutionTarget, GraphEncoding, Tensor};
+use crate::{Backend, ExecutionContext, Graph};
+use std::path::Path;
 use thiserror::Error;
 use wiggle::GuestError;
 
 /// Return a list of all available backend frameworks.
-pub fn list() -> Vec<(BackendKind, Box<dyn Backend>)> {
-    vec![(BackendKind::OpenVINO, Box::new(OpenvinoBackend::default()))]
+pub fn list() -> Vec<crate::Backend> {
+    vec![Backend::from(OpenvinoBackend::default())]
 }
 
-/// A [Backend] contains the necessary state to load [BackendGraph]s.
-pub trait Backend: Send + Sync {
-    fn name(&self) -> &str;
+/// A [Backend] contains the necessary state to load [Graph]s.
+pub trait BackendInner: Send + Sync {
+    fn encoding(&self) -> GraphEncoding;
     fn load(&mut self, builders: &[&[u8]], target: ExecutionTarget) -> Result<Graph, BackendError>;
+    fn as_dir_loadable<'a>(&'a mut self) -> Option<&'a mut dyn BackendFromDir>;
+}
+
+/// Some [Backend]s support loading a [Graph] from a directory on the
+/// filesystem; this is not a general requirement for backends but is useful for
+/// the Wasmtime CLI.
+pub trait BackendFromDir: BackendInner {
+    fn load_from_dir(
+        &mut self,
+        builders: &Path,
+        target: ExecutionTarget,
+    ) -> Result<Graph, BackendError>;
 }
 
 /// A [BackendGraph] can create [BackendExecutionContext]s; this is the backing
-/// implementation for a [crate::witx::types::Graph].
+/// implementation for the user-facing graph.
 pub trait BackendGraph: Send + Sync {
-    fn init_execution_context(&mut self) -> Result<ExecutionContext, BackendError>;
+    fn init_execution_context(&self) -> Result<ExecutionContext, BackendError>;
 }
 
 /// A [BackendExecutionContext] performs the actual inference; this is the
-/// backing implementation for a [crate::witx::types::GraphExecutionContext].
+/// backing implementation for a user-facing execution context.
 pub trait BackendExecutionContext: Send + Sync {
     fn set_input(&mut self, index: u32, tensor: &Tensor) -> Result<(), BackendError>;
     fn compute(&mut self) -> Result<(), BackendError>;
@@ -47,9 +60,4 @@ pub enum BackendError {
     InvalidNumberOfBuilders(usize, usize),
     #[error("Not enough memory to copy tensor data of size: {0}")]
     NotEnoughMemory(usize),
-}
-
-#[derive(Hash, PartialEq, Debug, Eq, Clone, Copy)]
-pub enum BackendKind {
-    OpenVINO,
 }

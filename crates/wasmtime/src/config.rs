@@ -1,7 +1,7 @@
 use crate::memory::MemoryCreator;
 use crate::trampoline::MemoryCreatorProxy;
 use anyhow::{bail, ensure, Result};
-use serde::{Deserialize, Serialize};
+use serde_derive::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 #[cfg(any(feature = "cache", feature = "cranelift", feature = "winch"))]
@@ -101,7 +101,7 @@ pub struct Config {
     pub(crate) features: WasmFeatures,
     pub(crate) wasm_backtrace: bool,
     pub(crate) wasm_backtrace_details_env_used: bool,
-    pub(crate) native_unwind_info: bool,
+    pub(crate) native_unwind_info: Option<bool>,
     #[cfg(feature = "async")]
     pub(crate) async_stack_size: usize,
     pub(crate) async_support: bool,
@@ -194,7 +194,7 @@ impl Config {
             max_wasm_stack: 512 * 1024,
             wasm_backtrace: true,
             wasm_backtrace_details_env_used: false,
-            native_unwind_info: true,
+            native_unwind_info: None,
             features: WasmFeatures::default(),
             #[cfg(feature = "async")]
             async_stack_size: 2 << 20,
@@ -431,14 +431,13 @@ impl Config {
     /// [`WasmBacktrace`] is controlled by the [`Config::wasm_backtrace`]
     /// option.
     ///
-    /// Note that native unwind information is always generated when targeting
-    /// Windows, since the Windows ABI requires it.
-    ///
-    /// This option defaults to `true`.
+    /// Native unwind information is included:
+    /// - When targeting Windows, since the Windows ABI requires it.
+    /// - By default.
     ///
     /// [`WasmBacktrace`]: crate::WasmBacktrace
     pub fn native_unwind_info(&mut self, enable: bool) -> &mut Self {
-        self.native_unwind_info = enable;
+        self.native_unwind_info = Some(enable);
         self
     }
 
@@ -1653,7 +1652,12 @@ impl Config {
             .insert("probestack_strategy".into(), "inline".into());
 
         let host = target_lexicon::Triple::host();
-        let target = self.compiler_config.target.as_ref().unwrap_or(&host);
+        let target = self
+            .compiler_config
+            .target
+            .as_ref()
+            .unwrap_or(&host)
+            .clone();
 
         // On supported targets, we enable stack probing by default.
         // This is required on Windows because of the way Windows
@@ -1674,15 +1678,21 @@ impl Config {
             );
         }
 
-        if self.native_unwind_info ||
-             // Windows always needs unwind info, since it is part of the ABI.
-             target.operating_system == target_lexicon::OperatingSystem::Windows
-        {
+        if let Some(unwind_requested) = self.native_unwind_info {
+            if !self
+                .compiler_config
+                .ensure_setting_unset_or_given("unwind_info", &unwind_requested.to_string())
+            {
+                bail!("incompatible settings requested for Cranelift and Wasmtime `unwind-info` settings");
+            }
+        }
+
+        if target.operating_system == target_lexicon::OperatingSystem::Windows {
             if !self
                 .compiler_config
                 .ensure_setting_unset_or_given("unwind_info", "true")
             {
-                bail!("compiler option 'unwind_info' must be enabled profiling");
+                bail!("`native_unwind_info` cannot be disabled on Windows");
             }
         }
 
@@ -1955,7 +1965,7 @@ impl PoolingAllocationConfig {
     /// If this setting is set to infinity, however, then cold slots are
     /// prioritized to be allocated from. This means that the set of slots used
     /// over the lifetime of a program will approach
-    /// [`PoolingAllocationConfig::instance_count`], or the maximum number of
+    /// [`PoolingAllocationConfig::total_memories`], or the maximum number of
     /// slots in the pooling allocator.
     ///
     /// Wasmtime does not aggressively decommit all resources associated with a
@@ -1965,7 +1975,7 @@ impl PoolingAllocationConfig {
     /// This means that the total set of used slots in the pooling instance
     /// allocator can impact the overall RSS usage of a program.
     ///
-    /// The default value for this option is 100.
+    /// The default value for this option is `100`.
     pub fn max_unused_warm_slots(&mut self, max: u32) -> &mut Self {
         self.config.max_unused_warm_slots = max;
         self
@@ -2048,47 +2058,180 @@ impl PoolingAllocationConfig {
         self
     }
 
-    /// The maximum number of concurrent instances supported (default is 1000).
+    /// The maximum number of concurrent component instances supported (default
+    /// is `1000`).
+    ///
+    /// This provides an upper-bound on the total size of component
+    /// metadata-related allocations, along with
+    /// [`PoolingAllocationConfig::max_component_instance_size`]. The upper bound is
+    ///
+    /// ```text
+    /// total_component_instances * max_component_instance_size
+    /// ```
+    ///
+    /// where `max_component_instance_size` is rounded up to the size and alignment
+    /// of the internal representation of the metadata.
+    pub fn total_component_instances(&mut self, count: u32) -> &mut Self {
+        self.config.limits.total_component_instances = count;
+        self
+    }
+
+    /// The maximum size, in bytes, allocated for a component instance's
+    /// `VMComponentContext` metadata.
+    ///
+    /// The [`wasmtime::component::Instance`][crate::component::Instance] type
+    /// has a static size but its internal `VMComponentContext` is dynamically
+    /// sized depending on the component being instantiated. This size limit
+    /// loosely correlates to the size of the component, taking into account
+    /// factors such as:
+    ///
+    /// * number of lifted and lowered functions,
+    /// * number of memories
+    /// * number of inner instances
+    /// * number of resources
+    ///
+    /// If the allocated size per instance is too small then instantiation of a
+    /// module will fail at runtime with an error indicating how many bytes were
+    /// needed.
+    ///
+    /// The default value for this is 1MiB.
+    ///
+    /// This provides an upper-bound on the total size of component
+    /// metadata-related allocations, along with
+    /// [`PoolingAllocationConfig::total_component_instances`]. The upper bound is
+    ///
+    /// ```text
+    /// total_component_instances * max_component_instance_size
+    /// ```
+    ///
+    /// where `max_component_instance_size` is rounded up to the size and alignment
+    /// of the internal representation of the metadata.
+    pub fn max_component_instance_size(&mut self, size: usize) -> &mut Self {
+        self.config.limits.component_instance_size = size;
+        self
+    }
+
+    /// The maximum number of core instances a single component may contain
+    /// (default is `20`).
+    ///
+    /// This method (along with
+    /// [`PoolingAllocationConfig::max_memories_per_component`],
+    /// [`PoolingAllocationConfig::max_tables_per_component`], and
+    /// [`PoolingAllocationConfig::max_component_instance_size`]) allows you to cap
+    /// the amount of resources a single component allocation consumes.
+    ///
+    /// If a component will instantiate more core instances than `count`, then
+    /// the component will fail to instantiate.
+    pub fn max_core_instances_per_component(&mut self, count: u32) -> &mut Self {
+        self.config.limits.max_core_instances_per_component = count;
+        self
+    }
+
+    /// The maximum number of Wasm linear memories that a single component may
+    /// transitively contain (default is `20`).
+    ///
+    /// This method (along with
+    /// [`PoolingAllocationConfig::max_core_instances_per_component`],
+    /// [`PoolingAllocationConfig::max_tables_per_component`], and
+    /// [`PoolingAllocationConfig::max_component_instance_size`]) allows you to cap
+    /// the amount of resources a single component allocation consumes.
+    ///
+    /// If a component transitively contains more linear memories than `count`,
+    /// then the component will fail to instantiate.
+    pub fn max_memories_per_component(&mut self, count: u32) -> &mut Self {
+        self.config.limits.max_memories_per_component = count;
+        self
+    }
+
+    /// The maximum number of tables that a single component may transitively
+    /// contain (default is `20`).
+    ///
+    /// This method (along with
+    /// [`PoolingAllocationConfig::max_core_instances_per_component`],
+    /// [`PoolingAllocationConfig::max_memories_per_component`],
+    /// [`PoolingAllocationConfig::max_component_instance_size`]) allows you to cap
+    /// the amount of resources a single component allocation consumes.
+    ///
+    /// If a component will transitively contains more tables than `count`, then
+    /// the component will fail to instantiate.
+    pub fn max_tables_per_component(&mut self, count: u32) -> &mut Self {
+        self.config.limits.max_tables_per_component = count;
+        self
+    }
+
+    /// The maximum number of concurrent Wasm linear memories supported (default
+    /// is `1000`).
     ///
     /// This value has a direct impact on the amount of memory allocated by the pooling
     /// instance allocator.
     ///
-    /// The pooling instance allocator allocates three memory pools with sizes depending on this value:
+    /// The pooling instance allocator allocates a memory pool, where each entry
+    /// in the pool contains the reserved address space for each linear memory
+    /// supported by an instance.
     ///
-    /// * An instance pool, where each entry in the pool can store the runtime representation
-    ///   of an instance, including a maximal `VMContext` structure.
+    /// The memory pool will reserve a large quantity of host process address
+    /// space to elide the bounds checks required for correct WebAssembly memory
+    /// semantics. Even with 64-bit address spaces, the address space is limited
+    /// when dealing with a large number of linear memories.
     ///
-    /// * A memory pool, where each entry in the pool contains the reserved address space for each
-    ///   linear memory supported by an instance.
-    ///
-    /// * A table pool, where each entry in the pool contains the space needed for each WebAssembly table
-    ///   supported by an instance (see `table_elements` to control the size of each table).
-    ///
-    /// Additionally, this value will also control the maximum number of execution stacks allowed for
-    /// asynchronous execution (one per instance), when enabled.
-    ///
-    /// The memory pool will reserve a large quantity of host process address space to elide the bounds
-    /// checks required for correct WebAssembly memory semantics. Even for 64-bit address spaces, the
-    /// address space is limited when dealing with a large number of supported instances.
-    ///
-    /// For example, on Linux x86_64, the userland address space limit is 128 TiB. That might seem like a lot,
-    /// but each linear memory will *reserve* 6 GiB of space by default. Multiply that by the number of linear
-    /// memories each instance supports and then by the number of supported instances and it becomes apparent
-    /// that address space can be exhausted depending on the number of supported instances.
-    pub fn instance_count(&mut self, count: u32) -> &mut Self {
-        self.config.limits.count = count;
+    /// For example, on Linux x86_64, the userland address space limit is 128
+    /// TiB. That might seem like a lot, but each linear memory will *reserve* 6
+    /// GiB of space by default.
+    pub fn total_memories(&mut self, count: u32) -> &mut Self {
+        self.config.limits.total_memories = count;
         self
     }
 
-    /// The maximum size, in bytes, allocated for an instance and its
-    /// `VMContext`.
+    /// The maximum number of concurrent tables supported (default is `1000`).
     ///
-    /// This amount of space is pre-allocated for `count` number of instances
-    /// and is used to store the runtime `wasmtime_runtime::Instance` structure
-    /// along with its adjacent `VMContext` structure. The `Instance` type has a
-    /// static size but `VMContext` is dynamically sized depending on the module
-    /// being instantiated. This size limit loosely correlates to the size of
-    /// the wasm module, taking into account factors such as:
+    /// This value has a direct impact on the amount of memory allocated by the
+    /// pooling instance allocator.
+    ///
+    /// The pooling instance allocator allocates a table pool, where each entry
+    /// in the pool contains the space needed for each WebAssembly table
+    /// supported by an instance (see `table_elements` to control the size of
+    /// each table).
+    pub fn total_tables(&mut self, count: u32) -> &mut Self {
+        self.config.limits.total_tables = count;
+        self
+    }
+
+    /// The maximum number of execution stacks allowed for asynchronous
+    /// execution, when enabled (default is `1000`).
+    ///
+    /// This value has a direct impact on the amount of memory allocated by the
+    /// pooling instance allocator.
+    #[cfg(feature = "async")]
+    pub fn total_stacks(&mut self, count: u32) -> &mut Self {
+        self.config.limits.total_stacks = count;
+        self
+    }
+
+    /// The maximum number of concurrent core instances supported (default is
+    /// `1000`).
+    ///
+    /// This provides an upper-bound on the total size of core instance
+    /// metadata-related allocations, along with
+    /// [`PoolingAllocationConfig::max_core_instance_size`]. The upper bound is
+    ///
+    /// ```text
+    /// total_core_instances * max_core_instance_size
+    /// ```
+    ///
+    /// where `max_core_instance_size` is rounded up to the size and alignment of
+    /// the internal representation of the metadata.
+    pub fn total_core_instances(&mut self, count: u32) -> &mut Self {
+        self.config.limits.total_core_instances = count;
+        self
+    }
+
+    /// The maximum size, in bytes, allocated for a core instance's `VMContext`
+    /// metadata.
+    ///
+    /// The [`Instance`][crate::Instance] type has a static size but its
+    /// `VMContext` metadata is dynamically sized depending on the module being
+    /// instantiated. This size limit loosely correlates to the size of the Wasm
+    /// module, taking into account factors such as:
     ///
     /// * number of functions
     /// * number of globals
@@ -2098,71 +2241,91 @@ impl PoolingAllocationConfig {
     ///
     /// If the allocated size per instance is too small then instantiation of a
     /// module will fail at runtime with an error indicating how many bytes were
-    /// needed. This amount of bytes are committed to memory per-instance when
-    /// a pooling allocator is created.
+    /// needed.
     ///
-    /// The default value for this is 1MB.
-    pub fn instance_size(&mut self, size: usize) -> &mut Self {
-        self.config.limits.size = size;
+    /// The default value for this is 1MiB.
+    ///
+    /// This provides an upper-bound on the total size of core instance
+    /// metadata-related allocations, along with
+    /// [`PoolingAllocationConfig::total_core_instances`]. The upper bound is
+    ///
+    /// ```text
+    /// total_core_instances * max_core_instance_size
+    /// ```
+    ///
+    /// where `max_core_instance_size` is rounded up to the size and alignment of
+    /// the internal representation of the metadata.
+    pub fn max_core_instance_size(&mut self, size: usize) -> &mut Self {
+        self.config.limits.core_instance_size = size;
         self
     }
 
-    /// The maximum number of defined tables for a module (default is 1).
+    /// The maximum number of defined tables for a core module (default is `1`).
     ///
-    /// This value controls the capacity of the `VMTableDefinition` table in each instance's
-    /// `VMContext` structure.
+    /// This value controls the capacity of the `VMTableDefinition` table in
+    /// each instance's `VMContext` structure.
     ///
-    /// The allocated size of the table will be `tables * sizeof(VMTableDefinition)` for each
-    /// instance regardless of how many tables are defined by an instance's module.
-    pub fn instance_tables(&mut self, tables: u32) -> &mut Self {
-        self.config.limits.tables = tables;
+    /// The allocated size of the table will be `tables *
+    /// sizeof(VMTableDefinition)` for each instance regardless of how many
+    /// tables are defined by an instance's module.
+    pub fn max_tables_per_module(&mut self, tables: u32) -> &mut Self {
+        self.config.limits.max_tables_per_module = tables;
         self
     }
 
-    /// The maximum table elements for any table defined in a module (default is 10000).
+    /// The maximum table elements for any table defined in a module (default is
+    /// `10000`).
     ///
-    /// If a table's minimum element limit is greater than this value, the module will
-    /// fail to instantiate.
+    /// If a table's minimum element limit is greater than this value, the
+    /// module will fail to instantiate.
     ///
-    /// If a table's maximum element limit is unbounded or greater than this value,
-    /// the maximum will be `table_elements` for the purpose of any `table.grow` instruction.
+    /// If a table's maximum element limit is unbounded or greater than this
+    /// value, the maximum will be `table_elements` for the purpose of any
+    /// `table.grow` instruction.
     ///
-    /// This value is used to reserve the maximum space for each supported table; table elements
-    /// are pointer-sized in the Wasmtime runtime.  Therefore, the space reserved for each instance
-    /// is `tables * table_elements * sizeof::<*const ()>`.
-    pub fn instance_table_elements(&mut self, elements: u32) -> &mut Self {
+    /// This value is used to reserve the maximum space for each supported
+    /// table; table elements are pointer-sized in the Wasmtime runtime.
+    /// Therefore, the space reserved for each instance is `tables *
+    /// table_elements * sizeof::<*const ()>`.
+    pub fn table_elements(&mut self, elements: u32) -> &mut Self {
         self.config.limits.table_elements = elements;
         self
     }
 
-    /// The maximum number of defined linear memories for a module (default is 1).
+    /// The maximum number of defined linear memories for a module (default is
+    /// `1`).
     ///
-    /// This value controls the capacity of the `VMMemoryDefinition` table in each instance's
-    /// `VMContext` structure.
+    /// This value controls the capacity of the `VMMemoryDefinition` table in
+    /// each core instance's `VMContext` structure.
     ///
-    /// The allocated size of the table will be `memories * sizeof(VMMemoryDefinition)` for each
-    /// instance regardless of how many memories are defined by an instance's module.
-    pub fn instance_memories(&mut self, memories: u32) -> &mut Self {
-        self.config.limits.memories = memories;
+    /// The allocated size of the table will be `memories *
+    /// sizeof(VMMemoryDefinition)` for each core instance regardless of how
+    /// many memories are defined by the core instance's module.
+    pub fn max_memories_per_module(&mut self, memories: u32) -> &mut Self {
+        self.config.limits.max_memories_per_module = memories;
         self
     }
 
-    /// The maximum number of pages for any linear memory defined in a module (default is 160).
+    /// The maximum number of Wasm pages for any linear memory defined in a
+    /// module (default is `160`).
     ///
-    /// The default of 160 means at most 10 MiB of host memory may be committed for each instance.
+    /// The default of `160` means at most 10 MiB of host memory may be
+    /// committed for each instance.
     ///
-    /// If a memory's minimum page limit is greater than this value, the module will
-    /// fail to instantiate.
+    /// If a memory's minimum page limit is greater than this value, the module
+    /// will fail to instantiate.
     ///
-    /// If a memory's maximum page limit is unbounded or greater than this value,
-    /// the maximum will be `memory_pages` for the purpose of any `memory.grow` instruction.
+    /// If a memory's maximum page limit is unbounded or greater than this
+    /// value, the maximum will be `memory_pages` for the purpose of any
+    /// `memory.grow` instruction.
     ///
-    /// This value is used to control the maximum accessible space for each linear memory of an instance.
+    /// This value is used to control the maximum accessible space for each
+    /// linear memory of a core instance.
     ///
     /// The reservation size of each linear memory is controlled by the
-    /// `static_memory_maximum_size` setting and this value cannot
-    /// exceed the configured static memory maximum size.
-    pub fn instance_memory_pages(&mut self, pages: u64) -> &mut Self {
+    /// `static_memory_maximum_size` setting and this value cannot exceed the
+    /// configured static memory maximum size.
+    pub fn memory_pages(&mut self, pages: u64) -> &mut Self {
         self.config.limits.memory_pages = pages;
         self
     }

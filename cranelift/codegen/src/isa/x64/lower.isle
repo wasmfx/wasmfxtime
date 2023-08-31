@@ -300,7 +300,8 @@
 
 ;; `i128`.
 
-(rule 7 (lower (has_type $I128 (band x y)))
+(decl and_i128 (ValueRegs ValueRegs) ValueRegs)
+(rule (and_i128 x y)
       (let ((x_regs ValueRegs x)
             (x_lo Gpr (value_regs_get_gpr x_regs 0))
             (x_hi Gpr (value_regs_get_gpr x_regs 1))
@@ -309,6 +310,9 @@
             (y_hi Gpr (value_regs_get_gpr y_regs 1)))
         (value_gprs (x64_and $I64 x_lo y_lo)
                     (x64_and $I64 x_hi y_hi))))
+
+(rule 7 (lower (has_type $I128 (band x y)))
+      (and_i128 x y))
 
 ;; Specialized lowerings for `(band x (bnot y))` which is additionally produced
 ;; by Cranelift's `band_not` instruction that is legalized into the simpler
@@ -1370,10 +1374,7 @@
                                     if_false)))
       (if-let $true (use_sse41))
       (if (all_ones_or_all_zeros condition))
-      (x64_blend ty
-                 condition
-                 if_true
-                 if_false))
+      (x64_pblendvb if_false if_true condition))
 
 (decl pure partial all_ones_or_all_zeros (Value) bool)
 (rule (all_ones_or_all_zeros (and (icmp _ _ _) (value_type (multi_lane _ _)))) $true)
@@ -1382,6 +1383,39 @@
 
 (decl pure vconst_all_ones_or_all_zeros () Constant)
 (extern extractor vconst_all_ones_or_all_zeros vconst_all_ones_or_all_zeros)
+
+;; Specializations for floating-pointer compares to generate a `minp*` or a
+;; `maxp*` instruction. These are equivalent to the wasm `f32x4.{pmin,pmax}`
+;; instructions and how they're lowered into CLIF. Note the careful ordering
+;; of all the operands here to ensure that the input CLIF matched is implemented
+;; by the corresponding x64 instruction.
+(rule 2 (lower (has_type $F32X4 (bitselect (bitcast _ (fcmp (FloatCC.LessThan) x y)) x y)))
+        (x64_minps x y))
+(rule 2 (lower (has_type $F64X2 (bitselect (bitcast _ (fcmp (FloatCC.LessThan) x y)) x y)))
+        (x64_minpd x y))
+
+(rule 3 (lower (has_type $F32X4 (bitselect (bitcast _ (fcmp (FloatCC.LessThan) y x)) x y)))
+        (x64_maxps x y))
+(rule 3 (lower (has_type $F64X2 (bitselect (bitcast _ (fcmp (FloatCC.LessThan) y x)) x y)))
+        (x64_maxpd x y))
+
+;; Scalar rules
+
+(rule 3 (lower (has_type $I128 (bitselect c t f)))
+      (let ((a ValueRegs (and_i128 c t))
+            (b ValueRegs (and_i128 (i128_not c) f)))
+        (or_i128 a b)))
+
+(rule 4 (lower (has_type (ty_int_ref_scalar_64 ty) (bitselect c t f)))
+      (let ((a Gpr (x64_and ty c t))
+            (b Gpr (x64_and ty (x64_not ty c) f)))
+        (x64_or ty a b)))
+
+(rule 5 (lower (has_type (ty_scalar_float ty) (bitselect c t f)))
+      (let ((a Xmm (sse_and ty c t))
+            (c_neg Xmm (x64_xor_vector ty c (vector_all_ones)))
+            (b Xmm (sse_and ty c_neg f)))
+        (sse_or ty a b)))
 
 ;;;; Rules for `x86_blendv` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -2020,6 +2054,18 @@
 (rule -2 (lower (has_type ty (select c @ (value_type $I128) x y)))
       (let ((cond_result IcmpCondResult (cmp_zero_i128 (CC.Z) c)))
         (select_icmp cond_result x y)))
+
+;; Specializations for floating-point compares to generate a `mins*` or a
+;; `maxs*` instruction. These are equivalent to the "pseudo-m{in,ax}"
+;; specializations for vectors.
+(rule 2 (lower (has_type $F32 (select (maybe_uextend (fcmp (FloatCC.LessThan) x y)) x y)))
+        (x64_minss x y))
+(rule 2 (lower (has_type $F64 (select (maybe_uextend (fcmp (FloatCC.LessThan) x y)) x y)))
+        (x64_minsd x y))
+(rule 3 (lower (has_type $F32 (select (maybe_uextend (fcmp (FloatCC.LessThan) y x)) x y)))
+        (x64_maxss x y))
+(rule 3 (lower (has_type $F64 (select (maybe_uextend (fcmp (FloatCC.LessThan) y x)) x y)))
+        (x64_maxsd x y))
 
 ;; Rules for `clz` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -2676,28 +2722,6 @@
             ;; otherwise.
             (final Xmm (x64_andnpd nan_fraction_mask max_blended_nan_positive)))
         final))
-
-;; Rules for `fmin_pseudo` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(rule (lower (has_type $F32 (fmin_pseudo x y)))
-      (x64_minss y x))
-(rule (lower (has_type $F64 (fmin_pseudo x y)))
-      (x64_minsd y x))
-(rule (lower (has_type $F32X4 (fmin_pseudo x y)))
-      (x64_minps y x))
-(rule (lower (has_type $F64X2 (fmin_pseudo x y)))
-      (x64_minpd y x))
-
-;; Rules for `fmax_pseudo` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(rule (lower (has_type $F32 (fmax_pseudo x y)))
-      (x64_maxss y x))
-(rule (lower (has_type $F64 (fmax_pseudo x y)))
-      (x64_maxsd y x))
-(rule (lower (has_type $F32X4 (fmax_pseudo x y)))
-      (x64_maxps y x))
-(rule (lower (has_type $F64X2 (fmax_pseudo x y)))
-      (x64_maxpd y x))
 
 ;; Rules for `fma` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

@@ -676,6 +676,12 @@ criteria = "safe-to-deploy"
 delta = "0.19.0 -> 0.20.0"
 notes = "This version brings support for split-dwarf which while it uses the filesystem is always done at the behest of the caller, so everything is as expected for this update."
 
+[[audits.addr2line]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.20.0 -> 0.21.0"
+notes = "This version bump updated some dependencies and optimized some internals. All looks good."
+
 [[audits.adler]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
@@ -1138,6 +1144,16 @@ criteria = "safe-to-deploy"
 version = "0.1.2"
 notes = "This should be portable to any POSIX system and seems like it should be part of the libc crate, but at any rate it's safe as is."
 
+[[audits.fallible-iterator]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.3.0"
+notes = """
+This major version update has a few minor breaking changes but everything
+this crate has to do with iterators and `Result` and such. No `unsafe` or
+anything like that, all looks good.
+"""
+
 [[audits.fd-lock]]
 who = "Pat Hickey <phickey@fastly.com>"
 criteria = "safe-to-deploy"
@@ -1277,6 +1293,15 @@ who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 delta = "0.27.0 -> 0.27.3"
 notes = "More support for more DWARF, nothing major in this update. Some small refactorings and updates to publication of the package but otherwise everything's in order."
+
+[[audits.gimli]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.27.3 -> 0.28.0"
+notes = """
+Still looks like a good DWARF-parsing crate, nothing major was added or deleted
+and no `unsafe` code to review here.
+"""
 
 [[audits.glob]]
 who = "Jamey Sharp <jsharp@fastly.com>"
@@ -1603,6 +1628,12 @@ criteria = "safe-to-deploy"
 delta = "0.30.3 -> 0.31.1"
 notes = "A large-ish update to the crate but nothing out of the ordering. Support for new formats like xcoff, new constants, minor refactorings, etc. Nothing out of the ordinary."
 
+[[audits.object]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.31.1 -> 0.32.0"
+notes = "Various new features and refactorings as one would expect from an object parsing crate, all looks good."
+
 [[audits.once_cell]]
 who = "Chris Fallin <chris@cfallin.org>"
 criteria = "safe-to-deploy"
@@ -1822,10 +1853,20 @@ criteria = "safe-to-deploy"
 version = "0.21.0"
 notes = "no unsafe code, ambient capabilities only used in tests"
 
+[[audits.rustls]]
+who = "Pat Hickey <phickey@fastly.com>"
+criteria = "safe-to-deploy"
+delta = "0.21.0 -> 0.21.6"
+
 [[audits.rustls-webpki]]
 who = "Pat Hickey <phickey@fastly.com>"
 criteria = "safe-to-deploy"
 version = "0.100.1"
+
+[[audits.rustls-webpki]]
+who = "Pat Hickey <phickey@fastly.com>"
+criteria = "safe-to-deploy"
+delta = "0.100.1 -> 0.101.4"
 
 [[audits.sct]]
 who = "Pat Hickey <phickey@fastly.com>"
@@ -1859,6 +1900,19 @@ notes = """
 This update runs `rustfmt` for the first time in awhile and additionally fixes a
 few minor issues related to Stacked Borrows and running in MIRI. No fundamental
 change to any preexisting unsafe code is happening here.
+"""
+
+[[audits.smallvec]]
+who = "Dan Gohman <dev@sunfishcode.online>"
+criteria = "safe-to-deploy"
+delta = "1.8.0 -> 1.11.0"
+notes = """
+The main change is the switch to use `NonNull<T>` internally instead of
+`*mut T`. This seems reasonable, as `Vec` also never stores a null pointer,
+and in particular the new `NonNull::new_unchecked`s look ok.
+
+Most of the rest of the changes are adding some new unstable features which
+aren't enabled by default.
 """
 
 [[audits.socket2]]
@@ -2745,6 +2799,11 @@ who = "Pat Hickey <phickey@fastly.com>"
 criteria = "safe-to-deploy"
 delta = "0.22.4 -> 0.23.0"
 
+[[audits.webpki-roots]]
+who = "Pat Hickey <phickey@fastly.com>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.25.2"
+
 [[audits.winx]]
 who = "Dan Gohman <dev@sunfishcode.online>"
 criteria = "safe-to-deploy"
@@ -2872,6 +2931,12 @@ start = "2019-06-09"
 end = "2024-07-15"
 
 [[trusted.cap-fs-ext]]
+criteria = "safe-to-deploy"
+user-id = 6825 # Dan Gohman (sunfishcode)
+start = "2020-12-11"
+end = "2024-07-14"
+
+[[trusted.cap-net-ext]]
 criteria = "safe-to-deploy"
 user-id = 6825 # Dan Gohman (sunfishcode)
 start = "2020-12-11"

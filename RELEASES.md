@@ -6,7 +6,79 @@ Unreleased.
 
 ### Added
 
+* Configuration of mach ports vs signals on macOS is now done through a `Config`
+  instead of at compile time.
+  [#6807](https://github.com/bytecodealliance/wasmtime/pull/6807)
+
+* `Engine::detect_precompiled` can be used to to determine whether some bytes
+  look like a precompiled module or a component.
+  [#6832](https://github.com/bytecodealliance/wasmtime/pull/6832)
+
+* A new feature "wmemcheck" has been added to enable Valgrind-like detection of
+  use-after-free within a WebAssembly guest module.
+  [#6820](https://github.com/bytecodealliance/wasmtime/pull/6820)
+  [#6856](https://github.com/bytecodealliance/wasmtime/pull/6856)
+
+* The `wasmtime` CLI now supports executing components.
+  [#6836](https://github.com/bytecodealliance/wasmtime/pull/6836)
+
+* Support for WASI preview2's TCP sockets interface has been added.
+  [#6837](https://github.com/bytecodealliance/wasmtime/pull/6837)
+
+* Wasmtime's implementation of the wasi-nn proposal now supports named models.
+  [#6854](https://github.com/bytecodealliance/wasmtime/pull/6854)
+
+* The C API now supports configuring `native_unwind_info` and
+  `dynamic_memory_reserved_for_growth`.
+  [#6896](https://github.com/bytecodealliance/wasmtime/pull/6896)
+
 ### Changed
+
+* The pooling allocator was significantly refactored and the
+  `PoolingAllocationConfig` has some minor breaking API changes that reflect
+  those changes.
+
+  Previously, the pooling allocator had `count` slots, and each slot had `N`
+  memories and `M` tables. Every allocated instance would reserve those `N`
+  memories and `M` tables regardless whether it actually needed them all or
+  not. This could lead to some waste and over-allocation when a module used less
+  memories and tables than the pooling allocator's configured maximums.
+
+  After the refactors in this release, the pooling allocator doesn't have
+  one-size-fits-all slots anymore. Instead, memories and tables are in separate
+  pools that can be allocated from independently, and we allocate exactly as
+  many memories and tables as are necessary for the instance being allocated.
+
+  To preserve your old configuration with the new methods you can do the following:
+
+  ```rust
+  let mut config = PoolingAllocationConfig::default();
+
+  // If you used to have this old, no-longer-compiling configuration:
+  config.count(count);
+  config.instance_memories(n);
+  config.instance_tables(m);
+
+  // You can use these equivalent settings for the new config methods:
+  config.total_core_instances(count);
+  config.total_stacks(count); // If using the `async` feature.
+  config.total_memories(count * n);
+  config.max_memories_per_module(n);
+  config.total_tables(count * m);
+  config.max_tables_per_module(m);
+  ```
+
+  There are additionally a variety of methods to limit the maximum amount of
+  resources a single core Wasm or component instance can take from the pool:
+
+  * `PoolingAllocationConfig::max_memories_per_module`
+  * `PoolingAllocationConfig::max_tables_per_module`
+  * `PoolingAllocationConfig::max_memories_per_component`
+  * `PoolingAllocationConfig::max_tables_per_component`
+  * `PoolingAllocationConfig::max_core_instances_per_component`
+
+  These methods do not affect the size of the pre-allocated pool.
+  [#6835](https://github.com/bytecodealliance/wasmtime/pull/6835)
 
 * Options to the `wasmtime` CLI for Wasmtime itself must now come before the
   WebAssembly module. For example `wasmtime run foo.wasm --disable-cache` now
@@ -15,11 +87,40 @@ Unreleased.
   to the wasm module itself.
   [#6737](https://github.com/bytecodealliance/wasmtime/pull/6737)
 
+* Builder methods for WASI contexts onw use `&mut self` instead of `self`.
+  [#6770](https://github.com/bytecodealliance/wasmtime/pull/6770)
+
+* Native unwinding information is now properly disabled when it is configured to
+  be turned off.
+  [#6547](https://github.com/bytecodealliance/wasmtime/pull/6547)
+
+### Removed
+
+* Wasmtime's experimental implementation of wasi-crypto has been removed. More
+  discussion of this change can be found on
+  [#6732](https://github.com/bytecodealliance/wasmtime/pull/6732)
+  and
+  [#6816](https://github.com/bytecodealliance/wasmtime/pull/6816)
+
+* Support for `union` types in the component model has been removed.
+  [#6913](https://github.com/bytecodealliance/wasmtime/pull/6913)
+
+--------------------------------------------------------------------------------
+
+## 12.0.1
+
+Released 2023-08-24
+
+### Fixed
+
+* Optimized the cranelift compilation on aarch64 for large wasm modules.
+  [#6804](https://github.com/bytecodealliance/wasmtime/pull/6804)
+
 --------------------------------------------------------------------------------
 
 ## 12.0.0
 
-Unreleased.
+Released 2023-08-21
 
 ### Added
 
@@ -72,9 +173,6 @@ Unreleased.
 * WASI Preview 1 APIs will now trap on misaligned or out-of-bounds pointers
   instead of returning an error.
   [#6776](https://github.com/bytecodealliance/wasmtime/pull/6776)
-
-* Optimized the cranelift compilation on aarch64 for large wasm modules.
-  [#6804](https://github.com/bytecodealliance/wasmtime/pull/6804) 
 
 ### Changed
 
