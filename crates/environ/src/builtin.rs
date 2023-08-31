@@ -106,6 +106,12 @@ macro_rules! foreach_builtin_function {
             cont_obj_get_tag_return_values_buffer(vmctx: vmctx, contobj: pointer, expected_count : i32) -> pointer;
             /// Deallocated the tag return value buffer within the continuation object.
             cont_obj_deallocate_tag_return_values_buffer(vmctx: vmctx, contobj: pointer);
+            /// Sets the tag return values of `child_contobj` to those of `parent_contobj`.
+            /// This is implemented by exchanging the pointers to the underlying buffers.
+            /// `child_contobj` must not currently have a tag return value buffer.
+            /// `parent_contobj` may or may not have one.
+            cont_obj_forward_tag_return_values_buffer(vmctx: vmctx, parent_contobj: pointer, child_contobj : pointer);
+
             /// TODO
             drop_cont_obj(vmctx: vmctx, contobj: pointer);
 

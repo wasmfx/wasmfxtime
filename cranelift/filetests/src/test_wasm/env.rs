@@ -705,11 +705,8 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
         builder: &mut cranelift_frontend::FunctionBuilder,
         state: &cranelift_wasm::FuncTranslationState,
         cont: ir::Value,
-        call_arg_types: &[wasmtime_types::WasmType],
-        call_args: &[ir::Value],
     ) -> cranelift_wasm::WasmResult<(ir::Value, ir::Value, ir::Value)> {
-        self.inner
-            .translate_resume(builder, state, cont, call_arg_types, call_args)
+        self.inner.translate_resume(builder, state, cont)
     }
 
     /// TODO(dhil): write documentation.
@@ -729,7 +726,7 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
         state: &cranelift_wasm::FuncTranslationState,
-        tag_index: u32,
+        tag_index: ir::Value,
     ) -> ir::Value {
         return self.inner.translate_suspend(builder, state, tag_index);
     }
@@ -849,5 +846,19 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
         return self
             .inner
             .typed_continuations_load_tag_return_values(builder, contobj, valtypes);
+    }
+
+    /// TODO
+    fn typed_continuations_forward_tag_return_values(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        parent_contobj: ir::Value,
+        child_contobj: ir::Value,
+    ) {
+        return self.inner.typed_continuations_forward_tag_return_values(
+            builder,
+            parent_contobj,
+            child_contobj,
+        );
     }
 }

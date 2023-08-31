@@ -711,8 +711,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         _builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
         _cont: ir::Value,
-        _call_arg_types: &[WasmType],
-        _call_args: &[ir::Value],
     ) -> WasmResult<(ir::Value, ir::Value, ir::Value)> {
         todo!()
     }
@@ -731,7 +729,7 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         &mut self,
         _builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
-        _tag_index: u32,
+        _tag_index: ir::Value,
     ) -> ir::Value {
         todo!()
     }
@@ -766,6 +764,16 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         _contobj: ir::Value,
         _valtypes: &[WasmType],
     ) -> Vec<ir::Value> {
+        todo!()
+    }
+
+    /// TODO
+    fn typed_continuations_forward_tag_return_values(
+        &mut self,
+        _builder: &mut FunctionBuilder,
+        _parent_contobj: ir::Value,
+        _child_contobj: ir::Value,
+    ) {
         todo!()
     }
 

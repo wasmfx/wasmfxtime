@@ -175,6 +175,21 @@ pub fn cont_obj_get_tag_return_values_buffer(
 }
 
 /// TODO
+pub fn cont_obj_forward_tag_return_values_buffer(
+    parent: *mut ContinuationObject,
+    child: *mut ContinuationObject,
+) {
+    let parent = unsafe { parent.as_mut().unwrap() };
+    let child = unsafe { child.as_mut().unwrap() };
+    assert!(parent.state == State::Invoked);
+    assert!(child.state == State::Invoked);
+
+    assert!(child.tag_return_values.is_none());
+
+    child.tag_return_values = parent.tag_return_values.take()
+}
+
+/// TODO
 pub fn cont_obj_deallocate_tag_return_values_buffer(obj: *mut ContinuationObject) {
     let obj = unsafe { obj.as_mut().unwrap() };
     assert!(obj.state == State::Invoked);

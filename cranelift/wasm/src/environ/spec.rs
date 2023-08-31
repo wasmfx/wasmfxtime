@@ -644,8 +644,6 @@ pub trait FuncEnvironment: TargetEnvironment {
         builder: &mut FunctionBuilder,
         state: &FuncTranslationState,
         cont: ir::Value,
-        call_arg_types: &[wasmtime_types::WasmType],
-        call_args: &[ir::Value],
     ) -> WasmResult<(ir::Value, ir::Value, ir::Value)>;
 
     /// TODO(dhil): write documentation.
@@ -662,7 +660,7 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
         state: &FuncTranslationState,
-        tag_index: u32,
+        tag_index: ir::Value,
     ) -> ir::Value;
 
     /// TODO
@@ -693,6 +691,14 @@ pub trait FuncEnvironment: TargetEnvironment {
         contobj: ir::Value,
         valtypes: &[wasmtime_types::WasmType],
     ) -> std::vec::Vec<ir::Value>;
+
+    /// TODO
+    fn typed_continuations_forward_tag_return_values(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        parent_contobj: ir::Value,
+        child_contobj: ir::Value,
+    );
 
     /// TODO
     fn typed_continuations_store_payloads(

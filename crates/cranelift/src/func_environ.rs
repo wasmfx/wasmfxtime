@@ -2553,8 +2553,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
         contobj: ir::Value,
-        _call_arg_types: &[WasmType],
-        call_args: &[ir::Value],
     ) -> WasmResult<(ir::Value, ir::Value, ir::Value)> {
         // Strategy:
         //
@@ -2563,11 +2561,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         // designated typed continuation store in the VM context.
         //
         // Second: Call the `resume` builtin
-
-        if call_args.len() > 0 {
-            let count = builder.ins().iconst(I32, call_args.len() as i64);
-            self.typed_continuations_store_resume_args(builder, call_args, count, contobj);
-        }
 
         let (vmctx, result) = generate_builtin_call!(self, builder, resume, [contobj]);
 
@@ -2601,10 +2594,8 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
-        tag_index: u32,
+        tag_index: ir::Value,
     ) -> ir::Value {
-        let tag_index = builder.ins().iconst(I32, tag_index as i64);
-
         // Returns the vmctx
         return generate_builtin_call_no_return_val!(self, builder, suspend, [tag_index]);
     }
@@ -2699,6 +2690,20 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             );
         }
         values
+    }
+
+    fn typed_continuations_forward_tag_return_values(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        parent_contobj: ir::Value,
+        child_contobj: ir::Value,
+    ) {
+        generate_builtin_call_no_return_val!(
+            self,
+            builder,
+            cont_obj_forward_tag_return_values_buffer,
+            [parent_contobj, child_contobj]
+        );
     }
 
     /// TODO
