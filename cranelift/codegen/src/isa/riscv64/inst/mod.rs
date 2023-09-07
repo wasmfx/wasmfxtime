@@ -127,10 +127,7 @@ impl BranchTarget {
     pub(crate) fn zero() -> Self {
         Self::ResolvedOffset(0)
     }
-    #[inline]
-    pub(crate) fn offset(off: i32) -> Self {
-        Self::ResolvedOffset(off)
-    }
+
     #[inline]
     pub(crate) fn is_zero(self) -> bool {
         match self {
@@ -138,6 +135,7 @@ impl BranchTarget {
             BranchTarget::ResolvedOffset(off) => off == 0,
         }
     }
+
     #[inline]
     pub(crate) fn as_offset(self) -> Option<i32> {
         match self {
@@ -183,7 +181,10 @@ pub(crate) fn gen_moves(rd: &[Writable<Reg>], src: &[Reg]) -> SmallInstVec<Inst>
 }
 
 impl Inst {
-    const INSTRUCTION_SIZE: i32 = 4;
+    /// RISC-V can have multiple instruction sizes. 2 bytes for compressed
+    /// instructions, 4 for regular instructions, 6 and 8 byte instructions
+    /// are also being considered.
+    const UNCOMPRESSED_INSTRUCTION_SIZE: i32 = 4;
 
     #[inline]
     pub(crate) fn load_imm12(rd: Writable<Reg>, imm: Imm12) -> Inst {
@@ -715,7 +716,7 @@ fn riscv64_get_operands<F: Fn(VReg) -> VReg>(inst: &Inst, collector: &mut Operan
 
             // If the operation forbids source/destination overlap we need to
             // ensure that the source and destination registers are different.
-            if op.forbids_src_dst_overlaps() {
+            if op.forbids_overlaps(mask) {
                 collector.reg_late_use(vs2);
                 collector.reg_use(vd_src);
                 collector.reg_reuse_def(vd, 1); // `vd` == `vd_src`.
@@ -745,7 +746,7 @@ fn riscv64_get_operands<F: Fn(VReg) -> VReg>(inst: &Inst, collector: &mut Operan
             // If the operation forbids source/destination overlap, then we must
             // register it as an early_def. This encodes the constraint that
             // these must not overlap.
-            if op.forbids_src_dst_overlaps() {
+            if op.forbids_overlaps(mask) {
                 collector.reg_early_def(vd);
             } else {
                 collector.reg_def(vd);
@@ -768,7 +769,7 @@ fn riscv64_get_operands<F: Fn(VReg) -> VReg>(inst: &Inst, collector: &mut Operan
             // If the operation forbids source/destination overlap, then we must
             // register it as an early_def. This encodes the constraint that
             // these must not overlap.
-            if op.forbids_src_dst_overlaps() {
+            if op.forbids_overlaps(mask) {
                 collector.reg_early_def(vd);
             } else {
                 collector.reg_def(vd);
@@ -791,7 +792,7 @@ fn riscv64_get_operands<F: Fn(VReg) -> VReg>(inst: &Inst, collector: &mut Operan
             // If the operation forbids source/destination overlap, then we must
             // register it as an early_def. This encodes the constraint that
             // these must not overlap.
-            if op.forbids_src_dst_overlaps() {
+            if op.forbids_overlaps(mask) {
                 collector.reg_early_def(vd);
             } else {
                 collector.reg_def(vd);
@@ -799,8 +800,11 @@ fn riscv64_get_operands<F: Fn(VReg) -> VReg>(inst: &Inst, collector: &mut Operan
 
             vec_mask_operands(mask, collector);
         }
-        &Inst::VecAluRImm5 { vd, ref mask, .. } => {
+        &Inst::VecAluRImm5 {
+            op, vd, ref mask, ..
+        } => {
             debug_assert_eq!(vd.to_reg().class(), RegClass::Vector);
+            debug_assert!(!op.forbids_overlaps(mask));
 
             collector.reg_def(vd);
             vec_mask_operands(mask, collector);
@@ -998,8 +1002,7 @@ pub fn reg_name(reg: Reg) -> String {
                 2 => "sp".into(),
                 3 => "gp".into(),
                 4 => "tp".into(),
-                5 => "t0".into(),
-                6..=7 => format!("t{}", real.hw_enc() - 5),
+                5..=7 => format!("t{}", real.hw_enc() - 5),
                 8 => "fp".into(),
                 9 => "s1".into(),
                 10..=17 => format!("a{}", real.hw_enc() - 10),
@@ -1390,7 +1393,7 @@ impl Inst {
                 let mut buf = String::new();
                 write!(&mut buf, "auipc {},0; ", rd).unwrap();
                 write!(&mut buf, "ld {},12({}); ", rd, rd).unwrap();
-                write!(&mut buf, "j {}; ", Inst::INSTRUCTION_SIZE + 8).unwrap();
+                write!(&mut buf, "j {}; ", Inst::UNCOMPRESSED_INSTRUCTION_SIZE + 8).unwrap();
                 write!(&mut buf, ".8byte 0x{:x}", imm).unwrap();
                 buf
             }
