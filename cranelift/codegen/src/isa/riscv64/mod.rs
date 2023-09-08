@@ -1,16 +1,16 @@
 //! risc-v 64-bit Instruction Set Architecture.
 
 use crate::dominator_tree::DominatorTree;
-use crate::ir;
 use crate::ir::{Function, Type};
 use crate::isa::riscv64::settings as riscv_settings;
-use crate::isa::{Builder as IsaBuilder, FunctionAlignment, TargetIsa};
+use crate::isa::{Builder as IsaBuilder, FunctionAlignment, OwnedTargetIsa, TargetIsa};
 use crate::machinst::{
     compile, CompiledCode, CompiledCodeStencil, MachInst, MachTextSectionBuilder, Reg, SigSet,
     TextSectionBuilder, VCode,
 };
 use crate::result::CodegenResult;
-use crate::settings as shared_settings;
+use crate::settings::{self as shared_settings, Flags};
+use crate::{ir, CodegenError};
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 use cranelift_control::ControlPlane;
@@ -127,10 +127,10 @@ impl TargetIsa for Riscv64Backend {
     fn emit_unwind_info(
         &self,
         result: &CompiledCode,
-        kind: crate::machinst::UnwindInfoKind,
+        kind: crate::isa::unwind::UnwindInfoKind,
     ) -> CodegenResult<Option<crate::isa::unwind::UnwindInfo>> {
         use crate::isa::unwind::UnwindInfo;
-        use crate::machinst::UnwindInfoKind;
+        use crate::isa::unwind::UnwindInfoKind;
         Ok(match kind {
             UnwindInfoKind::SystemV => {
                 let mapper = self::inst::unwind::systemv::RegisterMapper;
@@ -219,10 +219,35 @@ pub fn isa_builder(triple: Triple) -> IsaBuilder {
     IsaBuilder {
         triple,
         setup: riscv_settings::builder(),
-        constructor: |triple, shared_flags, builder| {
-            let isa_flags = riscv_settings::Flags::new(&shared_flags, builder);
-            let backend = Riscv64Backend::new_with_flags(triple, shared_flags, isa_flags);
-            Ok(backend.wrapped())
-        },
+        constructor: isa_constructor,
     }
+}
+
+fn isa_constructor(
+    triple: Triple,
+    shared_flags: Flags,
+    builder: &shared_settings::Builder,
+) -> CodegenResult<OwnedTargetIsa> {
+    let isa_flags = riscv_settings::Flags::new(&shared_flags, builder);
+
+    // The RISC-V backend does not work without at least the G extension enabled.
+    // The G extension is simply a combination of the following extensions:
+    // - I: Base Integer Instruction Set
+    // - M: Integer Multiplication and Division
+    // - A: Atomic Instructions
+    // - F: Single-Precision Floating-Point
+    // - D: Double-Precision Floating-Point
+    // - Zicsr: Control and Status Register Instructions
+    // - Zifencei: Instruction-Fetch Fence
+    //
+    // Ensure that those combination of features is enabled.
+    if !isa_flags.has_g() {
+        return Err(CodegenError::Unsupported(
+            "The RISC-V Backend currently requires all the features in the G Extension enabled"
+                .into(),
+        ));
+    }
+
+    let backend = Riscv64Backend::new_with_flags(triple, shared_flags, isa_flags);
+    Ok(backend.wrapped())
 }
