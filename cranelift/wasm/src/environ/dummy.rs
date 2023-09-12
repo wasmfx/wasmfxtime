@@ -804,6 +804,15 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
+    fn typed_continuations_load_parent(
+        &mut self,
+        _builder: &mut FunctionBuilder,
+        _contobj: ir::Value,
+    ) -> ir::Value {
+        todo!()
+
+    }
+
     fn typed_continuations_new_cont_ref(
         &mut self,
         _builder: &mut FunctionBuilder,

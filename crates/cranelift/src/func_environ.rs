@@ -2837,6 +2837,24 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         }
     }
 
+
+    fn typed_continuations_load_parent(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+    ) -> ir::Value{
+        let offset = wasmtime_runtime::continuation::offsets::continuation_object::PARENT;
+        let memflags = ir::MemFlags::trusted();
+
+                builder.ins().load(
+                    self.pointer_type(),
+                    memflags,
+                    contobj,
+                    offset,
+                )
+
+    }
+
     /// TODO
     fn typed_continuations_drop_cont_obj(
         &mut self,

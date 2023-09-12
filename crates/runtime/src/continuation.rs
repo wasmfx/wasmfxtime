@@ -1,6 +1,5 @@
 //! Continuations TODO
 
-use crate::instance::TopOfStackPointer;
 use crate::vmcontext::{VMArrayCallFunction, VMFuncRef, VMOpaqueContext, ValRaw};
 use crate::{Instance, TrapReason};
 use std::cmp;
@@ -12,7 +11,7 @@ type ContinuationFiber = Fiber<'static, (), u32, ()>;
 type Yield = Suspend<(), u32, ()>;
 
 #[allow(dead_code)]
-const ENABLE_DEBUG_PRINTING: bool = false;
+const ENABLE_DEBUG_PRINTING: bool = true;
 
 macro_rules! debug_println {
     ($( $args:expr ),+ ) => {
@@ -75,7 +74,10 @@ enum State {
 /// TODO
 #[repr(C)]
 pub struct ContinuationObject {
+    parent: *mut ContinuationObject,
+
     fiber: *mut ContinuationFiber,
+
 
     /// Used to store
     /// 1. The arguments to the function passed to cont.new
@@ -97,6 +99,17 @@ pub struct ContinuationObject {
 /// at a given time.
 #[repr(C)]
 pub struct ContinuationReference(Option<*mut ContinuationObject>);
+
+/// Defines offsets of the fields in the types defined earlier
+pub mod offsets {
+
+    /// Offsets of fields in `ContinuationObject`
+    pub mod continuation_object {
+        /// Offset of `parent` field
+        pub const PARENT : i32 = 0;
+    }
+
+}
 
 /// TODO
 #[inline(always)]
@@ -334,6 +347,7 @@ pub fn cont_new(
 
     let contobj = Box::new(ContinuationObject {
         fiber: Box::into_raw(fiber),
+        parent: ptr::null_mut(),
         args: payload,
         tag_return_values: None,
         state: State::Allocated,
@@ -354,15 +368,19 @@ pub fn resume(
 ) -> Result<u32, TrapReason> {
     assert!(unsafe { (*contobj).state == State::Allocated || (*contobj).state == State::Invoked });
     let fiber = unsafe { (*contobj).fiber };
-    let fiber_stack = unsafe { &fiber.as_ref().unwrap().stack() };
-    let tsp = TopOfStackPointer::as_raw(instance.tsp());
-    unsafe { fiber_stack.write_parent(tsp) };
-    instance.set_tsp(TopOfStackPointer::from_raw(fiber_stack.top().unwrap()));
+
+    // This may be null!
+    let running_contobj = instance.typed_continuations_store();
+    unsafe {(*contobj).parent = running_contobj}
+
+    // We mark `contobj` as the currently running one
+    instance.set_typed_continuations_store(contobj);
+
+
     debug_println!(
-        "Resuming contobj @ {:p}, tsp is {:p}, setting it to {:p}",
+        "Resuming contobj @ {:p}, previously running contobj is {:p}",
         contobj,
-        tsp,
-        fiber_stack.top().unwrap()
+        running_contobj
     );
     unsafe {
         (*(*(*instance.store()).vmruntime_limits())
@@ -370,28 +388,22 @@ pub fn resume(
             .get_mut()) = 0
     };
     unsafe { (*contobj).state = State::Invoked };
-    // This is to make sure that after we resume from a suspend, we can load the continuation object
-    // to access the tag return values.
-    unsafe {
-        let cont_store_ptr =
-            instance.get_typed_continuations_store_mut() as *mut *mut ContinuationObject;
-        cont_store_ptr.write(contobj)
-    };
+
     match unsafe { fiber.as_mut().unwrap().resume(()) } {
         Ok(()) => {
             // The result of the continuation was written to the first
             // entry of the payload store by virtue of using the array
             // calling trampoline to execute it.
 
-            // Restore tsp pointer in instance
-            let _tsp = TopOfStackPointer::as_raw(instance.tsp());
-            let parent = unsafe { (*(*contobj).fiber).stack().parent() };
-            instance.set_tsp(TopOfStackPointer::from_raw(parent));
+            // Restore the currently running contobj entry in the VMContext
+            let parent = unsafe { (*contobj).parent  };
+            debug_assert_eq!(parent, running_contobj);
+            instance.set_typed_continuations_store(parent);
+
 
             debug_println!(
-                "Continuation @ {:p} returned normally, setting tsp from {:p} to {:p}",
+                "Continuation @ {:p} returned normally, setting running continuation in VMContext to {:p}",
                 contobj,
-                _tsp,
                 parent
             );
 
@@ -405,11 +417,17 @@ pub fn resume(
             // encode the tag into the remainder of the integer.
             let signal_mask = 0xf000_0000;
             debug_assert_eq!(tag & signal_mask, 0);
-            unsafe {
-                let cont_store_ptr =
-                    instance.get_typed_continuations_store_mut() as *mut *mut ContinuationObject;
-                cont_store_ptr.write(contobj)
-            };
+
+            let parent = unsafe { (*contobj).parent };
+            debug_assert_eq!(parent, running_contobj);
+            instance.set_typed_continuations_store(parent);
+
+            unsafe {(*contobj).parent = ptr::null_mut()} ;
+            // unsafe {
+            //     let cont_store_ptr =
+            //         instance.get_typed_continuations_store_mut() as *mut *mut ContinuationObject;
+            //     cont_store_ptr.write(contobj)
+            // };
             Ok(tag | signal_mask)
         }
     }
@@ -418,14 +436,17 @@ pub fn resume(
 /// TODO
 #[inline(always)]
 pub fn suspend(instance: &mut Instance, tag_index: u32) {
-    let stack_ptr = TopOfStackPointer::as_raw(instance.tsp());
-    let parent = unsafe { stack_ptr.cast::<*mut u8>().offset(-2).read() };
+    let running = instance.typed_continuations_store();
+    let running = unsafe {running.as_ref().expect("Calling suspend outside of a continuation")};
+
+
+    let stack_ptr = unsafe {(*running.fiber).stack().top().unwrap()};
     debug_println!(
-        "Suspending, setting tsp from {:p} to {:p}",
-        stack_ptr,
-        parent
+        "Suspending while running {:p}, parent is {:p}",
+        running,
+        running.parent
     );
-    instance.set_tsp(TopOfStackPointer::from_raw(parent));
+
     let suspend = wasmtime_fibre::unix::Suspend::from_top_ptr(stack_ptr);
     suspend.switch::<(), u32, ()>(wasmtime_fibre::RunResult::Yield(tag_index))
 }

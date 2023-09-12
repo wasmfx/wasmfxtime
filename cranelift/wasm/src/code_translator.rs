@@ -2553,7 +2553,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
 
             builder.ins().jump(resume_block, &[original_contobj]);
 
-            let (base_addr, tag, resumed_contobj) = {
+            let (_base_addr, tag, resumed_contobj) = {
                 builder.switch_to_block(resume_block);
                 builder.append_block_param(resume_block, environ.pointer_type());
 
@@ -2605,8 +2605,11 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 // avoid allocation of the intermediary "continuation
                 // proxy objects", though, for that I reckon we need
                 // fat pointers.
+
+                // FIXME This needs fixing. Here, we want to get the continuation object that was just suspended.
+                // But currently, in `runtime::continuation::resume`, we eagerly update the field to the parent
                 let contobj =
-                    environ.typed_continuations_load_continuation_object(builder, base_addr);
+                    resumed_contobj;
                 let contref = environ.typed_continuations_new_cont_ref(builder, contobj);
 
                 // We need to terminate this block before being allowed to switch to another one
@@ -2664,10 +2667,9 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 // payload buffer associcated with the whole VMContext.
                 environ.translate_suspend(builder, state, tag);
 
-                // When reaching this point, the parent handler has just invoked `resume`.
-                // We propagate the tag return values to the child (i.e., `contobj`).
                 let parent_contobj =
-                    environ.typed_continuations_load_continuation_object(builder, base_addr);
+                    environ.typed_continuations_load_parent(builder, contobj);
+
                 environ.typed_continuations_forward_tag_return_values(
                     builder,
                     parent_contobj,

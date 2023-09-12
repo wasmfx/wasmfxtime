@@ -3505,6 +3505,7 @@ dependencies = [
  "wasmparser 0.112.0 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.40)",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
+ "wasmtime-runtime",
  "wasmtime-versioned-export-macros",
 ]
 
