@@ -1146,21 +1146,40 @@ fn declare_and_call(
     builder.ins().call(callee, &args)
 }
 
+fn debug_assert_icmp(
+    builder: &mut FunctionBuilder,
+    condition_code: ir::condcodes::IntCC,
+    v1: Value,
+    v2: Value,
+) {
+    if cfg!(debug_assertions) {
+        let condition = builder.ins().icmp(condition_code, v1, v2);
+        builder
+            .ins()
+            .trapz(condition, ir::TrapCode::User(DEBUG_ASSERT_TRAP_CODE));
+    }
+}
+
+pub fn debug_assert_eq(builder: &mut FunctionBuilder, v1: Value, v2: Value) {
+    debug_assert_icmp(builder, ir::condcodes::IntCC::Equal, v1, v2)
+}
+
+pub fn debug_assert_ne(builder: &mut FunctionBuilder, v1: Value, v2: Value) {
+    debug_assert_icmp(builder, ir::condcodes::IntCC::NotEqual, v1, v2)
+}
+
 fn debug_assert_enough_capacity_for_length(
     builder: &mut FunctionBuilder,
     length: usize,
     capacity: ir::Value,
 ) {
-    if cfg!(debug_assertions) {
-        let enough_capacity = builder.ins().icmp_imm(
-            ir::condcodes::IntCC::UnsignedGreaterThanOrEqual,
-            capacity,
-            ir::immediates::Imm64::new(length.try_into().unwrap()),
-        );
-        builder
-            .ins()
-            .trapz(enough_capacity, ir::TrapCode::User(DEBUG_ASSERT_TRAP_CODE));
-    }
+    let length = builder.ins().iconst(ir::types::I64, length as i64);
+    debug_assert_icmp(
+        builder,
+        ir::condcodes::IntCC::UnsignedGreaterThanOrEqual,
+        capacity,
+        length,
+    )
 }
 
 fn debug_assert_vmctx_kind(
@@ -1176,15 +1195,16 @@ fn debug_assert_vmctx_kind(
             vmctx,
             0,
         );
-        let is_expected_vmctx = builder.ins().icmp_imm(
+        let expected_vmctx_magic = builder
+            .ins()
+            .iconst(ir::types::I32, expected_vmctx_magic as i64);
+
+        debug_assert_icmp(
+            builder,
             ir::condcodes::IntCC::Equal,
             magic,
-            i64::from(expected_vmctx_magic),
-        );
-        builder.ins().trapz(
-            is_expected_vmctx,
-            ir::TrapCode::User(DEBUG_ASSERT_TRAP_CODE),
-        );
+            expected_vmctx_magic,
+        )
     }
 }
 
