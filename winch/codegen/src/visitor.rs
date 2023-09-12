@@ -39,6 +39,10 @@ macro_rules! def_unsupported {
     (emit I64Const $($rest:tt)*) => {};
     (emit F32Const $($rest:tt)*) => {};
     (emit F64Const $($rest:tt)*) => {};
+    (emit F32Abs $($rest:tt)*) => {};
+    (emit F64Abs $($rest:tt)*) => {};
+    (emit F32Neg $($rest:tt)*) => {};
+    (emit F64Neg $($rest:tt)*) => {};
     (emit I32Add $($rest:tt)*) => {};
     (emit I64Add $($rest:tt)*) => {};
     (emit I32Sub $($rest:tt)*) => {};
@@ -140,6 +144,34 @@ where
 
     fn visit_f64_const(&mut self, val: Ieee64) {
         self.context.stack.push(Val::f64(val));
+    }
+
+    fn visit_f32_abs(&mut self) {
+        self.context
+            .unop(self.masm, OperandSize::S32, &mut |masm, reg, size| {
+                masm.float_abs(reg, size);
+            });
+    }
+
+    fn visit_f64_abs(&mut self) {
+        self.context
+            .unop(self.masm, OperandSize::S64, &mut |masm, reg, size| {
+                masm.float_abs(reg, size);
+            });
+    }
+
+    fn visit_f32_neg(&mut self) {
+        self.context
+            .unop(self.masm, OperandSize::S32, &mut |masm, reg, size| {
+                masm.float_neg(reg, size);
+            });
+    }
+
+    fn visit_f64_neg(&mut self) {
+        self.context
+            .unop(self.masm, OperandSize::S64, &mut |masm, reg, size| {
+                masm.float_neg(reg, size);
+            });
     }
 
     fn visit_i32_add(&mut self) {
@@ -713,14 +745,14 @@ where
 {
     fn cmp_i32s(&mut self, kind: CmpKind) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
-            masm.cmp_with_set(src, dst.get_reg().unwrap(), kind, size);
+            masm.cmp_with_set(src, dst, kind, size);
         });
     }
 
     fn cmp_i64s(&mut self, kind: CmpKind) {
         self.context
             .i64_binop(self.masm, move |masm, dst, src, size| {
-                masm.cmp_with_set(src, dst.get_reg().unwrap(), kind, size);
+                masm.cmp_with_set(src, dst, kind, size);
             });
     }
 }
