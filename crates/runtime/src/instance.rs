@@ -143,7 +143,6 @@ pub struct Instance {
     /// seems not too bad.
     vmctx_self_reference: SendSyncPtr<VMContext>,
 
-
     #[cfg(feature = "wmemcheck")]
     pub(crate) wmemcheck_state: Option<Wmemcheck>,
     // TODO: add support for multiple memories, wmemcheck_state corresponds to
@@ -155,14 +154,20 @@ pub struct Instance {
 }
 
 impl Instance {
-
-    pub(crate) fn typed_continuations_store(&mut self) -> *mut crate::continuation::ContinuationObject   {
+    pub(crate) fn typed_continuations_store(
+        &mut self,
+    ) -> *mut crate::continuation::ContinuationObject {
         unsafe { *self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store()) }
     }
 
-    pub(crate) fn set_typed_continuations_store(&mut self, contobj: *mut crate::continuation::ContinuationObject)   {
-        unsafe { let ptr = self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store());
-         *ptr = contobj; }
+    pub(crate) fn set_typed_continuations_store(
+        &mut self,
+        contobj: *mut crate::continuation::ContinuationObject,
+    ) {
+        unsafe {
+            let ptr = self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store());
+            *ptr = contobj;
+        }
     }
 
     /// Create an instance at the given memory address.
@@ -1087,7 +1092,8 @@ impl Instance {
         *self.vmctx_plus_offset_mut(offsets.vmctx_builtin_functions()) =
             &VMBuiltinFunctionsArray::INIT;
 
-        *self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_store()) = std::ptr::null_mut::<crate::continuation::ContinuationObject>();
+        *self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_store()) =
+            std::ptr::null_mut::<crate::continuation::ContinuationObject>();
 
         // Initialize the imports
         debug_assert_eq!(imports.functions.len(), module.num_imported_funcs);
@@ -1271,8 +1277,6 @@ pub struct InstanceHandle {
 // assertion below.
 unsafe impl Send for InstanceHandle {}
 unsafe impl Sync for InstanceHandle {}
-
-
 
 fn _assert_send_sync() {
     fn _assert<T: Send + Sync>() {}

@@ -733,11 +733,19 @@ pub trait FuncEnvironment: TargetEnvironment {
     ) -> ir::Value;
 
     /// TODO
-fn typed_continuations_load_parent(
+    fn typed_continuations_load_parent(
         &mut self,
         builder: &mut FunctionBuilder,
         contobj: ir::Value,
     ) -> ir::Value;
+
+    /// TODO
+    fn typed_continuations_store_parent(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+        new_parent: ir::Value,
+    );
 
     /// TODO
     fn typed_continuations_new_cont_ref(

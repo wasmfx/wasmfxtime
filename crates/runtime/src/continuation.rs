@@ -78,7 +78,6 @@ pub struct ContinuationObject {
 
     fiber: *mut ContinuationFiber,
 
-
     /// Used to store
     /// 1. The arguments to the function passed to cont.new
     /// 2. The return values of that function
@@ -106,9 +105,8 @@ pub mod offsets {
     /// Offsets of fields in `ContinuationObject`
     pub mod continuation_object {
         /// Offset of `parent` field
-        pub const PARENT : i32 = 0;
+        pub const PARENT: i32 = 0;
     }
-
 }
 
 /// TODO
@@ -371,11 +369,10 @@ pub fn resume(
 
     // This may be null!
     let running_contobj = instance.typed_continuations_store();
-    unsafe {(*contobj).parent = running_contobj}
+    unsafe { (*contobj).parent = running_contobj }
 
     // We mark `contobj` as the currently running one
     instance.set_typed_continuations_store(contobj);
-
 
     debug_println!(
         "Resuming contobj @ {:p}, previously running contobj is {:p}",
@@ -396,10 +393,9 @@ pub fn resume(
             // calling trampoline to execute it.
 
             // Restore the currently running contobj entry in the VMContext
-            let parent = unsafe { (*contobj).parent  };
+            let parent = unsafe { (*contobj).parent };
             debug_assert_eq!(parent, running_contobj);
             instance.set_typed_continuations_store(parent);
-
 
             debug_println!(
                 "Continuation @ {:p} returned normally, setting running continuation in VMContext to {:p}",
@@ -422,7 +418,7 @@ pub fn resume(
             debug_assert_eq!(parent, running_contobj);
             instance.set_typed_continuations_store(parent);
 
-            unsafe {(*contobj).parent = ptr::null_mut()} ;
+            unsafe { (*contobj).parent = ptr::null_mut() };
             // unsafe {
             //     let cont_store_ptr =
             //         instance.get_typed_continuations_store_mut() as *mut *mut ContinuationObject;
@@ -437,10 +433,13 @@ pub fn resume(
 #[inline(always)]
 pub fn suspend(instance: &mut Instance, tag_index: u32) {
     let running = instance.typed_continuations_store();
-    let running = unsafe {running.as_ref().expect("Calling suspend outside of a continuation")};
+    let running = unsafe {
+        running
+            .as_ref()
+            .expect("Calling suspend outside of a continuation")
+    };
 
-
-    let stack_ptr = unsafe {(*running.fiber).stack().top().unwrap()};
+    let stack_ptr = unsafe { (*running.fiber).stack().top().unwrap() };
     debug_println!(
         "Suspending while running {:p}, parent is {:p}",
         running,
