@@ -418,7 +418,7 @@ pub fn resume(
             debug_assert_eq!(parent, running_contobj);
             instance.set_typed_continuations_store(parent);
 
-            unsafe { (*contobj).parent = ptr::null_mut() };
+            //unsafe { (*contobj).parent = ptr::null_mut() };
             // unsafe {
             //     let cont_store_ptr =
             //         instance.get_typed_continuations_store_mut() as *mut *mut ContinuationObject;

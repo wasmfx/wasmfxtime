@@ -2615,7 +2615,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             };
 
             // Next, build the suspend block.
-            let (contref, contobj) = {
+            let contobj= {
                 builder.switch_to_block(suspend_block);
                 builder.seal_block(suspend_block);
 
@@ -2636,11 +2636,11 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 // FIXME This needs fixing. Here, we want to get the continuation object that was just suspended.
                 // But currently, in `runtime::continuation::resume`, we eagerly update the field to the parent
                 let contobj = resumed_contobj;
-                let contref = environ.typed_continuations_new_cont_ref(builder, contobj);
+
 
                 // We need to terminate this block before being allowed to switch to another one
                 builder.ins().jump(switch_block, &[]);
-                (contref, contobj)
+                contobj
             };
 
             // Strategy:
@@ -2665,9 +2665,19 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 let param_types = environ.tag_params(tag).to_vec();
                 let params = environ.typed_continuations_load_payloads(builder, &param_types);
 
+                // We have an actual handling block for this tag, rather than just forwarding.
+                // Detatch the continuation object by setting its parent to NULL
+                let pointer_type = environ.pointer_type();
+                let null = builder.ins().iconst(pointer_type, 0);
+                environ.typed_continuations_store_parent(builder, contobj, null);
+
                 state.pushn(&params);
-                // Push the continuation reference.
+
+                // Push the continuation reference. We only create them here because we don't need them when forwarding.
+                let contref = environ.typed_continuations_new_cont_ref(builder, contobj);
                 state.push1(contref);
+
+
                 let count = params.len() + 1;
                 let (br_destination, inputs) = translate_br_if_args(label, state);
 
