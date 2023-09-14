@@ -368,17 +368,20 @@ pub fn resume(
     let fiber = unsafe { (*contobj).fiber };
 
     // This may be null!
-    let running_contobj = instance.typed_continuations_store();
-    unsafe { (*contobj).parent = running_contobj }
+    //
+    //unsafe { (*contobj).parent = running_contobj }
 
     // We mark `contobj` as the currently running one
     instance.set_typed_continuations_store(contobj);
 
-    debug_println!(
-        "Resuming contobj @ {:p}, previously running contobj is {:p}",
-        contobj,
-        running_contobj
-    );
+    if ENABLE_DEBUG_PRINTING {
+        let running_contobj = instance.typed_continuations_store();
+        debug_println!(
+            "Resuming contobj @ {:p}, previously running contobj is {:p}",
+            contobj,
+            running_contobj
+        );
+    }
     unsafe {
         (*(*(*instance.store()).vmruntime_limits())
             .stack_limit
@@ -394,7 +397,7 @@ pub fn resume(
 
             // Restore the currently running contobj entry in the VMContext
             let parent = unsafe { (*contobj).parent };
-            debug_assert_eq!(parent, running_contobj);
+
             instance.set_typed_continuations_store(parent);
 
             debug_println!(
@@ -415,7 +418,7 @@ pub fn resume(
             debug_assert_eq!(tag & signal_mask, 0);
 
             let parent = unsafe { (*contobj).parent };
-            debug_assert_eq!(parent, running_contobj);
+
             instance.set_typed_continuations_store(parent);
 
             //unsafe { (*contobj).parent = ptr::null_mut() };

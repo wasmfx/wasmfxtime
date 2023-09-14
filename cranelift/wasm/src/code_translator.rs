@@ -2578,6 +2578,15 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let suspend_block = crate::translation_utils::suspend_block(builder, environ)?;
             let switch_block = builder.create_block();
 
+            // Make the currently running continuation the parent of the one we are about to resume
+            let original_running_contobj =
+                environ.typed_continuations_load_continuation_object(builder);
+            environ.typed_continuations_store_parent(
+                builder,
+                original_contobj,
+                original_running_contobj,
+            );
+
             builder.ins().jump(resume_block, &[original_contobj]);
 
             let (_base_addr, tag, resumed_contobj) = {
@@ -2590,6 +2599,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 // Now, we generate the call instruction.
                 let (base_addr, signal, tag) =
                     environ.translate_resume(builder, state, resume_contobj)?;
+
                 // Description of results:
                 // * The `base_addr` is the base address of VM context.
                 // * The `signal` is an encoded boolean indicating whether
@@ -2615,7 +2625,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             };
 
             // Next, build the suspend block.
-            let contobj= {
+            {
                 builder.switch_to_block(suspend_block);
                 builder.seal_block(suspend_block);
 
@@ -2635,12 +2645,9 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
 
                 // FIXME This needs fixing. Here, we want to get the continuation object that was just suspended.
                 // But currently, in `runtime::continuation::resume`, we eagerly update the field to the parent
-                let contobj = resumed_contobj;
-
 
                 // We need to terminate this block before being allowed to switch to another one
                 builder.ins().jump(switch_block, &[]);
-                contobj
             };
 
             // Strategy:
@@ -2669,14 +2676,13 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 // Detatch the continuation object by setting its parent to NULL
                 let pointer_type = environ.pointer_type();
                 let null = builder.ins().iconst(pointer_type, 0);
-                environ.typed_continuations_store_parent(builder, contobj, null);
+                environ.typed_continuations_store_parent(builder, resumed_contobj, null);
 
                 state.pushn(&params);
 
                 // Push the continuation reference. We only create them here because we don't need them when forwarding.
-                let contref = environ.typed_continuations_new_cont_ref(builder, contobj);
+                let contref = environ.typed_continuations_new_cont_ref(builder, resumed_contobj);
                 state.push1(contref);
-
 
                 let count = params.len() + 1;
                 let (br_destination, inputs) = translate_br_if_args(label, state);
@@ -2698,7 +2704,8 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             {
                 builder.switch_to_block(forwarding_block);
 
-                let parent_contobj = environ.typed_continuations_load_parent(builder, contobj);
+                let parent_contobj =
+                    environ.typed_continuations_load_parent(builder, resumed_contobj);
 
                 // We suspend, thus deferring handling to the parent.
                 // We do nothing about tag *parameters, these remain unchanged within the
@@ -2711,10 +2718,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 environ.typed_continuations_forward_tag_return_values(
                     builder,
                     parent_contobj,
-                    contobj,
+                    resumed_contobj,
                 );
 
-                builder.ins().jump(resume_block, &[contobj]);
+                builder.ins().jump(resume_block, &[resumed_contobj]);
                 builder.seal_block(resume_block);
             }
 
@@ -2764,9 +2771,9 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             state.popn(param_count);
 
             let tag_index_val = builder.ins().iconst(I32, *tag_index as i64);
-            let vmctx = environ.translate_suspend(builder, state, tag_index_val);
+            let _vmctx = environ.translate_suspend(builder, state, tag_index_val);
 
-            let contobj = environ.typed_continuations_load_continuation_object(builder, vmctx);
+            let contobj = environ.typed_continuations_load_continuation_object(builder);
 
             let return_types = environ.tag_returns(*tag_index).to_vec();
             let return_values =

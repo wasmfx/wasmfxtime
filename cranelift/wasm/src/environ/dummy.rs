@@ -797,9 +797,8 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
     }
 
     fn typed_continuations_load_continuation_object(
-        &self,
+        &mut self,
         _builder: &mut FunctionBuilder,
-        _base_addr: ir::Value,
     ) -> ir::Value {
         todo!()
     }

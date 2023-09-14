@@ -727,9 +727,8 @@ pub trait FuncEnvironment: TargetEnvironment {
 
     /// TODO
     fn typed_continuations_load_continuation_object(
-        &self,
+        &mut self,
         builder: &mut FunctionBuilder,
-        base_addr: ir::Value,
     ) -> ir::Value;
 
     /// TODO
