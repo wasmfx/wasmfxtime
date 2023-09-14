@@ -2817,13 +2817,13 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     ) -> ir::Value {
         let pointer_type = self.pointer_type();
         let vmctx = self.vmctx(builder.cursor().func);
-        let base = builder.ins().global_value(pointer_type, vmctx);
+        let base_addr = builder.ins().global_value(pointer_type, vmctx);
 
         let memflags = ir::MemFlags::trusted();
         let offset = i32::try_from(self.offsets.vmctx_typed_continuations_store()).unwrap();
         builder
             .ins()
-            .load(self.pointer_type(), memflags, base, offset)
+            .load(self.pointer_type(), memflags, base_addr, offset)
     }
 
     fn typed_continuations_new_cont_ref(

@@ -11,7 +11,7 @@ type ContinuationFiber = Fiber<'static, (), u32, ()>;
 type Yield = Suspend<(), u32, ()>;
 
 #[allow(dead_code)]
-const ENABLE_DEBUG_PRINTING: bool = true;
+const ENABLE_DEBUG_PRINTING: bool = false;
 
 macro_rules! debug_println {
     ($( $args:expr ),+ ) => {

@@ -154,22 +154,6 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub(crate) fn typed_continuations_store(
-        &mut self,
-    ) -> *mut crate::continuation::ContinuationObject {
-        unsafe { *self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store()) }
-    }
-
-    pub(crate) fn set_typed_continuations_store(
-        &mut self,
-        contobj: *mut crate::continuation::ContinuationObject,
-    ) {
-        unsafe {
-            let ptr = self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store());
-            *ptr = contobj;
-        }
-    }
-
     /// Create an instance at the given memory address.
     ///
     /// It is assumed the memory was properly aligned and the
@@ -1233,9 +1217,20 @@ impl Instance {
         fault
     }
 
-    /// TODO
-    pub unsafe fn get_typed_continuations_store_mut(&mut self) -> *mut u32 {
-        self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store())
+    pub(crate) fn typed_continuations_store(
+        &mut self,
+    ) -> *mut crate::continuation::ContinuationObject {
+        unsafe { *self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store()) }
+    }
+
+    pub(crate) fn set_typed_continuations_store(
+        &mut self,
+        contobj: *mut crate::continuation::ContinuationObject,
+    ) {
+        unsafe {
+            let ptr = self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store());
+            *ptr = contobj;
+        }
     }
 
     /// TODO

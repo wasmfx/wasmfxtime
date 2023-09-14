@@ -2748,7 +2748,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             state.popn(param_count);
 
             let tag_index_val = builder.ins().iconst(I32, *tag_index as i64);
-            let _vmctx = environ.translate_suspend(builder, state, tag_index_val);
+            environ.translate_suspend(builder, state, tag_index_val);
 
             let contobj = environ.typed_continuations_load_continuation_object(builder);
 
