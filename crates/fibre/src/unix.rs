@@ -104,14 +104,6 @@ impl FiberStack {
         Some(self.top)
     }
 
-    pub unsafe fn parent(&self) -> *mut u8 {
-        self.top.cast::<*mut u8>().offset(-2).read()
-    }
-
-    pub unsafe fn write_parent(&self, tsp: *mut u8) {
-        self.top.cast::<*mut u8>().offset(-2).write(tsp);
-    }
-
     pub fn range(&self) -> Option<Range<usize>> {
         let base = unsafe { self.top.sub(self.len) as usize };
         Some(base..base + self.len)
