@@ -237,6 +237,9 @@ pub fn new_cont_ref(contobj: *mut ContinuationObject) -> *mut ContinuationRefere
 /// TODO
 #[inline(always)]
 pub fn drop_cont_obj(contobj: *mut ContinuationObject) {
+    // Note that continuation objects do not own their parents, hence we ignore
+    // parent fields here.
+
     let contobj: Box<ContinuationObject> = unsafe { Box::from_raw(contobj) };
     let _: Box<ContinuationFiber> = unsafe { Box::from_raw(contobj.fiber) };
     unsafe {
@@ -367,13 +370,6 @@ pub fn resume(
     assert!(unsafe { (*contobj).state == State::Allocated || (*contobj).state == State::Invoked });
     let fiber = unsafe { (*contobj).fiber };
 
-    // This may be null!
-    //
-    //unsafe { (*contobj).parent = running_contobj }
-
-    // We mark `contobj` as the currently running one
-    instance.set_typed_continuations_store(contobj);
-
     if ENABLE_DEBUG_PRINTING {
         let running_contobj = instance.typed_continuations_store();
         debug_println!(
@@ -382,6 +378,14 @@ pub fn resume(
             running_contobj
         );
     }
+
+    // Note that this function updates the typed continuation store field in the
+    // VMContext (i.e., the currently running continuation), but does not update
+    // any parent pointers. The latter has to happend elsewhere.
+
+    // We mark `contobj` as the currently running one
+    instance.set_typed_continuations_store(contobj);
+
     unsafe {
         (*(*(*instance.store()).vmruntime_limits())
             .stack_limit
@@ -397,7 +401,6 @@ pub fn resume(
 
             // Restore the currently running contobj entry in the VMContext
             let parent = unsafe { (*contobj).parent };
-
             instance.set_typed_continuations_store(parent);
 
             debug_println!(
@@ -417,16 +420,10 @@ pub fn resume(
             let signal_mask = 0xf000_0000;
             debug_assert_eq!(tag & signal_mask, 0);
 
+            // Restore the currently running contobj entry in the VMContext
             let parent = unsafe { (*contobj).parent };
-
             instance.set_typed_continuations_store(parent);
 
-            //unsafe { (*contobj).parent = ptr::null_mut() };
-            // unsafe {
-            //     let cont_store_ptr =
-            //         instance.get_typed_continuations_store_mut() as *mut *mut ContinuationObject;
-            //     cont_store_ptr.write(contobj)
-            // };
             Ok(tag | signal_mask)
         }
     }
