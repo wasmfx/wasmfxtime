@@ -14,7 +14,7 @@ pub use builder::builder;
 use wasmtime_environ::Tunables;
 
 mod builder;
-pub mod compiler;
+mod compiler;
 mod debug;
 mod func_environ;
 
