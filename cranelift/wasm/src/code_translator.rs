@@ -114,33 +114,6 @@ macro_rules! unwrap_or_return_unreachable_state {
     };
 }
 
-/// Trap code used for debug assertions we emit in our JIT code.
-const DEBUG_ASSERT_TRAP_CODE: u16 = u16::MAX;
-
-fn debug_assert_icmp(
-    builder: &mut FunctionBuilder,
-    condition_code: ir::condcodes::IntCC,
-    v1: Value,
-    v2: Value,
-) {
-    if cfg!(debug_assertions) {
-        let condition = builder.ins().icmp(condition_code, v1, v2);
-        builder
-            .ins()
-            .trapz(condition, ir::TrapCode::User(DEBUG_ASSERT_TRAP_CODE));
-    }
-}
-
-#[allow(dead_code)]
-pub fn debug_assert_eq(builder: &mut FunctionBuilder, v1: Value, v2: Value) {
-    debug_assert_icmp(builder, ir::condcodes::IntCC::Equal, v1, v2)
-}
-
-#[allow(dead_code)]
-pub fn debug_assert_ne(builder: &mut FunctionBuilder, v1: Value, v2: Value) {
-    debug_assert_icmp(builder, ir::condcodes::IntCC::NotEqual, v1, v2)
-}
-
 /// Translates wasm operators into Cranelift IR instructions.
 pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
     validator: &mut FuncValidator<impl WasmModuleResources>,
