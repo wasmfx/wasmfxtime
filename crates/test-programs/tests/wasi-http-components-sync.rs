@@ -69,8 +69,8 @@ fn instantiate_component(
 }
 
 fn run(name: &str) -> anyhow::Result<()> {
-    let stdout = MemoryOutputPipe::new();
-    let stderr = MemoryOutputPipe::new();
+    let stdout = MemoryOutputPipe::new(4096);
+    let stderr = MemoryOutputPipe::new(4096);
     let r = {
         let mut table = Table::new();
         let component = get_component(name);
@@ -120,15 +120,21 @@ fn outbound_request_get() {
 }
 
 #[test_log::test]
-#[ignore = "test is currently flaky in ci and needs to be debugged"]
+#[cfg_attr(
+    windows,
+    ignore = "test is currently flaky in ci and needs to be debugged"
+)]
 fn outbound_request_post() {
     setup_http1_sync(|| run("outbound_request_post")).unwrap();
 }
 
 #[test_log::test]
-#[ignore = "test is currently flaky in ci and needs to be debugged"]
-fn outbound_request_post_large() {
-    setup_http1_sync(|| run("outbound_request_post_large")).unwrap();
+#[cfg_attr(
+    windows,
+    ignore = "test is currently flaky in ci and needs to be debugged"
+)]
+fn outbound_request_large_post() {
+    setup_http1_sync(|| run("outbound_request_large_post")).unwrap();
 }
 
 #[test_log::test]
