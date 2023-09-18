@@ -90,8 +90,11 @@
     (Args
       (args VecArgPair))
 
-    (Ret (rets VecRetPair)
-         (stack_bytes_to_pop u32))
+    ;; A pseudo-instruction that moves vregs to return registers.
+    (Rets
+      (rets VecRetPair))
+
+    (Ret)
 
      (Extend
       (rd WritableReg)
@@ -705,11 +708,27 @@
   (C2)
 ))
 
-
 ;; Opcodes for the CR compressed instruction format
 (type CrOp (enum
   (CMv)
   (CAdd)
+  (CJr)
+  (CJalr)
+))
+
+;; Opcodes for the CA compressed instruction format
+(type CaOp (enum
+  (CAnd)
+  (COr)
+  (CXor)
+  (CSub)
+  (CAddw)
+  (CSubw)
+))
+
+;; Opcodes for the CJ compressed instruction format
+(type CjOp (enum
+  (CJ)
 ))
 
 

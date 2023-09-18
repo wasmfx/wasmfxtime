@@ -319,7 +319,7 @@ impl<T: WasiView> types::Host for T {
         readdir.next()
     }
 
-    async fn drop_directory_entry_stream(
+    fn drop_directory_entry_stream(
         &mut self,
         stream: types::DirectoryEntryStream,
     ) -> anyhow::Result<()> {
@@ -590,7 +590,7 @@ impl<T: WasiView> types::Host for T {
         }
     }
 
-    async fn drop_descriptor(&mut self, fd: types::Descriptor) -> anyhow::Result<()> {
+    fn drop_descriptor(&mut self, fd: types::Descriptor) -> anyhow::Result<()> {
         let table = self.table_mut();
 
         // The Drop will close the file/dir, but if the close syscall
@@ -742,7 +742,7 @@ impl<T: WasiView> types::Host for T {
         todo!("filesystem unlock is not implemented")
     }
 
-    async fn read_via_stream(
+    fn read_via_stream(
         &mut self,
         fd: types::Descriptor,
         offset: types::Filesize,
@@ -772,15 +772,12 @@ impl<T: WasiView> types::Host for T {
         Ok(index)
     }
 
-    async fn write_via_stream(
+    fn write_via_stream(
         &mut self,
         fd: types::Descriptor,
         offset: types::Filesize,
     ) -> Result<streams::OutputStream, types::Error> {
-        use crate::preview2::{
-            filesystem::FileOutputStream,
-            stream::{InternalOutputStream, InternalTableStreamExt},
-        };
+        use crate::preview2::{filesystem::FileOutputStream, TableStreamExt};
 
         // Trap if fd lookup fails:
         let f = self.table().get_file(fd)?;
@@ -796,21 +793,16 @@ impl<T: WasiView> types::Host for T {
         let writer = FileOutputStream::write_at(clone, offset);
 
         // Insert the stream view into the table. Trap if the table is full.
-        let index = self
-            .table_mut()
-            .push_internal_output_stream(InternalOutputStream::File(writer))?;
+        let index = self.table_mut().push_output_stream(Box::new(writer))?;
 
         Ok(index)
     }
 
-    async fn append_via_stream(
+    fn append_via_stream(
         &mut self,
         fd: types::Descriptor,
     ) -> Result<streams::OutputStream, types::Error> {
-        use crate::preview2::{
-            filesystem::FileOutputStream,
-            stream::{InternalOutputStream, InternalTableStreamExt},
-        };
+        use crate::preview2::{filesystem::FileOutputStream, TableStreamExt};
 
         // Trap if fd lookup fails:
         let f = self.table().get_file(fd)?;
@@ -825,9 +817,7 @@ impl<T: WasiView> types::Host for T {
         let appender = FileOutputStream::append(clone);
 
         // Insert the stream view into the table. Trap if the table is full.
-        let index = self
-            .table_mut()
-            .push_internal_output_stream(InternalOutputStream::File(appender))?;
+        let index = self.table_mut().push_output_stream(Box::new(appender))?;
 
         Ok(index)
     }

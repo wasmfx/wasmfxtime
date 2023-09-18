@@ -70,8 +70,8 @@ async fn instantiate_component(
 }
 
 async fn run(name: &str) -> anyhow::Result<()> {
-    let stdout = MemoryOutputPipe::new();
-    let stderr = MemoryOutputPipe::new();
+    let stdout = MemoryOutputPipe::new(4096);
+    let stderr = MemoryOutputPipe::new(4096);
     let r = {
         let mut table = Table::new();
         let component = get_component(name);
@@ -123,15 +123,21 @@ async fn outbound_request_get() {
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-#[ignore = "test is currently flaky in ci and needs to be debugged"]
+#[cfg_attr(
+    windows,
+    ignore = "test is currently flaky in ci and needs to be debugged"
+)]
 async fn outbound_request_post() {
     setup_http1(run("outbound_request_post")).await.unwrap();
 }
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
-#[ignore = "test is currently flaky in ci and needs to be debugged"]
-async fn outbound_request_post_large() {
-    setup_http1(run("outbound_request_post_large"))
+#[cfg_attr(
+    windows,
+    ignore = "test is currently flaky in ci and needs to be debugged"
+)]
+async fn outbound_request_large_post() {
+    setup_http1(run("outbound_request_large_post"))
         .await
         .unwrap();
 }
