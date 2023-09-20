@@ -2642,11 +2642,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
 
                 // We have an actual handling block for this tag, rather than just forwarding.
                 // Detatch the continuation object by setting its parent to NULL.
-                let pointer_type = environ.pointer_type();
-                // TODO(frank-emrich): Would be nice to use a target-specific
-                // constant for the null pointer here, rather than the literal
-                // 0.
-                let null = builder.ins().iconst(pointer_type, 0);
+                let null = builder.ins().null(environ.pointer_type());
                 environ.typed_continuations_store_parent(builder, resumed_contobj, null);
 
                 state.pushn(&params);

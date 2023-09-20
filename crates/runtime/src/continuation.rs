@@ -381,7 +381,7 @@ pub fn resume(
 
     // Note that this function updates the typed continuation store field in the
     // VMContext (i.e., the currently running continuation), but does not update
-    // any parent pointers. The latter has to happend elsewhere.
+    // any parent pointers. The latter has to happen elsewhere.
 
     // We mark `contobj` as the currently running one
     instance.set_typed_continuations_store(contobj);
