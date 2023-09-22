@@ -1,9 +1,9 @@
 //! Riscv64 ISA: binary code emission.
 
 use crate::binemit::StackMap;
-use crate::ir::{self, RelSourceLoc, TrapCode};
+use crate::ir::{self, LibCall, RelSourceLoc, TrapCode};
 use crate::isa::riscv64::inst::*;
-use crate::isa::riscv64::lower::isle::generated_code::{CaOp, CrOp};
+use crate::isa::riscv64::lower::isle::generated_code::{CaOp, CiOp, CiwOp, CrOp};
 use crate::machinst::{AllocationConsumer, Reg, Writable};
 use crate::trace;
 use cranelift_control::ControlPlane;
@@ -339,10 +339,10 @@ impl Inst {
             | Inst::CallInd { .. }
             | Inst::ReturnCall { .. }
             | Inst::ReturnCallInd { .. }
-            | Inst::TrapIf { .. }
             | Inst::Jal { .. }
             | Inst::CondBr { .. }
             | Inst::LoadExtName { .. }
+            | Inst::ElfTlsGetAddr { .. }
             | Inst::LoadAddr { .. }
             | Inst::VirtualSPOffsetAdj { .. }
             | Inst::Mov { .. }
@@ -364,7 +364,7 @@ impl Inst {
             | Inst::AtomicStore { .. }
             | Inst::AtomicLoad { .. }
             | Inst::AtomicRmwLoop { .. }
-            | Inst::TrapIfC { .. }
+            | Inst::TrapIf { .. }
             | Inst::Unwind { .. }
             | Inst::DummyUse { .. }
             | Inst::FloatRound { .. }
@@ -460,10 +460,16 @@ impl Inst {
         &self,
         sink: &mut MachBuffer<Inst>,
         emit_info: &EmitInfo,
-        _state: &mut EmitState,
+        state: &mut EmitState,
         start_off: &mut u32,
     ) -> bool {
         let has_zca = emit_info.isa_flags.has_zca();
+
+        // Currently all compressed extensions (Zcb, Zcd, Zcmp, Zcmt, etc..) require Zca
+        // to be enabled, so check it early.
+        if !has_zca {
+            return false;
+        }
 
         fn reg_is_compressible(r: Reg) -> bool {
             r.to_real_reg()
@@ -478,7 +484,7 @@ impl Inst {
                 rd,
                 rs1,
                 rs2,
-            } if has_zca && rd.to_reg() == rs1 && rs1 != zero_reg() && rs2 != zero_reg() => {
+            } if rd.to_reg() == rs1 && rs1 != zero_reg() && rs2 != zero_reg() => {
                 sink.put2(encode_cr_type(CrOp::CAdd, rd, rs2));
             }
 
@@ -488,8 +494,7 @@ impl Inst {
                 rd,
                 rs,
                 imm12,
-            } if has_zca
-                && rd.to_reg() != rs
+            } if rd.to_reg() != rs
                 && rd.to_reg() != zero_reg()
                 && rs != zero_reg()
                 && imm12.as_i16() == 0 =>
@@ -509,11 +514,7 @@ impl Inst {
                 rd,
                 rs1,
                 rs2,
-            } if has_zca
-                && rd.to_reg() == rs1
-                && reg_is_compressible(rs1)
-                && reg_is_compressible(rs2) =>
-            {
+            } if rd.to_reg() == rs1 && reg_is_compressible(rs1) && reg_is_compressible(rs2) => {
                 let op = match alu_op {
                     AluOPRRR::And => CaOp::CAnd,
                     AluOPRRR::Or => CaOp::COr,
@@ -530,7 +531,7 @@ impl Inst {
             // c.j
             //
             // We don't have a separate JAL as that is only availabile in RV32C
-            Inst::Jal { label } if has_zca => {
+            Inst::Jal { label } => {
                 sink.use_label_at_offset(*start_off, label, LabelUse::RVCJump);
                 sink.add_uncond_branch(*start_off, *start_off + 2, label);
                 sink.put2(encode_cj_type(CjOp::CJ, Imm12::ZERO));
@@ -538,24 +539,121 @@ impl Inst {
 
             // c.jr
             Inst::Jalr { rd, base, offset }
-                if has_zca
-                    && rd.to_reg() == zero_reg()
-                    && base != zero_reg()
-                    && offset.as_i16() == 0 =>
+                if rd.to_reg() == zero_reg() && base != zero_reg() && offset.as_i16() == 0 =>
             {
                 sink.put2(encode_cr2_type(CrOp::CJr, base));
             }
 
             // c.jalr
             Inst::Jalr { rd, base, offset }
-                if has_zca
-                    && rd.to_reg() == link_reg()
-                    && base != zero_reg()
-                    && offset.as_i16() == 0 =>
+                if rd.to_reg() == link_reg() && base != zero_reg() && offset.as_i16() == 0 =>
             {
                 sink.put2(encode_cr2_type(CrOp::CJalr, base));
             }
 
+            // c.ebreak
+            Inst::EBreak => {
+                sink.put2(encode_cr_type(
+                    CrOp::CEbreak,
+                    writable_zero_reg(),
+                    zero_reg(),
+                ));
+            }
+
+            // c.unimp
+            Inst::Udf { trap_code } => {
+                sink.add_trap(trap_code);
+                if let Some(s) = state.take_stack_map() {
+                    sink.add_stack_map(StackMapExtent::UpcomingBytes(2), s);
+                }
+                sink.put2(0x0000);
+            }
+
+            // c.addi16sp
+            //
+            // c.addi16sp shares the opcode with c.lui, but has a destination field of x2.
+            // c.addi16sp adds the non-zero sign-extended 6-bit immediate to the value in the stack pointer (sp=x2),
+            // where the immediate is scaled to represent multiples of 16 in the range (-512,496). c.addi16sp is used
+            // to adjust the stack pointer in procedure prologues and epilogues. It expands into addi x2, x2, nzimm. c.addi16sp
+            // is only valid when nzimm≠0; the code point with nzimm=0 is reserved.
+            Inst::AluRRImm12 {
+                alu_op: AluOPRRI::Addi,
+                rd,
+                rs,
+                imm12,
+            } if rd.to_reg() == rs
+                && rs == stack_reg()
+                && imm12.as_i16() != 0
+                && (imm12.as_i16() % 16) == 0
+                && Imm6::maybe_from_i16(imm12.as_i16() / 16).is_some() =>
+            {
+                let imm6 = Imm6::maybe_from_i16(imm12.as_i16() / 16).unwrap();
+                sink.put2(encode_c_addi16sp(imm6));
+            }
+
+            // c.addi4spn
+            //
+            // c.addi4spn is a CIW-format instruction that adds a zero-extended non-zero
+            // immediate, scaled by 4, to the stack pointer, x2, and writes the result to
+            // rd. This instruction is used to generate pointers to stack-allocated variables
+            // and expands to addi rd, x2, nzuimm. c.addi4spn is only valid when nzuimm≠0;
+            // the code points with nzuimm=0 are reserved.
+            Inst::AluRRImm12 {
+                alu_op: AluOPRRI::Addi,
+                rd,
+                rs,
+                imm12,
+            } if reg_is_compressible(rd.to_reg())
+                && rs == stack_reg()
+                && imm12.as_i16() != 0
+                && (imm12.as_i16() % 4) == 0
+                && u8::try_from(imm12.as_i16() / 4).is_ok() =>
+            {
+                let imm = u8::try_from(imm12.as_i16() / 4).unwrap();
+                sink.put2(encode_ciw_type(CiwOp::CAddi4spn, rd, imm));
+            }
+
+            // c.addi
+            Inst::AluRRImm12 {
+                alu_op: AluOPRRI::Addi,
+                rd,
+                rs,
+                imm12,
+            } if rd.to_reg() == rs && rs != zero_reg() && imm12.as_i16() != 0 => {
+                let imm6 = match Imm6::maybe_from_imm12(imm12) {
+                    Some(imm6) => imm6,
+                    None => return false,
+                };
+
+                sink.put2(encode_ci_type(CiOp::CAddi, rd, imm6));
+            }
+
+            // c.addiw
+            Inst::AluRRImm12 {
+                alu_op: AluOPRRI::Addiw,
+                rd,
+                rs,
+                imm12,
+            } if rd.to_reg() == rs && rs != zero_reg() => {
+                let imm6 = match Imm6::maybe_from_imm12(imm12) {
+                    Some(imm6) => imm6,
+                    None => return false,
+                };
+                sink.put2(encode_ci_type(CiOp::CAddiw, rd, imm6));
+            }
+
+            // c.slli
+            Inst::AluRRImm12 {
+                alu_op: AluOPRRI::Slli,
+                rd,
+                rs,
+                imm12,
+            } if rd.to_reg() == rs && rs != zero_reg() && imm12.as_i16() != 0 => {
+                // The shift amount is unsigned, but we encode it as signed.
+                let shift = imm12.as_i16() & 0x3f;
+                let imm6 = Imm6::maybe_from_i16(shift << 10 >> 10).unwrap();
+                sink.put2(encode_ci_type(CiOp::CSlli, rd, imm6));
+            }
             _ => return false,
         }
 
@@ -978,7 +1076,7 @@ impl Inst {
                 );
 
                 sink.add_call_site(ir::Opcode::ReturnCall);
-                sink.add_reloc(Reloc::RiscvCall, &callee, 0);
+                sink.add_reloc(Reloc::RiscvCall, &**callee, 0);
                 Inst::construct_auipc_and_jalr(None, writable_spilltmp_reg(), 0)
                     .into_iter()
                     .for_each(|i| i.emit_uncompressed(sink, emit_info, state, start_off));
@@ -1096,6 +1194,20 @@ impl Inst {
                 let default_target = targets[0];
                 let targets = &targets[1..];
 
+                // We are going to potentially emit a large amount of instructions, so ensure that we emit an island
+                // now if we need one.
+                //
+                // The worse case PC calculations are 12 instructions. And each entry in the jump table is 2 instructions.
+                // Check if we need to emit a jump table here to support that jump.
+                let inst_count = 12 + (targets.len() * 2);
+                let distance = (inst_count * Inst::UNCOMPRESSED_INSTRUCTION_SIZE as usize) as u32;
+                if sink.island_needed(distance) {
+                    let jump_around_label = sink.get_label();
+                    Inst::gen_jump(jump_around_label).emit(&[], sink, emit_info, state);
+                    sink.emit_island(distance + 4, &mut state.ctrl_plane);
+                    sink.bind_label(jump_around_label, &mut state.ctrl_plane);
+                }
+
                 // We emit a bounds check on the index, if the index is larger than the number of
                 // jump table entries, we jump to the default block.  Otherwise we compute a jump
                 // offset by multiplying the index by 8 (the size of each entry) and then jump to
@@ -1203,16 +1315,8 @@ impl Inst {
 
                 // Emit the jump table.
                 //
-                // Each entry is a aupc + jalr to the target block. We also start with a island
+                // Each entry is a auipc + jalr to the target block. We also start with a island
                 // if necessary.
-
-                // Each entry in the jump table is 2 instructions, so 8 bytes. Check if
-                // we need to emit a jump table here to support that jump.
-                let distance =
-                    (targets.len() * 2 * Inst::UNCOMPRESSED_INSTRUCTION_SIZE as usize) as u32;
-                if sink.island_needed(distance) {
-                    sink.emit_island(distance, &mut state.ctrl_plane);
-                }
 
                 // Emit the jumps back to back
                 for target in targets.iter() {
@@ -1823,7 +1927,9 @@ impl Inst {
                     }
                     .emit(&[], sink, emit_info, state);
                     Inst::TrapIf {
-                        test: rd.to_reg(),
+                        cc: IntCC::NotEqual,
+                        rs1: rd.to_reg(),
+                        rs2: zero_reg(),
                         trap_code: TrapCode::IntegerOverflow,
                     }
                     .emit(&[], sink, emit_info, state);
@@ -1851,7 +1957,9 @@ impl Inst {
                     .emit(&[], sink, emit_info, state);
 
                     Inst::TrapIf {
-                        test: rd.to_reg(),
+                        cc: IntCC::NotEqual,
+                        rs1: rd.to_reg(),
+                        rs2: zero_reg(),
                         trap_code: TrapCode::IntegerOverflow,
                     }
                     .emit(&[], sink, emit_info, state);
@@ -1958,50 +2066,87 @@ impl Inst {
 
                 sink.bind_label(label_end, &mut state.ctrl_plane);
             }
-            &Inst::TrapIfC {
+
+            &Inst::ElfTlsGetAddr { rd, ref name } => {
+                // RISC-V's TLS GD model is slightly different from other arches.
+                //
+                // We have a relocation (R_RISCV_TLS_GD_HI20) that loads the high 20 bits
+                // of the address relative to the GOT entry. This relocation points to
+                // the symbol as usual.
+                //
+                // However when loading the bottom 12bits of the address, we need to
+                // use a label that points to the previous AUIPC instruction.
+                //
+                // label:
+                //    auipc a0,0                    # R_RISCV_TLS_GD_HI20 (symbol)
+                //    addi  a0,a0,0                 # R_RISCV_PCREL_LO12_I (label)
+                //
+                // https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc#global-dynamic
+
+                // Create the lable that is going to be published to the final binary object.
+                let auipc_label = sink.get_label();
+                sink.bind_label(auipc_label, &mut state.ctrl_plane);
+
+                // Get the current PC.
+                sink.add_reloc(Reloc::RiscvTlsGdHi20, &**name, 0);
+                Inst::Auipc {
+                    rd: rd,
+                    imm: Imm20::from_i32(0),
+                }
+                .emit_uncompressed(sink, emit_info, state, start_off);
+
+                // The `addi` here, points to the `auipc` label instead of directly to the symbol.
+                sink.add_reloc(Reloc::RiscvPCRelLo12I, &auipc_label, 0);
+                Inst::AluRRImm12 {
+                    alu_op: AluOPRRI::Addi,
+                    rd: rd,
+                    rs: rd.to_reg(),
+                    imm12: Imm12::from_i16(0),
+                }
+                .emit_uncompressed(sink, emit_info, state, start_off);
+
+                Inst::Call {
+                    info: Box::new(CallInfo {
+                        dest: ExternalName::LibCall(LibCall::ElfTlsGetAddr),
+                        uses: smallvec![],
+                        defs: smallvec![],
+                        opcode: crate::ir::Opcode::TlsValue,
+                        caller_callconv: CallConv::SystemV,
+                        callee_callconv: CallConv::SystemV,
+                        callee_pop_size: 0,
+                        clobbers: PRegSet::empty(),
+                    }),
+                }
+                .emit_uncompressed(sink, emit_info, state, start_off);
+            }
+
+            &Inst::TrapIf {
                 rs1,
                 rs2,
                 cc,
                 trap_code,
             } => {
-                let label_trap = sink.get_label();
-                let label_jump_over = sink.get_label();
+                let label_end = sink.get_label();
+                let cond = IntegerCompare { kind: cc, rs1, rs2 };
+
+                // Jump over the trap if we the condition is false.
                 Inst::CondBr {
-                    taken: CondBrTarget::Label(label_trap),
-                    not_taken: CondBrTarget::Label(label_jump_over),
-                    kind: IntegerCompare { kind: cc, rs1, rs2 },
+                    taken: CondBrTarget::Label(label_end),
+                    not_taken: CondBrTarget::Fallthrough,
+                    kind: cond.inverse(),
                 }
                 .emit(&[], sink, emit_info, state);
-                // trap
-                sink.bind_label(label_trap, &mut state.ctrl_plane);
                 Inst::Udf { trap_code }.emit(&[], sink, emit_info, state);
-                sink.bind_label(label_jump_over, &mut state.ctrl_plane);
-            }
-            &Inst::TrapIf { test, trap_code } => {
-                let label_trap = sink.get_label();
-                let label_jump_over = sink.get_label();
-                Inst::CondBr {
-                    taken: CondBrTarget::Label(label_trap),
-                    not_taken: CondBrTarget::Label(label_jump_over),
-                    kind: IntegerCompare {
-                        kind: IntCC::NotEqual,
-                        rs1: test,
-                        rs2: zero_reg(),
-                    },
-                }
-                .emit(&[], sink, emit_info, state);
-                // trap
-                sink.bind_label(label_trap, &mut state.ctrl_plane);
-                Inst::Udf {
-                    trap_code: trap_code,
-                }
-                .emit(&[], sink, emit_info, state);
-                sink.bind_label(label_jump_over, &mut state.ctrl_plane);
+
+                sink.bind_label(label_end, &mut state.ctrl_plane);
             }
             &Inst::Udf { trap_code } => {
                 sink.add_trap(trap_code);
                 if let Some(s) = state.take_stack_map() {
-                    sink.add_stack_map(StackMapExtent::UpcomingBytes(4), s);
+                    sink.add_stack_map(
+                        StackMapExtent::UpcomingBytes(Inst::TRAP_OPCODE.len() as u32),
+                        s,
+                    );
                 }
                 sink.put_data(Inst::TRAP_OPCODE);
             }
@@ -3273,20 +3418,21 @@ impl Inst {
                 offset,
             },
 
-            Inst::TrapIfC {
+            Inst::ElfTlsGetAddr { rd, name } => {
+                let rd = allocs.next_writable(rd);
+                debug_assert_eq!(a0(), rd.to_reg());
+                Inst::ElfTlsGetAddr { rd, name }
+            }
+
+            Inst::TrapIf {
                 rs1,
                 rs2,
                 cc,
                 trap_code,
-            } => Inst::TrapIfC {
+            } => Inst::TrapIf {
                 rs1: allocs.next(rs1),
                 rs2: allocs.next(rs2),
                 cc,
-                trap_code,
-            },
-
-            Inst::TrapIf { test, trap_code } => Inst::TrapIf {
-                test: allocs.next(test),
                 trap_code,
             },
 
