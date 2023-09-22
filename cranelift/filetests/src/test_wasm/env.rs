@@ -774,12 +774,29 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
 
     /// TODO
     fn typed_continuations_load_continuation_object(
-        &self,
+        &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
-        base_addr: ir::Value,
     ) -> ir::Value {
         self.inner
-            .typed_continuations_load_continuation_object(builder, base_addr)
+            .typed_continuations_load_continuation_object(builder)
+    }
+
+    fn typed_continuations_load_parent(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        contobj: ir::Value,
+    ) -> ir::Value {
+        self.inner.typed_continuations_load_parent(builder, contobj)
+    }
+
+    fn typed_continuations_store_parent(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        contobj: ir::Value,
+        new_parent: ir::Value,
+    ) {
+        self.inner
+            .typed_continuations_store_parent(builder, contobj, new_parent);
     }
 
     fn typed_continuations_load_return_values(

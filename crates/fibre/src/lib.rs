@@ -56,14 +56,6 @@ impl FiberStack {
         self.0.top()
     }
 
-    pub unsafe fn parent(&self) -> *mut u8 {
-        self.0.parent()
-    }
-
-    pub unsafe fn write_parent(&self, tsp: *mut u8) {
-        self.0.write_parent(tsp);
-    }
-
     /// Returns the range of where this stack resides in memory if the platform
     /// supports it.
     pub fn range(&self) -> Option<Range<usize>> {

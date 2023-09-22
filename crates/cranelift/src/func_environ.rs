@@ -2812,10 +2812,13 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     }
 
     fn typed_continuations_load_continuation_object(
-        &self,
+        &mut self,
         builder: &mut FunctionBuilder,
-        base_addr: ir::Value,
     ) -> ir::Value {
+        let pointer_type = self.pointer_type();
+        let vmctx = self.vmctx(builder.cursor().func);
+        let base_addr = builder.ins().global_value(pointer_type, vmctx);
+
         let memflags = ir::MemFlags::trusted();
         let offset = i32::try_from(self.offsets.vmctx_typed_continuations_store()).unwrap();
         builder
@@ -2835,6 +2838,31 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 generate_builtin_call!(self, builder, new_cont_ref, [contobj_addr]);
             return contref;
         }
+    }
+
+    fn typed_continuations_load_parent(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+    ) -> ir::Value {
+        let offset = wasmtime_runtime::continuation::offsets::continuation_object::PARENT;
+        let memflags = ir::MemFlags::trusted();
+
+        builder
+            .ins()
+            .load(self.pointer_type(), memflags, contobj, offset)
+    }
+
+    fn typed_continuations_store_parent(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+        new_parent: ir::Value,
+    ) {
+        let offset = wasmtime_runtime::continuation::offsets::continuation_object::PARENT;
+        let memflags = ir::MemFlags::trusted();
+
+        builder.ins().store(memflags, new_parent, contobj, offset);
     }
 
     /// TODO

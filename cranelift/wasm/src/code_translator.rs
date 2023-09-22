@@ -2523,46 +2523,68 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             // Idea create wrapper block for handling suspends:
             // (resume ...)
             // (if returned_normally then return code else resumetable code)
-
-            // First we pop the arguments off the stack and bundle
-            // them up. The arguments are laid out on the stack as
-            // follows.
             //
-            //  [ arg1 ... argN cont ]
-            let arity = environ.continuation_arguments(*type_index).len();
-            let (original_contref, call_args) = state.peekn(arity + 1).split_last().unwrap();
-            let original_contobj =
-                environ.typed_continuations_cont_ref_get_cont_obj(builder, *original_contref);
-
-            if call_args.len() > 0 {
-                let count = builder.ins().iconst(I32, call_args.len() as i64);
-                environ.typed_continuations_store_resume_args(
-                    builder,
-                    call_args,
-                    count,
-                    original_contobj,
-                );
-            }
-            // Pop the `resume_args` off the stack.
-            state.popn(arity + 1);
-
             let resume_block = builder.create_block();
             let return_block = crate::translation_utils::return_block(builder, environ)?;
             let suspend_block = crate::translation_utils::suspend_block(builder, environ)?;
             let switch_block = builder.create_block();
+            let forwarding_block =
+                crate::translation_utils::resumetable_forwarding_block(builder, environ)?;
 
-            builder.ins().jump(resume_block, &[original_contobj]);
+            // Preamble: Part of previously active block
+            {
+                // First we pop the arguments off the stack and bundle
+                // them up. The arguments are laid out on the stack as
+                // follows.
+                //
+                //  [ arg1 ... argN cont ]
+                let arity = environ.continuation_arguments(*type_index).len();
+                let (original_contref, call_args) = state.peekn(arity + 1).split_last().unwrap();
+                let original_contobj =
+                    environ.typed_continuations_cont_ref_get_cont_obj(builder, *original_contref);
 
-            let (base_addr, tag, resumed_contobj) = {
+                if call_args.len() > 0 {
+                    // We store the arguments in the continuation object to be resumed.
+                    let count = builder.ins().iconst(I32, call_args.len() as i64);
+                    environ.typed_continuations_store_resume_args(
+                        builder,
+                        call_args,
+                        count,
+                        original_contobj,
+                    );
+                }
+                // Pop the `resume_args` off the stack.
+                state.popn(arity + 1);
+
+                // Make the currently running continuation the parent of the one we are about to resume.
+                let original_running_contobj =
+                    environ.typed_continuations_load_continuation_object(builder);
+                environ.typed_continuations_store_parent(
+                    builder,
+                    original_contobj,
+                    original_running_contobj,
+                );
+
+                builder.ins().jump(resume_block, &[original_contobj]);
+            }
+
+            // Resume block: actually resume the fiber corresponding to the
+            // continuation object given as a parameter to the block. This
+            // parameterisation is necessary to enable forwarding, requiring us
+            // to resume objects other than `original_contobj`.
+            // We make the continuation object that was actually resumed available via
+            // `resumed_contobj`, so that subsequent blocks can refer to it.
+            let (tag, resumed_contobj) = {
                 builder.switch_to_block(resume_block);
                 builder.append_block_param(resume_block, environ.pointer_type());
 
-                // The continuation object to actually call resume on
+                // The continuation object to actually call resume on.
                 let resume_contobj = builder.block_params(resume_block)[0];
 
                 // Now, we generate the call instruction.
-                let (base_addr, signal, tag) =
+                let (_base_addr, signal, tag) =
                     environ.translate_resume(builder, state, resume_contobj)?;
+
                 // Description of results:
                 // * The `base_addr` is the base address of VM context.
                 // * The `signal` is an encoded boolean indicating whether
@@ -2570,11 +2592,6 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 // instruction.
                 // * The `tag` is the index of the control tag supplied to
                 // suspend (only valid if `signal` is 1).
-
-                // Now, construct blocks for the three continuations:
-                // 1) `resume` returned normally.
-                // 2) `resume` returned via a suspend.
-                // 3) `resume` is forwarding
 
                 // Test the signal bit.
                 let is_zero = builder.ins().icmp_imm(IntCC::Equal, signal, 0);
@@ -2584,35 +2601,22 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 canonicalise_brif(builder, is_zero, return_block, &[], suspend_block, &[]);
 
                 // We do not seal this block, yet, because the effect forwarding block has a back edge to it
-                (base_addr, tag, resume_contobj)
+                (tag, resume_contobj)
             };
 
-            // Next, build the suspend block.
-            let (contref, contobj) = {
+            // Suspend block.
+            {
                 builder.switch_to_block(suspend_block);
                 builder.seal_block(suspend_block);
 
-                // Load the continuation object
-                // TODO(frank-emrich) Is it actually the case that the suspended continuation MUST
-                // be the one we resumed here? In that case we wouldn't actually have to go via memory
-                // but could just re-use the cont object on the (WASM) stack in the beginning
-
-                // ANSWER(dhil): Yes, in general it will be a
-                // completely different object. If we had some static
-                // information to tell us that the previous
-                // continuation object wasn't ever invoked again, then
-                // we could reuse it. A different question is how to
-                // avoid allocation of the intermediary "continuation
-                // proxy objects", though, for that I reckon we need
-                // fat pointers.
-                let contobj =
-                    environ.typed_continuations_load_continuation_object(builder, base_addr);
-                let contref = environ.typed_continuations_new_cont_ref(builder, contobj);
-
                 // We need to terminate this block before being allowed to switch to another one
                 builder.ins().jump(switch_block, &[]);
-                (contref, contobj)
             };
+
+            // Now, construct blocks for the three continuations:
+            // 1) `resume` returned normally.
+            // 2) `resume` returned via a suspend.
+            // 3) `resume` is forwarding
 
             // Strategy:
             //
@@ -2636,9 +2640,19 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 let param_types = environ.tag_params(tag).to_vec();
                 let params = environ.typed_continuations_load_payloads(builder, &param_types);
 
+                // We have an actual handling block for this tag, rather than just forwarding.
+                // Detatch the continuation object by setting its parent to NULL.
+                let pointer_type = environ.pointer_type();
+                let null = builder.ins().iconst(pointer_type, 0);
+                environ.typed_continuations_store_parent(builder, resumed_contobj, null);
+
                 state.pushn(&params);
-                // Push the continuation reference.
+
+                // Create and push the continuation reference. We only create
+                // them here because we don't need them when forwarding.
+                let contref = environ.typed_continuations_new_cont_ref(builder, resumed_contobj);
                 state.push1(contref);
+
                 let count = params.len() + 1;
                 let (br_destination, inputs) = translate_br_if_args(label, state);
 
@@ -2654,32 +2668,39 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             // the Switch structure and created the blocks it jumps
             // to.
 
-            let forwarding_block =
-                crate::translation_utils::resumetable_forwarding_block(builder, environ)?;
+            // Forwarding block: Default case for the switching logic on the
+            // tag. Used when the (resume ...) clause we currently translate
+            // does not have a matching (tag ...) entry.
             {
                 builder.switch_to_block(forwarding_block);
 
+                let parent_contobj =
+                    environ.typed_continuations_load_parent(builder, resumed_contobj);
+
+                // TODO(frank-emrich): Check if parent is null. If so, we are at
+                // the toplevel and simply have no handler for the given tag and must trap.
+
                 // We suspend, thus deferring handling to the parent.
-                // We do nothing about tag *parameters, these remain unchanged within the
-                // payload buffer associcated with the whole VMContext.
+                // We do nothing about tag *parameters*, these remain unchanged within the
+                // payload buffer associated with the whole VMContext.
                 environ.translate_suspend(builder, state, tag);
 
-                // When reaching this point, the parent handler has just invoked `resume`.
-                // We propagate the tag return values to the child (i.e., `contobj`).
-                let parent_contobj =
-                    environ.typed_continuations_load_continuation_object(builder, base_addr);
+                // "Tag return values" (i.e., values provided by cont.bind or
+                // resume to the continuation) are actually stored in
+                // continuation objects, and we need to move them down the chain
+                // back to the continuation object where we originally
+                // suspended.
                 environ.typed_continuations_forward_tag_return_values(
                     builder,
                     parent_contobj,
-                    contobj,
+                    resumed_contobj,
                 );
 
-                builder.ins().jump(resume_block, &[contobj]);
+                builder.ins().jump(resume_block, &[resumed_contobj]);
                 builder.seal_block(resume_block);
             }
 
-            // Switch block (where the actual switching logic is
-            // emitted to).
+            // Switch block: actual switching logic is emitted here.
             {
                 builder.switch_to_block(switch_block);
                 switch.emit(builder, tag, forwarding_block);
@@ -2693,7 +2714,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 }
             }
 
-            // Now, finish the return block.
+            // Return block: Jumped to by resume block if continuation returned normally.
             {
                 builder.switch_to_block(return_block);
                 builder.seal_block(return_block);
@@ -2709,7 +2730,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 // The continuation has returned and all `ContinuationReferences`
                 // to it should have been be invalidated. We may safely deallocate
                 // it.
-                environ.typed_continuations_drop_cont_obj(builder, original_contobj);
+                environ.typed_continuations_drop_cont_obj(builder, resumed_contobj);
 
                 state.pushn(&values);
             }
@@ -2724,9 +2745,9 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             state.popn(param_count);
 
             let tag_index_val = builder.ins().iconst(I32, *tag_index as i64);
-            let vmctx = environ.translate_suspend(builder, state, tag_index_val);
+            environ.translate_suspend(builder, state, tag_index_val);
 
-            let contobj = environ.typed_continuations_load_continuation_object(builder, vmctx);
+            let contobj = environ.typed_continuations_load_continuation_object(builder);
 
             let return_types = environ.tag_returns(*tag_index).to_vec();
             let return_values =

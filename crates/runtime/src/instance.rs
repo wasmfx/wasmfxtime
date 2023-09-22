@@ -143,9 +143,6 @@ pub struct Instance {
     /// seems not too bad.
     vmctx_self_reference: SendSyncPtr<VMContext>,
 
-    /// Current top of the stack pointer (tsp)
-    tsp: TopOfStackPointer,
-
     #[cfg(feature = "wmemcheck")]
     pub(crate) wmemcheck_state: Option<Wmemcheck>,
     // TODO: add support for multiple memories, wmemcheck_state corresponds to
@@ -157,13 +154,6 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub(crate) fn tsp(&self) -> TopOfStackPointer {
-        self.tsp
-    }
-    pub(crate) fn set_tsp(&mut self, ptr: TopOfStackPointer) {
-        self.tsp = ptr;
-    }
-
     /// Create an instance at the given memory address.
     ///
     /// It is assumed the memory was properly aligned and the
@@ -201,7 +191,6 @@ impl Instance {
                 vmctx_self_reference: SendSyncPtr::new(
                     NonNull::new(ptr.cast::<u8>().add(mem::size_of::<Instance>()).cast()).unwrap(),
                 ),
-                tsp: TopOfStackPointer::null(),
                 vmctx: VMContext {
                     _marker: std::marker::PhantomPinned,
                 },
@@ -1087,6 +1076,9 @@ impl Instance {
         *self.vmctx_plus_offset_mut(offsets.vmctx_builtin_functions()) =
             &VMBuiltinFunctionsArray::INIT;
 
+        *self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_store()) =
+            std::ptr::null_mut::<crate::continuation::ContinuationObject>();
+
         // Initialize the imports
         debug_assert_eq!(imports.functions.len(), module.num_imported_funcs);
         ptr::copy_nonoverlapping(
@@ -1225,9 +1217,20 @@ impl Instance {
         fault
     }
 
-    /// TODO
-    pub unsafe fn get_typed_continuations_store_mut(&mut self) -> *mut u32 {
-        self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store())
+    pub(crate) fn typed_continuations_store(
+        &mut self,
+    ) -> *mut crate::continuation::ContinuationObject {
+        unsafe { *self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store()) }
+    }
+
+    pub(crate) fn set_typed_continuations_store(
+        &mut self,
+        contobj: *mut crate::continuation::ContinuationObject,
+    ) {
+        unsafe {
+            let ptr = self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store());
+            *ptr = contobj;
+        }
     }
 
     /// TODO
@@ -1269,36 +1272,6 @@ pub struct InstanceHandle {
 // assertion below.
 unsafe impl Send for InstanceHandle {}
 unsafe impl Sync for InstanceHandle {}
-
-pub struct TopOfStackPointer {
-    tsp: *mut u8,
-}
-
-impl TopOfStackPointer {
-    pub fn null() -> Self {
-        TopOfStackPointer {
-            tsp: std::ptr::null_mut(),
-        }
-    }
-
-    pub fn as_raw(self) -> *mut u8 {
-        self.tsp
-    }
-
-    pub fn from_raw(tsp: *mut u8) -> Self {
-        TopOfStackPointer { tsp }
-    }
-}
-
-impl Copy for TopOfStackPointer {}
-impl Clone for TopOfStackPointer {
-    fn clone(&self) -> Self {
-        TopOfStackPointer { tsp: self.tsp }
-    }
-}
-
-unsafe impl Send for TopOfStackPointer {}
-unsafe impl Sync for TopOfStackPointer {}
 
 fn _assert_send_sync() {
     fn _assert<T: Send + Sync>() {}
