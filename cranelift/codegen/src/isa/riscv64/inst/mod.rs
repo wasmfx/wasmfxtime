@@ -459,9 +459,6 @@ fn riscv64_get_operands<F: Fn(VReg) -> VReg>(inst: &Inst, collector: &mut Operan
                 collector.reg_fixed_use(u.vreg, u.preg);
             }
         }
-        &Inst::TrapIf { test, .. } => {
-            collector.reg_use(test);
-        }
         &Inst::Jal { .. } => {
             // JAL technically has a rd register, but we currently always
             // hardcode it to x0.
@@ -472,6 +469,13 @@ fn riscv64_get_operands<F: Fn(VReg) -> VReg>(inst: &Inst, collector: &mut Operan
         }
         &Inst::LoadExtName { rd, .. } => {
             collector.reg_def(rd);
+        }
+        &Inst::ElfTlsGetAddr { rd, .. } => {
+            // x10 is a0 which is both the first argument and the first return value.
+            collector.reg_fixed_def(rd, a0());
+            let mut clobbers = Riscv64MachineDeps::get_regs_clobbered_by_call(CallConv::SystemV);
+            clobbers.remove(px_reg(10));
+            collector.reg_clobbers(clobbers);
         }
         &Inst::LoadAddr { rd, mem } => {
             if let Some(r) = mem.get_allocatable_register() {
@@ -596,7 +600,7 @@ fn riscv64_get_operands<F: Fn(VReg) -> VReg>(inst: &Inst, collector: &mut Operan
             collector.reg_early_def(t0);
             collector.reg_early_def(dst);
         }
-        &Inst::TrapIfC { rs1, rs2, .. } => {
+        &Inst::TrapIf { rs1, rs2, .. } => {
             collector.reg_use(rs1);
             collector.reg_use(rs2);
         }
@@ -1628,10 +1632,7 @@ impl Inst {
                 }
                 s
             }
-            &MInst::TrapIf { test, trap_code } => {
-                format!("trap_if {},{}", format_reg(test, allocs), trap_code,)
-            }
-            &MInst::TrapIfC {
+            &MInst::TrapIf {
                 rs1,
                 rs2,
                 cc,
@@ -1639,7 +1640,7 @@ impl Inst {
             } => {
                 let rs1 = format_reg(rs1, allocs);
                 let rs2 = format_reg(rs2, allocs);
-                format!("trap_ifc {}##({} {} {})", trap_code, rs1, cc, rs2)
+                format!("trap_if {trap_code}##({rs1} {cc} {rs2})")
             }
             &MInst::Jal { label } => {
                 format!("j {}", label.to_string())
@@ -1690,6 +1691,10 @@ impl Inst {
             } => {
                 let rd = format_reg(rd.to_reg(), allocs);
                 format!("load_sym {},{}{:+}", rd, name.display(None), offset)
+            }
+            &Inst::ElfTlsGetAddr { rd, ref name } => {
+                let rd = format_reg(rd.to_reg(), allocs);
+                format!("elf_tls_get_addr {rd},{}", name.display(None))
             }
             &MInst::LoadAddr { ref rd, ref mem } => {
                 let rs = mem.to_string_with_alloc(allocs);

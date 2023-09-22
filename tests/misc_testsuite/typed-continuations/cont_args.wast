@@ -74,14 +74,14 @@
     ;; the resume above resumes execution of f2, which finishes without further suspends
     (i32.add (global.get $i)))
 
-(func $test_case_3 (export "test_case_3") (result i32)
+  (func $test_case_3 (export "test_case_3") (result i32)
     ;; remove this eventually
     (global.set  $i (i32.const 0))
     (resume $f2_ct (i32.const 49) (cont.new $f2_ct (ref.func $f2)))
     (i32.add (global.get $i)))
 
 
-(func $test_case_4 (export "test_case_4") (result i32)
+  (func $test_case_4 (export "test_case_4") (result i32)
     (local $k (ref $res_int_to_int))
 
     (block $on_e3 (result i32 (ref $res_int_to_int))
