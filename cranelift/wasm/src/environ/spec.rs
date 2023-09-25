@@ -10,7 +10,7 @@ use crate::state::FuncTranslationState;
 use crate::{
     DataIndex, ElemIndex, FuncIndex, Global, GlobalIndex, GlobalInit, Heap, HeapData, Memory,
     MemoryIndex, SignatureIndex, Table, TableIndex, Tag, TagIndex, TypeConvert, TypeIndex,
-    WasmError, WasmFuncType, WasmHeapType, WasmResult,
+    WasmContType, WasmError, WasmFuncType, WasmHeapType, WasmResult,
 };
 use core::convert::From;
 use cranelift_codegen::cursor::FuncCursor;
@@ -841,7 +841,7 @@ pub trait ModuleEnvironment<'data>: TypeConvert {
     fn declare_type_func(&mut self, wasm_func_type: WasmFuncType) -> WasmResult<()>;
 
     /// Declares a continuation signature to the environment.
-    fn declare_type_cont(&mut self, type_index: u32) -> WasmResult<()>;
+    fn declare_type_cont(&mut self, wasm_cont_type: WasmContType) -> WasmResult<()>;
 
     /// Translates a type index to its signature index, only called for type
     /// indices which point to functions.

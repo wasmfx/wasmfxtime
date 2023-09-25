@@ -161,6 +161,20 @@ impl WasmFuncType {
     }
 }
 
+/// WebAssembly continuation type -- equivalent of `wasmparser`'s ContType.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct WasmContType(TypeIndex);
+
+impl WasmContType {
+    pub fn new(idx: TypeIndex) -> Self {
+        WasmContType(idx)
+    }
+
+    pub fn type_index(self) -> TypeIndex {
+        self.0
+    }
+}
+
 /// Index type of a function (imported or defined) inside the WebAssembly module.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct FuncIndex(u32);
@@ -456,6 +470,11 @@ pub trait TypeConvert {
             .map(|t| self.convert_valtype(*t))
             .collect();
         WasmFuncType::new(params, results)
+    }
+
+    /// Converts a wasmparser continuation type to a wasmtime type
+    fn convert_cont_type(&self, ty: &wasmparser::ContType) -> WasmContType {
+        WasmContType(TypeIndex::from_u32(ty.0))
     }
 
     /// Converts a wasmparser value type to a wasmtime type

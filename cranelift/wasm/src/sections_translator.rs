@@ -56,6 +56,7 @@ pub fn parse_type_section<'a>(
                 environ.declare_type_func(ty)?;
             }
             wasmparser::FuncOrContType::Cont(ty) => {
+                let ty = environ.convert_cont_type(&ty);
                 environ.declare_type_cont(ty)?;
             }
         }

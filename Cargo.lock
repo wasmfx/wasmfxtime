@@ -656,7 +656,7 @@ dependencies = [
  "target-lexicon",
  "thiserror",
  "toml",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmtime-types",
  "wat",
 ]
@@ -836,7 +836,7 @@ dependencies = [
  "serde_derive",
  "smallvec",
  "target-lexicon",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmtime-types",
  "wat",
 ]
@@ -2625,7 +2625,7 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wasmtime-wasi-http",
- "wit-component 0.14.2 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wit-component 0.14.2 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
 ]
 
 [[package]]
@@ -2907,7 +2907,7 @@ name = "verify-component-adapter"
 version = "14.0.0"
 dependencies = [
  "anyhow",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wat",
 ]
 
@@ -3008,7 +3008,7 @@ dependencies = [
  "byte-array-literals",
  "object",
  "wasi",
- "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wit-bindgen",
 ]
 
@@ -3113,7 +3113,7 @@ dependencies = [
 [[package]]
 name = "wasm-encoder"
 version = "0.33.1"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix#1e57203382cf57530e4c92817e50609a9baf8fd1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1#9a01dae1ec7d2020ef8994f38bc37d5d49be0158"
 dependencies = [
  "leb128",
 ]
@@ -3136,41 +3136,41 @@ dependencies = [
 [[package]]
 name = "wasm-metadata"
 version = "0.10.5"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix#1e57203382cf57530e4c92817e50609a9baf8fd1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1#9a01dae1ec7d2020ef8994f38bc37d5d49be0158"
 dependencies = [
  "anyhow",
  "indexmap 2.0.0",
  "serde",
  "serde_json",
  "spdx",
- "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
 ]
 
 [[package]]
 name = "wasm-mutate"
 version = "0.2.34"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix#1e57203382cf57530e4c92817e50609a9baf8fd1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1#9a01dae1ec7d2020ef8994f38bc37d5d49be0158"
 dependencies = [
  "egg",
  "log",
  "rand",
  "thiserror",
- "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
 ]
 
 [[package]]
 name = "wasm-smith"
 version = "0.12.17"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix#1e57203382cf57530e4c92817e50609a9baf8fd1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1#9a01dae1ec7d2020ef8994f38bc37d5d49be0158"
 dependencies = [
  "arbitrary",
  "flagset",
  "indexmap 2.0.0",
  "leb128",
- "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
 ]
 
 [[package]]
@@ -3224,7 +3224,7 @@ dependencies = [
 [[package]]
 name = "wasmparser"
 version = "0.113.1"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix#1e57203382cf57530e4c92817e50609a9baf8fd1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1#9a01dae1ec7d2020ef8994f38bc37d5d49be0158"
 dependencies = [
  "indexmap 2.0.0",
  "semver",
@@ -3242,10 +3242,10 @@ dependencies = [
 [[package]]
 name = "wasmprinter"
 version = "0.2.66"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix#1e57203382cf57530e4c92817e50609a9baf8fd1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1#9a01dae1ec7d2020ef8994f38bc37d5d49be0158"
 dependencies = [
  "anyhow",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
 ]
 
 [[package]]
@@ -3273,8 +3273,8 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "wasi-cap-std-sync",
- "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmtime-cache",
  "wasmtime-component-macro",
  "wasmtime-component-util",
@@ -3389,8 +3389,8 @@ dependencies = [
  "test-programs",
  "tokio",
  "walkdir",
- "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmtime",
  "wasmtime-cache",
  "wasmtime-cli-flags",
@@ -3435,7 +3435,7 @@ dependencies = [
  "wasmtime",
  "wasmtime-component-util",
  "wasmtime-wit-bindgen",
- "wit-parser 0.11.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wit-parser 0.11.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
 ]
 
 [[package]]
@@ -3459,7 +3459,7 @@ dependencies = [
  "object",
  "target-lexicon",
  "thiserror",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
  "wasmtime-runtime",
@@ -3497,8 +3497,8 @@ dependencies = [
  "serde_derive",
  "target-lexicon",
  "thiserror",
- "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmprinter",
  "wasmtime-component-util",
  "wasmtime-types",
@@ -3513,7 +3513,7 @@ dependencies = [
  "component-fuzz-util",
  "env_logger 0.10.0",
  "libfuzzer-sys",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmprinter",
  "wasmtime-environ",
  "wat",
@@ -3581,7 +3581,7 @@ dependencies = [
  "rand",
  "smallvec",
  "target-lexicon",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmtime",
  "wasmtime-fuzzing",
 ]
@@ -3601,12 +3601,12 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "v8",
- "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasm-mutate",
  "wasm-smith",
  "wasm-spec-interpreter",
  "wasmi",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmprinter",
  "wasmtime",
  "wasmtime-wast",
@@ -3676,7 +3676,7 @@ dependencies = [
  "rand",
  "rustix",
  "sptr",
- "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmtime-asm-macros",
  "wasmtime-environ",
  "wasmtime-fiber",
@@ -3695,7 +3695,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "thiserror",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
 ]
 
 [[package]]
@@ -3808,7 +3808,7 @@ dependencies = [
  "gimli",
  "object",
  "target-lexicon",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
  "winch-codegen",
@@ -3821,7 +3821,7 @@ dependencies = [
  "anyhow",
  "heck",
  "indexmap 2.0.0",
- "wit-parser 0.11.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wit-parser 0.11.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
 ]
 
 [[package]]
@@ -3840,18 +3840,18 @@ dependencies = [
 [[package]]
 name = "wast"
 version = "65.0.1"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix#1e57203382cf57530e4c92817e50609a9baf8fd1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1#9a01dae1ec7d2020ef8994f38bc37d5d49be0158"
 dependencies = [
  "leb128",
  "memchr",
  "unicode-width",
- "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
 ]
 
 [[package]]
 name = "wat"
 version = "1.0.73"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix#1e57203382cf57530e4c92817e50609a9baf8fd1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1#9a01dae1ec7d2020ef8994f38bc37d5d49be0158"
 dependencies = [
  "wast 65.0.1",
 ]
@@ -3979,7 +3979,7 @@ dependencies = [
  "regalloc2",
  "smallvec",
  "target-lexicon",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmtime-environ",
 ]
 
@@ -4024,7 +4024,7 @@ dependencies = [
  "similar",
  "target-lexicon",
  "toml",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
  "wasmtime-environ",
  "wat",
  "winch-codegen",
@@ -4255,7 +4255,7 @@ dependencies = [
 [[package]]
 name = "wit-component"
 version = "0.14.2"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix#1e57203382cf57530e4c92817e50609a9baf8fd1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1#9a01dae1ec7d2020ef8994f38bc37d5d49be0158"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
@@ -4263,10 +4263,10 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
- "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
- "wasm-metadata 0.10.5 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
- "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
- "wit-parser 0.11.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix)",
+ "wasm-encoder 0.33.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
+ "wasm-metadata 0.10.5 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
+ "wasmparser 0.113.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
+ "wit-parser 0.11.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1)",
 ]
 
 [[package]]
@@ -4290,7 +4290,7 @@ dependencies = [
 [[package]]
 name = "wit-parser"
 version = "0.11.1"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.hotfix#1e57203382cf57530e4c92817e50609a9baf8fd1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.42.rev+1#9a01dae1ec7d2020ef8994f38bc37d5d49be0158"
 dependencies = [
  "anyhow",
  "id-arena",

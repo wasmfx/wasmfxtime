@@ -12,7 +12,7 @@ use crate::WasmType;
 use crate::{
     DataIndex, DefinedFuncIndex, ElemIndex, FuncIndex, Global, GlobalIndex, GlobalInit, Heap,
     HeapData, HeapStyle, Memory, MemoryIndex, Table, TableIndex, TypeConvert, TypeIndex,
-    WasmFuncType, WasmHeapType, WasmResult,
+    WasmContType, WasmFuncType, WasmHeapType, WasmResult,
 };
 use core::convert::TryFrom;
 use cranelift_codegen::cursor::FuncCursor;
@@ -895,7 +895,7 @@ impl<'data> ModuleEnvironment<'data> for DummyEnvironment {
         Ok(())
     }
 
-    fn declare_type_cont(&mut self, _type_index: u32) -> WasmResult<()> {
+    fn declare_type_cont(&mut self, _wasm_cont_type: WasmContType) -> WasmResult<()> {
         unimplemented!()
     }
 
