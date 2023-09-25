@@ -5,8 +5,8 @@ use crate::module::{
 use crate::{
     DataIndex, DefinedFuncIndex, ElemIndex, EntityIndex, EntityType, FuncIndex, GlobalIndex,
     GlobalInit, MemoryIndex, ModuleTypesBuilder, PrimaryMap, SignatureIndex, TableIndex,
-    TableInitialValue, Tunables, TypeConvert, TypeIndex, WasmError, WasmFuncType, WasmHeapType,
-    WasmResult, WasmType,
+    TableInitialValue, Tunables, TypeConvert, TypeIndex, WasmContType, WasmError, WasmFuncType,
+    WasmHeapType, WasmResult, WasmType,
 };
 use cranelift_entity::packed_option::ReservedValue;
 use std::borrow::Cow;
@@ -244,6 +244,7 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                             self.declare_type_func(ty)?;
                         }
                         wasmparser::FuncOrContType::Cont(ty) => {
+                            let ty = self.convert_cont_type(&ty);
                             self.declare_type_cont(ty)?;
                         }
                     }
@@ -817,8 +818,8 @@ and for re-adding support for interface types you can see this issue:
         Ok(())
     }
 
-    fn declare_type_cont(&mut self, index: u32) -> WasmResult<()> {
-        let sig_index = self.result.module.types[TypeIndex::from_u32(index)].unwrap_function();
+    fn declare_type_cont(&mut self, wasm: WasmContType) -> WasmResult<()> {
+        let sig_index = self.result.module.types[WasmContType::type_index(wasm)].unwrap_function();
         self.result
             .module
             .types
