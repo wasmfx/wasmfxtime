@@ -78,7 +78,7 @@
 
 use crate::instance::InstanceData;
 use crate::linker::Definition;
-use crate::module::BareModuleInfo;
+use crate::module::{BareModuleInfo, RegisteredModuleId};
 use crate::trampoline::VMHostGlobalContext;
 use crate::{module::ModuleRegistry, Engine, Module, Trap, Val, ValRaw};
 use crate::{Global, Instance, Memory};
@@ -96,9 +96,9 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use wasmtime_runtime::{
-    ExportGlobal, ExportMemory, InstanceAllocationRequest, InstanceAllocator, InstanceHandle,
-    ModuleInfo, OnDemandInstanceAllocator, SignalHandler, StoreBox, StorePtr, VMContext,
-    VMExternRef, VMExternRefActivationsTable, VMFuncRef, VMRuntimeLimits, WasmFault,
+    ExportGlobal, InstanceAllocationRequest, InstanceAllocator, InstanceHandle, ModuleInfo,
+    OnDemandInstanceAllocator, SignalHandler, StoreBox, StorePtr, VMContext, VMExternRef,
+    VMExternRefActivationsTable, VMFuncRef, VMRuntimeLimits, WasmFault,
 };
 
 mod context;
@@ -433,8 +433,24 @@ where
 /// instance allocator.
 struct StoreInstance {
     handle: InstanceHandle,
-    // Stores whether or not to use the on-demand allocator to deallocate the instance
-    ondemand: bool,
+    kind: StoreInstanceKind,
+}
+
+enum StoreInstanceKind {
+    /// An actual, non-dummy instance.
+    Real {
+        /// The id of this instance's module inside our owning store's
+        /// `ModuleRegistry`.
+        module_id: RegisteredModuleId,
+    },
+
+    /// This is a dummy instance that is just an implementation detail for
+    /// something else. For example, host-created memories internally create a
+    /// dummy instance.
+    ///
+    /// Regardless of the configured instance allocator for the engine, dummy
+    /// instances always use the on-demand allocator to deallocate the instance.
+    Dummy,
 }
 
 #[derive(Copy, Clone)]
@@ -1247,10 +1263,40 @@ impl StoreOpaque {
         &mut self.host_globals
     }
 
-    pub unsafe fn add_instance(&mut self, handle: InstanceHandle, ondemand: bool) -> InstanceId {
+    pub fn module_for_instance(&self, instance: InstanceId) -> Option<&'_ Module> {
+        match self.instances[instance.0].kind {
+            StoreInstanceKind::Dummy => None,
+            StoreInstanceKind::Real { module_id } => {
+                let module = self
+                    .modules()
+                    .lookup_module_by_id(module_id)
+                    .expect("should always have a registered module for real instances");
+                Some(module)
+            }
+        }
+    }
+
+    pub unsafe fn add_instance(
+        &mut self,
+        handle: InstanceHandle,
+        module_id: RegisteredModuleId,
+    ) -> InstanceId {
         self.instances.push(StoreInstance {
             handle: handle.clone(),
-            ondemand,
+            kind: StoreInstanceKind::Real { module_id },
+        });
+        InstanceId(self.instances.len() - 1)
+    }
+
+    /// Add a dummy instance that to the store.
+    ///
+    /// These are instances that are just implementation details of something
+    /// else (e.g. host-created memories that are not actually defined in any
+    /// Wasm module) and therefore shouldn't show up in things like core dumps.
+    pub unsafe fn add_dummy_instance(&mut self, handle: InstanceHandle) -> InstanceId {
+        self.instances.push(StoreInstance {
+            handle: handle.clone(),
+            kind: StoreInstanceKind::Dummy,
         });
         InstanceId(self.instances.len() - 1)
     }
@@ -1263,22 +1309,65 @@ impl StoreOpaque {
         &mut self.instances[id.0].handle
     }
 
-    pub fn all_instances(&self) -> impl ExactSizeIterator<Item = Instance> {
-        self.store_data()
-            .iter::<InstanceData>()
-            .map(Instance::from_stored)
+    /// Get all instances (ignoring dummy instances) within this store.
+    pub fn all_instances<'a>(&'a mut self) -> impl ExactSizeIterator<Item = Instance> + 'a {
+        let instances = self
+            .instances
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, inst)| {
+                let id = InstanceId::from_index(idx);
+                if let StoreInstanceKind::Dummy = inst.kind {
+                    None
+                } else {
+                    Some(InstanceData::from_id(id))
+                }
+            })
+            .collect::<Vec<_>>();
+        instances
+            .into_iter()
+            .map(|i| Instance::from_wasmtime(i, self))
     }
 
-    pub fn all_memories(&self) -> impl ExactSizeIterator<Item = Memory> {
-        self.store_data()
-            .iter::<ExportMemory>()
-            .map(Memory::from_stored)
+    /// Get all memories (host- or Wasm-defined) within this store.
+    pub fn all_memories<'a>(&'a mut self) -> impl Iterator<Item = Memory> + 'a {
+        // NB: Host-created memories have dummy instances. Therefore, we can get
+        // all memories in the store by iterating over all instances (including
+        // dummy instances) and getting each of their defined memories.
+        let mems = self
+            .instances
+            .iter_mut()
+            .flat_map(|instance| instance.handle.defined_memories())
+            .collect::<Vec<_>>();
+        mems.into_iter()
+            .map(|memory| unsafe { Memory::from_wasmtime_memory(memory, self) })
     }
 
-    pub fn all_globals(&self) -> impl ExactSizeIterator<Item = Global> {
-        self.store_data()
-            .iter::<ExportGlobal>()
-            .map(Global::from_stored)
+    /// Iterate over all globals (host- or Wasm-defined) within this store.
+    pub fn all_globals<'a>(&'a mut self) -> impl Iterator<Item = Global> + 'a {
+        unsafe {
+            // First gather all the host-created globals.
+            let mut globals = self
+                .host_globals()
+                .iter()
+                .map(|global| ExportGlobal {
+                    definition: &mut (*global.get()).global as *mut _,
+                    global: (*global.get()).ty.to_wasm_type(),
+                })
+                .collect::<Vec<_>>();
+
+            // Then iterate over all instances and yield each of their defined
+            // globals.
+            globals.extend(
+                self.instances.iter_mut().flat_map(|instance| {
+                    instance.handle.defined_globals().map(|(_i, global)| global)
+                }),
+            );
+
+            globals
+                .into_iter()
+                .map(|g| Global::from_wasmtime_global(g, self))
+        }
     }
 
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))] // not used on all platforms
@@ -2207,7 +2296,7 @@ impl Drop for StoreOpaque {
             let allocator = self.engine.allocator();
             let ondemand = OnDemandInstanceAllocator::default();
             for instance in self.instances.iter_mut() {
-                if instance.ondemand {
+                if let StoreInstanceKind::Dummy = instance.kind {
                     ondemand.deallocate_module(&mut instance.handle);
                 } else {
                     allocator.deallocate_module(&mut instance.handle);
@@ -2232,7 +2321,7 @@ impl Drop for StoreOpaque {
 
 impl wasmtime_runtime::ModuleInfoLookup for ModuleRegistry {
     fn lookup(&self, pc: usize) -> Option<&dyn ModuleInfo> {
-        self.lookup_module(pc)
+        self.lookup_module_info(pc)
     }
 }
 
