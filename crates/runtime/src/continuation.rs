@@ -371,11 +371,11 @@ pub fn resume(
     let fiber = unsafe { (*contobj).fiber };
 
     if ENABLE_DEBUG_PRINTING {
-        let running_contobj = instance.typed_continuations_store();
+        let _running_contobj = instance.typed_continuations_store();
         debug_println!(
             "Resuming contobj @ {:p}, previously running contobj is {:p}",
             contobj,
-            running_contobj
+            _running_contobj
         );
     }
 
