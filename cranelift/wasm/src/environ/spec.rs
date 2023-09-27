@@ -21,6 +21,7 @@ use cranelift_entity::PrimaryMap;
 use cranelift_frontend::FunctionBuilder;
 use std::boxed::Box;
 use std::string::ToString;
+use std::vec::Vec;
 use wasmparser::{FuncValidator, FunctionBody, Operator, ValidatorResources, WasmFeatures};
 
 /// The value of a WebAssembly global variable.
@@ -629,17 +630,17 @@ pub trait FuncEnvironment: TargetEnvironment {
         return_types: &[wasmtime_types::WasmType],
     ) -> WasmResult<ir::Value>;
 
-    /// Translates a resume instruction and returns a triple (vmctx,
-    /// signal, tag), where vmctx is the base address of the VM
-    /// context, signal is high bit of the resume result, and tag is
-    /// the index of the control tag supplied to suspend (if the
-    /// signal is 1).
+    /// Translates resume instructions.
+    /// Returns the values returned by the instruction (i.e., the values
+    /// returned by the resumed continuation once it returns normally)
     fn translate_resume(
         &mut self,
         builder: &mut FunctionBuilder,
-        state: &FuncTranslationState,
-        cont: ir::Value,
-    ) -> WasmResult<(ir::Value, ir::Value, ir::Value)>;
+        type_index: u32,
+        contref: ir::Value,
+        resume_args: &[ir::Value],
+        resumetable: &[(u32, ir::Block)],
+    ) -> Vec<ir::Value>;
 
     /// TODO(dhil): write documentation.
     fn translate_resume_throw(
@@ -654,7 +655,6 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn translate_suspend(
         &mut self,
         builder: &mut FunctionBuilder,
-        state: &FuncTranslationState,
         tag_index: ir::Value,
     ) -> ir::Value;
 

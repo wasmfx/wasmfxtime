@@ -9,8 +9,8 @@ use cranelift_codegen::ir::{
 };
 use cranelift_codegen::isa::{self, CallConv, TargetFrontendConfig, TargetIsa};
 use cranelift_entity::{EntityRef, PrimaryMap};
-use cranelift_frontend::FunctionBuilder;
 use cranelift_frontend::Variable;
+use cranelift_frontend::{FunctionBuilder, Switch};
 use cranelift_wasm::{
     self, FuncIndex, FuncTranslationState, GlobalIndex, GlobalVariable, Heap, HeapData, HeapStyle,
     MemoryIndex, TableIndex, TagIndex, TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType,
@@ -19,6 +19,7 @@ use cranelift_wasm::{
 
 use std::convert::TryFrom;
 use std::mem;
+use std::vec::Vec;
 use wasmparser::Operator;
 use wasmtime_environ::{
     BuiltinFunctionIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation, ModuleTypes, PtrSize,
@@ -2551,33 +2552,211 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn translate_resume(
         &mut self,
         builder: &mut FunctionBuilder,
-        _state: &FuncTranslationState,
-        contobj: ir::Value,
-    ) -> WasmResult<(ir::Value, ir::Value, ir::Value)> {
+        type_index: u32,
+        contref: ir::Value,
+        resume_args: &[ir::Value],
+        resumetable: &[(u32, ir::Block)],
+    ) -> Vec<ir::Value> {
+        let resume_block = builder.create_block();
+        let return_block = builder.create_block();
+        let suspend_block = builder.create_block();
+        let switch_block = builder.create_block();
+        let forwarding_block = builder.create_block();
+
+        // Preamble: Part of previously active block
+        {
+            let original_contobj = self.typed_continuations_cont_ref_get_cont_obj(builder, contref);
+
+            if resume_args.len() > 0 {
+                // We store the arguments in the continuation object to be resumed.
+                let count = builder.ins().iconst(I32, resume_args.len() as i64);
+                self.typed_continuations_store_resume_args(
+                    builder,
+                    resume_args,
+                    count,
+                    original_contobj,
+                );
+            }
+
+            // Make the currently running continuation the parent of the one we are about to resume.
+            let original_running_contobj =
+                self.typed_continuations_load_continuation_object(builder);
+            self.typed_continuations_store_parent(
+                builder,
+                original_contobj,
+                original_running_contobj,
+            );
+
+            builder.ins().jump(resume_block, &[original_contobj]);
+        }
+
+        // Resume block: actually resume the fiber corresponding to the
+        // continuation object given as a parameter to the block. This
+        // parameterisation is necessary to enable forwarding, requiring us
+        // to resume objects other than `original_contobj`.
+        // We make the continuation object that was actually resumed available via
+        // `resumed_contobj`, so that subsequent blocks can refer to it.
+        let (tag, resumed_contobj) = {
+            builder.switch_to_block(resume_block);
+            builder.append_block_param(resume_block, self.pointer_type());
+
+            // The continuation object to actually call resume on.
+            let resume_contobj = builder.block_params(resume_block)[0];
+
+            let (_vmctx, result) = generate_builtin_call!(self, builder, resume, [resume_contobj]);
+
+            // The result encodes whether the return happens via ordinary
+            // means or via a suspend. If the high bit is set, then it is
+            // interpreted as the return happened via a suspend, and the
+            // remainder of the integer is to be interpreted as the index
+            // of the control tag that was supplied to the suspend.
+            let signal_mask = 0xf000_0000;
+            let inverse_signal_mask = 0x0fff_ffff;
+            let signal = builder.ins().band_imm(result, signal_mask);
+            let tag = builder.ins().band_imm(result, inverse_signal_mask);
+
+            // Description of results:
+            // * The `base_addr` is the base address of VM context.
+            // * The `signal` is an encoded boolean indicating whether
+            // the `resume` returned ordinarily or via a suspend
+            // instruction.
+            // * The `tag` is the index of the control tag supplied to
+            // suspend (only valid if `signal` is 1).
+
+            // Test the signal bit.
+            let is_zero = builder.ins().icmp_imm(IntCC::Equal, signal, 0);
+
+            // Jump to the return block if the signal is 0, otherwise
+            // jump to the suspend block.
+            builder
+                .ins()
+                .brif(is_zero, return_block, &[], suspend_block, &[]);
+
+            // We do not seal this block, yet, because the effect forwarding block has a back edge to it
+            (tag, resume_contobj)
+        };
+
+        // Suspend block.
+        {
+            builder.switch_to_block(suspend_block);
+            builder.seal_block(suspend_block);
+
+            // We need to terminate this block before being allowed to switch to another one
+            builder.ins().jump(switch_block, &[]);
+        };
+
+        // Now, construct blocks for the three continuations:
+        // 1) `resume` returned normally.
+        // 2) `resume` returned via a suspend.
+        // 3) `resume` is forwarding
+
         // Strategy:
         //
+        // Translate each each (tag, label) pair in the resume table to a
+        // switch-case of the form "case tag: br label".
+        // The switching logic then ensures that we jump to the block
+        // handling the corresponding tag.
         //
-        // First, store the remainder of `call_args` in the
-        // designated typed continuation store in the VM context.
+        // The fallback/default case performs effect forwarding (TODO).
         //
-        // Second: Call the `resume` builtin
+        // First, initialise the switch structure.
+        let mut switch = Switch::new();
+        // Second, we consume the resume table entry-wise.
+        let mut case_blocks = vec![];
+        for &(tag, target_block) in resumetable {
+            let case = builder.create_block();
+            switch.set_entry(tag as u128, case);
+            builder.switch_to_block(case);
 
-        let (vmctx, result) = generate_builtin_call!(self, builder, resume, [contobj]);
+            // Load and push arguments.
+            let param_types = self.tag_params(tag).to_vec();
+            let mut args = self.typed_continuations_load_payloads(builder, &param_types);
 
-        // The result encodes whether the return happens via ordinary
-        // means or via a suspend. If the high bit is set, then it is
-        // interpreted as the return happened via a suspend, and the
-        // remainder of the integer is to be interpreted as the index
-        // of the control tag that was supplied to the suspend.
-        let signal_mask = 0xf000_0000;
-        let inverse_signal_mask = 0x0fff_ffff;
-        let signal = builder.ins().band_imm(result, signal_mask);
-        let real_result = builder.ins().band_imm(result, inverse_signal_mask);
+            // We have an actual handling block for this tag, rather than just forwarding.
+            // Detatch the continuation object by setting its parent to NULL.
+            let pointer_type = self.pointer_type();
+            let null = builder.ins().iconst(pointer_type, 0);
+            self.typed_continuations_store_parent(builder, resumed_contobj, null);
 
-        // We return a pointer to the base of the VM context, as the
-        // subsequent codegen needs to project from it. Along with it,
-        // we also return the return signal and the tag.
-        Ok((vmctx, signal, real_result))
+            // Create and push the continuation reference. We only create
+            // them here because we don't need them when forwarding.
+            let contref = self.typed_continuations_new_cont_ref(builder, resumed_contobj);
+
+            args.push(contref);
+
+            // Now jump to the actual user-defined block handling
+            // this tag, as given by the resumetable.
+            builder.ins().jump(target_block, &args);
+            case_blocks.push(case);
+        }
+
+        // Note that at this point we haven't actually emitted any
+        // code for the switching logic itself, but only filled
+        // the Switch structure and created the blocks it jumps
+        // to.
+
+        // Forwarding block: Default case for the switching logic on the
+        // tag. Used when the (resume ...) clause we currently translate
+        // does not have a matching (tag ...) entry.
+        {
+            builder.switch_to_block(forwarding_block);
+
+            let parent_contobj = self.typed_continuations_load_parent(builder, resumed_contobj);
+
+            // TODO(frank-emrich): Check if parent is null. If so, we are at
+            // the toplevel and simply have no handler for the given tag and must trap.
+
+            // We suspend, thus deferring handling to the parent.
+            // We do nothing about tag *parameters*, these remain unchanged within the
+            // payload buffer associated with the whole VMContext.
+            generate_builtin_call_no_return_val!(self, builder, suspend, [tag]);
+
+            // "Tag return values" (i.e., values provided by cont.bind or
+            // resume to the continuation) are actually stored in
+            // continuation objects, and we need to move them down the chain
+            // back to the continuation object where we originally
+            // suspended.
+            self.typed_continuations_forward_tag_return_values(
+                builder,
+                parent_contobj,
+                resumed_contobj,
+            );
+
+            builder.ins().jump(resume_block, &[resumed_contobj]);
+            builder.seal_block(resume_block);
+        }
+
+        // Switch block: actual switching logic is emitted here.
+        {
+            builder.switch_to_block(switch_block);
+            switch.emit(builder, tag, forwarding_block);
+            builder.seal_block(switch_block);
+            builder.seal_block(forwarding_block);
+
+            // We can only seal the blocks we generated for each
+            // tag now, after switch.emit ran.
+            for case_block in case_blocks {
+                builder.seal_block(case_block);
+            }
+        }
+
+        // Return block: Jumped to by resume block if continuation returned normally.
+        {
+            builder.switch_to_block(return_block);
+            builder.seal_block(return_block);
+
+            // Load and push the results.
+            let returns = self.continuation_returns(type_index).to_vec();
+            let values =
+                self.typed_continuations_load_return_values(builder, &returns, resumed_contobj);
+
+            // The continuation has returned and all `ContinuationReferences`
+            // to it should have been be invalidated. We may safely deallocate
+            // it.
+            self.typed_continuations_drop_cont_obj(builder, resumed_contobj);
+
+            return values;
+        }
     }
 
     fn translate_resume_throw(
@@ -2593,7 +2772,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn translate_suspend(
         &mut self,
         builder: &mut FunctionBuilder,
-        _state: &FuncTranslationState,
         tag_index: ir::Value,
     ) -> ir::Value {
         // Returns the vmctx

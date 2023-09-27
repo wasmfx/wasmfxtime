@@ -698,18 +698,17 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
             .translate_cont_new(builder, state, func, arg_types, return_types)
     }
 
-    /// Translates a resume instruction and returns a triple (vmctx,
-    /// signal, tag), where vmctx is the base address of the VM
-    /// context, signal is high bit of the resume result, and tag is
-    /// the index of the control tag supplied to suspend (if the
-    /// signal is 1).
+    /// TODO(dhil): write documentatio.n
     fn translate_resume(
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
-        state: &cranelift_wasm::FuncTranslationState,
-        cont: ir::Value,
-    ) -> cranelift_wasm::WasmResult<(ir::Value, ir::Value, ir::Value)> {
-        self.inner.translate_resume(builder, state, cont)
+        type_index: u32,
+        contref: ir::Value,
+        resume_args: &[ir::Value],
+        resumetable: &[(u32, ir::Block)],
+    ) -> Vec<ir::Value> {
+        self.inner
+            .translate_resume(builder, type_index, contref, resume_args, resumetable)
     }
 
     /// TODO(dhil): write documentation.
@@ -728,10 +727,9 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     fn translate_suspend(
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
-        state: &cranelift_wasm::FuncTranslationState,
         tag_index: ir::Value,
     ) -> ir::Value {
-        return self.inner.translate_suspend(builder, state, tag_index);
+        return self.inner.translate_suspend(builder, tag_index);
     }
 
     /// TODO
