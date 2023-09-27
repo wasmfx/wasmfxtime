@@ -2,6 +2,7 @@
 
 use crate::vmcontext::{VMArrayCallFunction, VMFuncRef, VMOpaqueContext, ValRaw};
 use crate::{Instance, TrapReason};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::cmp;
 use std::mem;
 use std::ptr;
@@ -55,7 +56,8 @@ impl Payloads {
 }
 
 /// Encodes the life cycle of a `ContinuationObject`.
-#[derive(PartialEq)]
+#[derive(PartialEq, IntoPrimitive, TryFromPrimitive)]
+#[repr(i32)]
 enum State {
     /// The `ContinuationObject` has been created, but `resume` has never been
     /// called on it. During this stage, we may add arguments using `cont.bind`.
@@ -104,8 +106,13 @@ pub mod offsets {
 
     /// Offsets of fields in `ContinuationObject`
     pub mod continuation_object {
+        use crate::continuation::ContinuationObject;
+        use memoffset::offset_of;
+
         /// Offset of `parent` field
-        pub const PARENT: i32 = 0;
+        pub const PARENT: i32 = offset_of!(ContinuationObject, parent) as i32;
+        /// Offset of `state` field
+        pub const STATE: i32 = offset_of!(ContinuationObject, state) as i32;
     }
 }
 
