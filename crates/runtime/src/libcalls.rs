@@ -828,15 +828,6 @@ fn cont_ref_get_cont_obj(
     )? as *mut u8)
 }
 
-fn cont_obj_has_state_invoked(
-    _instance: &mut Instance,
-    contobj: *mut u8,
-) -> Result<u32, TrapReason> {
-    Ok(crate::continuation::cont_obj_has_state_invoked(
-        contobj as *mut crate::continuation::ContinuationObject,
-    ) as u32)
-}
-
 fn cont_obj_occupy_next_tag_returns_slots(
     _instance: &mut Instance,
     contobj: *mut u8,

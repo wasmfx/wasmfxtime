@@ -58,7 +58,7 @@ impl Payloads {
 /// Encodes the life cycle of a `ContinuationObject`.
 #[derive(PartialEq, IntoPrimitive, TryFromPrimitive)]
 #[repr(i32)]
-enum State {
+pub enum State {
     /// The `ContinuationObject` has been created, but `resume` has never been
     /// called on it. During this stage, we may add arguments using `cont.bind`.
     Allocated,
@@ -215,18 +215,6 @@ pub fn cont_obj_deallocate_tag_return_values_buffer(obj: *mut ContinuationObject
     let _: Vec<u128> =
         unsafe { Vec::from_raw_parts((*payloads).data, (*payloads).length, (*payloads).capacity) };
     obj.tag_return_values = None;
-}
-
-/// TODO
-#[inline(always)]
-pub fn cont_obj_has_state_invoked(obj: *mut ContinuationObject) -> bool {
-    // We use this function to determine whether a contination object is in initialisation mode or
-    // not.
-    // FIXME(frank-emrich) Rename this function to make it clearer that we shouldn't call
-    // it in `Returned` state.
-    assert!(unsafe { (*obj).state != State::Returned });
-
-    return unsafe { (*obj).state == State::Invoked };
 }
 
 /// TODO
