@@ -698,7 +698,7 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
             .translate_cont_new(builder, state, func, arg_types, return_types)
     }
 
-    /// TODO(dhil): write documentatio.n
+    /// TODO(frank-emrich): write documentation.
     fn translate_resume(
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
