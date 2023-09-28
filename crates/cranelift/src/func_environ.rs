@@ -951,6 +951,47 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         builder.ins().call_indirect(sig, addr, &args);
         return vmctx;
     }
+
+    //
+    // Typed continuation helper functions
+    //
+
+    /// Returns the value of state field in the continuation object.
+    fn tc_cont_obj_get_state(
+        &self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+    ) -> ir::Value {
+        let mem_flags = ir::MemFlags::trusted();
+        let offset = wasmtime_runtime::continuation::offsets::continuation_object::STATE;
+
+        // Let's make sure that we still represent the State enum as i32.
+        debug_assert!(
+            mem::size_of::<wasmtime_runtime::continuation::State>() == mem::size_of::<i32>()
+        );
+
+        builder.ins().load(I32, mem_flags, contobj, offset)
+    }
+
+    /// Checks whether the given continuation object is invoked (i.e., `resume`
+    /// was called at least once on the object).
+    fn tc_cont_obj_is_invoked(
+        &self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+    ) -> ir::Value {
+        // TODO(frank-emrich) In the future, we may get rid of the State field
+        // in `ContinuationObject` and try to infer the state by other means.
+        // For example, we may alllocate the `ContinuationFiber` lazily, doing
+        // so only at the point when a continuation is actualy invoked, meaning
+        // that we can use the null-ness of the `fiber` field as an indicator
+        // for invokedness.
+        let actual_state = self.tc_cont_obj_get_state(builder, contobj);
+        let invoked: i32 = wasmtime_runtime::continuation::State::Invoked.into();
+        builder
+            .ins()
+            .icmp_imm(IntCC::Equal, actual_state, invoked as i64)
+    }
 }
 
 macro_rules! generate_builtin_call {
@@ -2916,9 +2957,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             let store_data_block = builder.create_block();
             builder.append_block_param(store_data_block, self.pointer_type());
 
-            let (_vmctx, is_invoked) =
-                generate_builtin_call!(self, builder, cont_obj_has_state_invoked, [contobj]);
-
+            let is_invoked = self.tc_cont_obj_is_invoked(builder, contobj);
             builder
                 .ins()
                 .brif(is_invoked, use_payloads_block, &[], use_args_block, &[]);
