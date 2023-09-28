@@ -1,4 +1,4 @@
-name: TC CI
+name: WasmFX CI
 on:
   # Run CI for PRs to `main` and to release branches.
   #
