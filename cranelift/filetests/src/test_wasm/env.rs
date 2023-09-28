@@ -729,7 +729,7 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
         builder: &mut cranelift_frontend::FunctionBuilder,
         tag_index: ir::Value,
     ) -> ir::Value {
-        return self.inner.translate_suspend(builder, tag_index);
+        self.inner.translate_suspend(builder, tag_index)
     }
 
     /// TODO
