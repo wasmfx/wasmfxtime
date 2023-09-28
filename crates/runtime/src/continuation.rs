@@ -103,12 +103,26 @@ pub struct ContinuationReference(Option<*mut ContinuationObject>);
 
 /// Defines offsets of the fields in the types defined earlier
 pub mod offsets {
+    /// Offsets of fields in `Payloads`
+    pub mod payloads {
+        use crate::continuation::Payloads;
+        use memoffset::offset_of;
+
+        /// Offset of `capacity` field
+        pub const CAPACITY: i32 = offset_of!(Payloads, capacity) as i32;
+        /// Offset of `data` field
+        pub const DATA: i32 = offset_of!(Payloads, data) as i32;
+        /// Offset of `length` field
+        pub const LENGTH: i32 = offset_of!(Payloads, length) as i32;
+    }
 
     /// Offsets of fields in `ContinuationObject`
     pub mod continuation_object {
         use crate::continuation::ContinuationObject;
         use memoffset::offset_of;
 
+        /// Offset of `args` field
+        pub const ARGS: i32 = offset_of!(ContinuationObject, args) as i32;
         /// Offset of `parent` field
         pub const PARENT: i32 = offset_of!(ContinuationObject, parent) as i32;
         /// Offset of `state` field
@@ -141,14 +155,6 @@ pub fn cont_ref_get_cont_obj(
             Ok(contobj as *mut ContinuationObject)
         }
     }
-}
-
-/// TODO
-#[inline(always)]
-pub fn cont_obj_get_results(obj: *mut ContinuationObject) -> *mut u128 {
-    assert!(unsafe { (*obj).state == State::Returned });
-    assert!(unsafe { !(*obj).args.data.is_null() });
-    unsafe { (*obj).args.data }
 }
 
 /// TODO

@@ -952,6 +952,15 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         return vmctx;
     }
 
+    // Traps if the given condition does not hold (i.e., equal to zero)
+    fn emit_debug_assert(&self, builder: &mut FunctionBuilder, condition: ir::Value) {
+        if cfg!(debug_assertions) {
+            builder
+                .ins()
+                .trapz(condition, ir::TrapCode::User(crate::DEBUG_ASSERT_TRAP_CODE));
+        }
+    }
+
     //
     // Typed continuation helper functions
     //
@@ -991,6 +1000,39 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         builder
             .ins()
             .icmp_imm(IntCC::Equal, actual_state, invoked as i64)
+    }
+
+    /// Checks whether the given continuation object has returned (i.e., the
+    /// function used as continuation has returned normally)
+    fn tc_cont_obj_has_returned(
+        &self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+    ) -> ir::Value {
+        let actual_state = self.tc_cont_obj_get_state(builder, contobj);
+        let returned: i32 = wasmtime_runtime::continuation::State::Returned.into();
+        builder
+            .ins()
+            .icmp_imm(IntCC::Equal, actual_state, returned as i64)
+    }
+
+    /// Returns the buffer storing the results after a continuation function
+    /// has returned normally. Must only be called after the continuation has
+    /// returned and the executed function has return values.
+    fn tc_cont_obj_get_results(
+        &self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+    ) -> ir::Value {
+        if cfg!(debug_assertions) {
+            let has_returned = self.tc_cont_obj_has_returned(builder, contobj);
+            self.emit_debug_assert(builder, has_returned);
+        }
+        let mem_flags = ir::MemFlags::trusted();
+        let offset = wasmtime_runtime::continuation::offsets::continuation_object::ARGS
+            + wasmtime_runtime::continuation::offsets::payloads::DATA;
+        let pt = self.pointer_type();
+        builder.ins().load(pt, mem_flags, contobj, offset)
     }
 }
 
@@ -3100,8 +3142,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let mut values = vec![];
 
         if valtypes.len() > 0 {
-            let (_vmctx, result_buffer_addr) =
-                generate_builtin_call!(self, builder, cont_obj_get_results, [contobj]);
+            let result_buffer_addr = self.tc_cont_obj_get_results(builder, contobj);
 
             let mut offset = 0;
             let memflags = ir::MemFlags::trusted();
