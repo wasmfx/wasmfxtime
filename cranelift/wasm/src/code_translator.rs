@@ -89,7 +89,7 @@ use cranelift_codegen::ir::{
     self, AtomicRmwOp, ConstantData, InstBuilder, JumpTableData, MemFlags, Value, ValueLabel,
 };
 use cranelift_codegen::packed_option::ReservedValue;
-use cranelift_frontend::{FunctionBuilder, Switch, Variable};
+use cranelift_frontend::{FunctionBuilder, Variable};
 use itertools::Itertools;
 use smallvec::SmallVec;
 use std::convert::TryFrom;
@@ -2520,220 +2520,29 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             type_index,
             resumetable,
         } => {
-            // Idea create wrapper block for handling suspends:
-            // (resume ...)
-            // (if returned_normally then return code else resumetable code)
-            //
-            let resume_block = builder.create_block();
-            let return_block = crate::translation_utils::return_block(builder, environ)?;
-            let suspend_block = crate::translation_utils::suspend_block(builder, environ)?;
-            let switch_block = builder.create_block();
-            let forwarding_block =
-                crate::translation_utils::resumetable_forwarding_block(builder, environ)?;
+            // We translate the block indices in the resumetable to actual Blocks.
+            let resumetable = resumetable
+                .targets()
+                .map(|x| {
+                    let (tag_index, block_index) = x.unwrap();
+                    let i = state.control_stack.len() - 1 - (block_index as usize);
+                    let frame = &mut state.control_stack[i];
 
-            // Preamble: Part of previously active block
-            {
-                // First we pop the arguments off the stack and bundle
-                // them up. The arguments are laid out on the stack as
-                // follows.
-                //
-                //  [ arg1 ... argN cont ]
-                let arity = environ.continuation_arguments(*type_index).len();
-                let (original_contref, call_args) = state.peekn(arity + 1).split_last().unwrap();
-                let original_contobj =
-                    environ.typed_continuations_cont_ref_get_cont_obj(builder, *original_contref);
+                    // This is side-effecting!
+                    frame.set_branched_to_exit();
 
-                if call_args.len() > 0 {
-                    // We store the arguments in the continuation object to be resumed.
-                    let count = builder.ins().iconst(I32, call_args.len() as i64);
-                    environ.typed_continuations_store_resume_args(
-                        builder,
-                        call_args,
-                        count,
-                        original_contobj,
-                    );
-                }
-                // Pop the `resume_args` off the stack.
-                state.popn(arity + 1);
+                    (tag_index, frame.br_destination())
+                })
+                .collect::<Vec<(u32, ir::Block)>>();
 
-                // Make the currently running continuation the parent of the one we are about to resume.
-                let original_running_contobj =
-                    environ.typed_continuations_load_continuation_object(builder);
-                environ.typed_continuations_store_parent(
-                    builder,
-                    original_contobj,
-                    original_running_contobj,
-                );
+            let arity = environ.continuation_arguments(*type_index).len();
+            let (contref, call_args) = state.peekn(arity + 1).split_last().unwrap();
 
-                builder.ins().jump(resume_block, &[original_contobj]);
-            }
+            let cont_return_vals =
+                environ.translate_resume(builder, *type_index, *contref, call_args, &resumetable);
 
-            // Resume block: actually resume the fiber corresponding to the
-            // continuation object given as a parameter to the block. This
-            // parameterisation is necessary to enable forwarding, requiring us
-            // to resume objects other than `original_contobj`.
-            // We make the continuation object that was actually resumed available via
-            // `resumed_contobj`, so that subsequent blocks can refer to it.
-            let (tag, resumed_contobj) = {
-                builder.switch_to_block(resume_block);
-                builder.append_block_param(resume_block, environ.pointer_type());
-
-                // The continuation object to actually call resume on.
-                let resume_contobj = builder.block_params(resume_block)[0];
-
-                // Now, we generate the call instruction.
-                let (_base_addr, signal, tag) =
-                    environ.translate_resume(builder, state, resume_contobj)?;
-
-                // Description of results:
-                // * The `base_addr` is the base address of VM context.
-                // * The `signal` is an encoded boolean indicating whether
-                // the `resume` returned ordinarily or via a suspend
-                // instruction.
-                // * The `tag` is the index of the control tag supplied to
-                // suspend (only valid if `signal` is 1).
-
-                // Test the signal bit.
-                let is_zero = builder.ins().icmp_imm(IntCC::Equal, signal, 0);
-
-                // Jump to the return block if the signal is 0, otherwise
-                // jump to the suspend block.
-                canonicalise_brif(builder, is_zero, return_block, &[], suspend_block, &[]);
-
-                // We do not seal this block, yet, because the effect forwarding block has a back edge to it
-                (tag, resume_contobj)
-            };
-
-            // Suspend block.
-            {
-                builder.switch_to_block(suspend_block);
-                builder.seal_block(suspend_block);
-
-                // We need to terminate this block before being allowed to switch to another one
-                builder.ins().jump(switch_block, &[]);
-            };
-
-            // Now, construct blocks for the three continuations:
-            // 1) `resume` returned normally.
-            // 2) `resume` returned via a suspend.
-            // 3) `resume` is forwarding
-
-            // Strategy:
-            //
-            // Translate each each (tag, label) pair in the resume table to a
-            // switch-case of the form "case tag: br label".
-            // The switching logic then ensures that we jump to the block
-            // handling the corresponding tag.
-            //
-            // The fallback/default case performs effect forwarding (TODO).
-            //
-            // First, initialise the switch structure.
-            let mut switch = Switch::new();
-            // Second, we consume the resume table entry-wise.
-            let mut case_blocks = vec![];
-            for (tag, label) in resumetable.targets().map(|x| x.unwrap()) {
-                let case = crate::translation_utils::resumetable_entry_block(builder, environ)?;
-                switch.set_entry(tag as u128, case);
-                builder.switch_to_block(case);
-
-                // Load and push arguments.
-                let param_types = environ.tag_params(tag).to_vec();
-                let params = environ.typed_continuations_load_payloads(builder, &param_types);
-
-                // We have an actual handling block for this tag, rather than just forwarding.
-                // Detatch the continuation object by setting its parent to NULL.
-                let pointer_type = environ.pointer_type();
-                let null = builder.ins().iconst(pointer_type, 0);
-                environ.typed_continuations_store_parent(builder, resumed_contobj, null);
-
-                state.pushn(&params);
-
-                // Create and push the continuation reference. We only create
-                // them here because we don't need them when forwarding.
-                let contref = environ.typed_continuations_new_cont_ref(builder, resumed_contobj);
-                state.push1(contref);
-
-                let count = params.len() + 1;
-                let (br_destination, inputs) = translate_br_if_args(label, state);
-
-                // Now jump to the actual user-defined block handling
-                // this tag, as given by the resumetable.
-                builder.ins().jump(br_destination, inputs);
-                state.popn(count);
-                case_blocks.push(case);
-            }
-
-            // Note that at this point we haven't actually emitted any
-            // code for the switching logic itself, but only filled
-            // the Switch structure and created the blocks it jumps
-            // to.
-
-            // Forwarding block: Default case for the switching logic on the
-            // tag. Used when the (resume ...) clause we currently translate
-            // does not have a matching (tag ...) entry.
-            {
-                builder.switch_to_block(forwarding_block);
-
-                let parent_contobj =
-                    environ.typed_continuations_load_parent(builder, resumed_contobj);
-
-                // TODO(frank-emrich): Check if parent is null. If so, we are at
-                // the toplevel and simply have no handler for the given tag and must trap.
-
-                // We suspend, thus deferring handling to the parent.
-                // We do nothing about tag *parameters*, these remain unchanged within the
-                // payload buffer associated with the whole VMContext.
-                environ.translate_suspend(builder, state, tag);
-
-                // "Tag return values" (i.e., values provided by cont.bind or
-                // resume to the continuation) are actually stored in
-                // continuation objects, and we need to move them down the chain
-                // back to the continuation object where we originally
-                // suspended.
-                environ.typed_continuations_forward_tag_return_values(
-                    builder,
-                    parent_contobj,
-                    resumed_contobj,
-                );
-
-                builder.ins().jump(resume_block, &[resumed_contobj]);
-                builder.seal_block(resume_block);
-            }
-
-            // Switch block: actual switching logic is emitted here.
-            {
-                builder.switch_to_block(switch_block);
-                switch.emit(builder, tag, forwarding_block);
-                builder.seal_block(switch_block);
-                builder.seal_block(forwarding_block);
-
-                // We can only seal the blocks we generated for each
-                // tag now, after switch.emit ran.
-                for case_block in case_blocks {
-                    builder.seal_block(case_block);
-                }
-            }
-
-            // Return block: Jumped to by resume block if continuation returned normally.
-            {
-                builder.switch_to_block(return_block);
-                builder.seal_block(return_block);
-
-                // Load and push the results.
-                let returns = environ.continuation_returns(*type_index).to_vec();
-                let values = environ.typed_continuations_load_return_values(
-                    builder,
-                    &returns,
-                    resumed_contobj,
-                );
-
-                // The continuation has returned and all `ContinuationReferences`
-                // to it should have been be invalidated. We may safely deallocate
-                // it.
-                environ.typed_continuations_drop_cont_obj(builder, resumed_contobj);
-
-                state.pushn(&values);
-            }
+            state.popn(arity + 1);
+            state.pushn(&cont_return_vals);
         }
         Operator::Suspend { tag_index } => {
             let param_types = environ.tag_params(*tag_index).to_vec();
@@ -2745,7 +2554,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             state.popn(param_count);
 
             let tag_index_val = builder.ins().iconst(I32, *tag_index as i64);
-            environ.translate_suspend(builder, state, tag_index_val);
+            environ.translate_suspend(builder, tag_index_val);
 
             let contobj = environ.typed_continuations_load_continuation_object(builder);
 

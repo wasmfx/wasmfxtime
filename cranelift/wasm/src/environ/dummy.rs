@@ -709,9 +709,11 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
     fn translate_resume(
         &mut self,
         _builder: &mut FunctionBuilder,
-        _state: &FuncTranslationState,
-        _cont: ir::Value,
-    ) -> WasmResult<(ir::Value, ir::Value, ir::Value)> {
+        _type_index: u32,
+        _contref: ir::Value,
+        _resume_args: &[ir::Value],
+        _resumetable: &[(u32, ir::Block)],
+    ) -> Vec<ir::Value> {
         todo!()
     }
 
@@ -728,7 +730,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
     fn translate_suspend(
         &mut self,
         _builder: &mut FunctionBuilder,
-        _state: &FuncTranslationState,
         _tag_index: ir::Value,
     ) -> ir::Value {
         todo!()

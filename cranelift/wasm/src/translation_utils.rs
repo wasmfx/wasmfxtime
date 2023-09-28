@@ -129,45 +129,6 @@ pub fn block_with_params_wasmtype<PE: TargetEnvironment + ?Sized>(
     Ok(block)
 }
 
-/// Create a synthetic suspend block (used to wrap a resume table).
-pub fn suspend_block<PE: TargetEnvironment + ?Sized>(
-    builder: &mut FunctionBuilder,
-    _environ: &PE,
-) -> WasmResult<ir::Block> {
-    let block = builder.create_block();
-    Ok(block)
-}
-
-/// Create a synthetic resume table entry block.
-pub fn resumetable_entry_block<PE: TargetEnvironment + ?Sized>(
-    builder: &mut FunctionBuilder,
-    _environ: &PE,
-) -> WasmResult<ir::Block> {
-    let block = builder.create_block();
-    Ok(block)
-}
-
-/// Create a synthetic resume table forwarding block.
-pub fn resumetable_forwarding_block<PE: TargetEnvironment + ?Sized>(
-    builder: &mut FunctionBuilder,
-    _environ: &PE,
-) -> WasmResult<ir::Block> {
-    let block = builder.create_block();
-
-    Ok(block)
-}
-
-/// Create a synthetic return block (used to wrap the return
-/// continuation of resume).
-pub fn return_block<PE: TargetEnvironment + ?Sized>(
-    builder: &mut FunctionBuilder,
-    _environ: &PE,
-) -> WasmResult<ir::Block> {
-    let block = builder.create_block();
-
-    Ok(block)
-}
-
 /// Compute the maximum number of arguments that a suspension may
 /// supply.
 pub fn resumetable_max_num_tag_payloads<PE: crate::FuncEnvironment + ?Sized>(
