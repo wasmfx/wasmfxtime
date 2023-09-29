@@ -797,17 +797,6 @@ fn suspend(instance: &mut Instance, tag_index: u32) {
     crate::continuation::suspend(instance, tag_index)
 }
 
-fn cont_obj_occupy_next_args_slots(
-    _instance: &mut Instance,
-    contobj: *mut u8,
-    arg_count: u32,
-) -> *mut u8 {
-    crate::continuation::cont_obj_occupy_next_args_slots(
-        contobj as *mut crate::continuation::ContinuationObject,
-        arg_count as usize,
-    ) as *mut u8
-}
-
 fn new_cont_ref(_instance: &mut Instance, contobj: *mut u8) -> *mut u8 {
     crate::continuation::new_cont_ref(contobj as *mut crate::continuation::ContinuationObject)
         as *mut u8
