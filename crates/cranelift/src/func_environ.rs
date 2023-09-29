@@ -208,6 +208,8 @@ mod typed_continuation_helpers {
             Payloads::new(*self, offset)
         }
 
+        /// Loads the value of the `state` field of the continuation object,
+        /// which is represented using the `State` enum.
         fn load_state(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let mem_flags = ir::MemFlags::trusted();
             let offset = wasmtime_runtime::continuation::offsets::continuation_object::STATE;
@@ -220,6 +222,8 @@ mod typed_continuation_helpers {
             builder.ins().load(I32, mem_flags, self.address, offset)
         }
 
+        /// Checks whether the continuation object is invoked (i.e., `resume`
+        /// was called at least once on the object).
         pub fn is_invoked(&self, builder: &mut FunctionBuilder) -> ir::Value {
             // TODO(frank-emrich) In the future, we may get rid of the State field
             // in `ContinuationObject` and try to infer the state by other means.
@@ -234,6 +238,8 @@ mod typed_continuation_helpers {
                 .icmp_imm(IntCC::Equal, actual_state, invoked as i64)
         }
 
+        /// Checks whether the continuation object has returned (i.e., the
+        /// function used as continuation has returned normally).
         pub fn has_returned(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let actual_state = self.load_state(builder);
             let returned: i32 = wasmtime_runtime::continuation::State::Returned.into();
@@ -242,6 +248,8 @@ mod typed_continuation_helpers {
                 .icmp_imm(IntCC::Equal, actual_state, returned as i64)
         }
 
+        /// Returns pointer to buffer where results are stored after a
+        /// continuation has returned.
         pub fn get_results(&self, builder: &mut FunctionBuilder) -> ir::Value {
             if cfg!(debug_assertions) {
                 let has_returned = self.has_returned(builder);
