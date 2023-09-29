@@ -275,7 +275,7 @@ mod typed_continuation_helpers {
             self.contobj.address
         }
 
-        fn get(&self, builder: &mut FunctionBuilder, ty : ir::Type, offset: i32) -> ir::Value {
+        fn get(&self, builder: &mut FunctionBuilder, ty: ir::Type, offset: i32) -> ir::Value {
             let mem_flags = ir::MemFlags::trusted();
             builder
                 .ins()
@@ -297,7 +297,7 @@ mod typed_continuation_helpers {
             );
             self.get(
                 builder,
-                I32,
+                self.pointer_type(),
                 wasmtime_runtime::continuation::offsets::payloads::CAPACITY,
             )
         }
@@ -309,7 +309,7 @@ mod typed_continuation_helpers {
             );
             self.get(
                 builder,
-                I32,
+                self.pointer_type(),
                 wasmtime_runtime::continuation::offsets::payloads::LENGTH,
             )
         }
