@@ -23,9 +23,20 @@ macro_rules! debug_println {
     }
 }
 
+/// Makes the types available that we use for various fields.
+pub mod types {
+    /// Types used by `Payloads` struct
+    pub mod payloads {
+        /// type of length
+        pub type Length = usize;
+        /// type of capacity
+        pub type Capacity = usize;
+    }
+}
+
 struct Payloads {
-    length: usize,
-    capacity: usize,
+    length: types::payloads::Length,
+    capacity: types::payloads::Capacity,
     /// This is null if and only if capacity (and thus also `length`) are 0.
     data: *mut u128,
 }

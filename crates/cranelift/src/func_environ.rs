@@ -27,6 +27,15 @@ use wasmtime_environ::{
 };
 use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
+// Traps if the given condition does not hold (i.e., equal to zero)
+fn emit_debug_assert(builder: &mut FunctionBuilder, condition: ir::Value) {
+    if cfg!(debug_assertions) {
+        builder
+            .ins()
+            .trapz(condition, ir::TrapCode::User(crate::DEBUG_ASSERT_TRAP_CODE));
+    }
+}
+
 macro_rules! declare_function_signatures {
     (
         $(
@@ -161,6 +170,136 @@ pub struct FuncEnvironment<'module_environment> {
     #[cfg(feature = "wmemcheck")]
     wmemcheck: bool,
 }
+
+mod typed_continuation_helpers {
+    use super::emit_debug_assert;
+    use super::IntCC;
+    use cranelift_codegen::ir;
+    use cranelift_codegen::ir::types::*;
+    use cranelift_codegen::ir::InstBuilder;
+    use cranelift_frontend::FunctionBuilder;
+    use std::mem;
+
+    #[derive(Copy, Clone)]
+    pub struct ContObj {
+        address: ir::Value,
+        pointer_type: ir::Type,
+    }
+
+    #[derive(Copy, Clone)]
+    pub struct Paylds {
+        /// The continuation object owning/enclosing the Payloads
+        contobj: ContObj,
+
+        // Offset to the beginning of the Args object within the continuation object.
+        offset: i32,
+    }
+
+    impl ContObj {
+        pub fn new(address: ir::Value, pointer_type: ir::Type) -> ContObj {
+            ContObj {
+                address,
+                pointer_type,
+            }
+        }
+
+        pub fn args(&self) -> Paylds {
+            let offset = wasmtime_runtime::continuation::offsets::continuation_object::ARGS;
+            Paylds::new(*self, offset)
+        }
+
+        fn load_state(&self, builder: &mut FunctionBuilder) -> ir::Value {
+            let mem_flags = ir::MemFlags::trusted();
+            let offset = wasmtime_runtime::continuation::offsets::continuation_object::STATE;
+
+            // Let's make sure that we still represent the State enum as i32.
+            debug_assert!(
+                mem::size_of::<wasmtime_runtime::continuation::State>() == mem::size_of::<i32>()
+            );
+
+            builder.ins().load(I32, mem_flags, self.address, offset)
+        }
+
+        pub fn is_invoked(&self, builder: &mut FunctionBuilder) -> ir::Value {
+            // TODO(frank-emrich) In the future, we may get rid of the State field
+            // in `ContinuationObject` and try to infer the state by other means.
+            // For example, we may alllocate the `ContinuationFiber` lazily, doing
+            // so only at the point when a continuation is actualy invoked, meaning
+            // that we can use the null-ness of the `fiber` field as an indicator
+            // for invokedness.
+            let actual_state = self.load_state(builder);
+            let invoked: i32 = wasmtime_runtime::continuation::State::Invoked.into();
+            builder
+                .ins()
+                .icmp_imm(IntCC::Equal, actual_state, invoked as i64)
+        }
+
+        pub fn has_returned(&self, builder: &mut FunctionBuilder) -> ir::Value {
+            let actual_state = self.load_state(builder);
+            let returned: i32 = wasmtime_runtime::continuation::State::Returned.into();
+            builder
+                .ins()
+                .icmp_imm(IntCC::Equal, actual_state, returned as i64)
+        }
+
+        pub fn get_results(&self, builder: &mut FunctionBuilder) -> ir::Value {
+            if cfg!(debug_assertions) {
+                let has_returned = self.has_returned(builder);
+                emit_debug_assert(builder, has_returned);
+            }
+            return self.args().get_data(builder);
+        }
+    }
+
+    impl Paylds {
+        pub(crate) fn new(co: ContObj, offset: i32) -> Paylds {
+            Paylds {
+                contobj: co,
+                offset,
+            }
+        }
+
+        fn pointer_type(&self) -> ir::Type {
+            self.contobj.pointer_type
+        }
+
+        fn contobj(&self) -> ir::Value {
+            self.contobj.address
+        }
+
+        fn get(&self, builder: &mut FunctionBuilder, offset: i32) -> ir::Value {
+            let mem_flags = ir::MemFlags::trusted();
+            //let data_offset = wasmtime_runtime::continuation::offsets::payloads::DATA;
+            let pt = self.pointer_type();
+            builder
+                .ins()
+                .load(pt, mem_flags, self.contobj(), self.offset + offset)
+        }
+
+        fn get_data(&self, builder: &mut FunctionBuilder) -> ir::Value {
+            self.get(
+                builder,
+                wasmtime_runtime::continuation::offsets::payloads::DATA,
+            )
+        }
+
+        fn get_capacity(&self, builder: &mut FunctionBuilder) -> ir::Value {
+            self.get(
+                builder,
+                wasmtime_runtime::continuation::offsets::payloads::CAPACITY,
+            )
+        }
+
+        fn get_length(&self, builder: &mut FunctionBuilder) -> ir::Value {
+            self.get(
+                builder,
+                wasmtime_runtime::continuation::offsets::payloads::LENGTH,
+            )
+        }
+    }
+}
+
+use typed_continuation_helpers::ContObj;
 
 impl<'module_environment> FuncEnvironment<'module_environment> {
     pub fn new(
@@ -952,88 +1091,89 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         return vmctx;
     }
 
-    // Traps if the given condition does not hold (i.e., equal to zero)
-    fn emit_debug_assert(&self, builder: &mut FunctionBuilder, condition: ir::Value) {
-        if cfg!(debug_assertions) {
-            builder
-                .ins()
-                .trapz(condition, ir::TrapCode::User(crate::DEBUG_ASSERT_TRAP_CODE));
-        }
-    }
-
     //
     // Typed continuation helper functions
     //
 
-    /// Returns the value of state field in the continuation object.
-    fn tc_cont_obj_get_state(
-        &self,
-        builder: &mut FunctionBuilder,
-        contobj: ir::Value,
-    ) -> ir::Value {
-        let mem_flags = ir::MemFlags::trusted();
-        let offset = wasmtime_runtime::continuation::offsets::continuation_object::STATE;
+    // /// Returns the value of state field in the continuation object.
+    // fn tc_cont_obj_get_state(
+    //     &self,
+    //     builder: &mut FunctionBuilder,
+    //     contobj: ir::Value,
+    // ) -> ir::Value {
+    //     let mem_flags = ir::MemFlags::trusted();
+    //     let offset = wasmtime_runtime::continuation::offsets::continuation_object::STATE;
 
-        // Let's make sure that we still represent the State enum as i32.
-        debug_assert!(
-            mem::size_of::<wasmtime_runtime::continuation::State>() == mem::size_of::<i32>()
-        );
+    //     // Let's make sure that we still represent the State enum as i32.
+    //     debug_assert!(
+    //         mem::size_of::<wasmtime_runtime::continuation::State>() == mem::size_of::<i32>()
+    //     );
 
-        builder.ins().load(I32, mem_flags, contobj, offset)
-    }
+    //     builder.ins().load(I32, mem_flags, contobj, offset)
+    // }
 
-    /// Checks whether the given continuation object is invoked (i.e., `resume`
-    /// was called at least once on the object).
-    fn tc_cont_obj_is_invoked(
-        &self,
-        builder: &mut FunctionBuilder,
-        contobj: ir::Value,
-    ) -> ir::Value {
-        // TODO(frank-emrich) In the future, we may get rid of the State field
-        // in `ContinuationObject` and try to infer the state by other means.
-        // For example, we may alllocate the `ContinuationFiber` lazily, doing
-        // so only at the point when a continuation is actualy invoked, meaning
-        // that we can use the null-ness of the `fiber` field as an indicator
-        // for invokedness.
-        let actual_state = self.tc_cont_obj_get_state(builder, contobj);
-        let invoked: i32 = wasmtime_runtime::continuation::State::Invoked.into();
-        builder
-            .ins()
-            .icmp_imm(IntCC::Equal, actual_state, invoked as i64)
-    }
+    // /// Checks whether the given continuation object is invoked (i.e., `resume`
+    // /// was called at least once on the object).
+    // fn tc_cont_obj_is_invoked(
+    //     &self,
+    //     builder: &mut FunctionBuilder,
+    //     contobj: ir::Value,
+    // ) -> ir::Value {
+    // }
 
-    /// Checks whether the given continuation object has returned (i.e., the
-    /// function used as continuation has returned normally)
-    fn tc_cont_obj_has_returned(
-        &self,
-        builder: &mut FunctionBuilder,
-        contobj: ir::Value,
-    ) -> ir::Value {
-        let actual_state = self.tc_cont_obj_get_state(builder, contobj);
-        let returned: i32 = wasmtime_runtime::continuation::State::Returned.into();
-        builder
-            .ins()
-            .icmp_imm(IntCC::Equal, actual_state, returned as i64)
-    }
+    // /// Checks whether the given continuation object has returned (i.e., the
+    // /// function used as continuation has returned normally)
+    // fn tc_cont_obj_has_returned(
+    //     &self,
+    //     builder: &mut FunctionBuilder,
+    //     contobj: ir::Value,
+    // ) -> ir::Value {
+    //     let actual_state = self.tc_cont_obj_get_state(builder, contobj);
+    //     let returned: i32 = wasmtime_runtime::continuation::State::Returned.into();
+    //     builder
+    //         .ins()
+    //         .icmp_imm(IntCC::Equal, actual_state, returned as i64)
+    // }
 
-    /// Returns the buffer storing the results after a continuation function
-    /// has returned normally. Must only be called after the continuation has
-    /// returned and the executed function has return values.
-    fn tc_cont_obj_get_results(
-        &self,
-        builder: &mut FunctionBuilder,
-        contobj: ir::Value,
-    ) -> ir::Value {
-        if cfg!(debug_assertions) {
-            let has_returned = self.tc_cont_obj_has_returned(builder, contobj);
-            self.emit_debug_assert(builder, has_returned);
-        }
-        let mem_flags = ir::MemFlags::trusted();
-        let offset = wasmtime_runtime::continuation::offsets::continuation_object::ARGS
-            + wasmtime_runtime::continuation::offsets::payloads::DATA;
-        let pt = self.pointer_type();
-        builder.ins().load(pt, mem_flags, contobj, offset)
-    }
+    // /// Returns the data field/pointer of the `Payloads` object stored in the
+    // /// `args` field of the given continuation object.
+    // /// Note that this is *not* just the pointer to the `args` field itself!
+    // fn tc_cont_obj_get_args_data_buffer(
+    //     &self,
+    //     builder: &mut FunctionBuilder,
+    //     contobj: ir::Value,
+    // ) -> ir::Value {
+    //     let mem_flags = ir::MemFlags::trusted();
+    //     let offset = wasmtime_runtime::continuation::offsets::continuation_object::ARGS
+    //         + wasmtime_runtime::continuation::offsets::payloads::DATA;
+    //     let pt = self.pointer_type();
+    //     builder.ins().load(pt, mem_flags, contobj, offset)
+    // }
+
+    // /// Returns a pointer within the continuation argument buffer
+    // /// pointing at the next free slot. Marks the next `arg_count`
+    // /// entries in that buffer as used.
+    // /// Thus, this is the `data` pointer of the `args` field (a `Payloads`
+    // /// object) of the continuation object, plus an offset, corresponding to the
+    // /// already occupied slots.
+    // fn tc_cont_obj_occupy_next_args_slots(&self,
+    //     builder: &mut FunctionBuilder,
+    //     contobj: ir::Value,
+    //     arg_count: i32,
+    // ) -> ir::Value {
+    //     let data = self.tc_cont_obj_get_args_data_buffer(builder, contobj);
+    //     let mem_flags = ir::MemFlags::trusted();
+    //     let offset = wasmtime_runtime::continuation::offsets::continuation_object::ARGS
+    //         + wasmtime_runtime::continuation::offsets::payloads::LENGTH;
+    //     let pt = self.pointer_type();
+    //     let length = builder.ins().load(pt, mem_flags, contobj, offset);
+
+    //     if cfg!(debug_assertions) {
+    //         let offset = wasmtime_runtime::continuation::offsets::continuation_object::ARGS
+    //         + wasmtime_runtime::continuation::offsets::payloads::LENGTH;
+    //         let capacity = builder.ins().load(pt, mem_flags, contobj, offset);
+    //     }
+    // }
 }
 
 macro_rules! generate_builtin_call {
@@ -2999,7 +3139,8 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             let store_data_block = builder.create_block();
             builder.append_block_param(store_data_block, self.pointer_type());
 
-            let is_invoked = self.tc_cont_obj_is_invoked(builder, contobj);
+            let co = ContObj::new(contobj, self.pointer_type());
+            let is_invoked = co.is_invoked(builder);
             builder
                 .ins()
                 .brif(is_invoked, use_payloads_block, &[], use_args_block, &[]);
@@ -3139,10 +3280,11 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         valtypes: &[WasmType],
         contobj: ir::Value,
     ) -> std::vec::Vec<ir::Value> {
+        let co = ContObj::new(contobj, self.pointer_type());
         let mut values = vec![];
 
         if valtypes.len() > 0 {
-            let result_buffer_addr = self.tc_cont_obj_get_results(builder, contobj);
+            let result_buffer_addr = co.get_results(builder);
 
             let mut offset = 0;
             let memflags = ir::MemFlags::trusted();
