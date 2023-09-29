@@ -181,31 +181,31 @@ mod typed_continuation_helpers {
     use std::mem;
 
     #[derive(Copy, Clone)]
-    pub struct ContObj {
+    pub struct ContinuationObject {
         address: ir::Value,
         pointer_type: ir::Type,
     }
 
     #[derive(Copy, Clone)]
-    pub struct Paylds {
+    pub struct Payloads {
         /// The continuation object owning/enclosing the Payloads
-        contobj: ContObj,
+        contobj: ContinuationObject,
 
         // Offset to the beginning of the Args object within the continuation object.
         offset: i32,
     }
 
-    impl ContObj {
-        pub fn new(address: ir::Value, pointer_type: ir::Type) -> ContObj {
-            ContObj {
+    impl ContinuationObject {
+        pub fn new(address: ir::Value, pointer_type: ir::Type) -> ContinuationObject {
+            ContinuationObject {
                 address,
                 pointer_type,
             }
         }
 
-        pub fn args(&self) -> Paylds {
+        pub fn args(&self) -> Payloads {
             let offset = wasmtime_runtime::continuation::offsets::continuation_object::ARGS;
-            Paylds::new(*self, offset)
+            Payloads::new(*self, offset)
         }
 
         fn load_state(&self, builder: &mut FunctionBuilder) -> ir::Value {
@@ -251,9 +251,9 @@ mod typed_continuation_helpers {
         }
     }
 
-    impl Paylds {
-        pub(crate) fn new(co: ContObj, offset: i32) -> Paylds {
-            Paylds {
+    impl Payloads {
+        pub(crate) fn new(co: ContinuationObject, offset: i32) -> Payloads {
+            Payloads {
                 contobj: co,
                 offset,
             }
@@ -299,7 +299,7 @@ mod typed_continuation_helpers {
     }
 }
 
-use typed_continuation_helpers::ContObj;
+use typed_continuation_helpers as tc;
 
 impl<'module_environment> FuncEnvironment<'module_environment> {
     pub fn new(
@@ -3139,7 +3139,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             let store_data_block = builder.create_block();
             builder.append_block_param(store_data_block, self.pointer_type());
 
-            let co = ContObj::new(contobj, self.pointer_type());
+            let co = tc::ContinuationObject::new(contobj, self.pointer_type());
             let is_invoked = co.is_invoked(builder);
             builder
                 .ins()
@@ -3280,7 +3280,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         valtypes: &[WasmType],
         contobj: ir::Value,
     ) -> std::vec::Vec<ir::Value> {
-        let co = ContObj::new(contobj, self.pointer_type());
+        let co = tc::ContinuationObject::new(contobj, self.pointer_type());
         let mut values = vec![];
 
         if valtypes.len() > 0 {
