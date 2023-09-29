@@ -275,32 +275,41 @@ mod typed_continuation_helpers {
             self.contobj.address
         }
 
-        fn get(&self, builder: &mut FunctionBuilder, offset: i32) -> ir::Value {
+        fn get(&self, builder: &mut FunctionBuilder, ty : ir::Type, offset: i32) -> ir::Value {
             let mem_flags = ir::MemFlags::trusted();
-            //let data_offset = wasmtime_runtime::continuation::offsets::payloads::DATA;
-            let pt = self.pointer_type();
             builder
                 .ins()
-                .load(pt, mem_flags, self.contobj(), self.offset + offset)
+                .load(ty, mem_flags, self.contobj(), self.offset + offset)
         }
 
         fn get_data(&self, builder: &mut FunctionBuilder) -> ir::Value {
             self.get(
                 builder,
+                self.pointer_type(),
                 wasmtime_runtime::continuation::offsets::payloads::DATA,
             )
         }
 
         fn get_capacity(&self, builder: &mut FunctionBuilder) -> ir::Value {
+            debug_assert_eq!(
+                mem::size_of::<wasmtime_runtime::continuation::types::payloads::Capacity>(),
+                mem::size_of::<usize>()
+            );
             self.get(
                 builder,
+                I32,
                 wasmtime_runtime::continuation::offsets::payloads::CAPACITY,
             )
         }
 
         fn get_length(&self, builder: &mut FunctionBuilder) -> ir::Value {
+            debug_assert_eq!(
+                mem::size_of::<wasmtime_runtime::continuation::types::payloads::Length>(),
+                mem::size_of::<usize>()
+            );
             self.get(
                 builder,
+                I32,
                 wasmtime_runtime::continuation::offsets::payloads::LENGTH,
             )
         }
