@@ -58,10 +58,6 @@ macro_rules! foreach_builtin_function {
             resume(vmctx: vmctx, contobj: pointer) -> i32;
             /// Suspends a continuation.
             suspend(vmctx: vmctx, tag: i32);
-            /// Projects a pointer within the continuation argument buffer
-            /// pointing at the next free slot. Marks the next `arg_count`
-            /// entries in that buffer as used.
-            cont_obj_occupy_next_args_slots(vmctx: vmctx, contobj: pointer, arg_count: i32) -> pointer;
             /// Returns the continuation object corresponding to the given continuation reference.
             cont_ref_get_cont_obj(vmctx: vmctx, contref: pointer) -> pointer;
             /// Drops the given continuation object. Currently unused.

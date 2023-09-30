@@ -31,6 +31,8 @@ pub mod types {
         pub type Length = usize;
         /// type of capacity
         pub type Capacity = usize;
+        /// Type of the entries in the actual buffer
+        pub type DataEntries = u128;
     }
 }
 

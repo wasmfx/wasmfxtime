@@ -282,6 +282,13 @@ mod typed_continuation_helpers {
                 .load(ty, mem_flags, self.contobj(), self.offset + offset)
         }
 
+        fn set(&self, builder: &mut FunctionBuilder, offset: i32, value: ir::Value) {
+            let mem_flags = ir::MemFlags::trusted();
+            builder
+                .ins()
+                .store(mem_flags, value, self.contobj(), self.offset + offset);
+        }
+
         fn get_data(&self, builder: &mut FunctionBuilder) -> ir::Value {
             self.get(
                 builder,
@@ -290,7 +297,6 @@ mod typed_continuation_helpers {
             )
         }
 
-        #[allow(dead_code)]
         fn get_capacity(&self, builder: &mut FunctionBuilder) -> ir::Value {
             debug_assert_eq!(
                 mem::size_of::<wasmtime_runtime::continuation::types::payloads::Capacity>(),
@@ -303,7 +309,6 @@ mod typed_continuation_helpers {
             )
         }
 
-        #[allow(dead_code)]
         fn get_length(&self, builder: &mut FunctionBuilder) -> ir::Value {
             debug_assert_eq!(
                 mem::size_of::<wasmtime_runtime::continuation::types::payloads::Length>(),
@@ -314,6 +319,42 @@ mod typed_continuation_helpers {
                 self.pointer_type(),
                 wasmtime_runtime::continuation::offsets::payloads::LENGTH,
             )
+        }
+
+        fn set_length(&self, builder: &mut FunctionBuilder, length: ir::Value) {
+            self.set(
+                builder,
+                wasmtime_runtime::continuation::offsets::payloads::LENGTH,
+                length,
+            );
+        }
+
+        /// Returns pointer to next empty slot in data buffer and marks the
+        /// subsequent `arg_count` slots as occupied.
+        pub fn occupy_next_slots(
+            &self,
+            builder: &mut FunctionBuilder,
+            arg_count: i32,
+        ) -> ir::Value {
+            let data = self.get_data(builder);
+            let original_length = self.get_length(builder);
+            let new_length = builder.ins().iadd_imm(original_length, arg_count as i64);
+            self.set_length(builder, new_length);
+
+            if cfg!(debug_assertions) {
+                let capacity = self.get_capacity(builder);
+                let sufficient_capacity =
+                    builder
+                        .ins()
+                        .icmp(IntCC::UnsignedLessThanOrEqual, new_length, capacity);
+                emit_debug_assert(builder, sufficient_capacity);
+            }
+
+            let value_size = mem::size_of::<
+                wasmtime_runtime::continuation::types::payloads::DataEntries,
+            >() as i64;
+            let byte_offset = builder.ins().imul_imm(original_length, value_size);
+            builder.ins().iadd(data, byte_offset)
         }
     }
 }
@@ -3083,12 +3124,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             {
                 builder.switch_to_block(use_args_block);
                 builder.seal_block(use_args_block);
-                let (_vmctx, ptr) = generate_builtin_call!(
-                    self,
-                    builder,
-                    cont_obj_occupy_next_args_slots,
-                    [contobj, nargs]
-                );
+
+                let args = co.args();
+                let ptr = args.occupy_next_slots(builder, values.len() as i32);
+
                 builder.ins().jump(store_data_block, &[ptr]);
             }
 
