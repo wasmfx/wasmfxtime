@@ -102,7 +102,7 @@ pub struct ContinuationObject {
     // Once a continuation is suspended, this buffer is used to hold payloads
     // provided by cont.bind and resume and received at the suspend site.
     // In particular, this may only be Some when `state` is `Invoked`.
-    tag_return_values: Option<Box<Payloads>>,
+    tag_return_values: Payloads,
 
     state: State,
 }
@@ -190,10 +190,13 @@ pub fn cont_obj_occupy_next_tag_returns_slots(
 ) -> *mut u128 {
     let obj = unsafe { obj.as_mut().unwrap() };
     assert!(obj.state == State::Invoked);
-    let payloads = obj
-        .tag_return_values
-        .get_or_insert_with(|| Box::new(Payloads::new(remaining_arg_count)));
-    return payloads.occupy_next(arg_count);
+    let payloads = &obj.tag_return_values;
+    if payloads.capacity == 0 {
+        obj.tag_return_values = Payloads::new(remaining_arg_count);
+    } else {
+        assert!(payloads.capacity >= remaining_arg_count);
+    }
+    return obj.tag_return_values.occupy_next(arg_count);
 }
 
 /// TODO
@@ -204,7 +207,7 @@ pub fn cont_obj_get_tag_return_values_buffer(
     let obj = unsafe { obj.as_mut().unwrap() };
     assert!(obj.state == State::Invoked);
 
-    let payloads = &mut obj.tag_return_values.as_ref().unwrap();
+    let payloads = &mut obj.tag_return_values;
     assert_eq!(payloads.length, expected_value_count);
     assert_eq!(payloads.length, payloads.capacity);
     assert!(!payloads.data.is_null());
@@ -221,19 +224,19 @@ pub fn cont_obj_forward_tag_return_values_buffer(
     assert!(parent.state == State::Invoked);
     assert!(child.state == State::Invoked);
 
-    assert!(child.tag_return_values.is_none());
+    assert!(child.tag_return_values.capacity == 0);
 
-    child.tag_return_values = parent.tag_return_values.take()
+    mem::swap(&mut child.tag_return_values, &mut parent.tag_return_values);
 }
 
 /// TODO
 pub fn cont_obj_deallocate_tag_return_values_buffer(obj: *mut ContinuationObject) {
     let obj = unsafe { obj.as_mut().unwrap() };
     assert!(obj.state == State::Invoked);
-    let payloads: Box<Payloads> = obj.tag_return_values.take().unwrap();
+    let payloads = &obj.tag_return_values;
     let _: Vec<u128> =
-        unsafe { Vec::from_raw_parts((*payloads).data, (*payloads).length, (*payloads).capacity) };
-    obj.tag_return_values = None;
+        unsafe { Vec::from_raw_parts(payloads.data, payloads.length, payloads.capacity) };
+    obj.tag_return_values = Payloads::new(0);
 }
 
 /// TODO
@@ -263,13 +266,9 @@ pub fn drop_cont_obj(contobj: *mut ContinuationObject) {
             contobj.args.capacity,
         );
     };
-    match contobj.tag_return_values {
-        None => (),
-        Some(payloads) => unsafe {
-            let _: Vec<u128> =
-                Vec::from_raw_parts(payloads.data, payloads.length, payloads.capacity);
-        },
-    }
+    let payloads = &contobj.tag_return_values;
+    let _: Vec<u128> =
+        unsafe { Vec::from_raw_parts(payloads.data, payloads.length, payloads.capacity) };
 }
 
 /// TODO
@@ -364,7 +363,7 @@ pub fn cont_new(
         fiber: Box::into_raw(fiber),
         parent: ptr::null_mut(),
         args: payload,
-        tag_return_values: None,
+        tag_return_values: Payloads::new(0),
         state: State::Allocated,
     });
 
