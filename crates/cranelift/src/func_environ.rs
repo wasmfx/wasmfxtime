@@ -297,7 +297,6 @@ mod typed_continuation_helpers {
             )
         }
 
-        #[allow(dead_code)]
         fn get_capacity(&self, builder: &mut FunctionBuilder) -> ir::Value {
             debug_assert_eq!(
                 mem::size_of::<wasmtime_runtime::continuation::types::payloads::Capacity>(),
@@ -310,7 +309,6 @@ mod typed_continuation_helpers {
             )
         }
 
-        #[allow(dead_code)]
         fn get_length(&self, builder: &mut FunctionBuilder) -> ir::Value {
             debug_assert_eq!(
                 mem::size_of::<wasmtime_runtime::continuation::types::payloads::Length>(),
