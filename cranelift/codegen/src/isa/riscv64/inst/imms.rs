@@ -74,6 +74,18 @@ pub struct Imm20 {
 impl Imm20 {
     pub(crate) const ZERO: Self = Self { bits: 0 };
 
+    pub fn maybe_from_u64(val: u64) -> Option<Imm20> {
+        Self::maybe_from_i64(val as i64)
+    }
+
+    pub fn maybe_from_i64(val: i64) -> Option<Imm20> {
+        if val >= -(0x7_ffff + 1) && val <= 0x7_ffff {
+            Some(Imm20 { bits: val as u32 })
+        } else {
+            None
+        }
+    }
+
     #[inline]
     pub fn from_i32(bits: i32) -> Self {
         assert!(bits >= -(0x7_ffff + 1) && bits <= 0x7_ffff);
@@ -258,6 +270,34 @@ impl Uimm5 {
 }
 
 impl Display for Uimm5 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+/// A unsigned 2-bit immediate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Uimm2 {
+    value: u8,
+}
+
+impl Uimm2 {
+    /// Create an unsigned 2-bit immediate from an u8
+    pub fn maybe_from_u8(value: u8) -> Option<Self> {
+        if value <= 3 {
+            Some(Self { value })
+        } else {
+            None
+        }
+    }
+
+    /// Bits for encoding.
+    pub fn bits(&self) -> u8 {
+        self.value & 0x3
+    }
+}
+
+impl Display for Uimm2 {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, "{}", self.value)
     }

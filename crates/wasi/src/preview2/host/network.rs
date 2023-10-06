@@ -2,27 +2,27 @@ use crate::preview2::bindings::sockets::network::{
     self, ErrorCode, IpAddressFamily, IpSocketAddress, Ipv4Address, Ipv4SocketAddress, Ipv6Address,
     Ipv6SocketAddress,
 };
-use crate::preview2::network::TableNetworkExt;
-use crate::preview2::{TableError, WasiView};
+use crate::preview2::{SocketError, WasiView};
 use std::io;
+use wasmtime::component::Resource;
 
 impl<T: WasiView> network::Host for T {
-    fn drop_network(&mut self, this: network::Network) -> Result<(), anyhow::Error> {
+    fn convert_error_code(&mut self, error: SocketError) -> anyhow::Result<ErrorCode> {
+        error.downcast()
+    }
+}
+
+impl<T: WasiView> crate::preview2::bindings::sockets::network::HostNetwork for T {
+    fn drop(&mut self, this: Resource<network::Network>) -> Result<(), anyhow::Error> {
         let table = self.table_mut();
 
-        table.delete_network(this)?;
+        table.delete_resource(this)?;
 
         Ok(())
     }
 }
 
-impl From<TableError> for network::Error {
-    fn from(error: TableError) -> Self {
-        Self::trap(error.into())
-    }
-}
-
-impl From<io::Error> for network::Error {
+impl From<io::Error> for ErrorCode {
     fn from(error: io::Error) -> Self {
         match error.kind() {
             // Errors that we can directly map.
@@ -37,24 +37,8 @@ impl From<io::Error> for network::Error {
             io::ErrorKind::Unsupported => ErrorCode::NotSupported,
             io::ErrorKind::OutOfMemory => ErrorCode::OutOfMemory,
 
-            // Errors we don't expect to see here.
-            io::ErrorKind::Interrupted | io::ErrorKind::ConnectionAborted => {
-                // Transient errors should be skipped.
-                return Self::trap(error.into());
-            }
-
-            // Errors not expected from network APIs.
-            io::ErrorKind::WriteZero
-            | io::ErrorKind::InvalidInput
-            | io::ErrorKind::InvalidData
-            | io::ErrorKind::BrokenPipe
-            | io::ErrorKind::NotFound
-            | io::ErrorKind::UnexpectedEof
-            | io::ErrorKind::AlreadyExists => return Self::trap(error.into()),
-
             // Errors that don't correspond to a Rust `io::ErrorKind`.
             io::ErrorKind::Other => match error.raw_os_error() {
-                None => return Self::trap(error.into()),
                 Some(libc::ENOBUFS) | Some(libc::ENOMEM) => ErrorCode::OutOfMemory,
                 Some(libc::EOPNOTSUPP) => ErrorCode::NotSupported,
                 Some(libc::ENETUNREACH) | Some(libc::EHOSTUNREACH) | Some(libc::ENETDOWN) => {
@@ -63,15 +47,21 @@ impl From<io::Error> for network::Error {
                 Some(libc::ECONNRESET) => ErrorCode::ConnectionReset,
                 Some(libc::ECONNREFUSED) => ErrorCode::ConnectionRefused,
                 Some(libc::EADDRINUSE) => ErrorCode::AddressInUse,
-                Some(_) => return Self::trap(error.into()),
+                Some(_) | None => {
+                    log::debug!("unknown I/O error: {error}");
+                    ErrorCode::Unknown
+                }
             },
-            _ => return Self::trap(error.into()),
+
+            _ => {
+                log::debug!("unknown I/O error: {error}");
+                ErrorCode::Unknown
+            }
         }
-        .into()
     }
 }
 
-impl From<rustix::io::Errno> for network::Error {
+impl From<rustix::io::Errno> for ErrorCode {
     fn from(error: rustix::io::Errno) -> Self {
         std::io::Error::from(error).into()
     }
