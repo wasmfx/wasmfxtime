@@ -1,6 +1,6 @@
 use crate::rust::{to_rust_ident, to_rust_upper_camel_case, RustGenerator, TypeMode};
 use crate::types::{TypeInfo, Types};
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, Context};
 use heck::*;
 use indexmap::{IndexMap, IndexSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -27,20 +27,22 @@ mod source;
 mod types;
 use source::Source;
 
-struct InterfaceName {
-    /// True when this interface name has been remapped through the use of `with` in the `bindgen!`
-    /// macro invocation.
-    remapped: bool,
-
-    /// The string name for this interface.
-    path: String,
+#[derive(Clone)]
+enum InterfaceName {
+    /// This interface was remapped using `with` to some other Rust code.
+    Remapped {
+        name_at_root: String,
+        local_path: Vec<String>,
+    },
+    /// This interface is generated in the module hierarchy specified.
+    Path(Vec<String>),
 }
 
 #[derive(Default)]
 struct Wasmtime {
     src: Source,
     opts: Opts,
-    import_interfaces: BTreeMap<Option<PackageName>, Vec<ImportInterface>>,
+    import_interfaces: Vec<(String, InterfaceName)>,
     import_functions: Vec<ImportFunction>,
     exports: Exports,
     types: Types,
@@ -51,10 +53,6 @@ struct Wasmtime {
     trappable_errors: IndexMap<TypeId, String>,
 }
 
-struct ImportInterface {
-    snake: String,
-    module: String,
-}
 struct ImportFunction {
     add_to_linker: String,
     sig: String,
@@ -63,7 +61,7 @@ struct ImportFunction {
 #[derive(Default)]
 struct Exports {
     fields: BTreeMap<String, (String, String)>,
-    modules: BTreeMap<Option<PackageName>, Vec<String>>,
+    modules: Vec<(String, InterfaceName)>,
     funcs: Vec<String>,
 }
 
@@ -114,11 +112,8 @@ pub struct Opts {
 
 #[derive(Debug, Clone)]
 pub struct TrappableError {
-    /// The package and interface that define the error type being mapped.
-    pub wit_package_path: String,
-
-    /// The name of the error type in WIT that is being mapped.
-    pub wit_type_name: String,
+    /// Full path to the error, such as `wasi:io/streams/error`.
+    pub wit_path: String,
 
     /// The name, in Rust, of the error type to generate.
     pub rust_type_name: String,
@@ -178,49 +173,89 @@ impl Wasmtime {
         is_export: bool,
     ) -> bool {
         let with_name = resolve.name_world_key(name);
+
+        let mut path = Vec::new();
+        if is_export {
+            path.push("exports".to_string());
+        }
+        match name {
+            WorldKey::Name(name) => {
+                path.push(name.to_snake_case());
+            }
+            WorldKey::Interface(_) => {
+                let iface = &resolve.interfaces[id];
+                let pkgname = &resolve.packages[iface.package.unwrap()].name;
+                path.push(pkgname.namespace.to_snake_case());
+                path.push(self.name_package_module(resolve, iface.package.unwrap()));
+                path.push(iface.name.as_ref().unwrap().to_snake_case());
+            }
+        }
         let entry = if let Some(remapped_path) = self.opts.with.get(&with_name) {
             let name = format!("__with_name{}", self.with_name_counter);
             self.with_name_counter += 1;
             uwriteln!(self.src, "use {remapped_path} as {name};");
-            InterfaceName {
-                remapped: true,
-                path: name,
+            InterfaceName::Remapped {
+                name_at_root: name,
+                local_path: path,
             }
         } else {
-            let path = match name {
-                WorldKey::Name(name) => name.to_snake_case(),
-                WorldKey::Interface(_) => {
-                    let iface = &resolve.interfaces[id];
-                    let pkgname = &resolve.packages[iface.package.unwrap()].name;
-                    format!(
-                        "{}::{}::{}",
-                        pkgname.namespace.to_snake_case(),
-                        pkgname.name.to_snake_case(),
-                        iface.name.as_ref().unwrap().to_snake_case()
-                    )
-                }
-            };
-            let path = if is_export {
-                format!("exports::{path}")
-            } else {
-                path
-            };
-            InterfaceName {
-                remapped: false,
-                path,
-            }
+            InterfaceName::Path(path)
         };
 
-        let remapped = entry.remapped;
+        let remapped = matches!(entry, InterfaceName::Remapped { .. });
         self.interface_names.insert(id, entry);
-
         remapped
+    }
+
+    /// If the package `id` is the only package with its namespace/name combo
+    /// then pass through the name unmodified. If, however, there are multiple
+    /// versions of this package then the package module is going to get version
+    /// information.
+    fn name_package_module(&self, resolve: &Resolve, id: PackageId) -> String {
+        let pkg = &resolve.packages[id];
+        let versions_with_same_name = resolve
+            .packages
+            .iter()
+            .filter_map(|(_, p)| {
+                if p.name.namespace == pkg.name.namespace && p.name.name == pkg.name.name {
+                    Some(&p.name.version)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let base = pkg.name.name.to_snake_case();
+        if versions_with_same_name.len() == 1 {
+            return base;
+        }
+
+        let version = match &pkg.name.version {
+            Some(version) => version,
+            // If this package didn't have a version then don't mangle its name
+            // and other packages with the same name but with versions present
+            // will have their names mangled.
+            None => return base,
+        };
+
+        // Here there's multiple packages with the same name that differ only in
+        // version, so the version needs to be mangled into the Rust module name
+        // that we're generating. This in theory could look at all of
+        // `versions_with_same_name` and produce a minimal diff, e.g. for 0.1.0
+        // and 0.2.0 this could generate "foo1" and "foo2", but for now
+        // a simpler path is chosen to generate "foo0_1_0" and "foo0_2_0".
+        let version = version
+            .to_string()
+            .replace('.', "_")
+            .replace('-', "_")
+            .replace('+', "_")
+            .to_snake_case();
+        format!("{base}{version}")
     }
 
     fn generate(&mut self, resolve: &Resolve, id: WorldId) -> String {
         self.types.analyze(resolve, id);
         for (i, te) in self.opts.trappable_error_type.iter().enumerate() {
-            let id = resolve_type_in_package(resolve, &te.wit_package_path, &te.wit_type_name)
+            let id = resolve_type_in_package(resolve, &te.wit_path)
                 .context(format!("resolving {:?}", te))
                 .unwrap();
             let name = format!("_TrappableError{i}");
@@ -235,6 +270,7 @@ impl Wasmtime {
                 self.import(resolve, id, name, import);
             }
         }
+
         for (name, export) in world.exports.iter() {
             if !self.opts.only_interfaces || matches!(export, WorldItem::Interface(_)) {
                 self.export(resolve, name, export);
@@ -291,15 +327,8 @@ impl Wasmtime {
                         }}
                     "
                 );
-                let pkg = resolve.interfaces[*id].package.unwrap();
-                let pkgname = match name {
-                    WorldKey::Name(_) => None,
-                    WorldKey::Interface(_) => Some(resolve.packages[pkg].name.clone()),
-                };
                 self.import_interfaces
-                    .entry(pkgname)
-                    .or_insert(Vec::new())
-                    .push(ImportInterface { snake, module });
+                    .push((module, self.interface_names[id].clone()));
             }
             WorldItem::Type(ty) => {
                 let name = match name {
@@ -433,9 +462,7 @@ impl Wasmtime {
                 };
                 self.exports
                     .modules
-                    .entry(pkgname.clone())
-                    .or_insert(Vec::new())
-                    .push(module);
+                    .push((module, self.interface_names[id].clone()));
 
                 let name = resolve.name_world_key(name);
                 let (path, method_name) = match pkgname {
@@ -565,18 +592,10 @@ impl Wasmtime {
         }
 
         let imports = mem::take(&mut self.import_interfaces);
-        self.emit_modules(
-            &imports
-                .into_iter()
-                .map(|(k, v)| (k, v.into_iter().map(|m| m.module).collect()))
-                .collect(),
-        );
-        if !self.exports.modules.is_empty() {
-            uwriteln!(self.src, "pub mod exports {{");
-            let exports = mem::take(&mut self.exports.modules);
-            self.emit_modules(&exports);
-            uwriteln!(self.src, "}}");
-        }
+        self.emit_modules(imports);
+
+        let exports = mem::take(&mut self.exports.modules);
+        self.emit_modules(exports);
 
         let mut src = mem::take(&mut self.src);
         if self.opts.rustfmt {
@@ -606,34 +625,39 @@ impl Wasmtime {
         src.into()
     }
 
-    fn emit_modules(&mut self, modules: &BTreeMap<Option<PackageName>, Vec<String>>) {
-        let mut map = BTreeMap::new();
-        for (pkg, modules) in modules {
-            match pkg {
-                Some(pkg) => {
-                    let prev = map
-                        .entry(&pkg.namespace)
-                        .or_insert(BTreeMap::new())
-                        .insert(&pkg.name, modules);
-                    assert!(prev.is_none());
-                }
-                None => {
-                    for module in modules {
-                        uwriteln!(self.src, "{module}");
-                    }
-                }
-            }
+    fn emit_modules(&mut self, modules: Vec<(String, InterfaceName)>) {
+        #[derive(Default)]
+        struct Module {
+            submodules: BTreeMap<String, Module>,
+            contents: Vec<String>,
         }
-        for (ns, pkgs) in map {
-            uwriteln!(self.src, "pub mod {} {{", ns.to_snake_case());
-            for (pkg, modules) in pkgs {
-                uwriteln!(self.src, "pub mod {} {{", pkg.to_snake_case());
-                for module in modules {
-                    uwriteln!(self.src, "{module}");
-                }
-                uwriteln!(self.src, "}}");
+        let mut map = Module::default();
+        for (module, name) in modules {
+            let path = match name {
+                InterfaceName::Remapped { local_path, .. } => local_path,
+                InterfaceName::Path(path) => path,
+            };
+            let mut cur = &mut map;
+            for name in path[..path.len() - 1].iter() {
+                cur = cur
+                    .submodules
+                    .entry(name.clone())
+                    .or_insert(Module::default());
             }
-            uwriteln!(self.src, "}}");
+            cur.contents.push(module);
+        }
+
+        emit(&mut self.src, map);
+
+        fn emit(me: &mut Source, module: Module) {
+            for (name, submodule) in module.submodules {
+                uwriteln!(me, "pub mod {name} {{");
+                emit(me, submodule);
+                uwriteln!(me, "}}");
+            }
+            for submodule in module.contents {
+                uwriteln!(me, "{submodule}");
+            }
         }
     }
 }
@@ -675,19 +699,12 @@ impl Wasmtime {
             return;
         }
         let mut interfaces = Vec::new();
-        for (pkg, imports) in self.import_interfaces.iter() {
-            for import in imports {
-                let mut path = String::new();
-                if let Some(pkg) = pkg {
-                    path.push_str(&pkg.namespace.to_snake_case());
-                    path.push_str("::");
-                    path.push_str(&pkg.name.to_snake_case());
-                    path.push_str("::");
-                }
-
-                path.push_str(&import.snake);
-                interfaces.push(path);
-            }
+        for (_, name) in self.import_interfaces.iter() {
+            let path = match name {
+                InterfaceName::Remapped { .. } => unreachable!("imported a remapped module"),
+                InterfaceName::Path(path) => path,
+            };
+            interfaces.push(path.join("::"));
         }
 
         uwrite!(
@@ -770,77 +787,29 @@ impl Wasmtime {
     }
 }
 
-fn resolve_type_in_package(
-    resolve: &Resolve,
-    package_path: &str,
-    type_name: &str,
-) -> anyhow::Result<TypeId> {
+fn resolve_type_in_package(resolve: &Resolve, wit_path: &str) -> anyhow::Result<TypeId> {
     // foo:bar/baz
 
-    let (namespace, rest) = package_path
-        .split_once(':')
-        .ok_or_else(|| anyhow!("Invalid package path: missing package identifier"))?;
-
-    let (package_name, iface_name) = rest
-        .split_once('/')
-        .ok_or_else(|| anyhow!("Invalid package path: missing namespace separator"))?;
-
-    // TODO: we should handle version annotations
-    if package_name.contains('@') {
-        bail!("Invalid package path: version parsing is not currently handled");
-    }
-
-    let packages = Vec::from_iter(
-        resolve
-            .package_names
-            .iter()
-            .filter(|(pname, _)| pname.namespace == namespace && pname.name == package_name),
-    );
-
-    if packages.len() != 1 {
-        if packages.is_empty() {
-            bail!("No package named `{}`", namespace);
-        } else {
-            // Getting here is a bug, parsing version identifiers would disambiguate the intended
-            // package.
-            bail!(
-                "Multiple packages named `{}` found ({:?})",
-                namespace,
-                packages
-            );
-        }
-    }
-
-    let (_, &package_id) = packages[0];
-    let package = &resolve.packages[package_id];
-
-    let (_, &iface_id) = package
-        .interfaces
+    let (_, interface) = resolve
+        .packages
         .iter()
-        .find(|(name, _)| name.as_str() == iface_name)
-        .ok_or_else(|| {
-            anyhow!(
-                "Unknown interface `{}` in package `{}`",
-                iface_name,
-                package_path
-            )
-        })?;
+        .flat_map(|(_, p)| p.interfaces.iter())
+        .find(|(_, id)| wit_path.starts_with(&resolve.id_of(**id).unwrap()))
+        .ok_or_else(|| anyhow!("no package/interface found to match `{wit_path}`"))?;
 
-    let iface = &resolve.interfaces[iface_id];
+    let wit_path = wit_path
+        .strip_prefix(&resolve.id_of(*interface).unwrap())
+        .unwrap();
+    let wit_path = wit_path
+        .strip_prefix('/')
+        .ok_or_else(|| anyhow!("expected `/` after interface name"))?;
 
-    let (_, &type_id) = iface
+    let (_, id) = resolve.interfaces[*interface]
         .types
         .iter()
-        .find(|(n, _)| n.as_str() == type_name)
-        .ok_or_else(|| {
-            anyhow!(
-                "No type named `{}` in package `{}`",
-                package_name,
-                package_path
-            )
-        })?;
-
-    Ok(type_id)
+        .find(|(name, _)| wit_path == name.as_str())
+        .ok_or_else(|| anyhow!("no types found to match `{wit_path}` in interface"))?;
+    Ok(*id)
 }
 
 struct InterfaceGenerator<'a> {
@@ -1951,8 +1920,17 @@ impl<'a> RustGenerator<'a> for InterfaceGenerator<'a> {
             }
         }
         let mut path_to_root = self.path_to_root();
-        let InterfaceName { path, .. } = &self.gen.interface_names[&interface];
-        path_to_root.push_str(path);
+        match &self.gen.interface_names[&interface] {
+            InterfaceName::Remapped { name_at_root, .. } => path_to_root.push_str(name_at_root),
+            InterfaceName::Path(path) => {
+                for (i, name) in path.iter().enumerate() {
+                    if i > 0 {
+                        path_to_root.push_str("::");
+                    }
+                    path_to_root.push_str(name);
+                }
+            }
+        }
         Some(path_to_root)
     }
 

@@ -65,14 +65,14 @@ pub mod bindings {
             wasmtime::component::bindgen!({
                 path: "wit",
                 interfaces: "
-                    import wasi:io/poll
-                    import wasi:io/streams
-                    import wasi:filesystem/types
+                    import wasi:io/poll;
+                    import wasi:io/streams;
+                    import wasi:filesystem/types;
                 ",
                 tracing: true,
                 trappable_error_type: {
-                    "wasi:io/streams"::"stream-error": StreamError,
-                    "wasi:filesystem/types"::"error-code": FsError,
+                    "wasi:io/streams/stream-error" => StreamError,
+                    "wasi:filesystem/types/error-code" => FsError,
                 },
                 with: {
                     "wasi:clocks/wall-clock": crate::preview2::bindings::clocks::wall_clock,
@@ -90,7 +90,7 @@ pub mod bindings {
 
     wasmtime::component::bindgen!({
         path: "wit",
-        interfaces: "include wasi:cli/reactor",
+        interfaces: "include wasi:cli/reactor;",
         tracing: true,
         async: {
             // Only these functions are `async` and everything else is sync
@@ -149,17 +149,15 @@ pub mod bindings {
                 "poll-one",
             ],
         },
-        with: {
-            "wasi:sockets/ip-name-lookup/resolve-address-stream": super::ip_name_lookup::ResolveAddressStream,
-        },
         trappable_error_type: {
-            "wasi:io/streams"::"stream-error": crate::preview2::StreamError,
-            "wasi:filesystem/types"::"error-code": crate::preview2::FsError,
-            "wasi:sockets/network"::"error-code": crate::preview2::SocketError,
+            "wasi:io/streams/stream-error" => crate::preview2::StreamError,
+            "wasi:filesystem/types/error-code" => crate::preview2::FsError,
+            "wasi:sockets/network/error-code" => crate::preview2::SocketError,
         },
         with: {
             "wasi:sockets/network/network": super::network::Network,
             "wasi:sockets/tcp/tcp-socket": super::tcp::TcpSocket,
+            "wasi:sockets/ip-name-lookup/resolve-address-stream": super::ip_name_lookup::ResolveAddressStream,
             "wasi:filesystem/types/directory-entry-stream": super::filesystem::ReaddirIterator,
             "wasi:filesystem/types/descriptor": super::filesystem::Descriptor,
             "wasi:io/streams/input-stream": super::stream::InputStream,
