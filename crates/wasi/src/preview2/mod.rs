@@ -36,6 +36,7 @@ mod stdio;
 mod stream;
 mod table;
 mod tcp;
+mod udp;
 mod write_stream;
 
 pub use self::clocks::{HostMonotonicClock, HostWallClock};
@@ -45,7 +46,9 @@ pub use self::filesystem::{DirPerms, FilePerms, FsError, FsResult};
 pub use self::network::{Network, SocketError, SocketResult};
 pub use self::poll::{subscribe, ClosureFuture, MakeFuture, Pollable, PollableFuture, Subscribe};
 pub use self::random::{thread_rng, Deterministic};
-pub use self::stdio::{stderr, stdin, stdout, IsATTY, Stderr, Stdin, Stdout};
+pub use self::stdio::{
+    stderr, stdin, stdout, IsATTY, Stderr, Stdin, StdinStream, Stdout, StdoutStream,
+};
 pub use self::stream::{
     HostInputStream, HostOutputStream, InputStream, OutputStream, StreamError, StreamResult,
 };
@@ -157,6 +160,7 @@ pub mod bindings {
         with: {
             "wasi:sockets/network/network": super::network::Network,
             "wasi:sockets/tcp/tcp-socket": super::tcp::TcpSocket,
+            "wasi:sockets/udp/udp-socket": super::udp::UdpSocket,
             "wasi:sockets/ip-name-lookup/resolve-address-stream": super::ip_name_lookup::ResolveAddressStream,
             "wasi:filesystem/types/directory-entry-stream": super::filesystem::ReaddirIterator,
             "wasi:filesystem/types/descriptor": super::filesystem::Descriptor,
@@ -237,9 +241,49 @@ pub fn in_tokio<F: Future>(f: F) -> F::Output {
             let _enter = h.enter();
             h.block_on(f)
         }
+        // The `yield_now` here is non-obvious and if you're reading this
+        // you're likely curious about why it's here. This is currently required
+        // to get some features of "sync mode" working correctly, such as with
+        // the CLI. To illustrate why this is required, consider a program
+        // organized as:
+        //
+        // * A program has a `pollable` that it's waiting on.
+        // * This `pollable` is always ready .
+        // * Actually making the corresponding operation ready, however,
+        //   requires some background work on Tokio's part.
+        // * The program is looping on "wait for readiness" coupled with
+        //   performing the operation.
+        //
+        // In this situation this program ends up infinitely looping in waiting
+        // for pollables. The reason appears to be that when we enter the tokio
+        // runtime here it doesn't necessary yield to background work because
+        // the provided future `f` is ready immediately. The future `f` will run
+        // through the list of pollables and determine one of them is ready.
+        //
+        // Historically this happened with UDP sockets. A test send a datagram
+        // from one socket to another and the other socket infinitely didn't
+        // receive the data. This appeared to be because the server socket was
+        // waiting on `READABLE | WRITABLE` (which is itself a bug but ignore
+        // that) and the socket was currently in the "writable" state but never
+        // ended up receiving a notification for the "readable" state. Moving
+        // the socket to "readable" would require Tokio to perform some
+        // background work via epoll/kqueue/handle events but if the future
+        // provided here is always ready, then that never happened.
+        //
+        // Thus the `yield_now()` is an attempt to force Tokio to go do some
+        // background work eventually and look at new interest masks for
+        // example. This is a bit of a kludge but everything's already a bit
+        // wonky in synchronous mode anyway. Note that this is hypothesized to
+        // not be an issue in async mode because async mode typically has the
+        // Tokio runtime in a separate thread or otherwise participating in a
+        // larger application, it's only here in synchronous mode where we
+        // effectively own the runtime that we need some special care.
         Err(_) => {
             let _enter = RUNTIME.enter();
-            RUNTIME.block_on(f)
+            RUNTIME.block_on(async move {
+                tokio::task::yield_now().await;
+                f.await
+            })
         }
     }
 }
