@@ -654,8 +654,13 @@
   (rv_rem x y))
 
 ;;;; Rules for `and` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(rule 0 (lower (has_type (ty_int ty) (band x y)))
-  (gen_and ty x y))
+(rule -1 (lower (has_type (fits_in_64 ty) (band x y)))
+  (rv_and x y))
+
+(rule 0 (lower (has_type $I128 (band x y)))
+  (value_regs
+    (rv_and (value_regs_get x 0) (value_regs_get y 0))
+    (rv_and (value_regs_get x 1) (value_regs_get y 1))))
 
 ;; Special cases for when one operand is an immediate that fits in 12 bits.
 (rule 1 (lower (has_type (fits_in_64 (ty_int ty)) (band x (imm12_from_value y))))
@@ -1214,19 +1219,114 @@
 
 
 ;;;; Rules for `rotl` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(rule (lower (has_type (fits_in_64 ty) (rotl x y)))
-  (lower_rotl ty (zext x) (value_regs_get y 0)))
+
+(rule 0 (lower (has_type (fits_in_64 ty) (rotl rs amount)))
+  (let
+    ((rs XReg (zext rs))
+      (amount XReg (value_regs_get amount 0))
+      (x ValueRegs (gen_shamt ty amount))
+      (shamt XReg (value_regs_get x 0))
+      (len_sub_shamt Reg (value_regs_get x 1))
+      (part1 Reg (rv_sll rs shamt))
+      (part2 Reg (rv_srl rs len_sub_shamt))
+      (part3 Reg (gen_select_xreg (cmp_eqz shamt) (zero_reg) part2)))
+    (rv_or part1 part3)))
+
+(rule 1 (lower (has_type $I32 (rotl rs amount)))
+  (if-let $true (has_zbb))
+  (rv_rolw rs (value_regs_get amount 0)))
+
+(rule 2 (lower (has_type $I32 (rotl rs (u64_from_iconst n))))
+  (if-let $true (has_zbb))
+  (if-let (imm12_from_u64 imm) (u64_sub 32 (u64_and n 31)))
+  (rv_roriw rs imm))
+
+(rule 1 (lower (has_type $I64 (rotl rs amount)))
+  (if-let $true (has_zbb))
+  (rv_rol rs (value_regs_get amount 0)))
+
+(rule 2 (lower (has_type $I64 (rotl rs (u64_from_iconst n))))
+  (if-let $true (has_zbb))
+  (if-let (imm12_from_u64 imm) (u64_sub 64 (u64_and n 63)))
+  (rv_rori rs imm))
 
 (rule 1 (lower (has_type $I128 (rotl x y)))
-  (lower_i128_rotl x y))
+  (let
+    ((tmp ValueRegs (gen_shamt $I128 (value_regs_get y 0)))
+      (shamt XReg (value_regs_get tmp 0))
+      (len_sub_shamt XReg (value_regs_get tmp 1))
+      (low_part1 XReg (rv_sll (value_regs_get x 0) shamt))
+      (low_part2 XReg (rv_srl (value_regs_get x 1) len_sub_shamt))
+      ;;; if shamt == 0 low_part2 will overflow we should zero instead.
+      (low_part3 XReg (gen_select_xreg (cmp_eqz shamt) (zero_reg) low_part2))
+      (low XReg (rv_or low_part1 low_part3))
+      (high_part1 XReg (rv_sll (value_regs_get x 1) shamt))
+      (high_part2 XReg (rv_srl (value_regs_get x 0) len_sub_shamt))
+      (high_part3 XReg (gen_select_xreg (cmp_eqz shamt) (zero_reg) high_part2))
+      (high XReg (rv_or high_part1 high_part3))
+      (const64 XReg (imm $I64 64))
+      (shamt_128 XReg (rv_andi (value_regs_get y 0) (imm12_const 127))))
+    ;; right now we only rotate less than 64 bits.
+    ;; if shamt is greater than or equal 64 , we should switch low and high.
+    (gen_select_regs
+      (cmp_geu shamt_128 const64)
+      (value_regs high low)
+      (value_regs low high)
+    )))
 
 ;;;; Rules for `rotr` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(rule (lower (has_type (fits_in_64 ty) (rotr x y)))
-  (lower_rotr ty (zext x) (value_regs_get y 0)))
+
+(rule (lower (has_type (fits_in_64 ty) (rotr rs amount)))
+  (let
+    ((rs XReg (zext rs))
+      (amount XReg (value_regs_get amount 0))
+      (x ValueRegs (gen_shamt ty amount))
+      (shamt XReg (value_regs_get x 0))
+      (len_sub_shamt XReg (value_regs_get x 1))
+      (part1 XReg (rv_srl rs shamt))
+      (part2 XReg (rv_sll rs len_sub_shamt))
+      (part3 XReg (gen_select_xreg (cmp_eqz shamt) (zero_reg) part2)))
+    (rv_or part1 part3)))
+
+(rule 1 (lower (has_type $I32 (rotr rs amount)))
+  (if-let $true (has_zbb))
+  (rv_rorw rs (value_regs_get amount 0)))
+
+(rule 2 (lower (has_type $I32 (rotr rs (imm12_from_value n))))
+  (if-let $true (has_zbb))
+  (rv_roriw rs n))
+
+(rule 1 (lower (has_type $I64 (rotr rs amount)))
+  (if-let $true (has_zbb))
+  (rv_ror rs (value_regs_get amount 0)))
+
+(rule 2 (lower (has_type $I64 (rotr rs (imm12_from_value n))))
+  (if-let $true (has_zbb))
+  (rv_rori rs n))
 
 (rule 1 (lower (has_type $I128 (rotr x y)))
-  (lower_i128_rotr x y))
-
+  (let
+    ((tmp ValueRegs (gen_shamt $I128 (value_regs_get y 0)))
+      (shamt XReg (value_regs_get tmp 0))
+      (len_sub_shamt XReg (value_regs_get tmp 1))
+      (low_part1 XReg (rv_srl (value_regs_get x 0) shamt))
+      (low_part2 XReg (rv_sll (value_regs_get x 1) len_sub_shamt))
+      ;;; if shamt == 0 low_part2 will overflow we should zero instead.
+      (low_part3 XReg (gen_select_xreg (cmp_eqz shamt) (zero_reg) low_part2))
+      (low XReg (rv_or low_part1 low_part3))
+      (high_part1 XReg (rv_srl (value_regs_get x 1) shamt))
+      (high_part2 XReg (rv_sll (value_regs_get x 0) len_sub_shamt))
+      (high_part3 XReg (gen_select_xreg (cmp_eqz shamt) (zero_reg) high_part2))
+      (high XReg (rv_or high_part1 high_part3))
+      (const64 XReg (imm $I64 64))
+      (shamt_128 XReg (rv_andi (value_regs_get y 0) (imm12_const 127))))
+    ;; right now we only rotate less than 64 bits.
+    ;; if shamt is greater than or equal 64 , we should switch low and high.
+    (gen_select_regs
+      (cmp_geu shamt_128 const64)
+      (value_regs high low)
+      (value_regs low high)
+    )))
 
 ;;;; Rules for `fabs` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (rule 0 (lower (has_type (ty_scalar_float ty) (fabs x)))
@@ -2108,17 +2208,24 @@
 ;;
 ;; We don't have cmov's in RISC-V either, but we can emulate those using bitwise
 ;; operations, which is what we do below.
-(rule (lower (has_type ty (select_spectre_guard cmp @ (value_type cmp_ty) x @ (value_type arg_ty) y)))
-  (let (;; Build a mask that is 0 or -1 depending on the input comparision value.
-        ;; `lower_bmask` handles normalizing the input.
-        (mask ValueRegs (lower_bmask cmp arg_ty))
-        ;; Using the mask above we can select either `x` or `y` by
-        ;; performing a bitwise `and` on both sides and then merging them
-        ;; together. We know that only the bits of one of the sides will be selected.
-        ;; TODO: We can use `andn` here if we have `Zbb`
-        (lhs ValueRegs (gen_and arg_ty x mask))
-        (rhs ValueRegs (gen_and arg_ty y (gen_bnot arg_ty mask))))
-    (gen_or arg_ty lhs rhs)))
+
+;; Base case: use `gen_bmask` to generate a 0 mask or -1 mask from the value of
+;; `cmp`. This is then used with some bit twiddling to produce the final result.
+(rule 0 (lower (has_type (fits_in_64 _) (select_spectre_guard cmp x y)))
+  (let ((mask XReg (gen_bmask cmp)))
+    (rv_or (rv_and mask x) (rv_andn y mask))))
+(rule 1 (lower (has_type $I128 (select_spectre_guard cmp x y)))
+  (let ((mask XReg (gen_bmask cmp)))
+    (value_regs
+      (rv_or (rv_and mask (value_regs_get x 0)) (rv_andn (value_regs_get y 0) mask))
+      (rv_or (rv_and mask (value_regs_get x 1)) (rv_andn (value_regs_get y 1) mask)))))
+
+;; Special case when an argument is the constant zero as some ands and ors
+;; can be folded away.
+(rule 2 (lower (has_type (fits_in_64 _) (select_spectre_guard cmp (i64_from_iconst 0) y)))
+  (rv_andn y (gen_bmask cmp)))
+(rule 3 (lower (has_type (fits_in_64 _) (select_spectre_guard cmp x (i64_from_iconst 0))))
+  (rv_and x (gen_bmask cmp)))
 
 ;;;;;  Rules for `bmask`;;;;;;;;;
 (rule

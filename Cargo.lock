@@ -2818,6 +2818,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
 dependencies = [
  "once_cell",
+ "valuable",
+]
+
+[[package]]
+name = "tracing-log"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78ddad33d2d10b1ed7eb9d1f518a5674713876e97e5bb9b7345a7984fbb4f922"
+dependencies = [
+ "lazy_static",
+ "log",
+ "tracing-core",
 ]
 
 [[package]]
@@ -2834,6 +2846,7 @@ dependencies = [
  "thread_local",
  "tracing",
  "tracing-core",
+ "tracing-log",
 ]
 
 [[package]]
@@ -2945,6 +2958,12 @@ dependencies = [
  "once_cell",
  "which",
 ]
+
+[[package]]
+name = "valuable"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
 name = "verify-component-adapter"
@@ -3434,7 +3453,6 @@ dependencies = [
  "tempfile",
  "test-programs-artifacts",
  "tokio",
- "tracing-subscriber",
  "walkdir",
  "wasm-encoder 0.33.2 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.45)",
  "wasmparser 0.113.3 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.45)",
@@ -3464,8 +3482,8 @@ dependencies = [
  "clap",
  "file-per-thread-logger",
  "humantime 2.1.0",
- "pretty_env_logger 0.5.0",
  "rayon",
+ "tracing-subscriber",
  "wasmtime",
 ]
 
