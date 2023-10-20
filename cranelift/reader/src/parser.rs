@@ -305,7 +305,13 @@ impl Context {
     }
 
     // Allocate a global value slot.
-    fn add_gv(&mut self, gv: GlobalValue, data: GlobalValueData, loc: Location) -> ParseResult<()> {
+    fn add_gv(
+        &mut self,
+        gv: GlobalValue,
+        data: GlobalValueData,
+        maybe_fact: Option<Fact>,
+        loc: Location,
+    ) -> ParseResult<()> {
         self.map.def_gv(gv, loc)?;
         while self.function.global_values.next_key().index() <= gv.index() {
             self.function.create_global_value(GlobalValueData::Symbol {
@@ -316,6 +322,9 @@ impl Context {
             });
         }
         self.function.global_values[gv] = data;
+        if let Some(fact) = maybe_fact {
+            self.function.global_value_facts[gv] = Some(fact);
+        }
         Ok(())
     }
 
@@ -1468,7 +1477,7 @@ impl<'a> Parser<'a> {
                 Some(Token::GlobalValue(..)) => {
                     self.start_gathering_comments();
                     self.parse_global_value_decl()
-                        .and_then(|(gv, dat)| ctx.add_gv(gv, dat, self.loc))
+                        .and_then(|(gv, dat, maybe_fact)| ctx.add_gv(gv, dat, maybe_fact, self.loc))
                 }
                 Some(Token::MemoryType(..)) => {
                     self.start_gathering_comments();
@@ -1574,15 +1583,24 @@ impl<'a> Parser<'a> {
 
     // Parse a global value decl.
     //
-    // global-val-decl ::= * GlobalValue(gv) "=" global-val-desc
+    // global-val-decl ::= * GlobalValue(gv) [ "!" fact ] "=" global-val-desc
     // global-val-desc ::= "vmctx"
     //                   | "load" "." type "notrap" "aligned" GlobalValue(base) [offset]
     //                   | "iadd_imm" "(" GlobalValue(base) ")" imm64
     //                   | "symbol" ["colocated"] name + imm64
     //                   | "dyn_scale_target_const" "." type
     //
-    fn parse_global_value_decl(&mut self) -> ParseResult<(GlobalValue, GlobalValueData)> {
+    fn parse_global_value_decl(
+        &mut self,
+    ) -> ParseResult<(GlobalValue, GlobalValueData, Option<Fact>)> {
         let gv = self.match_gv("expected global value number: gv«n»")?;
+
+        let fact = if self.token() == Some(Token::Bang) {
+            self.consume();
+            Some(self.parse_fact()?)
+        } else {
+            None
+        };
 
         self.match_token(Token::Equal, "expected '=' in global value declaration")?;
 
@@ -1605,7 +1623,7 @@ impl<'a> Parser<'a> {
                     base,
                     offset,
                     global_type,
-                    readonly: flags.readonly(),
+                    flags,
                 }
             }
             "iadd_imm" => {
@@ -1654,7 +1672,7 @@ impl<'a> Parser<'a> {
         self.token();
         self.claim_gathered_comments(gv);
 
-        Ok((gv, data))
+        Ok((gv, data, fact))
     }
 
     // Parse one field definition in a memory-type struct decl.
@@ -2147,39 +2165,51 @@ impl<'a> Parser<'a> {
 
     // Parse a "fact" for proof-carrying code, attached to a value.
     //
-    // fact ::= "max" "(" bit-width "," max-value ")"
-    //        | "mem" "(" memory-type "," mt-offset ")"
+    // fact ::= "range" "(" bit-width "," min-value "," max-value ")"
+    //        | "mem" "(" memory-type "," mt-offset "," mt-offset ")"
+    //        | "conflict"
     // bit-width ::= uimm64
+    // min-value ::= uimm64
     // max-value ::= uimm64
     // valid-range ::= uimm64
-    // mt-offset ::= imm64
+    // mt-offset ::= uimm64
     fn parse_fact(&mut self) -> ParseResult<Fact> {
         match self.token() {
-            Some(Token::Identifier("max")) => {
+            Some(Token::Identifier("range")) => {
                 self.consume();
-                self.match_token(Token::LPar, "`max` fact needs an opening `(`")?;
+                self.match_token(Token::LPar, "`range` fact needs an opening `(`")?;
                 let bit_width: u64 = self
-                    .match_uimm64("expected a bit-width value for `max` fact")?
+                    .match_uimm64("expected a bit-width value for `range` fact")?
+                    .into();
+                self.match_token(Token::Comma, "expected a comma")?;
+                let min: u64 = self
+                    .match_uimm64("expected a min value for `range` fact")?
                     .into();
                 self.match_token(Token::Comma, "expected a comma")?;
                 let max: u64 = self
-                    .match_uimm64("expected a max value for `max` fact")?
+                    .match_uimm64("expected a max value for `range` fact")?
                     .into();
-                self.match_token(Token::RPar, "`max` fact needs a closing `)`")?;
+                self.match_token(Token::RPar, "`range` fact needs a closing `)`")?;
                 let bit_width_max = match bit_width {
                     x if x > 64 => {
-                        return Err(self.error("bitwidth must be <= 64 bits on a `max` fact"));
+                        return Err(self.error("bitwidth must be <= 64 bits on a `range` fact"));
                     }
                     64 => u64::MAX,
                     x => (1u64 << x) - 1,
                 };
+                if min > max {
+                    return Err(self.error(
+                        "min value must be less than or equal to max value on a `range` fact",
+                    ));
+                }
                 if max > bit_width_max {
                     return Err(
-                        self.error("max value is out of range for bitwidth on a `max` fact")
+                        self.error("max value is out of range for bitwidth on a `range` fact")
                     );
                 }
-                Ok(Fact::ValueMax {
+                Ok(Fact::Range {
                     bit_width: u16::try_from(bit_width).unwrap(),
+                    min: min.into(),
                     max: max.into(),
                 })
             }
@@ -2191,13 +2221,28 @@ impl<'a> Parser<'a> {
                     Token::Comma,
                     "expected a comma after memory type in `mem` fact",
                 )?;
-                let offset: i64 = self
-                    .match_imm64("expected an imm64 pointer offset for `mem` fact")?
+                let min_offset: u64 = self
+                    .match_uimm64("expected a uimm64 minimum pointer offset for `mem` fact")?
+                    .into();
+                self.match_token(
+                    Token::Comma,
+                    "expected a comma after memory type in `mem` fact",
+                )?;
+                let max_offset: u64 = self
+                    .match_uimm64("expected a uimm64 maximum pointer offset for `mem` fact")?
                     .into();
                 self.match_token(Token::RPar, "expected a `)`")?;
-                Ok(Fact::Mem { ty, offset })
+                Ok(Fact::Mem {
+                    ty,
+                    min_offset,
+                    max_offset,
+                })
             }
-            _ => Err(self.error("expected a `max` or `mem` fact")),
+            Some(Token::Identifier("conflict")) => {
+                self.consume();
+                Ok(Fact::Conflict)
+            }
+            _ => Err(self.error("expected a `range`, `mem` or `conflict` fact")),
         }
     }
 
