@@ -1,7 +1,7 @@
 //! Assembler library implementation for x64.
 
 use crate::{
-    isa::reg::{Reg, RegClass},
+    isa::reg::Reg,
     masm::{CmpKind, DivKind, OperandSize, RemKind, RoundingMode, ShiftKind},
 };
 use cranelift_codegen::{
@@ -409,32 +409,13 @@ impl Assembler {
 
     /// "and" two registers.
     pub fn and_rr(&mut self, src: Reg, dst: Reg, size: OperandSize) {
-        match dst.class() {
-            RegClass::Int => {
-                self.emit(Inst::AluRmiR {
-                    size: size.into(),
-                    op: AluRmiROpcode::And,
-                    src1: dst.into(),
-                    src2: src.into(),
-                    dst: dst.into(),
-                });
-            }
-            RegClass::Float => {
-                let op = match size {
-                    OperandSize::S32 => SseOpcode::Andps,
-                    OperandSize::S64 => SseOpcode::Andpd,
-                    OperandSize::S128 => unreachable!(),
-                };
-
-                self.emit(Inst::XmmRmR {
-                    op,
-                    src1: dst.into(),
-                    src2: XmmMemAligned::from(Xmm::from(src)),
-                    dst: dst.into(),
-                });
-            }
-            RegClass::Vector => unreachable!(),
-        }
+        self.emit(Inst::AluRmiR {
+            size: size.into(),
+            op: AluRmiROpcode::And,
+            src1: dst.into(),
+            src2: src.into(),
+            dst: dst.into(),
+        });
     }
 
     pub fn and_ir(&mut self, imm: i32, dst: Reg, size: OperandSize) {
@@ -444,6 +425,38 @@ impl Assembler {
             op: AluRmiROpcode::And,
             src1: dst.into(),
             src2: GprMemImm::new(imm).expect("valid immediate"),
+            dst: dst.into(),
+        });
+    }
+
+    /// "and" two float registers.
+    pub fn xmm_and_rr(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        let op = match size {
+            OperandSize::S32 => SseOpcode::Andps,
+            OperandSize::S64 => SseOpcode::Andpd,
+            OperandSize::S128 => unreachable!(),
+        };
+
+        self.emit(Inst::XmmRmR {
+            op,
+            src1: dst.into(),
+            src2: XmmMemAligned::from(Xmm::from(src)),
+            dst: dst.into(),
+        });
+    }
+
+    /// "and not" two float registers.
+    pub fn xmm_andn_rr(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        let op = match size {
+            OperandSize::S32 => SseOpcode::Andnps,
+            OperandSize::S64 => SseOpcode::Andnpd,
+            OperandSize::S128 => unreachable!(),
+        };
+
+        self.emit(Inst::XmmRmR {
+            op,
+            src1: dst.into(),
+            src2: Xmm::from(src).into(),
             dst: dst.into(),
         });
     }
@@ -485,34 +498,30 @@ impl Assembler {
         });
     }
 
+    pub fn xmm_or_rr(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        let op = match size {
+            OperandSize::S32 => SseOpcode::Orps,
+            OperandSize::S64 => SseOpcode::Orpd,
+            OperandSize::S128 => unreachable!(),
+        };
+
+        self.emit(Inst::XmmRmR {
+            op,
+            src1: dst.into(),
+            src2: XmmMemAligned::from(Xmm::from(src)),
+            dst: dst.into(),
+        });
+    }
+
     /// Logical exclusive or with registers.
     pub fn xor_rr(&mut self, src: Reg, dst: Reg, size: OperandSize) {
-        match dst.class() {
-            RegClass::Int => {
-                self.emit(Inst::AluRmiR {
-                    size: size.into(),
-                    op: AluRmiROpcode::Xor,
-                    src1: dst.into(),
-                    src2: src.into(),
-                    dst: dst.into(),
-                });
-            }
-            RegClass::Float => {
-                let op = match size {
-                    OperandSize::S32 => SseOpcode::Xorps,
-                    OperandSize::S64 => SseOpcode::Xorpd,
-                    OperandSize::S128 => unreachable!(),
-                };
-
-                self.emit(Inst::XmmRmR {
-                    op,
-                    src1: dst.into(),
-                    src2: XmmMemAligned::from(Xmm::from(src)),
-                    dst: dst.into(),
-                });
-            }
-            RegClass::Vector => todo!(),
-        }
+        self.emit(Inst::AluRmiR {
+            size: size.into(),
+            op: AluRmiROpcode::Xor,
+            src1: dst.into(),
+            src2: src.into(),
+            dst: dst.into(),
+        });
     }
 
     pub fn xor_ir(&mut self, imm: i32, dst: Reg, size: OperandSize) {
@@ -523,6 +532,22 @@ impl Assembler {
             op: AluRmiROpcode::Xor,
             src1: dst.into(),
             src2: GprMemImm::new(imm).expect("valid immediate"),
+            dst: dst.into(),
+        });
+    }
+
+    /// Logical exclusive or with float registers.
+    pub fn xmm_xor_rr(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        let op = match size {
+            OperandSize::S32 => SseOpcode::Xorps,
+            OperandSize::S64 => SseOpcode::Xorpd,
+            OperandSize::S128 => unreachable!(),
+        };
+
+        self.emit(Inst::XmmRmR {
+            op,
+            src1: dst.into(),
+            src2: XmmMemAligned::from(Xmm::from(src)),
             dst: dst.into(),
         });
     }
@@ -823,7 +848,95 @@ impl Assembler {
         });
     }
 
-    pub fn rounds(&mut self, src: Reg, dst: Reg, mode: RoundingMode, size: OperandSize) {
+    /// Performs float addition on src and dst and places result in dst.
+    pub fn xmm_add_rr(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        let op = match size {
+            OperandSize::S32 => SseOpcode::Addss,
+            OperandSize::S64 => SseOpcode::Addsd,
+            OperandSize::S128 => unreachable!(),
+        };
+
+        self.emit(Inst::XmmRmRUnaligned {
+            op,
+            src1: Xmm::from(dst).into(),
+            src2: Xmm::from(src).into(),
+            dst: dst.into(),
+        });
+    }
+
+    /// Performs float subtraction on src and dst and places result in dst.
+    pub fn xmm_sub_rr(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        let op = match size {
+            OperandSize::S32 => SseOpcode::Subss,
+            OperandSize::S64 => SseOpcode::Subsd,
+            OperandSize::S128 => unreachable!(),
+        };
+
+        self.emit(Inst::XmmRmRUnaligned {
+            op,
+            src1: Xmm::from(dst).into(),
+            src2: Xmm::from(src).into(),
+            dst: dst.into(),
+        });
+    }
+
+    /// Performs float multiplication on src and dst and places result in dst.
+    pub fn xmm_mul_rr(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        let op = match size {
+            OperandSize::S32 => SseOpcode::Mulss,
+            OperandSize::S64 => SseOpcode::Mulsd,
+            OperandSize::S128 => unreachable!(),
+        };
+
+        self.emit(Inst::XmmRmRUnaligned {
+            op,
+            src1: Xmm::from(dst).into(),
+            src2: Xmm::from(src).into(),
+            dst: dst.into(),
+        });
+    }
+
+    /// Performs float division on src and dst and places result in dst.
+    pub fn xmm_div_rr(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        let op = match size {
+            OperandSize::S32 => SseOpcode::Divss,
+            OperandSize::S64 => SseOpcode::Divsd,
+            OperandSize::S128 => unreachable!(),
+        };
+
+        self.emit(Inst::XmmRmRUnaligned {
+            op,
+            src1: Xmm::from(dst).into(),
+            src2: Xmm::from(src).into(),
+            dst: dst.into(),
+        });
+    }
+
+    /// Mininum for src and dst XMM registers with results put in dst.
+    pub fn xmm_min_seq(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        self.emit(Inst::XmmMinMaxSeq {
+            size: size.into(),
+            is_min: true,
+            lhs: src.into(),
+            rhs: dst.into(),
+            dst: dst.into(),
+        });
+    }
+
+    /// Maximum for src and dst XMM registers with results put in dst.
+    pub fn xmm_max_seq(&mut self, src: Reg, dst: Reg, size: OperandSize) {
+        self.emit(Inst::XmmMinMaxSeq {
+            size: size.into(),
+            is_min: false,
+            lhs: src.into(),
+            rhs: dst.into(),
+            dst: dst.into(),
+        });
+    }
+
+    /// Perform rounding operation on float register src and place results in
+    /// float register dst.
+    pub fn xmm_rounds_rr(&mut self, src: Reg, dst: Reg, mode: RoundingMode, size: OperandSize) {
         let op = match size {
             OperandSize::S32 => SseOpcode::Roundss,
             OperandSize::S64 => SseOpcode::Roundsd,

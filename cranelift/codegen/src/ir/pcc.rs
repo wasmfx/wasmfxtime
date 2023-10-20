@@ -53,6 +53,10 @@
 //! - Support bounds-checking-type operations for dynamic memories and
 //!   tables.
 //!
+//! More checks:
+//! - Check that facts on `vmctx` GVs are subsumed by the actual facts
+//!   on the vmctx arg in block0 (function arg).
+//!
 //! Generality:
 //! - facts on outputs (in func signature)?
 //! - Implement checking at the CLIF level as well.
@@ -78,7 +82,8 @@
 use crate::ir;
 use crate::ir::types::*;
 use crate::isa::TargetIsa;
-use crate::machinst::{BlockIndex, LowerBackend, MachInst, VCode};
+use crate::machinst::{BlockIndex, LowerBackend, VCode};
+use crate::trace;
 use regalloc2::Function as _;
 use std::fmt;
 
@@ -128,19 +133,25 @@ pub enum PccError {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "enable-serde", derive(Serialize, Deserialize))]
 pub enum Fact {
-    /// A bitslice of a value (up to a bitwidth) is less than or equal
-    /// to a given maximum value.
+    /// A bitslice of a value (up to a bitwidth) is within the given
+    /// integer range.
     ///
     /// The slicing behavior is needed because this fact can describe
     /// both an SSA `Value`, whose entire value is well-defined, and a
     /// `VReg` in VCode, whose bits beyond the type stored in that
     /// register are don't-care (undefined).
-    ValueMax {
+    Range {
         /// The bitwidth of bits we care about, from the LSB upward.
         bit_width: u16,
+        /// The minimum value that the bitslice can take
+        /// (inclusive). The range is unsigned: the specified bits of
+        /// the actual value will be greater than or equal to this
+        /// value, as evaluated by an unsigned integer comparison.
+        min: u64,
         /// The maximum value that the bitslice can take
-        /// (inclusive). The range is unsigned: the bits of the value
-        /// will be within the range `0..=max`.
+        /// (inclusive). The range is unsigned: the specified bits of
+        /// the actual value will be less than or equal to this value,
+        /// as evaluated by an unsigned integer comparison.
         max: u64,
     },
 
@@ -148,40 +159,74 @@ pub enum Fact {
     Mem {
         /// The memory type.
         ty: ir::MemoryType,
-        /// The offset into the memory type.
-        offset: i64,
+        /// The minimum offset into the memory type, inclusive.
+        min_offset: u64,
+        /// The maximum offset into the memory type, inclusive.
+        max_offset: u64,
     },
+
+    /// A "conflict fact": this fact results from merging two other
+    /// facts, and it can never be satisfied -- checking any value
+    /// against this fact will fail.
+    Conflict,
 }
 
 impl fmt::Display for Fact {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Fact::ValueMax { bit_width, max } => write!(f, "max({}, {:#x})", bit_width, max),
-            Fact::Mem { ty, offset } => write!(f, "mem({}, {:#x})", ty, offset),
+            Fact::Range {
+                bit_width,
+                min,
+                max,
+            } => write!(f, "range({}, {:#x}, {:#x})", bit_width, min, max),
+            Fact::Mem {
+                ty,
+                min_offset,
+                max_offset,
+            } => write!(f, "mem({}, {:#x}, {:#x})", ty, min_offset, max_offset),
+            Fact::Conflict => write!(f, "conflict"),
         }
     }
 }
 
 impl Fact {
+    /// Create a range fact that specifies a single known constant value.
+    pub fn constant(bit_width: u16, value: u64) -> Self {
+        debug_assert!(value <= max_value_for_width(bit_width));
+        // `min` and `max` are inclusive, so this specifies a range of
+        // exactly one value.
+        Fact::Range {
+            bit_width,
+            min: value,
+            max: value,
+        }
+    }
+
+    /// Create a range fact that specifies the maximum range for a
+    /// value of the given bit-width.
+    pub const fn max_range_for_width(bit_width: u16) -> Self {
+        match bit_width {
+            bit_width if bit_width < 64 => Fact::Range {
+                bit_width,
+                min: 0,
+                max: (1u64 << bit_width) - 1,
+            },
+            64 => Fact::Range {
+                bit_width: 64,
+                min: 0,
+                max: u64::MAX,
+            },
+            _ => panic!("bit width too large!"),
+        }
+    }
+
     /// Try to infer a minimal fact for a value of the given IR type.
     pub fn infer_from_type(ty: ir::Type) -> Option<&'static Self> {
         static FACTS: [Fact; 4] = [
-            Fact::ValueMax {
-                bit_width: 8,
-                max: u8::MAX as u64,
-            },
-            Fact::ValueMax {
-                bit_width: 16,
-                max: u16::MAX as u64,
-            },
-            Fact::ValueMax {
-                bit_width: 32,
-                max: u32::MAX as u64,
-            },
-            Fact::ValueMax {
-                bit_width: 64,
-                max: u64::MAX,
-            },
+            Fact::max_range_for_width(8),
+            Fact::max_range_for_width(16),
+            Fact::max_range_for_width(32),
+            Fact::max_range_for_width(64),
         ];
         match ty {
             I8 => Some(&FACTS[0]),
@@ -189,6 +234,80 @@ impl Fact {
             I32 => Some(&FACTS[2]),
             I64 => Some(&FACTS[3]),
             _ => None,
+        }
+    }
+
+    /// Does this fact "propagate" automatically, i.e., cause
+    /// instructions that process it to infer their own output facts?
+    /// Not all facts propagate automatically; otherwise, verification
+    /// would be much slower.
+    pub fn propagates(&self) -> bool {
+        match self {
+            Fact::Mem { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Is this a constant value of the given bitwidth? Return it as a
+    /// `Some(value)` if so.
+    pub fn as_const(&self, bits: u16) -> Option<u64> {
+        match self {
+            Fact::Range {
+                bit_width,
+                min,
+                max,
+            } if *bit_width == bits && min == max => Some(*min),
+            _ => None,
+        }
+    }
+
+    /// Merge two facts. We take the *intersection*: that is, we know
+    /// both facts to be true, so we can intersect ranges. (This
+    /// differs from the usual static analysis approach, where we are
+    /// merging multiple possibilities into a generalized / widened
+    /// fact. We want to narrow here.)
+    pub fn intersect(a: &Fact, b: &Fact) -> Fact {
+        match (a, b) {
+            (
+                Fact::Range {
+                    bit_width: bw_lhs,
+                    min: min_lhs,
+                    max: max_lhs,
+                },
+                Fact::Range {
+                    bit_width: bw_rhs,
+                    min: min_rhs,
+                    max: max_rhs,
+                },
+            ) if bw_lhs == bw_rhs && max_lhs >= min_rhs && max_rhs >= min_lhs => Fact::Range {
+                bit_width: *bw_lhs,
+                min: std::cmp::max(*min_lhs, *min_rhs),
+                max: std::cmp::min(*max_lhs, *max_rhs),
+            },
+
+            (
+                Fact::Mem {
+                    ty: ty_lhs,
+                    min_offset: min_offset_lhs,
+                    max_offset: max_offset_lhs,
+                },
+                Fact::Mem {
+                    ty: ty_rhs,
+                    min_offset: min_offset_rhs,
+                    max_offset: max_offset_rhs,
+                },
+            ) if ty_lhs == ty_rhs
+                && max_offset_lhs >= min_offset_rhs
+                && max_offset_rhs >= min_offset_lhs =>
+            {
+                Fact::Mem {
+                    ty: *ty_lhs,
+                    min_offset: std::cmp::max(*min_offset_lhs, *min_offset_rhs),
+                    max_offset: std::cmp::min(*max_offset_lhs, *max_offset_rhs),
+                }
+            }
+
+            _ => Fact::Conflict,
         }
     }
 }
@@ -231,24 +350,42 @@ impl<'a> FactContext<'a> {
             (l, r) if l == r => true,
 
             (
-                Fact::ValueMax {
+                Fact::Range {
                     bit_width: bw_lhs,
+                    min: min_lhs,
                     max: max_lhs,
                 },
-                Fact::ValueMax {
+                Fact::Range {
                     bit_width: bw_rhs,
+                    min: min_rhs,
                     max: max_rhs,
                 },
             ) => {
                 // If the bitwidths we're claiming facts about are the
-                // same, and if the value is less than or equal to
-                // `max_lhs`, and if `max_rhs` is less than `max_lhs`,
-                // then it is certainly less than or equal to
-                // `max_rhs`.
+                // same, and if the right-hand-side range is larger
+                // than the left-hand-side range, than the LHS
+                // subsumes the RHS.
                 //
                 // In other words, we can always expand the claimed
                 // possible value range.
-                bw_lhs == bw_rhs && max_lhs <= max_rhs
+                bw_lhs == bw_rhs && max_lhs <= max_rhs && min_lhs >= min_rhs
+            }
+
+            (
+                Fact::Mem {
+                    ty: ty_lhs,
+                    min_offset: min_offset_lhs,
+                    max_offset: max_offset_lhs,
+                },
+                Fact::Mem {
+                    ty: ty_rhs,
+                    min_offset: min_offset_rhs,
+                    max_offset: max_offset_rhs,
+                },
+            ) => {
+                ty_lhs == ty_rhs
+                    && max_offset_lhs <= max_offset_rhs
+                    && min_offset_lhs >= min_offset_rhs
             }
 
             _ => false,
@@ -275,39 +412,58 @@ impl<'a> FactContext<'a> {
     pub fn add(&self, lhs: &Fact, rhs: &Fact, add_width: u16) -> Option<Fact> {
         match (lhs, rhs) {
             (
-                Fact::ValueMax {
+                Fact::Range {
                     bit_width: bw_lhs,
-                    max: lhs,
+                    min: min_lhs,
+                    max: max_lhs,
                 },
-                Fact::ValueMax {
+                Fact::Range {
                     bit_width: bw_rhs,
-                    max: rhs,
+                    min: min_rhs,
+                    max: max_rhs,
                 },
             ) if bw_lhs == bw_rhs && add_width >= *bw_lhs => {
-                let computed_max = lhs.checked_add(*rhs)?;
+                let computed_min = min_lhs.checked_add(*min_rhs)?;
+                let computed_max = max_lhs.checked_add(*max_rhs)?;
                 let computed_max = std::cmp::min(max_value_for_width(add_width), computed_max);
-                Some(Fact::ValueMax {
+                Some(Fact::Range {
                     bit_width: *bw_lhs,
+                    min: computed_min,
                     max: computed_max,
                 })
             }
 
             (
-                Fact::ValueMax {
+                Fact::Range {
                     bit_width: bw_max,
+                    min,
                     max,
                 },
-                Fact::Mem { ty, offset },
+                Fact::Mem {
+                    ty,
+                    min_offset,
+                    max_offset,
+                },
             )
             | (
-                Fact::Mem { ty, offset },
-                Fact::ValueMax {
+                Fact::Mem {
+                    ty,
+                    min_offset,
+                    max_offset,
+                },
+                Fact::Range {
                     bit_width: bw_max,
+                    min,
                     max,
                 },
             ) if *bw_max >= self.pointer_width && add_width >= *bw_max => {
-                let offset = offset.checked_add(i64::try_from(*max).ok()?)?;
-                Some(Fact::Mem { ty: *ty, offset })
+                let min_offset = min_offset.checked_add(*min)?;
+                let max_offset = max_offset.checked_add(*max)?;
+                Some(Fact::Mem {
+                    ty: *ty,
+                    min_offset,
+                    max_offset,
+                })
             }
 
             _ => None,
@@ -322,14 +478,20 @@ impl<'a> FactContext<'a> {
             // bit_width and from_bits are exactly contiguous, then we
             // have defined values in 0..to_bits (and because this is
             // a zero-extend, the max value is the same).
-            Fact::ValueMax { bit_width, max } if *bit_width == from_width => Some(Fact::ValueMax {
+            Fact::Range {
+                bit_width,
+                min,
+                max,
+            } if *bit_width == from_width => Some(Fact::Range {
                 bit_width: to_width,
+                min: *min,
                 max: *max,
             }),
             // Otherwise, we can at least claim that the value is
             // within the range of `to_width`.
-            Fact::ValueMax { .. } => Some(Fact::ValueMax {
+            Fact::Range { .. } => Some(Fact::Range {
                 bit_width: to_width,
+                min: 0,
                 max: max_value_for_width(to_width),
             }),
             _ => None,
@@ -342,9 +504,13 @@ impl<'a> FactContext<'a> {
             // If we have a defined value in bits 0..bit_width, and
             // the MSB w.r.t. `from_width` is *not* set, then we can
             // do the same as `uextend`.
-            Fact::ValueMax { bit_width, max }
-                if *bit_width == from_width && (*max & (1 << (*bit_width - 1)) == 0) =>
-            {
+            Fact::Range {
+                bit_width,
+                // We can ignore `min`: it is always <= max in
+                // unsigned terms, and we check max's LSB below.
+                min: _,
+                max,
+            } if *bit_width == from_width && (*max & (1 << (*bit_width - 1)) == 0) => {
                 self.uextend(fact, from_width, to_width)
             }
             _ => None,
@@ -353,23 +519,20 @@ impl<'a> FactContext<'a> {
 
     /// Scales a value with a fact by a known constant.
     pub fn scale(&self, fact: &Fact, width: u16, factor: u32) -> Option<Fact> {
-        // The minimal (loosest) fact we can claim: the value will be
-        // within the range implied by its bitwidth.
-        let minimal_fact = Fact::ValueMax {
-            bit_width: width,
-            max: max_value_for_width(width),
-        };
         match fact {
-            Fact::ValueMax { bit_width, max } if *bit_width == width => {
-                let max = match max.checked_mul(u64::from(factor)) {
-                    Some(max) => max,
-                    None => return Some(minimal_fact),
-                };
+            Fact::Range {
+                bit_width,
+                min,
+                max,
+            } if *bit_width == width => {
+                let min = min.checked_mul(u64::from(factor))?;
+                let max = max.checked_mul(u64::from(factor))?;
                 if *bit_width < 64 && max > max_value_for_width(width) {
-                    return Some(minimal_fact);
+                    return None;
                 }
-                Some(Fact::ValueMax {
+                Some(Fact::Range {
                     bit_width: *bit_width,
+                    min,
                     max,
                 })
             }
@@ -388,36 +551,45 @@ impl<'a> FactContext<'a> {
 
     /// Offsets a value with a fact by a known amount.
     pub fn offset(&self, fact: &Fact, width: u16, offset: i64) -> Option<Fact> {
+        // Any negative offset could underflow, and removes
+        // all claims of constrained range, so for now we only
+        // support positive offsets.
+        let offset = u64::try_from(offset).ok()?;
+
+        trace!(
+            "FactContext::offset: {:?} + {} in width {}",
+            fact,
+            offset,
+            width
+        );
+
         match fact {
-            Fact::ValueMax { bit_width, max } if *bit_width == width => {
-                // If we eventually support two-sided ranges, we can
-                // represent (0..n) + m -> ((0+m)..(n+m)). However,
-                // right now, all ranges start with zero, so any
-                // negative offset could underflow, and removes all
-                // claims of constrained range.
-                let offset = u64::try_from(offset).ok()?;
+            Fact::Range {
+                bit_width,
+                min,
+                max,
+            } if *bit_width == width => {
+                let min = min.checked_add(offset)?;
+                let max = max.checked_add(offset)?;
 
-                let max = match max.checked_add(offset) {
-                    Some(max) => max,
-                    None => {
-                        return Some(Fact::ValueMax {
-                            bit_width: width,
-                            max: max_value_for_width(width),
-                        })
-                    }
-                };
-
-                Some(Fact::ValueMax {
+                Some(Fact::Range {
                     bit_width: *bit_width,
+                    min,
                     max,
                 })
             }
             Fact::Mem {
                 ty,
-                offset: mem_offset,
+                min_offset: mem_min_offset,
+                max_offset: mem_max_offset,
             } => {
-                let offset = mem_offset.checked_sub(offset)?;
-                Some(Fact::Mem { ty: *ty, offset })
+                let min_offset = mem_min_offset.checked_add(offset)?;
+                let max_offset = mem_max_offset.checked_add(offset)?;
+                Some(Fact::Mem {
+                    ty: *ty,
+                    min_offset,
+                    max_offset,
+                })
             }
             _ => None,
         }
@@ -427,15 +599,19 @@ impl<'a> FactContext<'a> {
     /// a memory access of the given size, is valid.
     ///
     /// If valid, returns the memory type and offset into that type
-    /// that this address accesses.
-    fn check_address(&self, fact: &Fact, size: u32) -> PccResult<(ir::MemoryType, i64)> {
+    /// that this address accesses, if known, or `None` if the range
+    /// doesn't constrain the access to exactly one location.
+    fn check_address(&self, fact: &Fact, size: u32) -> PccResult<Option<(ir::MemoryType, u64)>> {
+        trace!("check_address: fact {:?} size {}", fact, size);
         match fact {
-            Fact::Mem { ty, offset } => {
-                let end_offset: i64 = offset
-                    .checked_add(i64::from(size))
+            Fact::Mem {
+                ty,
+                min_offset,
+                max_offset,
+            } => {
+                let end_offset: u64 = max_offset
+                    .checked_add(u64::from(size))
                     .ok_or(PccError::Overflow)?;
-                let end_offset: u64 =
-                    u64::try_from(end_offset).map_err(|_| PccError::OutOfBounds)?;
                 match &self.function.memory_types[*ty] {
                     ir::MemoryTypeData::Struct { size, .. }
                     | ir::MemoryTypeData::Memory { size } => {
@@ -443,7 +619,12 @@ impl<'a> FactContext<'a> {
                     }
                     ir::MemoryTypeData::Empty => bail!(OutOfBounds),
                 }
-                Ok((*ty, *offset))
+                let specific_ty_and_offset = if min_offset == max_offset {
+                    Some((*ty, *min_offset))
+                } else {
+                    None
+                };
+                Ok(specific_ty_and_offset)
             }
             _ => bail!(OutOfBounds),
         }
@@ -456,9 +637,10 @@ impl<'a> FactContext<'a> {
         fact: &Fact,
         access_ty: ir::Type,
     ) -> PccResult<Option<&'b ir::MemoryTypeField>> {
-        let (ty, offset) = self.check_address(fact, access_ty.bytes())?;
-        let offset =
-            u64::try_from(offset).expect("valid access address cannot have a negative offset");
+        let (ty, offset) = match self.check_address(fact, access_ty.bytes())? {
+            Some((ty, offset)) => (ty, offset),
+            None => return Ok(None),
+        };
 
         if let ir::MemoryTypeData::Struct { fields, .. } = &self.function.memory_types[ty] {
             let field = fields
@@ -516,7 +698,7 @@ fn max_value_for_width(bits: u16) -> u64 {
 /// VCode.
 pub fn check_vcode_facts<B: LowerBackend + TargetIsa>(
     f: &ir::Function,
-    vcode: &VCode<B::MInst>,
+    vcode: &mut VCode<B::MInst>,
     backend: &B,
 ) -> PccResult<()> {
     let ctx = FactContext::new(f, backend.triple().pointer_width().unwrap().bits().into());
@@ -526,14 +708,8 @@ pub fn check_vcode_facts<B: LowerBackend + TargetIsa>(
     for block in 0..vcode.num_blocks() {
         let block = BlockIndex::new(block);
         for inst in vcode.block_insns(block).iter() {
-            if vcode.inst_defines_facts(inst) || vcode[inst].is_mem_access() {
-                // This instruction defines a register with a new fact, or
-                // has some side-effect we want to be careful to
-                // verify. We'll call into the backend to validate this
-                // fact with respect to the instruction and the input
-                // facts.
-                backend.check_fact(&ctx, vcode, &vcode[inst])?;
-            }
+            // Check any output facts on this inst.
+            backend.check_fact(&ctx, vcode, inst)?;
 
             // If this is a branch, check that all block arguments subsume
             // the assumed facts on the blockparams of successors.

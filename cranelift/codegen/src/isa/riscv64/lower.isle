@@ -556,7 +556,7 @@
 (rule 1 (lower (has_type (fits_in_16 ty) (sdiv x y @ (iconst imm))))
   (if-let $true (has_m))
   (if (safe_divisor_from_imm64 ty imm))
-  (rv_divw (sext x) y))
+  (rv_divw (sext x) (sext y)))
 
 (rule 2 (lower (has_type $I32 (sdiv x y)))
   (if-let $true (has_m))
@@ -604,7 +604,7 @@
 (rule 1 (lower (has_type (fits_in_16 ty) (urem x y @ (iconst imm))))
   (if-let $true (has_m))
   (if (safe_divisor_from_imm64 ty imm))
-  (rv_remuw (zext x) y))
+  (rv_remuw (zext x) (zext y)))
 
 (rule 2 (lower (has_type $I32 (urem x y)))
   (if-let $true (has_m))
@@ -633,7 +633,7 @@
 (rule 1 (lower (has_type (fits_in_16 ty) (srem x y @ (iconst imm))))
   (if-let $true (has_m))
   (if (safe_divisor_from_imm64 ty imm))
-  (rv_remw (sext x) y))
+  (rv_remw (sext x) (sext y)))
 
 (rule 2 (lower (has_type $I32 (srem x y)))
   (if-let $true (has_m))
@@ -715,6 +715,74 @@
   (if-let x_imm (replicated_imm5 x))
   (rv_vand_vi y x_imm (unmasked) ty))
 
+;; `bclr{,i}` specializations from `zbs`
+
+(rule 13 (lower (has_type (fits_in_32 ty) (band x (bnot (ishl (i64_from_iconst 1) y)))))
+  (if-let $true (has_zbs))
+  (rv_bclr x (rv_andi y (imm12_const (u8_sub (ty_bits ty) 1)))))
+(rule 14 (lower (has_type (fits_in_32 ty) (band (bnot (ishl (i64_from_iconst 1) y)) x)))
+  (if-let $true (has_zbs))
+  (rv_bclr x (rv_andi y (imm12_const (u8_sub (ty_bits ty) 1)))))
+
+(rule 15 (lower (has_type $I64 (band x (bnot (ishl (i64_from_iconst 1) y)))))
+  (if-let $true (has_zbs))
+  (rv_bclr x y))
+(rule 16 (lower (has_type $I64 (band (bnot (ishl (i64_from_iconst 1) y)) x)))
+  (if-let $true (has_zbs))
+  (rv_bclr x y))
+
+(rule 17 (lower (has_type (fits_in_64 ty) (band x (u64_from_iconst n))))
+  (if-let $true (has_zbs))
+  (if-let imm (bclr_imm ty n))
+  (rv_bclri x imm))
+(rule 18 (lower (has_type (fits_in_64 ty) (band (u64_from_iconst n) x)))
+  (if-let $true (has_zbs))
+  (if-let imm (bclr_imm ty n))
+  (rv_bclri x imm))
+
+(decl pure partial bclr_imm (Type u64) Imm12)
+(extern constructor bclr_imm bclr_imm)
+
+;; `bext{,i}` specializations from `zbs`
+
+(rule 19 (lower (has_type $I32 (band (ushr x y) (u64_from_iconst 1))))
+  (if-let $true (has_zbs))
+  (rv_bext x (rv_andi y (imm12_const 31))))
+(rule 19 (lower (has_type $I32 (band (sshr x y) (u64_from_iconst 1))))
+  (if-let $true (has_zbs))
+  (rv_bext x (rv_andi y (imm12_const 31))))
+(rule 19 (lower (has_type $I32 (band (u64_from_iconst 1) (ushr x y))))
+  (if-let $true (has_zbs))
+  (rv_bext x (rv_andi y (imm12_const 31))))
+(rule 19 (lower (has_type $I32 (band (u64_from_iconst 1) (sshr x y))))
+  (if-let $true (has_zbs))
+  (rv_bext x (rv_andi y (imm12_const 31))))
+
+(rule 19 (lower (has_type $I64 (band (ushr x y) (u64_from_iconst 1))))
+  (if-let $true (has_zbs))
+  (rv_bext x y))
+(rule 19 (lower (has_type $I64 (band (sshr x y) (u64_from_iconst 1))))
+  (if-let $true (has_zbs))
+  (rv_bext x y))
+(rule 19 (lower (has_type $I64 (band (u64_from_iconst 1) (ushr x y))))
+  (if-let $true (has_zbs))
+  (rv_bext x y))
+(rule 19 (lower (has_type $I64 (band (u64_from_iconst 1) (sshr x y))))
+  (if-let $true (has_zbs))
+  (rv_bext x y))
+
+(rule 20 (lower (has_type $I32 (band (ushr x (imm12_from_value y)) (u64_from_iconst 1))))
+  (if-let $true (has_zbs))
+  (rv_bexti x (imm12_and y 31)))
+(rule 20 (lower (has_type $I32 (band (sshr x (imm12_from_value y)) (u64_from_iconst 1))))
+  (if-let $true (has_zbs))
+  (rv_bexti x (imm12_and y 31)))
+(rule 20 (lower (has_type $I64 (band (ushr x (imm12_from_value y)) (u64_from_iconst 1))))
+  (if-let $true (has_zbs))
+  (rv_bexti x (imm12_and y 63)))
+(rule 20 (lower (has_type $I64 (band (sshr x (imm12_from_value y)) (u64_from_iconst 1))))
+  (if-let $true (has_zbs))
+  (rv_bexti x (imm12_and y 63)))
 
 ;;;; Rules for `or` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (rule 0 (lower (has_type (ty_int ty) (bor x y)))
@@ -773,6 +841,33 @@
   (if-let x_imm (replicated_imm5 x))
   (rv_vor_vi y x_imm (unmasked) ty))
 
+;; `bset{,i}` specializations from `zbs`
+
+(rule 13 (lower (has_type $I32 (bor x (ishl (i64_from_iconst 1) y))))
+  (if-let $true (has_zbs))
+  (rv_bset x (rv_andi y (imm12_const 31))))
+(rule 14 (lower (has_type $I32 (bor (ishl (i64_from_iconst 1) y) x)))
+  (if-let $true (has_zbs))
+  (rv_bset x (rv_andi y (imm12_const 31))))
+
+(rule 13 (lower (has_type $I64 (bor x (ishl (i64_from_iconst 1) y))))
+  (if-let $true (has_zbs))
+  (rv_bset x y))
+(rule 14 (lower (has_type $I64 (bor (ishl (i64_from_iconst 1) y) x)))
+  (if-let $true (has_zbs))
+  (rv_bset x y))
+
+(rule 15 (lower (has_type (fits_in_64 _) (bor x (u64_from_iconst n))))
+  (if-let $true (has_zbs))
+  (if-let imm (bseti_imm n))
+  (rv_bseti x imm))
+(rule 16 (lower (has_type (fits_in_64 _) (bor (u64_from_iconst n) x)))
+  (if-let $true (has_zbs))
+  (if-let imm (bseti_imm n))
+  (rv_bseti x imm))
+
+(decl pure partial bseti_imm (u64) Imm12)
+(extern constructor bseti_imm bseti_imm)
 
 ;;;; Rules for `xor` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (rule 0 (lower (has_type (fits_in_64 (ty_int ty)) (bxor x y)))
@@ -810,13 +905,53 @@
   (if-let x_imm (replicated_imm5 x))
   (rv_vxor_vi y x_imm (unmasked) ty))
 
+;; `binv{,i}` specializations from `zbs`
+
+(rule 13 (lower (has_type $I32 (bxor x (ishl (i64_from_iconst 1) y))))
+  (if-let $true (has_zbs))
+  (rv_binv x (rv_andi y (imm12_const 31))))
+(rule 14 (lower (has_type $I32 (bxor (ishl (i64_from_iconst 1) y) x)))
+  (if-let $true (has_zbs))
+  (rv_binv x (rv_andi y (imm12_const 31))))
+
+(rule 13 (lower (has_type $I64 (bxor x (ishl (i64_from_iconst 1) y))))
+  (if-let $true (has_zbs))
+  (rv_binv x y))
+(rule 14 (lower (has_type $I64 (bxor (ishl (i64_from_iconst 1) y) x)))
+  (if-let $true (has_zbs))
+  (rv_binv x y))
+
+(rule 15 (lower (has_type (fits_in_64 _) (bxor x (u64_from_iconst n))))
+  (if-let $true (has_zbs))
+  (if-let imm (binvi_imm n))
+  (rv_binvi x imm))
+(rule 16 (lower (has_type (fits_in_64 _) (bxor (u64_from_iconst n) x)))
+  (if-let $true (has_zbs))
+  (if-let imm (binvi_imm n))
+  (rv_binvi x imm))
+
+(decl pure partial binvi_imm (u64) Imm12)
+(extern constructor binvi_imm binvi_imm)
 
 ;;;; Rules for `bnot` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(rule 0 (lower (has_type (ty_scalar ty) (bnot x)))
-  (gen_bnot ty x))
 
-(rule 1 (lower (has_type (ty_vec_fits_in_register ty) (bnot x)))
+(rule 0 (lower (has_type (ty_int_ref_scalar_64 _) (bnot x)))
+  (rv_not x))
+
+(rule 1 (lower (has_type (ty_scalar_float ty) (bnot x)))
+  (move_x_to_f (rv_not (move_f_to_x x ty)) (float_int_of_same_size ty)))
+
+(rule 2 (lower (has_type $I128 (bnot x)))
+  (value_regs
+    (rv_not (value_regs_get x 0))
+    (rv_not (value_regs_get x 1))))
+
+(rule 3 (lower (has_type (ty_vec_fits_in_register ty) (bnot x)))
   (rv_vnot_v x (unmasked) ty))
+
+(rule 4 (lower (has_type (ty_int_ref_scalar_64 _) (bnot (bxor x y))))
+  (if-let $true (has_zbb))
+  (rv_xnor x y))
 
 ;;;; Rules for `bit_reverse` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (rule (lower (has_type (fits_in_64 (ty_int ty)) (bitrev x)))
@@ -2565,18 +2700,23 @@
 
 ;;;; Rules for `scalar_to_vector` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(rule 1 (lower (has_type (ty_vec_fits_in_register ty) (scalar_to_vector x)))
-  (if (ty_vector_not_float ty))
-  (let ((zero VReg (rv_vmv_vx (zero_reg) ty))
-        (mask VReg (gen_vec_mask 1)))
-    (rv_vmerge_vxm zero x mask ty)))
-
 (rule 0 (lower (has_type (ty_vec_fits_in_register ty) (scalar_to_vector x)))
   (if (ty_vector_float ty))
   (let ((zero VReg (rv_vmv_vx (zero_reg) ty))
         (elem VReg (rv_vfmv_sf x ty))
         (mask VReg (gen_vec_mask 1)))
     (rv_vmerge_vvm zero elem mask ty)))
+
+(rule 1 (lower (has_type (ty_vec_fits_in_register ty) (scalar_to_vector x)))
+  (if (ty_vector_not_float ty))
+  (let ((zero VReg (rv_vmv_vx (zero_reg) ty))
+        (mask VReg (gen_vec_mask 1)))
+    (rv_vmerge_vxm zero x mask ty)))
+
+(rule 2 (lower (has_type (ty_vec_fits_in_register ty) (scalar_to_vector (imm5_from_value x))))
+  (let ((zero VReg (rv_vmv_vx (zero_reg) ty))
+        (mask VReg (gen_vec_mask 1)))
+    (rv_vmerge_vim zero x mask ty)))
 
 ;;;; Rules for `sqmul_round_sat` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

@@ -656,31 +656,23 @@ impl Config {
         self
     }
 
-    /// Configures whether the WebAssembly threads proposal will be enabled for
-    /// compilation.
-    ///
-    /// The [WebAssembly threads proposal][threads] is not currently fully
-    /// standardized and is undergoing development. Additionally the support in
-    /// wasmtime itself is still being worked on. Support for this feature can
-    /// be enabled through this method for appropriate wasm modules.
+    /// Configures whether the WebAssembly [threads] proposal will be enabled
+    /// for compilation.
     ///
     /// This feature gates items such as shared memories and atomic
-    /// instructions. Note that the threads feature depends on the
-    /// bulk memory feature, which is enabled by default.
+    /// instructions. Note that the threads feature depends on the bulk memory
+    /// feature, which is enabled by default. Additionally note that while the
+    /// wasm feature is called "threads" it does not actually include the
+    /// ability to spawn threads. Spawning threads is part of the [wasi-threads]
+    /// proposal which is a separately gated feature in Wasmtime.
     ///
-    /// This is `false` by default.
+    /// Embeddings of Wasmtime are able to build their own custom threading
+    /// scheme on top of the core wasm threads proposal, however.
     ///
-    /// > **Note**: Wasmtime does not implement everything for the wasm threads
-    /// > spec at this time, so bugs, panics, and possibly segfaults should be
-    /// > expected. This should not be enabled in a production setting right
-    /// > now.
-    ///
-    /// # Errors
-    ///
-    /// The validation of this feature are deferred until the engine is being built,
-    /// and thus may cause `Engine::new` fail if the `bulk_memory` feature is disabled.
+    /// This is `true` by default.
     ///
     /// [threads]: https://github.com/webassembly/threads
+    /// [wasi-threads]: https://github.com/webassembly/wasi-threads
     pub fn wasm_threads(&mut self, enable: bool) -> &mut Self {
         self.features.threads = enable;
         self
@@ -746,15 +738,13 @@ impl Config {
     /// Configures whether the WebAssembly Relaxed SIMD proposal will be
     /// enabled for compilation.
     ///
-    /// The [WebAssembly Relaxed SIMD proposal][proposal] is not, at the time of
-    /// this writing, at stage 4. The relaxed SIMD proposal adds new
-    /// instructions to WebAssembly which, for some specific inputs, are allowed
-    /// to produce different results on different hosts. More-or-less this
-    /// proposal enables exposing platform-specific semantics of SIMD
-    /// instructions in a controlled fashion to a WebAssembly program. From an
-    /// embedder's perspective this means that WebAssembly programs may execute
-    /// differently depending on whether the host is x86_64 or AArch64, for
-    /// example.
+    /// The relaxed SIMD proposal adds new instructions to WebAssembly which,
+    /// for some specific inputs, are allowed to produce different results on
+    /// different hosts. More-or-less this proposal enables exposing
+    /// platform-specific semantics of SIMD instructions in a controlled
+    /// fashion to a WebAssembly program. From an embedder's perspective this
+    /// means that WebAssembly programs may execute differently depending on
+    /// whether the host is x86_64 or AArch64, for example.
     ///
     /// By default Wasmtime lowers relaxed SIMD instructions to the fastest
     /// lowering for the platform it's running on. This means that, by default,
@@ -764,7 +754,7 @@ impl Config {
     /// deterministic behavior across all platforms, as classified by the
     /// specification, at the cost of performance.
     ///
-    /// This is `false` by default.
+    /// This is `true` by default.
     ///
     /// [proposal]: https://github.com/webassembly/relaxed-simd
     pub fn wasm_relaxed_simd(&mut self, enable: bool) -> &mut Self {
@@ -836,7 +826,7 @@ impl Config {
     /// This feature gates modules having more than one linear memory
     /// declaration or import.
     ///
-    /// This is `false` by default.
+    /// This is `true` by default.
     ///
     /// [proposal]: https://github.com/webassembly/multi-memory
     pub fn wasm_multi_memory(&mut self, enable: bool) -> &mut Self {
@@ -986,6 +976,29 @@ impl Config {
         self.compiler_config
             .settings
             .insert("enable_nan_canonicalization".to_string(), val.to_string());
+        self
+    }
+
+    /// Controls whether proof-carrying code (PCC) is used to validate
+    /// lowering of Wasm sandbox checks.
+    ///
+    /// Proof-carrying code carries "facts" about program values from
+    /// the IR all the way to machine code, and checks those facts
+    /// against known machine-instruction semantics. This guards
+    /// against bugs in instruction lowering that might create holes
+    /// in the Wasm sandbox.
+    ///
+    /// PCC is designed to be fast: it does not require complex
+    /// solvers or logic engines to verify, but only a linear pass
+    /// over a trail of "breadcrumbs" or facts at each intermediate
+    /// value. Thus, it is appropriate to enable in production.
+    #[cfg(any(feature = "cranelift", feature = "winch"))]
+    #[cfg_attr(nightlydoc, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
+    pub fn cranelift_pcc(&mut self, enable: bool) -> &mut Self {
+        let val = if enable { "true" } else { "false" };
+        self.compiler_config
+            .settings
+            .insert("enable_pcc".to_string(), val.to_string());
         self
     }
 
@@ -1529,6 +1542,8 @@ impl Config {
     /// the anyhow::Error when a trap is raised.
     ///
     /// This option is disabled by default.
+    #[cfg(feature = "coredump")]
+    #[cfg_attr(nightlydoc, doc(cfg(feature = "coredump")))]
     pub fn coredump_on_trap(&mut self, enable: bool) -> &mut Self {
         self.coredump_on_trap = enable;
         self
