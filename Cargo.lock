@@ -3511,6 +3511,7 @@ dependencies = [
  "gimli",
  "log",
  "object",
+ "regex",
  "target-lexicon",
  "thiserror",
  "wasmparser 0.116.0 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.50)",
