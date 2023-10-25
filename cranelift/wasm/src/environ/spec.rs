@@ -679,7 +679,7 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn typed_continuations_load_payloads(
         &mut self,
         builder: &mut FunctionBuilder,
-        valtypes: &[wasmtime_types::WasmType],
+        valtypes: &[ir::Type],
     ) -> std::vec::Vec<ir::Value>;
 
     /// TODO

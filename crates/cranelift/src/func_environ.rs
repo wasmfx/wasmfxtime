@@ -444,11 +444,13 @@ mod typed_continuation_helpers {
 
     #[derive(Copy, Clone)]
     pub struct Payloads {
-        /// The continuation object owning/enclosing the Payloads
-        contobj: ContinuationObject,
+        /// Base address of this object, which must be shifted by `offset` below.
+        base: ir::Value,
 
-        // Offset to the beginning of the Args object within the continuation object.
+        /// Adding this (statically) known offset gets us the overall address.
         offset: i32,
+
+        pointer_type: ir::Type,
     }
 
     impl ContinuationObject {
@@ -461,12 +463,12 @@ mod typed_continuation_helpers {
 
         pub fn args(&self) -> Payloads {
             let offset = wasmtime_continuations::offsets::continuation_object::ARGS;
-            Payloads::new(*self, offset)
+            Payloads::new(self.address, offset, self.pointer_type)
         }
 
         pub fn tag_return_values(&self) -> Payloads {
             let offset = wasmtime_continuations::offsets::continuation_object::TAG_RETURN_VALUES;
-            Payloads::new(*self, offset)
+            Payloads::new(self.address, offset, self.pointer_type)
         }
 
         /// Loads the value of the `state` field of the continuation object,
@@ -523,26 +525,19 @@ mod typed_continuation_helpers {
     }
 
     impl Payloads {
-        pub(crate) fn new(co: ContinuationObject, offset: i32) -> Payloads {
+        pub(crate) fn new(base: ir::Value, offset: i32, pointer_type: ir::Type) -> Payloads {
             Payloads {
-                contobj: co,
+                base,
                 offset,
+                pointer_type,
             }
-        }
-
-        fn pointer_type(&self) -> ir::Type {
-            self.contobj.pointer_type
-        }
-
-        fn contobj(&self) -> ir::Value {
-            self.contobj.address
         }
 
         fn get(&self, builder: &mut FunctionBuilder, ty: ir::Type, offset: i32) -> ir::Value {
             let mem_flags = ir::MemFlags::trusted();
             builder
                 .ins()
-                .load(ty, mem_flags, self.contobj(), self.offset + offset)
+                .load(ty, mem_flags, self.base, self.offset + offset)
         }
 
         fn set<T>(&self, builder: &mut FunctionBuilder, offset: i32, value: ir::Value) {
@@ -553,13 +548,13 @@ mod typed_continuation_helpers {
             let mem_flags = ir::MemFlags::trusted();
             builder
                 .ins()
-                .store(mem_flags, value, self.contobj(), self.offset + offset);
+                .store(mem_flags, value, self.base, self.offset + offset);
         }
 
         pub fn get_data(&self, builder: &mut FunctionBuilder) -> ir::Value {
             self.get(
                 builder,
-                self.pointer_type(),
+                self.pointer_type,
                 wasmtime_continuations::offsets::payloads::DATA,
             )
         }
@@ -678,8 +673,8 @@ mod typed_continuation_helpers {
                 emit_debug_println!(
                     env,
                     builder,
-                    "[ensure_capacity] contobj {:p}, buffer is {:p}",
-                    self.contobj(),
+                    "[ensure_capacity] contobj/base {:p}, buffer is {:p}",
+                    self.base,
                     data
                 );
             }
@@ -749,6 +744,65 @@ mod typed_continuation_helpers {
 
             builder.switch_to_block(sufficient_capacity_block);
             builder.seal_block(sufficient_capacity_block);
+        }
+
+        pub fn load_data_entries<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            load_types: &[ir::Type],
+        ) -> Vec<ir::Value> {
+            if cfg!(debug_assertions) {
+                let length = self.get_length(builder);
+                let load_count = builder.ins().iconst(I64, load_types.len() as i64);
+                emit_debug_assert_ule!(env, builder, load_count, length);
+            }
+
+            let memflags = ir::MemFlags::trusted();
+
+            let data_start_pointer = self.get_data(builder);
+            let mut values = vec![];
+            let mut offset = 0;
+            for valtype in load_types {
+                let val = builder
+                    .ins()
+                    .load(*valtype, memflags, data_start_pointer, offset);
+                values.push(val);
+                offset +=
+                    std::mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>()
+                        as i32;
+            }
+            values
+        }
+
+        pub fn store_data_entries<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            values: &[ir::Value],
+        ) {
+            let store_count = builder.ins().iconst(I64, values.len() as i64);
+
+            if cfg!(debug_assertions) {
+                let capacity = self.get_capacity(builder);
+                emit_debug_assert_ule!(env, builder, store_count, capacity);
+            }
+
+            let memflags = ir::MemFlags::trusted();
+
+            let data_start_pointer = self.get_data(builder);
+
+            let mut offset = 0;
+            for value in values {
+                builder
+                    .ins()
+                    .store(memflags, *value, data_start_pointer, offset);
+                offset +=
+                    std::mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>()
+                        as i32;
+            }
+
+            self.set_length(builder, store_count);
         }
 
         /// Silences some unused function warnings
@@ -3381,7 +3435,11 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             builder.switch_to_block(case);
 
             // Load and push arguments.
-            let param_types = self.tag_params(tag).to_vec();
+            let param_types = self.tag_params(tag);
+            let param_types: Vec<ir::Type> = param_types
+                .iter()
+                .map(|wty| crate::value_type(self.isa, *wty))
+                .collect();
             let mut args = self.typed_continuations_load_payloads(builder, &param_types);
 
             // We have an actual handling block for this tag, rather than just forwarding.
@@ -3514,35 +3572,22 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn typed_continuations_load_payloads(
         &mut self,
         builder: &mut FunctionBuilder,
-        valtypes: &[WasmType],
+        valtypes: &[ir::Type],
     ) -> Vec<ir::Value> {
-        let memflags = ir::MemFlags::trusted();
         let mut values = vec![];
 
         if valtypes.len() > 0 {
-            let nargs = builder.ins().iconst(I32, valtypes.len() as i64);
-
-            let (_vmctx, payload_ptr) =
-                generate_builtin_call!(self, builder, tc_get_payload_buffer, [nargs]);
-
-            let mut offset = 0;
-            for valtype in valtypes {
-                let val = builder.ins().load(
-                    super::value_type(self.isa, *valtype),
-                    memflags,
-                    payload_ptr,
-                    offset,
-                );
-                values.push(val);
-                offset += self.offsets.ptr.maximum_value_size() as i32;
-            }
-
-            generate_builtin_call_no_return_val!(
-                self,
-                builder,
-                tc_deallocate_payload_buffer,
-                [nargs]
+            let vmctx = self.vmctx(builder.cursor().func);
+            let vmctx = builder.ins().global_value(self.pointer_type(), vmctx);
+            let vmctx_payloads = tc::Payloads::new(
+                vmctx,
+                self.offsets.vmctx_typed_continuations_payloads() as i32,
+                self.pointer_type(),
             );
+
+            values = vmctx_payloads.load_data_entries(self, builder, valtypes);
+
+            vmctx_payloads.deallocate_buffer(self, builder);
         }
         values
     }
@@ -3679,21 +3724,20 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         valtypes: &[WasmType],
         values: &[ir::Value],
     ) {
-        //TODO(frank-emrich) what flags exactly do we need here?
-        let memflags = ir::MemFlags::trusted();
-
         assert_eq!(values.len(), valtypes.len());
         if valtypes.len() > 0 {
-            let nargs = builder.ins().iconst(I32, values.len() as i64);
+            let vmctx = self.vmctx(builder.cursor().func);
+            let vmctx = builder.ins().global_value(self.pointer_type(), vmctx);
+            let payloads = tc::Payloads::new(
+                vmctx,
+                self.offsets.vmctx_typed_continuations_payloads() as i32,
+                self.pointer_type(),
+            );
 
-            let (_vmctx, payload_addr) =
-                generate_builtin_call!(self, builder, tc_allocate_payload_buffer, [nargs]);
+            let nargs = builder.ins().iconst(I64, values.len() as i64);
+            payloads.ensure_capacity(self, builder, nargs);
 
-            let mut offset = 0;
-            for value in values {
-                builder.ins().store(memflags, *value, payload_addr, offset);
-                offset += self.offsets.ptr.maximum_value_size() as i32;
-            }
+            payloads.store_data_entries(self, builder, values);
         }
     }
 

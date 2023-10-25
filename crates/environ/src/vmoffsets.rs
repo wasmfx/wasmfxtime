@@ -95,7 +95,7 @@ pub struct VMOffsets<P> {
     // NOTE(dhil): The following field is used as "global" to store
     // the arguments of continuations and payloads of suspensions.
     typed_continuations_store: u32,
-    typed_continuations_payloads_ptr: u32,
+    typed_continuations_payloads: u32,
 }
 
 /// Trait used for the `ptr` representation of the field of `VMOffsets`
@@ -357,7 +357,7 @@ impl<P: PtrSize> VMOffsets<P> {
         }
 
         calculate_sizes! {
-            typed_continuations_payloads_ptr: "typed continuations payloads",
+            typed_continuations_payloads: "typed continuations payloads object",
             typed_continuations_store: "typed continuations store",
             defined_func_refs: "module functions",
             defined_globals: "defined globals",
@@ -412,7 +412,7 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
             defined_func_refs: 0,
             size: 0,
             typed_continuations_store: 0,
-            typed_continuations_payloads_ptr: 0,
+            typed_continuations_payloads: 0,
         };
 
         // Convenience functions for checked addition and multiplication.
@@ -477,7 +477,10 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
             ),
             size(typed_continuations_store)
                 = ret.ptr.size(),
-            size(typed_continuations_payloads_ptr) = ret.ptr.size(),
+             align(std::mem::align_of::<wasmtime_continuations::Payloads>() as u32),
+            //align(u32::from(ret.ptr.size())),
+            size(typed_continuations_payloads) = std::mem::size_of::<wasmtime_continuations::Payloads>() as u32,
+            //size(typed_continuations_payloads) = ret.ptr.size() * 3,
             align(16), // TODO(dhil): This could probably be done more
                        // efficiently by packing the pointer into the above 16 byte
                        // alignment
@@ -736,10 +739,10 @@ impl<P: PtrSize> VMOffsets<P> {
         self.typed_continuations_store
     }
 
-    /// The offset of the typed continuations payloads pointer.
+    /// The offset of the typed continuations Payloads object.
     #[inline]
-    pub fn vmctx_typed_continuations_payloads_ptr(&self) -> u32 {
-        self.typed_continuations_payloads_ptr
+    pub fn vmctx_typed_continuations_payloads(&self) -> u32 {
+        self.typed_continuations_payloads
     }
 
     /// Return the size of the `VMContext` allocation.

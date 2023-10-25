@@ -756,7 +756,7 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     fn typed_continuations_load_payloads(
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
-        valtypes: &[WasmType],
+        valtypes: &[ir::Type],
     ) -> std::vec::Vec<ir::Value> {
         self.inner
             .typed_continuations_load_payloads(builder, valtypes)

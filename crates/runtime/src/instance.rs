@@ -1130,6 +1130,11 @@ impl Instance {
         *self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_store()) =
             std::ptr::null_mut::<crate::continuation::ContinuationObject>();
 
+        // Initialize the Payloads object to be empty
+        let vmctx_payloads: *mut wasmtime_continuations::Payloads =
+            self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_payloads());
+        *vmctx_payloads = wasmtime_continuations::Payloads::new(0);
+
         // Initialize the imports
         debug_assert_eq!(imports.functions.len(), module.num_imported_funcs);
         ptr::copy_nonoverlapping(
@@ -1286,7 +1291,7 @@ impl Instance {
 
     /// TODO
     pub unsafe fn get_typed_continuations_payloads_ptr_mut(&mut self) -> *mut u32 {
-        self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_payloads_ptr())
+        self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_payloads())
     }
 }
 

@@ -66,24 +66,6 @@ macro_rules! foreach_builtin_function {
             tc_new_cont_ref(vmctx: vmctx, contobj: pointer) -> pointer;
 
 
-            /// Allocates a buffer large enough for storing `element_count` tag
-            /// payloads and stores it in the `VMContext` in such a way that
-            /// subsequent calls to `get_payload_buffer` will return the same
-            /// buffer.
-            /// Returns a pointer to that buffer.
-            /// Such a payload buffer is only used to store payloads provided
-            /// at a suspend site and read in a corresponding handler.
-            tc_allocate_payload_buffer(vmctx: vmctx, element_count: i32) -> pointer;
-            /// Counterpart to `alllocate_payload_buffer`, deallocating the
-            /// buffer. For debugging purposes, `expected_element_capacity`
-            /// should be the same value passed when allocating.
-            tc_deallocate_payload_buffer(vmctx: vmctx, expected_element_capacity: i32);
-            /// Returns pointer to the payload buffer, whose function was described earlier.
-            /// `expected_element_capacity` should be the same value passed when
-            /// allocating.
-            tc_get_payload_buffer(vmctx: vmctx, expected_element_capacity: i32) -> pointer;
-
-
             /// Sets the tag return values of `child_contobj` to those of `parent_contobj`.
             /// This is implemented by exchanging the pointers to the underlying buffers.
             /// `child_contobj` must not currently have a tag return value buffer.
