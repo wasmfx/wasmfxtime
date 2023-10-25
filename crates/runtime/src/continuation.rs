@@ -37,7 +37,10 @@ pub mod types {
 }
 
 struct Payloads {
+    /// Number of currently occupied slots.
     length: types::payloads::Length,
+    /// Number of slots in the data buffer. Note that this is *not* the size of
+    /// the buffer in bytes!
     capacity: types::payloads::Capacity,
     /// This is null if and only if capacity (and thus also `length`) are 0.
     data: *mut u128,
@@ -58,13 +61,6 @@ impl Payloads {
             capacity,
             data,
         };
-    }
-
-    fn occupy_next(&mut self, count: usize) -> *mut u128 {
-        let original_length = self.length;
-        assert!(self.length + count <= self.capacity);
-        self.length += count;
-        return unsafe { self.data.offset(original_length as isize) };
     }
 }
 
@@ -140,6 +136,8 @@ pub mod offsets {
         pub const PARENT: i32 = offset_of!(ContinuationObject, parent) as i32;
         /// Offset of `state` field
         pub const STATE: i32 = offset_of!(ContinuationObject, state) as i32;
+        /// Offset of `tag_return_values` field
+        pub const TAG_RETURN_VALUES: i32 = offset_of!(ContinuationObject, tag_return_values) as i32;
     }
 }
 
@@ -171,50 +169,6 @@ pub fn cont_ref_get_cont_obj(
 }
 
 /// TODO
-#[inline(always)]
-pub fn cont_obj_occupy_next_args_slots(
-    obj: *mut ContinuationObject,
-    arg_count: usize,
-) -> *mut u128 {
-    assert!(unsafe { (*obj).state == State::Allocated });
-    let args = &mut unsafe { obj.as_mut() }.unwrap().args;
-    return args.occupy_next(arg_count);
-}
-
-/// TODO
-#[inline(always)]
-pub fn cont_obj_occupy_next_tag_returns_slots(
-    obj: *mut ContinuationObject,
-    arg_count: usize,
-    remaining_arg_count: usize,
-) -> *mut u128 {
-    let obj = unsafe { obj.as_mut().unwrap() };
-    assert!(obj.state == State::Invoked);
-    let payloads = &obj.tag_return_values;
-    if payloads.capacity == 0 {
-        obj.tag_return_values = Payloads::new(remaining_arg_count);
-    } else {
-        assert!(payloads.capacity >= remaining_arg_count);
-    }
-    return obj.tag_return_values.occupy_next(arg_count);
-}
-
-/// TODO
-pub fn cont_obj_get_tag_return_values_buffer(
-    obj: *mut ContinuationObject,
-    expected_value_count: usize,
-) -> *mut u128 {
-    let obj = unsafe { obj.as_mut().unwrap() };
-    assert!(obj.state == State::Invoked);
-
-    let payloads = &mut obj.tag_return_values;
-    assert_eq!(payloads.length, expected_value_count);
-    assert_eq!(payloads.length, payloads.capacity);
-    assert!(!payloads.data.is_null());
-    return payloads.data;
-}
-
-/// TODO
 pub fn cont_obj_forward_tag_return_values_buffer(
     parent: *mut ContinuationObject,
     child: *mut ContinuationObject,
@@ -227,16 +181,6 @@ pub fn cont_obj_forward_tag_return_values_buffer(
     assert!(child.tag_return_values.capacity == 0);
 
     mem::swap(&mut child.tag_return_values, &mut parent.tag_return_values);
-}
-
-/// TODO
-pub fn cont_obj_deallocate_tag_return_values_buffer(obj: *mut ContinuationObject) {
-    let obj = unsafe { obj.as_mut().unwrap() };
-    assert!(obj.state == State::Invoked);
-    let payloads = &obj.tag_return_values;
-    let _: Vec<u128> =
-        unsafe { Vec::from_raw_parts(payloads.data, payloads.length, payloads.capacity) };
-    obj.tag_return_values = Payloads::new(0);
 }
 
 /// TODO
