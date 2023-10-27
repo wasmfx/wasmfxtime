@@ -29,29 +29,6 @@ use wasmtime_environ::{
 };
 use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
-// Traps if the given condition does not hold (i.e., equal to zero)
-fn emit_debug_assert(builder: &mut FunctionBuilder, condition: ir::Value) {
-    if cfg!(debug_assertions) {
-        builder
-            .ins()
-            .trapz(condition, ir::TrapCode::User(crate::DEBUG_ASSERT_TRAP_CODE));
-    }
-}
-
-fn emit_debug_assert_eq(builder: &mut FunctionBuilder, v1: ir::Value, v2: ir::Value) {
-    if cfg!(debug_assertions) {
-        let eq = builder.ins().icmp(IntCC::Equal, v1, v2);
-        emit_debug_assert(builder, eq);
-    }
-}
-
-fn emit_debug_assert_ne(builder: &mut FunctionBuilder, v1: ir::Value, v2: ir::Value) {
-    if cfg!(debug_assertions) {
-        let ne = builder.ins().icmp(IntCC::NotEqual, v1, v2);
-        emit_debug_assert(builder, ne);
-    }
-}
-
 macro_rules! declare_function_signatures {
     (
         $(
@@ -196,9 +173,6 @@ pub struct FuncEnvironment<'module_environment> {
 }
 
 mod typed_continuation_helpers {
-    use super::emit_debug_assert;
-    use super::emit_debug_assert_eq;
-    use super::emit_debug_assert_ne;
     use super::IntCC;
     use cranelift_codegen::ir;
     use cranelift_codegen::ir::types::*;
@@ -323,6 +297,138 @@ mod typed_continuation_helpers {
         }
     }
 
+    fn emit_debug_assert_generic<'a>(
+        env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+        condition: ir::Value,
+        error_str: &'static str,
+    ) {
+        if cfg!(debug_assertions) {
+            if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
+                let failure_block = builder.create_block();
+                let continue_block = builder.create_block();
+
+                builder
+                    .ins()
+                    .brif(condition, continue_block, &[], failure_block, &[]);
+
+                builder.switch_to_block(failure_block);
+                builder.seal_block(failure_block);
+
+                emit_debug_print(env, builder, error_str, &[]);
+                builder.ins().debugtrap();
+                builder.ins().jump(continue_block, &[]);
+
+                builder.switch_to_block(continue_block);
+                builder.seal_block(continue_block);
+            } else {
+                builder
+                    .ins()
+                    .trapz(condition, ir::TrapCode::User(crate::DEBUG_ASSERT_TRAP_CODE));
+            }
+        }
+    }
+
+    fn emit_debug_assert_icmp<'a>(
+        env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+        operator: IntCC,
+        v1: ir::Value,
+        v2: ir::Value,
+        error_str: &'static str,
+    ) {
+        if cfg!(debug_assertions) {
+            let cmp_res = builder.ins().icmp(operator, v1, v2);
+
+            if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
+                let failure_block = builder.create_block();
+                let continue_block = builder.create_block();
+
+                builder
+                    .ins()
+                    .brif(cmp_res, continue_block, &[], failure_block, &[]);
+
+                builder.switch_to_block(failure_block);
+                builder.seal_block(failure_block);
+
+                emit_debug_print(env, builder, error_str, &[v1, v2]);
+                builder.ins().debugtrap();
+                builder.ins().jump(continue_block, &[]);
+
+                builder.switch_to_block(continue_block);
+                builder.seal_block(continue_block);
+            } else {
+                builder
+                    .ins()
+                    .trapz(cmp_res, ir::TrapCode::User(crate::DEBUG_ASSERT_TRAP_CODE));
+            }
+        }
+    }
+
+    macro_rules! emit_debug_assert_icmp {
+        ( $env : expr,
+            $builder: expr,
+        $operator : expr,
+        $operator_string  : expr,
+        $v1 : expr,
+        $v2 : expr) => {
+            // `debug_print` *must* take a string literal, which means that we
+            // need macro magic to construct one (rather than just a String
+            // object).
+            let msg: &'static str = std::concat!(
+                "assertion failure in ",
+                std::file!(),
+                ", line ",
+                std::line!(),
+                ": {} ",
+                $operator_string,
+                " {} does not hold\n"
+            );
+            emit_debug_assert_icmp($env, $builder, $operator, $v1, $v2, msg);
+        };
+    }
+
+    macro_rules! emit_debug_assert {
+        ($env: expr, $builder: expr, $condition: expr) => {
+            // `debug_print` *must* take a string literal, which means that we
+            // need macro magic to construct one (rather than just a String
+            // object).
+            let msg: &'static str = std::concat!(
+                "assertion failure in ",
+                std::file!(),
+                ", line ",
+                std::line!(),
+                "\n"
+            );
+            emit_debug_assert_generic($env, $builder, $condition, msg);
+        };
+    }
+
+    macro_rules! emit_debug_assert_eq {
+        ($env: expr, $builder: expr, $v1 : expr, $v2: expr) => {
+            emit_debug_assert_icmp!($env, $builder, IntCC::Equal, "==", $v1, $v2);
+        };
+    }
+
+    macro_rules! emit_debug_assert_ne {
+        ($env: expr, $builder: expr, $v1 : expr, $v2: expr) => {
+            emit_debug_assert_icmp!($env, $builder, IntCC::NotEqual, "!=", $v1, $v2);
+        };
+    }
+
+    macro_rules! emit_debug_assert_ule {
+        ($env: expr, $builder: expr, $v1 : expr, $v2: expr) => {
+            emit_debug_assert_icmp!(
+                $env,
+                $builder,
+                IntCC::UnsignedLessThanOrEqual,
+                "<=",
+                $v1,
+                $v2
+            );
+        };
+    }
+
     #[derive(Copy, Clone)]
     pub struct ContinuationObject {
         address: ir::Value,
@@ -396,10 +502,14 @@ mod typed_continuation_helpers {
 
         /// Returns pointer to buffer where results are stored after a
         /// continuation has returned.
-        pub fn get_results(&self, builder: &mut FunctionBuilder) -> ir::Value {
+        pub fn get_results<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
             if cfg!(debug_assertions) {
                 let has_returned = self.has_returned(builder);
-                emit_debug_assert(builder, has_returned);
+                emit_debug_assert!(env, builder, has_returned);
             }
             return self.args().get_data(builder);
         }
@@ -497,8 +607,9 @@ mod typed_continuation_helpers {
 
         /// Returns pointer to next empty slot in data buffer and marks the
         /// subsequent `arg_count` slots as occupied.
-        pub fn occupy_next_slots(
+        pub fn occupy_next_slots<'a>(
             &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
             arg_count: i32,
         ) -> ir::Value {
@@ -509,11 +620,7 @@ mod typed_continuation_helpers {
 
             if cfg!(debug_assertions) {
                 let capacity = self.get_capacity(builder);
-                let sufficient_capacity =
-                    builder
-                        .ins()
-                        .icmp(IntCC::UnsignedLessThanOrEqual, new_length, capacity);
-                emit_debug_assert(builder, sufficient_capacity);
+                emit_debug_assert_ule!(env, builder, new_length, capacity);
             }
 
             let value_size =
@@ -522,6 +629,7 @@ mod typed_continuation_helpers {
             builder.ins().iadd(data, byte_offset)
         }
 
+        #[allow(dead_code)]
         pub fn deallocate_buffer<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -529,7 +637,7 @@ mod typed_continuation_helpers {
         ) {
             let zero = builder.ins().iconst(ir::types::I64, 0);
             let capacity = self.get_capacity(builder);
-            emit_debug_assert_ne(builder, capacity, zero);
+            emit_debug_assert_ne!(env, builder, capacity, zero);
 
             let align = builder.ins().iconst(
                 I64,
@@ -557,7 +665,7 @@ mod typed_continuation_helpers {
             required_capacity: ir::Value,
         ) {
             let zero = builder.ins().iconst(ir::types::I64, 0);
-            emit_debug_assert_ne(builder, required_capacity, zero);
+            emit_debug_assert_ne!(env, builder, required_capacity, zero);
 
             if cfg!(debug_assertions) {
                 let data = self.get_data(builder);
@@ -603,7 +711,7 @@ mod typed_continuation_helpers {
                 if cfg!(debug_assertions) {
                     // We must only re-allocate while there is no data in the buffer.
                     let length = self.get_length(builder);
-                    emit_debug_assert_eq(builder, length, zero);
+                    emit_debug_assert_eq!(env, builder, length, zero);
                 }
 
                 let align = builder.ins().iconst(
@@ -3520,7 +3628,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 builder.seal_block(use_args_block);
 
                 let args = co.args();
-                let ptr = args.occupy_next_slots(builder, values.len() as i32);
+                let ptr = args.occupy_next_slots(self, builder, values.len() as i32);
 
                 builder.ins().jump(store_data_block, &[ptr]);
             }
@@ -3537,7 +3645,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 // be too small.
                 tag_return_values.ensure_capacity(self, builder, remaining_arg_count);
 
-                let ptr = tag_return_values.occupy_next_slots(builder, values.len() as i32);
+                let ptr = tag_return_values.occupy_next_slots(self, builder, values.len() as i32);
                 builder.ins().jump(store_data_block, &[ptr]);
             }
 
@@ -3656,7 +3764,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let mut values = vec![];
 
         if valtypes.len() > 0 {
-            let result_buffer_addr = co.get_results(builder);
+            let result_buffer_addr = co.get_results(self, builder);
 
             let mut offset = 0;
             let memflags = ir::MemFlags::trusted();
