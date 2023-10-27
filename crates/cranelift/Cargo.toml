@@ -21,7 +21,7 @@ cranelift-entity = { workspace = true }
 cranelift-native = { workspace = true }
 cranelift-control = { workspace = true }
 wasmtime-cranelift-shared = { workspace = true }
-wasmtime-runtime = { workspace = true }
+wasmtime-continuations = { workspace = true }
 wasmparser = { workspace = true }
 target-lexicon = { workspace = true }
 gimli = { workspace = true }

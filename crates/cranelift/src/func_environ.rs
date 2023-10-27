@@ -231,13 +231,12 @@ mod typed_continuation_helpers {
         }
 
         pub fn args(&self) -> Payloads {
-            let offset = wasmtime_runtime::continuation::offsets::continuation_object::ARGS;
+            let offset = wasmtime_continuations::offsets::continuation_object::ARGS;
             Payloads::new(*self, offset)
         }
 
         pub fn tag_return_values(&self) -> Payloads {
-            let offset =
-                wasmtime_runtime::continuation::offsets::continuation_object::TAG_RETURN_VALUES;
+            let offset = wasmtime_continuations::offsets::continuation_object::TAG_RETURN_VALUES;
             Payloads::new(*self, offset)
         }
 
@@ -245,12 +244,10 @@ mod typed_continuation_helpers {
         /// which is represented using the `State` enum.
         fn load_state(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let mem_flags = ir::MemFlags::trusted();
-            let offset = wasmtime_runtime::continuation::offsets::continuation_object::STATE;
+            let offset = wasmtime_continuations::offsets::continuation_object::STATE;
 
             // Let's make sure that we still represent the State enum as i32.
-            debug_assert!(
-                mem::size_of::<wasmtime_runtime::continuation::State>() == mem::size_of::<i32>()
-            );
+            debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
 
             builder.ins().load(I32, mem_flags, self.address, offset)
         }
@@ -265,7 +262,7 @@ mod typed_continuation_helpers {
             // that we can use the null-ness of the `fiber` field as an indicator
             // for invokedness.
             let actual_state = self.load_state(builder);
-            let invoked: i32 = wasmtime_runtime::continuation::State::Invoked.into();
+            let invoked: i32 = wasmtime_continuations::State::Invoked.into();
             builder
                 .ins()
                 .icmp_imm(IntCC::Equal, actual_state, invoked as i64)
@@ -275,7 +272,7 @@ mod typed_continuation_helpers {
         /// function used as continuation has returned normally).
         pub fn has_returned(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let actual_state = self.load_state(builder);
-            let returned: i32 = wasmtime_runtime::continuation::State::Returned.into();
+            let returned: i32 = wasmtime_continuations::State::Returned.into();
             builder
                 .ins()
                 .icmp_imm(IntCC::Equal, actual_state, returned as i64)
@@ -330,46 +327,46 @@ mod typed_continuation_helpers {
             self.get(
                 builder,
                 self.pointer_type(),
-                wasmtime_runtime::continuation::offsets::payloads::DATA,
+                wasmtime_continuations::offsets::payloads::DATA,
             )
         }
 
         fn get_capacity(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let ty = Type::int_with_byte_size(std::mem::size_of::<
-                wasmtime_runtime::continuation::types::payloads::Capacity,
+                wasmtime_continuations::types::payloads::Capacity,
             >() as u16)
             .unwrap();
             self.get(
                 builder,
                 ty,
-                wasmtime_runtime::continuation::offsets::payloads::CAPACITY,
+                wasmtime_continuations::offsets::payloads::CAPACITY,
             )
         }
 
         fn get_length(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let ty = Type::int_with_byte_size(std::mem::size_of::<
-                wasmtime_runtime::continuation::types::payloads::Length,
+                wasmtime_continuations::types::payloads::Length,
             >() as u16)
             .unwrap();
             self.get(
                 builder,
                 ty,
-                wasmtime_runtime::continuation::offsets::payloads::LENGTH,
+                wasmtime_continuations::offsets::payloads::LENGTH,
             )
         }
 
         fn set_length(&self, builder: &mut FunctionBuilder, length: ir::Value) {
-            self.set::<wasmtime_runtime::continuation::types::payloads::Length>(
+            self.set::<wasmtime_continuations::types::payloads::Length>(
                 builder,
-                wasmtime_runtime::continuation::offsets::payloads::LENGTH,
+                wasmtime_continuations::offsets::payloads::LENGTH,
                 length,
             );
         }
 
         fn set_capacity(&self, builder: &mut FunctionBuilder, capacity: ir::Value) {
-            self.set::<wasmtime_runtime::continuation::types::payloads::Capacity>(
+            self.set::<wasmtime_continuations::types::payloads::Capacity>(
                 builder,
-                wasmtime_runtime::continuation::offsets::payloads::CAPACITY,
+                wasmtime_continuations::offsets::payloads::CAPACITY,
                 capacity,
             );
         }
@@ -377,7 +374,7 @@ mod typed_continuation_helpers {
         fn set_data(&self, builder: &mut FunctionBuilder, data: ir::Value) {
             self.set::<*mut u8>(
                 builder,
-                wasmtime_runtime::continuation::offsets::payloads::DATA,
+                wasmtime_continuations::offsets::payloads::DATA,
                 data,
             );
         }
@@ -403,9 +400,8 @@ mod typed_continuation_helpers {
                 emit_debug_assert(builder, sufficient_capacity);
             }
 
-            let value_size = mem::size_of::<
-                wasmtime_runtime::continuation::types::payloads::DataEntries,
-            >() as i64;
+            let value_size =
+                mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>() as i64;
             let byte_offset = builder.ins().imul_imm(original_length, value_size);
             builder.ins().iadd(data, byte_offset)
         }
@@ -421,11 +417,10 @@ mod typed_continuation_helpers {
 
             let align = builder.ins().iconst(
                 I64,
-                std::mem::align_of::<wasmtime_runtime::continuation::types::payloads::DataEntries>()
-                    as i64,
+                std::mem::align_of::<wasmtime_continuations::types::payloads::DataEntries>() as i64,
             );
             let entry_size =
-                std::mem::size_of::<wasmtime_runtime::continuation::types::payloads::DataEntries>();
+                std::mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>();
             let size = builder.ins().imul_imm(capacity, entry_size as i64);
 
             let index = BuiltinFunctionIndex::tc_deallocate();
@@ -476,16 +471,13 @@ mod typed_continuation_helpers {
                     emit_debug_assert_eq(builder, length, zero);
                 }
 
-                let align =
-                    builder.ins().iconst(
-                        I64,
-                        std::mem::align_of::<
-                            wasmtime_runtime::continuation::types::payloads::DataEntries,
-                        >() as i64,
-                    );
-                let entry_size = std::mem::size_of::<
-                    wasmtime_runtime::continuation::types::payloads::DataEntries,
-                >();
+                let align = builder.ins().iconst(
+                    I64,
+                    std::mem::align_of::<wasmtime_continuations::types::payloads::DataEntries>()
+                        as i64,
+                );
+                let entry_size =
+                    std::mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>();
                 let old_size = builder.ins().imul_imm(capacity, entry_size as i64);
                 let new_size = builder.ins().imul_imm(required_capacity, entry_size as i64);
 
@@ -3483,7 +3475,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         contobj: ir::Value,
     ) -> ir::Value {
-        let offset = wasmtime_runtime::continuation::offsets::continuation_object::PARENT;
+        let offset = wasmtime_continuations::offsets::continuation_object::PARENT;
         let memflags = ir::MemFlags::trusted();
 
         builder
@@ -3497,7 +3489,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         contobj: ir::Value,
         new_parent: ir::Value,
     ) {
-        let offset = wasmtime_runtime::continuation::offsets::continuation_object::PARENT;
+        let offset = wasmtime_continuations::offsets::continuation_object::PARENT;
         let memflags = ir::MemFlags::trusted();
 
         builder.ins().store(memflags, new_parent, contobj, offset);
