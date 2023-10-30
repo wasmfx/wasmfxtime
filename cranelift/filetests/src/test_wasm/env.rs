@@ -13,7 +13,7 @@ use cranelift_codegen::{
 };
 use cranelift_wasm::{
     DummyEnvironment, FuncEnvironment, FuncIndex, ModuleEnvironment, TargetEnvironment,
-    TypeConvert, TypeIndex, WasmType, WasmHeapType,
+    TypeConvert, TypeIndex, WasmHeapType, WasmType,
 };
 
 pub struct ModuleEnv {
