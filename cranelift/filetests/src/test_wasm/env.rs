@@ -98,6 +98,13 @@ impl<'data> ModuleEnvironment<'data> for ModuleEnv {
         self.inner.declare_type_func(wasm_func_type)
     }
 
+    fn declare_type_cont(
+        &mut self,
+        wasm_cont_type: cranelift_wasm::WasmContType,
+    ) -> cranelift_wasm::WasmResult<()> {
+        self.inner.declare_type_cont(wasm_cont_type)
+    }
+
     fn declare_func_import(
         &mut self,
         index: cranelift_wasm::TypeIndex,
