@@ -10,9 +10,57 @@ Unreleased.
 
 --------------------------------------------------------------------------------
 
+## 14.0.3
+
+Released 2023-10-29
+
+### Fixed
+
+* The `wasmtime` executable will now attempt to more gracefully handle the
+  transition from the 13.0.0 CLI arguments and parsing to the changes in 14.0.0.
+  CLI commands should now warn if they no longer work with the new parser, but
+  still execute as they previously did. This behavior can be controlled via a
+  new `WASMTIME_NEW_CLI` environment variable if necessary.
+  [#7385](https://github.com/bytecodealliance/wasmtime/pull/7385)
+
+* The `serve` subcommand of the `wasmtime` CLI is now enabled by default for the
+  `wasmtime` executable.
+  [#7392](https://github.com/bytecodealliance/wasmtime/pull/7392)
+
+--------------------------------------------------------------------------------
+
+## 14.0.2
+
+Released 2023-10-26
+
+### Fixed
+
+* Make the `wasmtime::unix` module accessible on macOS again.
+  [#7360](https://github.com/bytecodealliance/wasmtime/pull/7360)
+
+* Inter-crate dependencies between `cranelift-*` crates now disable the
+  `default` feature meaning that it's possible for embedders to depend on
+  `cranelift-codegen` as well without the `default` feature.
+  [#7369](https://github.com/bytecodealliance/wasmtime/pull/7369)
+
+--------------------------------------------------------------------------------
+
+## 14.0.1
+
+Released 2023-10-23
+
+### Fixed
+
+* Cranelift: preserve uext and sext flags for parameters on x86\_64 and apple
+  aarch64. Note that this does not affect Wasmtime and is only intended for
+  Cranelift embedders such as `rustc_codegen_cranelift`.
+  [#7333](https://github.com/bytecodealliance/wasmtime/pull/7333)
+
+--------------------------------------------------------------------------------
+
 ## 14.0.0
 
-Unreleased.
+Released 2023-10-20
 
 One of the larger changes in this release is a redesign of Wasmtime's CLI
 arguments and where arguments are passed. This means that previous invocations
@@ -165,6 +213,17 @@ More information about this change can be found on
 * Cranelift will now return an error when running out of temporaries in a very
   large function instead of panicking.
   [#7114](https://github.com/bytecodealliance/wasmtime/pull/7114)
+
+--------------------------------------------------------------------------------
+
+## 13.0.1
+
+Released 2023-10-26
+
+### Fixed
+
+* Make the `wasmtime::unix` module accessible on macOS again.
+  [#7360](https://github.com/bytecodealliance/wasmtime/pull/7360)
 
 --------------------------------------------------------------------------------
 

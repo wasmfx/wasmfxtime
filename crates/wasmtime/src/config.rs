@@ -338,7 +338,7 @@ impl Config {
     ///
     /// * Alternatively you can enable the
     ///   [`Config::consume_fuel`](crate::Config::consume_fuel) method as well
-    ///   as [`crate::Store::out_of_fuel_async_yield`] When doing so this will
+    ///   as [`crate::Store::fuel_async_yield_interval`] When doing so this will
     ///   configure Wasmtime futures to yield periodically while they're
     ///   executing WebAssembly code. After consuming the specified amount of
     ///   fuel wasm futures will return `Poll::Pending` from their `poll`
@@ -456,8 +456,9 @@ impl Config {
     ///
     /// This can be used to deterministically prevent infinitely-executing
     /// WebAssembly code by instrumenting generated code to consume fuel as it
-    /// executes. When fuel runs out the behavior is defined by configuration
-    /// within a [`Store`], and by default a trap is raised.
+    /// executes. When fuel runs out a trap is raised, however [`Store`] can be
+    /// configured to yield execution periodically via
+    /// [`crate::Store::fuel_async_yield_interval`].
     ///
     /// Note that a [`Store`] starts with no fuel, so if you enable this option
     /// you'll have to be sure to pour some fuel into [`Store`] before
@@ -1891,7 +1892,7 @@ impl fmt::Debug for Config {
 ///
 /// This is used as an argument to the [`Config::strategy`] method.
 #[non_exhaustive]
-#[derive(Clone, Debug, Copy)]
+#[derive(PartialEq, Eq, Clone, Debug, Copy)]
 pub enum Strategy {
     /// An indicator that the compilation strategy should be automatically
     /// selected.
@@ -2399,7 +2400,8 @@ impl PoolingAllocationConfig {
     ///   supported
     /// - `disable`: never use MPK
     ///
-    /// By default this value is `disabled`, but may become `auto` in future releases.
+    /// By default this value is `disabled`, but may become `auto` in future
+    /// releases.
     ///
     /// __WARNING__: this configuration options is still experimental--use at
     /// your own risk! MPK uses kernel and CPU features to protect memory
@@ -2407,6 +2409,23 @@ impl PoolingAllocationConfig {
     /// misconfigured.
     pub fn memory_protection_keys(&mut self, enable: MpkEnabled) -> &mut Self {
         self.config.memory_protection_keys = enable;
+        self
+    }
+
+    /// Sets an upper limit on how many memory protection keys (MPK) Wasmtime
+    /// will use.
+    ///
+    /// This setting is only applicable when
+    /// [`PoolingAllocationConfig::memory_protection_keys`] is set to `enable`
+    /// or `auto`. Configuring this above the HW and OS limits (typically 15)
+    /// has no effect.
+    ///
+    /// If multiple Wasmtime engines are used in the same process, note that all
+    /// engines will share the same set of allocated keys; this setting will
+    /// limit how many keys are allocated initially and thus available to all
+    /// other engines.
+    pub fn max_memory_protection_keys(&mut self, max: usize) -> &mut Self {
+        self.config.max_memory_protection_keys = max;
         self
     }
 

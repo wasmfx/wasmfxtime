@@ -2094,6 +2094,11 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 u64::MAX
             });
 
+        let max_size = self.module.memory_plans[index]
+            .memory
+            .maximum
+            .and_then(|max| max.checked_mul(u64::from(WASM_PAGE_SIZE)));
+
         let (ptr, base_offset, current_length_offset) = {
             let vmctx = self.vmctx(func);
             if let Some(def_index) = self.module.defined_memory_index(index) {
@@ -2198,6 +2203,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         Ok(self.heaps.push(HeapData {
             base: heap_base,
             min_size,
+            max_size,
             offset_guard_size,
             style: heap_style,
             index_type: self.memory_index_type(index),
