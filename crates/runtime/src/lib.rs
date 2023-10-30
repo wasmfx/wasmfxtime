@@ -30,6 +30,7 @@ mod traphandlers;
 mod vmcontext;
 
 pub mod continuation;
+#[cfg(feature = "debug-builtins")]
 pub mod debug_builtins;
 pub mod libcalls;
 pub mod mpk;
