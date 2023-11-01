@@ -1988,7 +1988,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             WasmHeapType::Func | WasmHeapType::TypedFunc(_) => {
                 pos.ins().iconst(self.pointer_type(), 0)
             }
-            WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
+            WasmHeapType::Cont | WasmHeapType::NoCont => {
+                pos.ins().iconst(self.pointer_type(), 0) // TODO(dhil): I haven't really thought this through.
+            }
             WasmHeapType::Extern => pos.ins().null(self.reference_type(ht)),
         })
     }
