@@ -287,6 +287,10 @@ async fn preview1_path_open_preopen() {
 async fn preview1_unicode_output() {
     run(PREVIEW1_UNICODE_OUTPUT_COMPONENT, true).await.unwrap()
 }
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn preview1_file_write() {
+    run(PREVIEW1_FILE_WRITE_COMPONENT, false).await.unwrap()
+}
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn preview2_sleep() {
@@ -317,6 +321,10 @@ async fn preview2_tcp_states() {
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn preview2_tcp_bind() {
     run(PREVIEW2_TCP_BIND_COMPONENT, false).await.unwrap()
+}
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn preview2_udp_connect() {
+    run(PREVIEW2_UDP_CONNECT_COMPONENT, false).await.unwrap()
 }
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn preview2_udp_sample_application() {

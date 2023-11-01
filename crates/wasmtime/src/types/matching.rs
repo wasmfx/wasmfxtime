@@ -204,6 +204,7 @@ fn match_heap(expected: WasmHeapType, actual: WasmHeapType, desc: &str) -> Resul
         (WasmHeapType::Func, _) | (WasmHeapType::Extern, _) | (WasmHeapType::TypedFunc(_), _) => {
             false
         }
+        (WasmHeapType::Cont, _) | (WasmHeapType::NoCont, _) => todo!(), // TODO(dhil): revisit this later.
     };
     if result {
         Ok(())

@@ -79,6 +79,8 @@ impl fmt::Display for WasmRefType {
 pub enum WasmHeapType {
     Func,
     Extern,
+    Cont,
+    NoCont,
     // FIXME: the `SignatureIndex` payload here is not suitable given all the
     // contexts that this type is used within. For example the Engine in
     // wasmtime hashes this index which is not appropriate because the index is
@@ -97,6 +99,8 @@ impl fmt::Display for WasmHeapType {
         match self {
             Self::Func => write!(f, "func"),
             Self::Extern => write!(f, "extern"),
+            Self::Cont => write!(f, "cont"),
+            Self::NoCont => write!(f, "nocont"),
             Self::TypedFunc(i) => write!(f, "func_sig{}", i.as_u32()),
         }
     }
@@ -502,7 +506,9 @@ pub trait TypeConvert {
         match ty {
             wasmparser::HeapType::Func => WasmHeapType::Func,
             wasmparser::HeapType::Extern => WasmHeapType::Extern,
-            wasmparser::HeapType::Indexed(i) => self.lookup_heap_type(TypeIndex::from_u32(i)),
+            wasmparser::HeapType::Cont => WasmHeapType::Cont,
+            wasmparser::HeapType::NoCont => WasmHeapType::NoCont,
+            wasmparser::HeapType::Concrete(i) => self.lookup_heap_type(TypeIndex::from_u32(i)),
 
             wasmparser::HeapType::Any
             | wasmparser::HeapType::None

@@ -104,7 +104,6 @@ mod tests {
     use crate::settings::{builder, Flags};
     use crate::Context;
     use gimli::write::Address;
-
     use target_lexicon::triple;
 
     #[test]

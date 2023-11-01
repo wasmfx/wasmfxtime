@@ -39,7 +39,7 @@ pub mod bindings {
         // can't support in these special core-wasm adapters.
         // Instead, we manually define the bindings for these functions in
         // terms of raw pointers.
-        skip: ["run", "get-environment", "poll-list"],
+        skip: ["run", "get-environment", "poll"],
     });
 
     #[cfg(feature = "reactor")]
@@ -54,7 +54,7 @@ pub mod bindings {
         // can't support in these special core-wasm adapters.
         // Instead, we manually define the bindings for these functions in
         // terms of raw pointers.
-        skip: ["get-environment", "poll-list"],
+        skip: ["get-environment", "poll"],
     });
 }
 
@@ -1748,12 +1748,15 @@ pub unsafe extern "C" fn poll_oneoff(
                                 clock.timeout
                             };
 
-                            monotonic_clock::subscribe(timeout, false)
+                            monotonic_clock::subscribe_duration(timeout)
                         }
 
                         CLOCKID_MONOTONIC => {
-                            let s = monotonic_clock::subscribe(clock.timeout, absolute);
-                            s
+                            if absolute {
+                                monotonic_clock::subscribe_instant(clock.timeout)
+                            } else {
+                                monotonic_clock::subscribe_duration(clock.timeout)
+                            }
                         }
 
                         _ => return Err(ERRNO_INVAL),
@@ -1777,8 +1780,8 @@ pub unsafe extern "C" fn poll_oneoff(
         #[link(wasm_import_module = "wasi:io/poll@0.2.0-rc-2023-11-05")]
         #[allow(improper_ctypes)] // FIXME(bytecodealliance/wit-bindgen#684)
         extern "C" {
-            #[link_name = "poll-list"]
-            fn poll_list_import(pollables: *const Pollable, len: usize, rval: *mut ReadyList);
+            #[link_name = "poll"]
+            fn poll_import(pollables: *const Pollable, len: usize, rval: *mut ReadyList);
         }
         let mut ready_list = ReadyList {
             base: std::ptr::null(),
@@ -1791,7 +1794,7 @@ pub unsafe extern "C" fn poll_oneoff(
                 .checked_mul(size_of::<u32>())
                 .trapping_unwrap(),
             || {
-                poll_list_import(
+                poll_import(
                     pollables.pointer,
                     pollables.length,
                     &mut ready_list as *mut _,

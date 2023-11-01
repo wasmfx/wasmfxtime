@@ -1624,6 +1624,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                     self.builtin_function_signatures
                         .table_grow_func_ref(&mut pos.func),
                 ),
+                WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
                 WasmHeapType::Extern => (
                     BuiltinFunctionIndex::table_grow_externref(),
                     self.builtin_function_signatures
@@ -1659,6 +1660,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                     Ok(self.get_or_init_func_ref_table_elem(builder, table_index, table, index))
                 }
             },
+            WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
             WasmHeapType::Extern => {
                 // Our read barrier for `externref` tables is roughly equivalent
                 // to the following pseudocode:
@@ -1805,6 +1807,8 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                     Ok(())
                 }
             },
+
+            WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
 
             WasmHeapType::Extern => {
                 // Our write barrier for `externref`s being copied out of the
@@ -1954,6 +1958,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                     self.builtin_function_signatures
                         .table_fill_func_ref(&mut pos.func),
                 ),
+                WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
                 WasmHeapType::Extern => (
                     BuiltinFunctionIndex::table_fill_externref(),
                     self.builtin_function_signatures
@@ -1983,6 +1988,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             WasmHeapType::Func | WasmHeapType::TypedFunc(_) => {
                 pos.ins().iconst(self.pointer_type(), 0)
             }
+            WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
             WasmHeapType::Extern => pos.ins().null(self.reference_type(ht)),
         })
     }
@@ -2236,6 +2242,11 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 heap_type: WasmHeapType::Func | WasmHeapType::TypedFunc(_),
                 ..
             }) => {}
+
+            WasmType::Ref(WasmRefType {
+                heap_type: WasmHeapType::Cont | WasmHeapType::NoCont,
+                ..
+            }) => todo!(), // TODO(dhil): revisit later
 
             // Value types all live in memory so let them fall through to a
             // memory-based global.

@@ -2072,9 +2072,15 @@ impl<
                         }
                         _ => return Err(types::Errno::Inval.into()),
                     };
-                    monotonic_clock::Host::subscribe(self, timeout, absolute)
-                        .context("failed to call `monotonic_clock::subscribe`")
-                        .map_err(types::Error::trap)?
+                    if absolute {
+                        monotonic_clock::Host::subscribe_instant(self, timeout)
+                            .context("failed to call `monotonic_clock::subscribe_instant`")
+                            .map_err(types::Error::trap)?
+                    } else {
+                        monotonic_clock::Host::subscribe_duration(self, timeout)
+                            .context("failed to call `monotonic_clock::subscribe_duration`")
+                            .map_err(types::Error::trap)?
+                    }
                 }
                 types::SubscriptionU::FdRead(types::SubscriptionFdReadwrite {
                     file_descriptor,
@@ -2150,7 +2156,7 @@ impl<
             pollables.push(p);
         }
         let ready: HashSet<_> = self
-            .poll_list(pollables)
+            .poll(pollables)
             .await
             .context("failed to call `poll-oneoff`")
             .map_err(types::Error::trap)?

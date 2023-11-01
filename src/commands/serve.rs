@@ -250,6 +250,8 @@ impl ServeCommand {
 
         let listener = tokio::net::TcpListener::bind(self.addr).await?;
 
+        eprintln!("Serving HTTP on http://{}/", listener.local_addr()?);
+
         let _epoch_thread = if let Some(timeout) = self.run.common.wasm.timeout {
             Some(EpochThread::spawn(timeout, engine.clone()))
         } else {
@@ -361,9 +363,9 @@ impl hyper::service::Service<Request> for ProxyHandler {
 
             let mut store = inner.cmd.new_store(&inner.engine, req_id)?;
 
-            let req = store.data_mut().new_incoming_request(
-                req.map(|body| body.map_err(|e| anyhow::anyhow!(e)).boxed()),
-            )?;
+            let req = store
+                .data_mut()
+                .new_incoming_request(req.map(|body| body.map_err(|e| e.into()).boxed()))?;
 
             let out = store.data_mut().new_response_outparam(sender)?;
 
@@ -380,8 +382,11 @@ impl hyper::service::Service<Request> for ProxyHandler {
         });
 
         Box::pin(async move {
-            let resp = receiver.await.unwrap()?;
-            Ok(resp)
+            match receiver.await {
+                Ok(Ok(resp)) => Ok(resp),
+                Ok(Err(e)) => Err(e.into()),
+                Err(_) => bail!("guest never invoked `response-outparam::set` method"),
+            }
         })
     }
 }

@@ -30,6 +30,7 @@ pub mod bindings {
             "wasi:http/types/outgoing-request": super::types::HostOutgoingRequest,
             "wasi:http/types/incoming-request": super::types::HostIncomingRequest,
             "wasi:http/types/fields": super::types::HostFields,
+            "wasi:http/types/request-options": super::types::HostRequestOptions,
         }
     });
 
@@ -62,12 +63,6 @@ impl From<std::io::Error> for crate::bindings::http::types::Error {
                 }
             }
         }
-    }
-}
-
-impl From<http::Error> for crate::bindings::http::types::Error {
-    fn from(err: http::Error) -> Self {
-        Self::InvalidUrl(err.to_string())
     }
 }
 
