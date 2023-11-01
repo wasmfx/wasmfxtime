@@ -183,6 +183,7 @@ impl Backtrace {
 
     /// Walk through a contiguous sequence of Wasm frames starting with the
     /// frame at the given PC and FP and ending at `trampoline_sp`.
+    // TODO(frank-emrich) Implement tracing across continuations.
     unsafe fn trace_through_wasm(
         mut pc: usize,
         mut fp: usize,
@@ -211,7 +212,9 @@ impl Backtrace {
             // The stack grows down, and therefore any frame pointer we are
             // dealing with should be less than the stack pointer on entry
             // to Wasm.
-            assert!(trampoline_sp >= fp, "{trampoline_sp:#x} >= {fp:#x}");
+            // TODO(frank-emrich) Disabled for now, as it does not hold in
+            // presence of continuations.
+            //assert!(trampoline_sp >= fp, "{trampoline_sp:#x} >= {fp:#x}");
 
             arch::assert_fp_is_aligned(fp);
 
