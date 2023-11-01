@@ -177,6 +177,9 @@ fn reference_type(wasm_ht: cranelift_wasm::WasmHeapType, pointer_type: ir::Type)
         cranelift_wasm::WasmHeapType::Func | cranelift_wasm::WasmHeapType::TypedFunc(_) => {
             pointer_type
         }
+        cranelift_wasm::WasmHeapType::Cont | cranelift_wasm::WasmHeapType::NoCont => {
+            todo!() // TODO(dhil): revisit this later.
+        }
         cranelift_wasm::WasmHeapType::Extern => match pointer_type {
             ir::types::I32 => ir::types::R32,
             ir::types::I64 => ir::types::R64,

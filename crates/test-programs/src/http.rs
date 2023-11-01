@@ -1,5 +1,4 @@
 use crate::wasi::http::{outgoing_handler, types as http_types};
-use crate::wasi::io::poll;
 use crate::wasi::io::streams;
 use anyhow::{anyhow, Result};
 use std::fmt;
@@ -42,7 +41,7 @@ pub fn request(
     fn header_val(v: &str) -> Vec<u8> {
         v.to_string().into_bytes()
     }
-    let headers = http_types::Headers::new(
+    let headers = http_types::Headers::from_list(
         &[
             &[
                 ("User-agent".to_string(), header_val("WASI-HTTP/0.0.1")),
@@ -51,18 +50,18 @@ pub fn request(
             additional_headers.unwrap_or(&[]),
         ]
         .concat(),
-    );
+    )?;
 
     let request = http_types::OutgoingRequest::new(
         &method,
         Some(path_with_query),
         Some(&scheme),
         Some(authority),
-        &headers,
+        headers,
     );
 
     let outgoing_body = request
-        .write()
+        .body()
         .map_err(|_| anyhow!("outgoing request write failed"))?;
 
     if let Some(mut buf) = body {
@@ -72,7 +71,7 @@ pub fn request(
 
         let pollable = request_body.subscribe();
         while !buf.is_empty() {
-            poll::poll_list(&[&pollable]);
+            pollable.block();
 
             let permit = match request_body.check_write() {
                 Ok(n) => n,
@@ -94,7 +93,7 @@ pub fn request(
             _ => {}
         }
 
-        poll::poll_list(&[&pollable]);
+        pollable.block();
 
         match request_body.check_write() {
             Ok(_) => {}
@@ -110,7 +109,7 @@ pub fn request(
         Some(result) => result.map_err(|_| anyhow!("incoming response errored"))?,
         None => {
             let pollable = future_response.subscribe();
-            let _ = poll::poll_list(&[&pollable]);
+            pollable.block();
             future_response
                 .get()
                 .expect("incoming response available")
@@ -140,7 +139,7 @@ pub fn request(
 
     let mut body = Vec::new();
     loop {
-        poll::poll_list(&[&input_stream_pollable]);
+        input_stream_pollable.block();
 
         let mut body_chunk = match input_stream.read(1024 * 1024) {
             Ok(c) => c,

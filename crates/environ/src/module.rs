@@ -480,7 +480,7 @@ impl ModuleTranslation<'_> {
                 // initializer won't trap so we could continue processing
                 // segments, but that's left as a future optimization if
                 // necessary.
-                WasmHeapType::Extern => break,
+                WasmHeapType::Cont | WasmHeapType::NoCont | WasmHeapType::Extern => break,
             }
 
             let precomputed =

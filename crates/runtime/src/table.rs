@@ -179,6 +179,8 @@ fn wasm_to_table_type(ty: WasmRefType) -> Result<TableElementType> {
         WasmHeapType::Func => Ok(TableElementType::Func),
         WasmHeapType::Extern => Ok(TableElementType::Extern),
         WasmHeapType::TypedFunc(_) => Ok(TableElementType::Func),
+        WasmHeapType::Cont => todo!(), // TODO(dhil): revisit this later.
+        WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
     }
 }
 

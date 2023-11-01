@@ -196,7 +196,7 @@ byte-array-literals = { path = "crates/wasi-preview1-component-adapter/byte-arra
 regalloc2 = "0.9.3"
 
 # cap-std family:
-target-lexicon = { version = "0.12.3", default-features = false, features = ["std"] }
+target-lexicon = { version = "0.12.12", default-features = false, features = ["std"] }
 cap-std = "2.0.0"
 cap-rand = { version = "2.0.0", features = ["small_rng"] }
 cap-fs-ext = "2.0.0"
@@ -207,21 +207,21 @@ fs-set-times = "0.20.0"
 system-interface = { version = "0.26.0", features = ["cap_std_impls"] }
 io-lifetimes = { version = "2.0.2", default-features = false }
 io-extras = "0.18.0"
-rustix = "0.38.8"
+rustix = "0.38.21"
 is-terminal = "0.4.0"
 # wit-bindgen:
-wit-bindgen = { version = "0.13.0", default-features = false }
+wit-bindgen = { version = "0.13.1", default-features = false }
 
 # wasm-tools family:
-wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.48" }
-wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.48" }
-wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.48" }
-wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.48" }
-wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.48" }
-wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.48" }
-wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.48" }
-wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.48" }
-wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.48" }
+wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.50" }
+wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.50" }
+wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.50" }
+wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.50" }
+wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.50" }
+wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.50" }
+wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.50" }
+wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.50" }
+wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.50" }
 
 # Non-Bytecode Alliance maintained dependencies:
 # --------------------------
