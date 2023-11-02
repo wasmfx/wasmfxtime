@@ -498,7 +498,24 @@ where
                 }
             }
             AssertException { .. } => bail!("unimplemented assert_exception"),
-            AssertSuspension { .. } => bail!("unimplemented assert_suspension"),
+            AssertSuspension {
+                span: _,
+                exec,
+                message
+            } => {
+                let err = match self.perform_execute(exec) {
+                    Ok(_) => bail!("expected tag to be unhandled"),
+                    Err(e) => e,
+                };
+                let error_message = format!("{:?}", err);
+                if !is_matching_assert_suspension_error_message(&message, &error_message) {
+                    bail!(
+                        "assert_suspension: expected {}, got {}",
+                        message,
+                        error_message
+                    )
+                }
+            }
 
             Thread(thread) => {
                 let mut core_linker = Linker::new(self.store.engine());
@@ -559,4 +576,8 @@ fn is_matching_assert_invalid_error_message(expected: &str, actual: &str) -> boo
         // for this scenario
         || (expected == "unknown global" && actual.contains("global.get of locally defined global"))
         || (expected == "immutable global" && actual.contains("global is immutable: cannot modify it with `global.set`"))
+}
+
+fn is_matching_assert_suspension_error_message(expected: &str, actual: &str) -> bool {
+    actual.contains(expected) || actual.contains("unhandled tag")
 }
