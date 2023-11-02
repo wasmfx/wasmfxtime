@@ -266,7 +266,7 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) {
     let running = unsafe {
         running
             .as_ref()
-            .expect("Calling suspend outside of a continuation")
+            .expect("Calling suspend outside of a continuation") // TODO(dhil): we should emit the trap UnhandledTag here.
     };
 
     let stack_ptr = unsafe { (*running.fiber).stack().top().unwrap() };

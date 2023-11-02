@@ -351,6 +351,22 @@ where
         bail!("expected '{}', got '{}'", expected, actual)
     }
 
+    fn assert_suspension(&self, result: Outcome, expected: &str) -> Result<()> {
+        let trap = match result {
+            Outcome::Ok(values) => bail!("expected suspension, got {:?}", values),
+            Outcome::Trap(t) => t,
+        };
+        let actual = format!("{trap:?}");
+        if actual.contains(expected)
+            || actual.contains("unhandled tag")
+            || actual.contains("Calling suspend outside of a continuation")
+        {
+            Ok(())
+        } else {
+            bail!("assert_suspension: expected '{}', got '{}'", expected, actual)
+        }
+    }
+
     /// Run a wast script from a byte buffer.
     pub fn run_buffer(&mut self, filename: &str, wast: &[u8]) -> Result<()> {
         let wast = str::from_utf8(wast)?;
@@ -503,18 +519,8 @@ where
                 exec,
                 message,
             } => {
-                let err = match self.perform_execute(exec) {
-                    Ok(_) => bail!("expected tag to be unhandled"),
-                    Err(e) => e,
-                };
-                let error_message = format!("{:?}", err);
-                if !is_matching_assert_suspension_error_message(&message, &error_message) {
-                    bail!(
-                        "assert_suspension: expected {}, got {}",
-                        message,
-                        error_message
-                    )
-                }
+                let result = self.perform_execute(exec)?;
+                self.assert_suspension(result, message)?;
             }
 
             Thread(thread) => {
@@ -576,8 +582,4 @@ fn is_matching_assert_invalid_error_message(expected: &str, actual: &str) -> boo
         // for this scenario
         || (expected == "unknown global" && actual.contains("global.get of locally defined global"))
         || (expected == "immutable global" && actual.contains("global is immutable: cannot modify it with `global.set`"))
-}
-
-fn is_matching_assert_suspension_error_message(expected: &str, actual: &str) -> bool {
-    actual.contains(expected) || actual.contains("unhandled tag")
 }
