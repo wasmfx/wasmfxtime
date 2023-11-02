@@ -3394,7 +3394,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 // Unlike for the args buffer (where we know the maximum
                 // required capacity at the time of creation of the
                 // ContinuationObject), tag return buffers are re-used and may
-                // be too smal.
+                // be too small.
                 tag_return_values.ensure_capacity(self, builder, remaining_arg_count);
 
                 let ptr = tag_return_values.occupy_next_slots(builder, values.len() as i32);
