@@ -811,30 +811,6 @@ fn cont_ref_get_cont_obj(
     )? as *mut u8)
 }
 
-fn cont_obj_occupy_next_tag_returns_slots(
-    _instance: &mut Instance,
-    contobj: *mut u8,
-    arg_count: u32,
-    remaining_arg_count: u32,
-) -> *mut u8 {
-    crate::continuation::cont_obj_occupy_next_tag_returns_slots(
-        contobj as *mut crate::continuation::ContinuationObject,
-        arg_count as usize,
-        remaining_arg_count as usize,
-    ) as *mut u8
-}
-
-fn cont_obj_get_tag_return_values_buffer(
-    _instance: &mut Instance,
-    contobj: *mut u8,
-    expected_value_count: u32,
-) -> *mut u8 {
-    crate::continuation::cont_obj_get_tag_return_values_buffer(
-        contobj as *mut crate::continuation::ContinuationObject,
-        expected_value_count as usize,
-    ) as *mut u8
-}
-
 fn cont_obj_forward_tag_return_values_buffer(
     _instance: &mut Instance,
     parent_contobj: *mut u8,
@@ -843,12 +819,6 @@ fn cont_obj_forward_tag_return_values_buffer(
     crate::continuation::cont_obj_forward_tag_return_values_buffer(
         parent_contobj as *mut crate::continuation::ContinuationObject,
         child_contobj as *mut crate::continuation::ContinuationObject,
-    );
-}
-
-fn cont_obj_deallocate_tag_return_values_buffer(_instance: &mut Instance, contobj: *mut u8) {
-    crate::continuation::cont_obj_deallocate_tag_return_values_buffer(
-        contobj as *mut crate::continuation::ContinuationObject,
     );
 }
 
@@ -866,4 +836,34 @@ fn get_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) -
 
 fn drop_cont_obj(_instance: &mut Instance, contobj: *mut u8) {
     crate::continuation::drop_cont_obj(contobj as *mut crate::continuation::ContinuationObject)
+}
+
+fn allocate(_instance: &mut Instance, size: u64, align: u64) -> *mut u8 {
+    debug_assert!(size > 0);
+    let layout =
+        std::alloc::Layout::from_size_align(size as usize, align as usize).expect("invalid Layout");
+    unsafe { std::alloc::alloc(layout) }
+}
+
+fn deallocate(_instance: &mut Instance, ptr: *mut u8, size: u64, align: u64) {
+    debug_assert!(size > 0);
+    let layout =
+        std::alloc::Layout::from_size_align(size as usize, align as usize).expect("invalid Layout");
+    unsafe { std::alloc::dealloc(ptr, layout) };
+}
+
+fn reallocate(
+    instance: &mut Instance,
+    ptr: *mut u8,
+    old_size: u64,
+    new_size: u64,
+    align: u64,
+) -> *mut u8 {
+    debug_assert!(old_size < new_size);
+
+    if old_size > 0 {
+        deallocate(instance, ptr, old_size, align);
+    }
+
+    allocate(instance, new_size, align)
 }

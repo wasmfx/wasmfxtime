@@ -84,17 +84,6 @@ macro_rules! foreach_builtin_function {
             get_payload_buffer(vmctx: vmctx, expected_element_capacity: i32) -> pointer;
 
 
-            /// Returns a pointer to the next empty slot within the tag return value buffer
-            /// of the given continuation object.
-            /// Such a buffer is used to store payloads provided by cont.bind and resume
-            /// and received at a suspend site.
-            /// The next `arg_count` slots within the buffer are marked as used.
-            /// If no such buffer currently exists, a new one is allocated.
-            cont_obj_occupy_next_tag_returns_slots(vmctx: vmctx, contobj: pointer, arg_count : i32, remaining_arg_count : i32) -> pointer;
-            /// Returns a pointer to the beginning of the tag return value buffer
-            cont_obj_get_tag_return_values_buffer(vmctx: vmctx, contobj: pointer, expected_count : i32) -> pointer;
-            /// Deallocated the tag return value buffer within the continuation object.
-            cont_obj_deallocate_tag_return_values_buffer(vmctx: vmctx, contobj: pointer);
             /// Sets the tag return values of `child_contobj` to those of `parent_contobj`.
             /// This is implemented by exchanging the pointers to the underlying buffers.
             /// `child_contobj` must not currently have a tag return value buffer.
@@ -103,6 +92,19 @@ macro_rules! foreach_builtin_function {
 
             /// TODO
             drop_cont_obj(vmctx: vmctx, contobj: pointer);
+
+            /// General-purpose allocation. Only used by typed-continuations
+            /// code at the moment.
+            allocate(vmctx: vmctx, size: i64, align: i64) -> pointer;
+            /// General-purpose deallocation. Only used by typed-continuations
+            /// code at the moment.
+            deallocate(vmctx: vmctx, ptr: pointer, size: i64, align: i64);
+            /// General-purpose reallocation without preserving existing data. Concretely, behaves like
+            /// deallocate followed by allocate.
+            /// The only difference is that if `old_size` is 0, then we assume that ptr does not point to allocated memory
+            /// and do not actually deallocate.
+            /// `old_size` must be smaller than `new_size`
+            reallocate(vmctx: vmctx, ptr: pointer, old_size: i64, new_size: i64, align: i64) -> pointer;
 
             /// Invoked before malloc returns.
             check_malloc(vmctx: vmctx, addr: i32, len: i32) -> i32;

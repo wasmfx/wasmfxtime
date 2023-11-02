@@ -38,6 +38,20 @@ fn emit_debug_assert(builder: &mut FunctionBuilder, condition: ir::Value) {
     }
 }
 
+fn emit_debug_assert_eq(builder: &mut FunctionBuilder, v1: ir::Value, v2: ir::Value) {
+    if cfg!(debug_assertions) {
+        let eq = builder.ins().icmp(IntCC::Equal, v1, v2);
+        emit_debug_assert(builder, eq);
+    }
+}
+
+fn emit_debug_assert_ne(builder: &mut FunctionBuilder, v1: ir::Value, v2: ir::Value) {
+    if cfg!(debug_assertions) {
+        let ne = builder.ins().icmp(IntCC::NotEqual, v1, v2);
+        emit_debug_assert(builder, ne);
+    }
+}
+
 macro_rules! declare_function_signatures {
     (
         $(
@@ -183,12 +197,15 @@ pub struct FuncEnvironment<'module_environment> {
 
 mod typed_continuation_helpers {
     use super::emit_debug_assert;
+    use super::emit_debug_assert_eq;
+    use super::emit_debug_assert_ne;
     use super::IntCC;
     use cranelift_codegen::ir;
     use cranelift_codegen::ir::types::*;
     use cranelift_codegen::ir::InstBuilder;
     use cranelift_frontend::FunctionBuilder;
     use std::mem;
+    use wasmtime_environ::BuiltinFunctionIndex;
 
     #[derive(Copy, Clone)]
     pub struct ContinuationObject {
@@ -215,6 +232,12 @@ mod typed_continuation_helpers {
 
         pub fn args(&self) -> Payloads {
             let offset = wasmtime_runtime::continuation::offsets::continuation_object::ARGS;
+            Payloads::new(*self, offset)
+        }
+
+        pub fn tag_return_values(&self) -> Payloads {
+            let offset =
+                wasmtime_runtime::continuation::offsets::continuation_object::TAG_RETURN_VALUES;
             Payloads::new(*self, offset)
         }
 
@@ -292,14 +315,18 @@ mod typed_continuation_helpers {
                 .load(ty, mem_flags, self.contobj(), self.offset + offset)
         }
 
-        fn set(&self, builder: &mut FunctionBuilder, offset: i32, value: ir::Value) {
+        fn set<T>(&self, builder: &mut FunctionBuilder, offset: i32, value: ir::Value) {
+            debug_assert_eq!(
+                builder.func.dfg.value_type(value),
+                Type::int_with_byte_size(std::mem::size_of::<T>() as u16).unwrap()
+            );
             let mem_flags = ir::MemFlags::trusted();
             builder
                 .ins()
                 .store(mem_flags, value, self.contobj(), self.offset + offset);
         }
 
-        fn get_data(&self, builder: &mut FunctionBuilder) -> ir::Value {
+        pub fn get_data(&self, builder: &mut FunctionBuilder) -> ir::Value {
             self.get(
                 builder,
                 self.pointer_type(),
@@ -308,34 +335,50 @@ mod typed_continuation_helpers {
         }
 
         fn get_capacity(&self, builder: &mut FunctionBuilder) -> ir::Value {
-            debug_assert_eq!(
-                mem::size_of::<wasmtime_runtime::continuation::types::payloads::Capacity>(),
-                mem::size_of::<usize>()
-            );
+            let ty = Type::int_with_byte_size(std::mem::size_of::<
+                wasmtime_runtime::continuation::types::payloads::Capacity,
+            >() as u16)
+            .unwrap();
             self.get(
                 builder,
-                self.pointer_type(),
+                ty,
                 wasmtime_runtime::continuation::offsets::payloads::CAPACITY,
             )
         }
 
         fn get_length(&self, builder: &mut FunctionBuilder) -> ir::Value {
-            debug_assert_eq!(
-                mem::size_of::<wasmtime_runtime::continuation::types::payloads::Length>(),
-                mem::size_of::<usize>()
-            );
+            let ty = Type::int_with_byte_size(std::mem::size_of::<
+                wasmtime_runtime::continuation::types::payloads::Length,
+            >() as u16)
+            .unwrap();
             self.get(
                 builder,
-                self.pointer_type(),
+                ty,
                 wasmtime_runtime::continuation::offsets::payloads::LENGTH,
             )
         }
 
         fn set_length(&self, builder: &mut FunctionBuilder, length: ir::Value) {
-            self.set(
+            self.set::<wasmtime_runtime::continuation::types::payloads::Length>(
                 builder,
                 wasmtime_runtime::continuation::offsets::payloads::LENGTH,
                 length,
+            );
+        }
+
+        fn set_capacity(&self, builder: &mut FunctionBuilder, capacity: ir::Value) {
+            self.set::<wasmtime_runtime::continuation::types::payloads::Capacity>(
+                builder,
+                wasmtime_runtime::continuation::offsets::payloads::CAPACITY,
+                capacity,
+            );
+        }
+
+        fn set_data(&self, builder: &mut FunctionBuilder, data: ir::Value) {
+            self.set::<*mut u8>(
+                builder,
+                wasmtime_runtime::continuation::offsets::payloads::DATA,
+                data,
             );
         }
 
@@ -365,6 +408,116 @@ mod typed_continuation_helpers {
             >() as i64;
             let byte_offset = builder.ins().imul_imm(original_length, value_size);
             builder.ins().iadd(data, byte_offset)
+        }
+
+        pub fn deallocate_buffer<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) {
+            let zero = builder.ins().iconst(ir::types::I64, 0);
+            let capacity = self.get_capacity(builder);
+            emit_debug_assert_ne(builder, capacity, zero);
+
+            let align = builder.ins().iconst(
+                I64,
+                std::mem::align_of::<wasmtime_runtime::continuation::types::payloads::DataEntries>()
+                    as i64,
+            );
+            let entry_size =
+                std::mem::size_of::<wasmtime_runtime::continuation::types::payloads::DataEntries>();
+            let size = builder.ins().imul_imm(capacity, entry_size as i64);
+
+            let index = BuiltinFunctionIndex::deallocate();
+            let sig = env.builtin_function_signatures.deallocate(builder.func);
+
+            let ptr = self.get_data(builder);
+            env.generate_builtin_call_no_return_val(builder, index, sig, vec![ptr, size, align]);
+
+            self.set_capacity(builder, zero);
+            self.set_length(builder, zero);
+            self.set_data(builder, zero);
+        }
+
+        pub fn ensure_capacity<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            required_capacity: ir::Value,
+        ) {
+            let zero = builder.ins().iconst(ir::types::I64, 0);
+            emit_debug_assert_ne(builder, required_capacity, zero);
+
+            let capacity = self.get_capacity(builder);
+
+            let sufficient_capacity_block = builder.create_block();
+            let insufficient_capacity_block = builder.create_block();
+
+            let big_enough =
+                builder
+                    .ins()
+                    .icmp(IntCC::UnsignedLessThanOrEqual, required_capacity, capacity);
+
+            builder.ins().brif(
+                big_enough,
+                sufficient_capacity_block,
+                &[],
+                insufficient_capacity_block,
+                &[],
+            );
+
+            {
+                builder.switch_to_block(insufficient_capacity_block);
+                builder.seal_block(insufficient_capacity_block);
+
+                if cfg!(debug_assertions) {
+                    // We must only re-allocate while there is no data in the buffer.
+                    let length = self.get_length(builder);
+                    emit_debug_assert_eq(builder, length, zero);
+                }
+
+                let align =
+                    builder.ins().iconst(
+                        I64,
+                        std::mem::align_of::<
+                            wasmtime_runtime::continuation::types::payloads::DataEntries,
+                        >() as i64,
+                    );
+                let entry_size = std::mem::size_of::<
+                    wasmtime_runtime::continuation::types::payloads::DataEntries,
+                >();
+                let old_size = builder.ins().imul_imm(capacity, entry_size as i64);
+                let new_size = builder.ins().imul_imm(required_capacity, entry_size as i64);
+
+                let index = BuiltinFunctionIndex::reallocate();
+                let sig = env.builtin_function_signatures.reallocate(builder.func);
+
+                let ptr = self.get_data(builder);
+                let (_, new_data) = env.generate_builtin_call(
+                    builder,
+                    index,
+                    sig,
+                    vec![ptr, old_size, new_size, align],
+                );
+
+                self.set_capacity(builder, required_capacity);
+                self.set_data(builder, new_data);
+                self.set_length(builder, zero);
+                builder.ins().jump(sufficient_capacity_block, &[]);
+            }
+
+            builder.switch_to_block(sufficient_capacity_block);
+            builder.seal_block(sufficient_capacity_block);
+        }
+
+        /// Silences some unused function warnings
+        #[allow(dead_code)]
+        pub fn dummy<'a>(
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) {
+            let _index = BuiltinFunctionIndex::allocate();
+            let _sig = env.builtin_function_signatures.allocate(builder.func);
         }
     }
 }
@@ -1194,7 +1347,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
     }
 
     // Used by the typed continuations API.
-    fn generate_builtin_call(
+    pub fn generate_builtin_call(
         &mut self,
         builder: &mut FunctionBuilder,
         index: BuiltinFunctionIndex,
@@ -1210,7 +1363,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         return (vmctx, result_value);
     }
 
-    fn generate_builtin_call_no_return_val(
+    pub fn generate_builtin_call_no_return_val(
         &mut self,
         builder: &mut FunctionBuilder,
         index: BuiltinFunctionIndex,
@@ -2879,7 +3032,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
             if resume_args.len() > 0 {
                 // We store the arguments in the continuation object to be resumed.
-                let count = builder.ins().iconst(I32, resume_args.len() as i64);
+                let count = builder.ins().iconst(I64, resume_args.len() as i64);
                 self.typed_continuations_store_resume_args(
                     builder,
                     resume_args,
@@ -3150,14 +3303,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let mut values = vec![];
 
         if valtypes.len() > 0 {
-            let nargs = builder.ins().iconst(I32, valtypes.len() as i64);
+            let co = tc::ContinuationObject::new(contobj, self.pointer_type());
+            let tag_return_values = co.tag_return_values();
 
-            let (_vmctx, payload_ptr) = generate_builtin_call!(
-                self,
-                builder,
-                cont_obj_get_tag_return_values_buffer,
-                [contobj, nargs]
-            );
+            let payload_ptr = tag_return_values.get_data(builder);
 
             let mut offset = 0;
             for valtype in valtypes {
@@ -3171,12 +3320,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 offset += self.offsets.ptr.maximum_value_size() as i32;
             }
 
-            generate_builtin_call_no_return_val!(
-                self,
-                builder,
-                cont_obj_deallocate_tag_return_values_buffer,
-                [contobj]
-            );
+            tag_return_values.deallocate_buffer(self, builder);
         }
         values
     }
@@ -3219,8 +3363,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         remaining_arg_count: ir::Value,
         contobj: ir::Value,
     ) {
-        let nargs = builder.ins().iconst(I32, values.len() as i64);
-
         if values.len() > 0 {
             let use_args_block = builder.create_block();
             let use_payloads_block = builder.create_block();
@@ -3246,12 +3388,16 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             {
                 builder.switch_to_block(use_payloads_block);
                 builder.seal_block(use_payloads_block);
-                let (_vmctx, ptr) = generate_builtin_call!(
-                    self,
-                    builder,
-                    cont_obj_occupy_next_tag_returns_slots,
-                    [contobj, nargs, remaining_arg_count]
-                );
+
+                let tag_return_values = co.tag_return_values();
+
+                // Unlike for the args buffer (where we know the maximum
+                // required capacity at the time of creation of the
+                // ContinuationObject), tag return buffers are re-used and may
+                // be too small.
+                tag_return_values.ensure_capacity(self, builder, remaining_arg_count);
+
+                let ptr = tag_return_values.occupy_next_slots(builder, values.len() as i32);
                 builder.ins().jump(store_data_block, &[ptr]);
             }
 
