@@ -501,7 +501,7 @@ where
             AssertSuspension {
                 span: _,
                 exec,
-                message
+                message,
             } => {
                 let err = match self.perform_execute(exec) {
                     Ok(_) => bail!("expected tag to be unhandled"),
