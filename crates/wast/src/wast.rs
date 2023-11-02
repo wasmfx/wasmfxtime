@@ -363,7 +363,11 @@ where
         {
             Ok(())
         } else {
-            bail!("assert_suspension: expected '{}', got '{}'", expected, actual)
+            bail!(
+                "assert_suspension: expected '{}', got '{}'",
+                expected,
+                actual
+            )
         }
     }
 
