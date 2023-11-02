@@ -124,7 +124,7 @@ impl fmt::Display for Trap {
             AtomicWaitNonSharedMemory => "atomic wait on non-shared memory",
             NullReference => "null reference",
             CannotEnterComponent => "cannot enter component instance",
-            UnhandledTag => "suspending to unhandled tag",
+            UnhandledTag => "unhandled tag",
         };
         write!(f, "wasm trap: {desc}")
     }
