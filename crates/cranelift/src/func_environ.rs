@@ -428,8 +428,8 @@ mod typed_continuation_helpers {
                 std::mem::size_of::<wasmtime_runtime::continuation::types::payloads::DataEntries>();
             let size = builder.ins().imul_imm(capacity, entry_size as i64);
 
-            let index = BuiltinFunctionIndex::deallocate();
-            let sig = env.builtin_function_signatures.deallocate(builder.func);
+            let index = BuiltinFunctionIndex::tc_deallocate();
+            let sig = env.builtin_function_signatures.tc_deallocate(builder.func);
 
             let ptr = self.get_data(builder);
             env.generate_builtin_call_no_return_val(builder, index, sig, vec![ptr, size, align]);
@@ -489,8 +489,8 @@ mod typed_continuation_helpers {
                 let old_size = builder.ins().imul_imm(capacity, entry_size as i64);
                 let new_size = builder.ins().imul_imm(required_capacity, entry_size as i64);
 
-                let index = BuiltinFunctionIndex::reallocate();
-                let sig = env.builtin_function_signatures.reallocate(builder.func);
+                let index = BuiltinFunctionIndex::tc_reallocate();
+                let sig = env.builtin_function_signatures.tc_reallocate(builder.func);
 
                 let ptr = self.get_data(builder);
                 let (_, new_data) = env.generate_builtin_call(
@@ -516,8 +516,8 @@ mod typed_continuation_helpers {
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
         ) {
-            let _index = BuiltinFunctionIndex::allocate();
-            let _sig = env.builtin_function_signatures.allocate(builder.func);
+            let _index = BuiltinFunctionIndex::tc_allocate();
+            let _sig = env.builtin_function_signatures.tc_allocate(builder.func);
         }
     }
 }
@@ -3003,7 +3003,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
 
         let (_vmctx, contobj) =
-            generate_builtin_call!(self, builder, cont_new, [func, nargs, nreturns]);
+            generate_builtin_call!(self, builder, tc_cont_new, [func, nargs, nreturns]);
 
         Ok(contobj)
     }
@@ -3066,7 +3066,8 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             // The continuation object to actually call resume on.
             let resume_contobj = builder.block_params(resume_block)[0];
 
-            let (_vmctx, result) = generate_builtin_call!(self, builder, resume, [resume_contobj]);
+            let (_vmctx, result) =
+                generate_builtin_call!(self, builder, tc_resume, [resume_contobj]);
 
             // The result encodes whether the return happens via ordinary
             // means or via a suspend. If the high bit is set, then it is
@@ -3173,7 +3174,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             // We suspend, thus deferring handling to the parent.
             // We do nothing about tag *parameters*, these remain unchanged within the
             // payload buffer associated with the whole VMContext.
-            generate_builtin_call_no_return_val!(self, builder, suspend, [tag]);
+            generate_builtin_call_no_return_val!(self, builder, tc_suspend, [tag]);
 
             // "Tag return values" (i.e., values provided by cont.bind or
             // resume to the continuation) are actually stored in
@@ -3239,7 +3240,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         tag_index: ir::Value,
     ) -> ir::Value {
         // Returns the vmctx
-        return generate_builtin_call_no_return_val!(self, builder, suspend, [tag_index]);
+        return generate_builtin_call_no_return_val!(self, builder, tc_suspend, [tag_index]);
     }
 
     fn continuation_arguments(&self, index: u32) -> &[WasmType] {
@@ -3274,7 +3275,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             let nargs = builder.ins().iconst(I32, valtypes.len() as i64);
 
             let (_vmctx, payload_ptr) =
-                generate_builtin_call!(self, builder, get_payload_buffer, [nargs]);
+                generate_builtin_call!(self, builder, tc_get_payload_buffer, [nargs]);
 
             let mut offset = 0;
             for valtype in valtypes {
@@ -3288,7 +3289,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 offset += self.offsets.ptr.maximum_value_size() as i32;
             }
 
-            generate_builtin_call_no_return_val!(self, builder, deallocate_payload_buffer, [nargs]);
+            generate_builtin_call_no_return_val!(
+                self,
+                builder,
+                tc_deallocate_payload_buffer,
+                [nargs]
+            );
         }
         values
     }
@@ -3334,7 +3340,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         generate_builtin_call_no_return_val!(
             self,
             builder,
-            cont_obj_forward_tag_return_values_buffer,
+            tc_cont_obj_forward_tag_return_values_buffer,
             [parent_contobj, child_contobj]
         );
     }
@@ -3350,7 +3356,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             return contref;
         } else {
             let (_vmctx, contobj) =
-                generate_builtin_call!(self, builder, cont_ref_get_cont_obj, [contref]);
+                generate_builtin_call!(self, builder, tc_cont_ref_get_cont_obj, [contref]);
             return contobj;
         }
     }
@@ -3433,7 +3439,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             let nargs = builder.ins().iconst(I32, values.len() as i64);
 
             let (_vmctx, payload_addr) =
-                generate_builtin_call!(self, builder, allocate_payload_buffer, [nargs]);
+                generate_builtin_call!(self, builder, tc_allocate_payload_buffer, [nargs]);
 
             let mut offset = 0;
             for value in values {
@@ -3467,7 +3473,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             return contobj_addr;
         } else {
             let (_vmctx, contref) =
-                generate_builtin_call!(self, builder, new_cont_ref, [contobj_addr]);
+                generate_builtin_call!(self, builder, tc_new_cont_ref, [contobj_addr]);
             return contref;
         }
     }
@@ -3503,7 +3509,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         contobj: ir::Value,
     ) {
-        generate_builtin_call_no_return_val!(self, builder, drop_cont_obj, [contobj]);
+        generate_builtin_call_no_return_val!(self, builder, tc_drop_cont_obj, [contobj]);
     }
 
     fn typed_continuations_load_return_values(

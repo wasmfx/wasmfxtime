@@ -53,17 +53,17 @@ macro_rules! foreach_builtin_function {
             new_epoch(vmctx: vmctx) -> i64;
 
             /// Creates a new continuation from a funcref.
-            cont_new(vmctx: vmctx, r: pointer, param_count: i64, result_count: i64) -> pointer;
+            tc_cont_new(vmctx: vmctx, r: pointer, param_count: i64, result_count: i64) -> pointer;
             /// Resumes a continuation.
-            resume(vmctx: vmctx, contobj: pointer) -> i32;
+            tc_resume(vmctx: vmctx, contobj: pointer) -> i32;
             /// Suspends a continuation.
-            suspend(vmctx: vmctx, tag: i32);
+            tc_suspend(vmctx: vmctx, tag: i32);
             /// Returns the continuation object corresponding to the given continuation reference.
-            cont_ref_get_cont_obj(vmctx: vmctx, contref: pointer) -> pointer;
+            tc_cont_ref_get_cont_obj(vmctx: vmctx, contref: pointer) -> pointer;
             /// Drops the given continuation object. Currently unused.
             //cont_obj_drop(vmctx: vmctx, contobj: pointer);
             /// Crates a new continuation reference.
-            new_cont_ref(vmctx: vmctx, contobj: pointer) -> pointer;
+            tc_new_cont_ref(vmctx: vmctx, contobj: pointer) -> pointer;
 
 
             /// Allocates a buffer large enough for storing `element_count` tag
@@ -73,38 +73,38 @@ macro_rules! foreach_builtin_function {
             /// Returns a pointer to that buffer.
             /// Such a payload buffer is only used to store payloads provided
             /// at a suspend site and read in a corresponding handler.
-            allocate_payload_buffer(vmctx: vmctx, element_count: i32) -> pointer;
+            tc_allocate_payload_buffer(vmctx: vmctx, element_count: i32) -> pointer;
             /// Counterpart to `alllocate_payload_buffer`, deallocating the
             /// buffer. For debugging purposes, `expected_element_capacity`
             /// should be the same value passed when allocating.
-            deallocate_payload_buffer(vmctx: vmctx, expected_element_capacity: i32);
+            tc_deallocate_payload_buffer(vmctx: vmctx, expected_element_capacity: i32);
             /// Returns pointer to the payload buffer, whose function was described earlier.
             /// `expected_element_capacity` should be the same value passed when
             /// allocating.
-            get_payload_buffer(vmctx: vmctx, expected_element_capacity: i32) -> pointer;
+            tc_get_payload_buffer(vmctx: vmctx, expected_element_capacity: i32) -> pointer;
 
 
             /// Sets the tag return values of `child_contobj` to those of `parent_contobj`.
             /// This is implemented by exchanging the pointers to the underlying buffers.
             /// `child_contobj` must not currently have a tag return value buffer.
             /// `parent_contobj` may or may not have one.
-            cont_obj_forward_tag_return_values_buffer(vmctx: vmctx, parent_contobj: pointer, child_contobj : pointer);
+            tc_cont_obj_forward_tag_return_values_buffer(vmctx: vmctx, parent_contobj: pointer, child_contobj : pointer);
 
             /// TODO
-            drop_cont_obj(vmctx: vmctx, contobj: pointer);
+            tc_drop_cont_obj(vmctx: vmctx, contobj: pointer);
 
             /// General-purpose allocation. Only used by typed-continuations
             /// code at the moment.
-            allocate(vmctx: vmctx, size: i64, align: i64) -> pointer;
+            tc_allocate(vmctx: vmctx, size: i64, align: i64) -> pointer;
             /// General-purpose deallocation. Only used by typed-continuations
             /// code at the moment.
-            deallocate(vmctx: vmctx, ptr: pointer, size: i64, align: i64);
+            tc_deallocate(vmctx: vmctx, ptr: pointer, size: i64, align: i64);
             /// General-purpose reallocation without preserving existing data. Concretely, behaves like
             /// deallocate followed by allocate.
             /// The only difference is that if `old_size` is 0, then we assume that ptr does not point to allocated memory
             /// and do not actually deallocate.
             /// `old_size` must be smaller than `new_size`
-            reallocate(vmctx: vmctx, ptr: pointer, old_size: i64, new_size: i64, align: i64) -> pointer;
+            tc_reallocate(vmctx: vmctx, ptr: pointer, old_size: i64, new_size: i64, align: i64) -> pointer;
 
             /// Invoked before malloc returns.
             check_malloc(vmctx: vmctx, addr: i32, len: i32) -> i32;

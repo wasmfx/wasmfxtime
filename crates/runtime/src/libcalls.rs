@@ -776,7 +776,7 @@ pub mod relocs {
 
 // Builtins for continuations. These are thin wrappers around the
 // respective definitions in continuation.rs.
-fn cont_new(
+fn tc_cont_new(
     instance: &mut Instance,
     func: *mut u8,
     param_count: u64,
@@ -786,23 +786,23 @@ fn cont_new(
         as *mut u8
 }
 
-fn resume(instance: &mut Instance, contobj: *mut u8) -> Result<u32, TrapReason> {
+fn tc_resume(instance: &mut Instance, contobj: *mut u8) -> Result<u32, TrapReason> {
     crate::continuation::resume(
         instance,
         contobj as *mut crate::continuation::ContinuationObject,
     )
 }
 
-fn suspend(instance: &mut Instance, tag_index: u32) {
+fn tc_suspend(instance: &mut Instance, tag_index: u32) {
     crate::continuation::suspend(instance, tag_index)
 }
 
-fn new_cont_ref(_instance: &mut Instance, contobj: *mut u8) -> *mut u8 {
+fn tc_new_cont_ref(_instance: &mut Instance, contobj: *mut u8) -> *mut u8 {
     crate::continuation::new_cont_ref(contobj as *mut crate::continuation::ContinuationObject)
         as *mut u8
 }
 
-fn cont_ref_get_cont_obj(
+fn tc_cont_ref_get_cont_obj(
     _instance: &mut Instance,
     contref: *mut u8,
 ) -> Result<*mut u8, TrapReason> {
@@ -811,7 +811,7 @@ fn cont_ref_get_cont_obj(
     )? as *mut u8)
 }
 
-fn cont_obj_forward_tag_return_values_buffer(
+fn tc_cont_obj_forward_tag_return_values_buffer(
     _instance: &mut Instance,
     parent_contobj: *mut u8,
     child_contobj: *mut u8,
@@ -822,37 +822,37 @@ fn cont_obj_forward_tag_return_values_buffer(
     );
 }
 
-fn allocate_payload_buffer(instance: &mut Instance, element_count: u32) -> *mut u8 {
+fn tc_allocate_payload_buffer(instance: &mut Instance, element_count: u32) -> *mut u8 {
     crate::continuation::allocate_payload_buffer(instance, element_count as usize) as *mut u8
 }
 
-fn deallocate_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) {
+fn tc_deallocate_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) {
     crate::continuation::deallocate_payload_buffer(instance, expected_element_capacity as usize);
 }
 
-fn get_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) -> *mut u8 {
+fn tc_get_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) -> *mut u8 {
     crate::continuation::get_payload_buffer(instance, expected_element_capacity as usize) as *mut u8
 }
 
-fn drop_cont_obj(_instance: &mut Instance, contobj: *mut u8) {
+fn tc_drop_cont_obj(_instance: &mut Instance, contobj: *mut u8) {
     crate::continuation::drop_cont_obj(contobj as *mut crate::continuation::ContinuationObject)
 }
 
-fn allocate(_instance: &mut Instance, size: u64, align: u64) -> *mut u8 {
+fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> *mut u8 {
     debug_assert!(size > 0);
     let layout =
         std::alloc::Layout::from_size_align(size as usize, align as usize).expect("invalid Layout");
     unsafe { std::alloc::alloc(layout) }
 }
 
-fn deallocate(_instance: &mut Instance, ptr: *mut u8, size: u64, align: u64) {
+fn tc_deallocate(_instance: &mut Instance, ptr: *mut u8, size: u64, align: u64) {
     debug_assert!(size > 0);
     let layout =
         std::alloc::Layout::from_size_align(size as usize, align as usize).expect("invalid Layout");
     unsafe { std::alloc::dealloc(ptr, layout) };
 }
 
-fn reallocate(
+fn tc_reallocate(
     instance: &mut Instance,
     ptr: *mut u8,
     old_size: u64,
@@ -862,8 +862,8 @@ fn reallocate(
     debug_assert!(old_size < new_size);
 
     if old_size > 0 {
-        deallocate(instance, ptr, old_size, align);
+        tc_deallocate(instance, ptr, old_size, align);
     }
 
-    allocate(instance, new_size, align)
+    tc_allocate(instance, new_size, align)
 }
