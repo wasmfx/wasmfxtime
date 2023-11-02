@@ -54,6 +54,9 @@ pub enum TrapCode {
 
     /// A null reference was encountered which was required to be non-null.
     NullReference,
+
+    /// We are suspending to a tag for which there is no active handler.
+    UnhandledTag,
 }
 
 impl TrapCode {
@@ -72,6 +75,7 @@ impl TrapCode {
             TrapCode::UnreachableCodeReached,
             TrapCode::Interrupt,
             TrapCode::NullReference,
+            TrapCode::UnhandledTag,
         ]
     }
 }
@@ -93,6 +97,7 @@ impl Display for TrapCode {
             Interrupt => "interrupt",
             User(x) => return write!(f, "user{}", x),
             NullReference => "null_reference",
+            UnhandledTag => "unhandled_tag",
         };
         f.write_str(identifier)
     }
@@ -116,6 +121,7 @@ impl FromStr for TrapCode {
             "unreachable" => Ok(UnreachableCodeReached),
             "interrupt" => Ok(Interrupt),
             "null_reference" => Ok(NullReference),
+            "unhandled_tag" => Ok(UnhandledTag),
             _ if s.starts_with("user") => s[4..].parse().map(User).map_err(|_| ()),
             _ => Err(()),
         }

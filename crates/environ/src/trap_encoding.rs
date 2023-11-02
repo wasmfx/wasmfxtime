@@ -97,6 +97,9 @@ pub enum Trap {
     /// would have violated the reentrance rules of the component model,
     /// triggering a trap instead.
     CannotEnterComponent,
+
+    /// We are suspending to a tag for which there is no active handler.
+    UnhandledTag,
     // if adding a variant here be sure to update the `check!` macro below
 }
 
@@ -121,6 +124,7 @@ impl fmt::Display for Trap {
             AtomicWaitNonSharedMemory => "atomic wait on non-shared memory",
             NullReference => "null reference",
             CannotEnterComponent => "cannot enter component instance",
+            UnhandledTag => "unhandled tag",
         };
         write!(f, "wasm trap: {desc}")
     }
@@ -237,6 +241,7 @@ pub fn lookup_trap_code(section: &[u8], offset: usize) -> Option<Trap> {
         AtomicWaitNonSharedMemory
         NullReference
         CannotEnterComponent
+        UnhandledTag
     }
 
     if cfg!(debug_assertions) {

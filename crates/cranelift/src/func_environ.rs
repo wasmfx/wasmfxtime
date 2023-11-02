@@ -3013,8 +3013,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
             let parent_contobj = self.typed_continuations_load_parent(builder, resumed_contobj);
 
-            // TODO(frank-emrich): Check if parent is null. If so, we are at
-            // the toplevel and simply have no handler for the given tag and must trap.
+            builder
+                .ins()
+                .trapz(parent_contobj, ir::TrapCode::UnhandledTag);
 
             // We suspend, thus deferring handling to the parent.
             // We do nothing about tag *parameters*, these remain unchanged within the
