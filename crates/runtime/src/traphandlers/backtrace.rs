@@ -280,7 +280,9 @@ impl Backtrace {
 
             // Because the stack always grows down, the older FP must be greater
             // than the current FP.
-            assert!(next_older_fp > fp, "{next_older_fp:#x} > {fp:#x}");
+            // TODO(dhil): The following assertion is not always true
+            // in the presence of stack switching.
+            //assert!(next_older_fp > fp, "{next_older_fp:#x} > {fp:#x}");
             fp = next_older_fp;
         }
     }
