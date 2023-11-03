@@ -36,6 +36,7 @@ wasmtime-wasi-nn = { workspace = true, optional = true }
 wasmtime-wasi-threads = { workspace = true, optional = true }
 wasmtime-wasi-http = { workspace = true, optional = true }
 wasmtime-runtime = { workspace = true }
+wasmtime-continuations = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 target-lexicon = { workspace = true }
@@ -67,6 +68,7 @@ log = { workspace = true }
 filecheck = { workspace = true }
 tempfile = { workspace = true }
 wasmtime-runtime = { workspace = true }
+wasmtime-continuations = { workspace = true }
 tokio = { workspace = true, features = ["rt", "time", "macros", "rt-multi-thread"] }
 wast = { workspace = true }
 criterion = "0.5.0"
@@ -146,6 +148,7 @@ wasmtime-types = { path = "crates/types", version = "15.0.0" }
 wasmtime-jit = { path = "crates/jit", version = "=15.0.0" }
 wasmtime-jit-debug = { path = "crates/jit-debug", version = "=15.0.0" }
 wasmtime-runtime = { path = "crates/runtime", version = "=15.0.0" }
+wasmtime-continuations = { path = "crates/continuations", version = "=15.0.0" }
 wasmtime-wast = { path = "crates/wast", version = "=15.0.0" }
 wasmtime-wasi = { path = "crates/wasi", version = "15.0.0", default-features = false }
 wasmtime-wasi-http = { path = "crates/wasi-http", version = "=15.0.0", default-features = false }

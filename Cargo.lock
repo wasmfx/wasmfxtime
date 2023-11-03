@@ -3439,6 +3439,7 @@ dependencies = [
  "wasmtime-cache",
  "wasmtime-cli-flags",
  "wasmtime-component-util",
+ "wasmtime-continuations",
  "wasmtime-cranelift",
  "wasmtime-environ",
  "wasmtime-explorer",
@@ -3487,6 +3488,15 @@ name = "wasmtime-component-util"
 version = "15.0.0"
 
 [[package]]
+name = "wasmtime-continuations"
+version = "15.0.0"
+dependencies = [
+ "memoffset",
+ "num_enum",
+ "wasmtime-fibre",
+]
+
+[[package]]
 name = "wasmtime-cranelift"
 version = "15.0.0"
 dependencies = [
@@ -3504,9 +3514,9 @@ dependencies = [
  "target-lexicon",
  "thiserror",
  "wasmparser 0.116.0 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.50)",
+ "wasmtime-continuations",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
- "wasmtime-runtime",
  "wasmtime-versioned-export-macros",
 ]
 
@@ -3715,7 +3725,6 @@ dependencies = [
  "mach",
  "memfd",
  "memoffset",
- "num_enum",
  "once_cell",
  "paste",
  "proptest",
@@ -3724,6 +3733,7 @@ dependencies = [
  "sptr",
  "wasm-encoder 0.36.1 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.50)",
  "wasmtime-asm-macros",
+ "wasmtime-continuations",
  "wasmtime-environ",
  "wasmtime-fiber",
  "wasmtime-fibre",
