@@ -351,6 +351,26 @@ where
         bail!("expected '{}', got '{}'", expected, actual)
     }
 
+    fn assert_suspension(&self, result: Outcome, expected: &str) -> Result<()> {
+        let trap = match result {
+            Outcome::Ok(values) => bail!("expected suspension, got {:?}", values),
+            Outcome::Trap(t) => t,
+        };
+        let actual = format!("{trap:?}");
+        if actual.contains(expected)
+            || actual.contains("unhandled tag")
+            || actual.contains("Calling suspend outside of a continuation")
+        {
+            Ok(())
+        } else {
+            bail!(
+                "assert_suspension: expected '{}', got '{}'",
+                expected,
+                actual
+            )
+        }
+    }
+
     /// Run a wast script from a byte buffer.
     pub fn run_buffer(&mut self, filename: &str, wast: &[u8]) -> Result<()> {
         let wast = str::from_utf8(wast)?;
@@ -498,7 +518,14 @@ where
                 }
             }
             AssertException { .. } => bail!("unimplemented assert_exception"),
-            AssertSuspension { .. } => bail!("unimplemented assert_suspension"),
+            AssertSuspension {
+                span: _,
+                exec,
+                message,
+            } => {
+                let result = self.perform_execute(exec)?;
+                self.assert_suspension(result, message)?;
+            }
 
             Thread(thread) => {
                 let mut core_linker = Linker::new(self.store.engine());
