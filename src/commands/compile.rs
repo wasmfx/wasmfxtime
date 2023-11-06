@@ -60,6 +60,15 @@ pub struct CompileCommand {
 impl CompileCommand {
     /// Executes the command.
     pub fn execute(mut self) -> Result<()> {
+        // Note that because of this, `cargo test` does not succeed when
+        // `ENABLE_DEBUG_PRINTING` is true, simply because some tests directly
+        // test `wasmtime compile`. However, all typed continuation unit tests
+        // are still usable.
+        assert!(
+            !wasmtime_continuations::ENABLE_DEBUG_PRINTING,
+            "Cannot store compiled code while debug printing is enabled"
+        );
+
         self.common.init_logging()?;
 
         let mut config = self.common.config(self.target.as_deref())?;

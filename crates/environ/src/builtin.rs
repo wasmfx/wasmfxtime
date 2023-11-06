@@ -106,6 +106,16 @@ macro_rules! foreach_builtin_function {
             /// `old_size` must be smaller than `new_size`
             tc_reallocate(vmctx: vmctx, ptr: pointer, old_size: i64, new_size: i64, align: i64) -> pointer;
 
+            // General-purpose printing functions.
+            //
+            /// Prints a string. Note that we transfer the string not as C strings, but as 'static str,
+            /// represented as a pointer and a length.
+            tc_print_str(vmctx: vmctx, s: pointer, len : i64);
+            /// TODO
+            tc_print_int(vmctx: vmctx, arg : i64);
+            /// TODO
+            tc_print_pointer(vmctx: vmctx, arg : pointer);
+
             /// Invoked before malloc returns.
             check_malloc(vmctx: vmctx, addr: i32, len: i32) -> i32;
             /// Invoked before the free returns.

@@ -207,6 +207,122 @@ mod typed_continuation_helpers {
     use std::mem;
     use wasmtime_environ::BuiltinFunctionIndex;
 
+    /// Low-level implementation of debug printing. Do not use directly; see
+    /// `emit_debug_println!` macro for doing actual printing.
+    ///
+    /// Takes a string literal which may contain placeholders similarly to those
+    /// supported by `std::fmt`.
+    ///
+    /// Currently supported placeholders:
+    /// {}       for unsinged integers
+    /// {:p}     for printing pointers (in hex form)
+    ///
+    /// When printing, we replace them with the corresponding values in `vals`.
+    /// Thus, the number of placeholders in `s` must match the number of entries
+    /// in `vals`.
+    fn emit_debug_print<'a>(
+        env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+        s: &'static str,
+        vals: &[ir::Value],
+    ) {
+        let print_s_infix = |env: &mut crate::func_environ::FuncEnvironment<'a>,
+                             builder: &mut FunctionBuilder,
+                             start: usize,
+                             end: usize| {
+            if start < end {
+                let s: &'static str = &s[start..end];
+                // This is quite dodgy, which is why we can only do this for
+                // debugging purposes:
+                // At jit time, we take a pointer to the slice of the (static)
+                // string, thus yielding an address within wasmtime's DATA
+                // section. This pointer is hard-code into generated code. We do
+                // not emit any kind of relocation information, which means that
+                // this breaks if we were to store the generated code and use it
+                // during subsequent executions of wasmtime (e.g., when using
+                // wasmtime compile).
+                let ptr = s.as_ptr();
+                let ptr = builder.ins().iconst(env.pointer_type(), ptr as i64);
+                let len = s.len();
+                let len = builder.ins().iconst(I64, len as i64);
+
+                let index = BuiltinFunctionIndex::tc_print_str();
+                let sig = env.builtin_function_signatures.tc_print_str(builder.func);
+                env.generate_builtin_call_no_return_val(builder, index, sig, vec![ptr, len]);
+            }
+        };
+        let print_int = |env: &mut crate::func_environ::FuncEnvironment<'a>,
+                         builder: &mut FunctionBuilder,
+                         val: ir::Value| {
+            let index = BuiltinFunctionIndex::tc_print_int();
+            let sig = env.builtin_function_signatures.tc_print_int(builder.func);
+            env.generate_builtin_call_no_return_val(builder, index, sig, vec![val]);
+        };
+        let print_pointer = |env: &mut crate::func_environ::FuncEnvironment<'a>,
+                             builder: &mut FunctionBuilder,
+                             ptr: ir::Value| {
+            let index = BuiltinFunctionIndex::tc_print_pointer();
+            let sig = env
+                .builtin_function_signatures
+                .tc_print_pointer(builder.func);
+            env.generate_builtin_call_no_return_val(builder, index, sig, vec![ptr]);
+        };
+
+        if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
+            // Regex matching { followed by something without { or } followed by }.
+            let placeholder_re = regex::Regex::new(r"\{[^{}]*\}").unwrap();
+
+            let mut prev_end = 0;
+            let mut i = 0;
+            for ph_match in placeholder_re.find_iter(s) {
+                let start = ph_match.start();
+                let end = ph_match.end();
+
+                assert!(
+                    i < vals.len(),
+                    "Must supply as many entries in vals as there are placeholders in the string"
+                );
+
+                print_s_infix(env, builder, prev_end, start);
+                match ph_match.as_str() {
+                    "{}" => print_int(env, builder, vals[i]),
+                    "{:p}" => print_pointer(env, builder, vals[i]),
+                    u => panic!("Unsupported placeholder in debug_print input string: {}", u),
+                }
+                prev_end = end;
+                i += 1;
+            }
+            assert_eq!(
+                i,
+                vals.len(),
+                "Must supply as many entries in vals as there are placeholders in the string"
+            );
+
+            print_s_infix(env, builder, prev_end, s.len());
+        }
+    }
+
+    /// Emits code to print debug information. Only actually prints in debug
+    /// builds and if debug printing flag is enabled. The third and all
+    /// following arguments are like those to println!: A string literal with
+    /// placeholders followed by the actual values.
+    ///
+    /// Summary of arguments:
+    /// * `env` - Type &mut crate::func_environ::FuncEnvironment<'a>
+    /// * `builder` - Type &mut FunctionBuilder,
+    /// * `msg` : String literal, containing placeholders like those supported by println!
+    /// * remaining arguments: ir::Values filled into the placeholders in `msg`
+    #[allow(unused_macros)]
+    macro_rules! emit_debug_println {
+        ($env : expr, $builder : expr, $msg : literal, $( $arg:expr ),*) => {
+            let msg_newline : &'static str= std::concat!(
+                $msg,
+                "\n"
+            );
+            emit_debug_print($env, $builder, msg_newline, &[$($arg),*]);
+        }
+    }
+
     #[derive(Copy, Clone)]
     pub struct ContinuationObject {
         address: ir::Value,
@@ -443,6 +559,17 @@ mod typed_continuation_helpers {
             let zero = builder.ins().iconst(ir::types::I64, 0);
             emit_debug_assert_ne(builder, required_capacity, zero);
 
+            if cfg!(debug_assertions) {
+                let data = self.get_data(builder);
+                emit_debug_println!(
+                    env,
+                    builder,
+                    "[ensure_capacity] contobj {:p}, buffer is {:p}",
+                    self.contobj(),
+                    data
+                );
+            }
+
             let capacity = self.get_capacity(builder);
 
             let sufficient_capacity_block = builder.create_block();
@@ -464,6 +591,14 @@ mod typed_continuation_helpers {
             {
                 builder.switch_to_block(insufficient_capacity_block);
                 builder.seal_block(insufficient_capacity_block);
+
+                emit_debug_println!(
+                    env,
+                    builder,
+                    "[ensure_capacity] need to increase capacity from {} to {}",
+                    capacity,
+                    required_capacity
+                );
 
                 if cfg!(debug_assertions) {
                     // We must only re-allocate while there is no data in the buffer.
