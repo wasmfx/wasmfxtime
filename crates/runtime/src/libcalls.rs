@@ -190,6 +190,13 @@ pub mod trampolines {
             self
         }
     }
+
+    impl LibcallResult for u64 {
+        type Abi = u64;
+        unsafe fn convert(self) -> u64 {
+            self
+        }
+    }
 }
 
 fn memory32_grow(
@@ -792,12 +799,13 @@ fn tc_resume(
     instance: &mut Instance,
     contobj: *mut u8,
     parent_stack_limits: *mut u8,
-) -> Result<u32, TrapReason> {
+) -> Result<u64, TrapReason> {
     crate::continuation::resume(
         instance,
         contobj.cast::<crate::continuation::ContinuationObject>(),
         parent_stack_limits.cast::<crate::continuation::StackLimits>(),
     )
+    .into()
 }
 
 fn tc_suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {

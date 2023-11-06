@@ -11,7 +11,7 @@
 //!
 //! ```text
 //! 0xB000 +-----------------------+   <- top of stack
-//!        | &Cell<RunResult>      |   <- where to store results
+//!        | unused                |
 //! 0xAff8 +-----------------------+
 //!        | *const u8             |   <- last sp to resume from
 //! 0xAff0 +-----------------------+   <- 16-byte aligned
@@ -31,9 +31,8 @@
 
 #![allow(unused_macros)]
 
-use crate::RunResult;
+use crate::SwitchReason;
 use std::alloc::{alloc, dealloc, Layout};
-use std::cell::Cell;
 use std::io;
 use std::ops::Range;
 use std::ptr;
@@ -135,73 +134,48 @@ extern "C" {
         entry: extern "C" fn(*mut u8, *mut u8),
         entry_arg0: *mut u8,
     );
-    fn wasmtime_fibre_switch(top_of_stack: *mut u8);
+    fn wasmtime_fibre_switch(top_of_stack: *mut u8, payload: u64) -> u64;
     #[allow(dead_code)] // only used in inline assembly for some platforms
     fn wasmtime_fibre_start();
 }
 
-extern "C" fn fiber_start<F, A, B, C>(arg0: *mut u8, top_of_stack: *mut u8)
+extern "C" fn fiber_start<F>(arg0: *mut u8, top_of_stack: *mut u8)
 where
-    F: FnOnce(A, &super::Suspend<A, B, C>) -> C,
+    F: FnOnce((), &super::Suspend) -> (),
 {
     unsafe {
         let inner = Suspend(top_of_stack);
-        let initial = inner.take_resume::<A, B, C>();
-        super::Suspend::<A, B, C>::execute(inner, initial, Box::from_raw(arg0.cast::<F>()))
+        super::Suspend::execute(inner, Box::from_raw(arg0.cast::<F>()))
     }
 }
 
 impl Fiber {
-    pub fn new<F, A, B, C>(stack: &FiberStack, func: F) -> io::Result<Self>
+    pub fn new<F>(stack: &FiberStack, func: F) -> io::Result<Self>
     where
-        F: FnOnce(A, &super::Suspend<A, B, C>) -> C,
+        F: FnOnce((), &super::Suspend) -> (),
     {
         unsafe {
             let data = Box::into_raw(Box::new(func)).cast();
-            wasmtime_fibre_init(stack.top, fiber_start::<F, A, B, C>, data);
+            wasmtime_fibre_init(stack.top, fiber_start::<F>, data);
         }
 
         Ok(Self)
     }
 
-    pub(crate) fn resume<A, B, C>(&self, stack: &FiberStack, result: &Cell<RunResult<A, B, C>>) {
+    pub(crate) fn resume(&self, stack: &FiberStack) -> SwitchReason {
         unsafe {
-            // Store where our result is going at the very tip-top of the
-            // stack, otherwise known as our reserved slot for this information.
-            //
-            // In the diagram above this is updating address 0xAff8
-            let addr = stack.top.cast::<usize>().offset(-1);
-            addr.write(result as *const _ as usize);
-
-            wasmtime_fibre_switch(stack.top);
-
-            // null this out to help catch use-after-free
-            addr.write(0);
+            let reason = SwitchReason::resume().into();
+            SwitchReason::from(wasmtime_fibre_switch(stack.top, reason))
         }
     }
 }
 
 impl Suspend {
-    pub fn switch<A, B, C>(&self, result: RunResult<A, B, C>) -> A {
+    pub fn switch(&self, payload: SwitchReason) {
         unsafe {
-            // Calculate 0xAff8 and then write to it
-            (*self.result_location::<A, B, C>()).set(result);
-            wasmtime_fibre_switch(self.0);
-            self.take_resume::<A, B, C>()
+            let arg = payload.into();
+            wasmtime_fibre_switch(self.0, arg);
         }
-    }
-
-    unsafe fn take_resume<A, B, C>(&self) -> A {
-        match (*self.result_location::<A, B, C>()).replace(RunResult::Executing) {
-            RunResult::Resuming(val) => val,
-            _ => panic!("not in resuming state"),
-        }
-    }
-
-    unsafe fn result_location<A, B, C>(&self) -> *const Cell<RunResult<A, B, C>> {
-        let ret = self.0.cast::<*const u8>().offset(-1).read();
-        assert!(!ret.is_null());
-        ret.cast()
     }
 
     pub fn from_top_ptr(ptr: *mut u8) -> Self {
