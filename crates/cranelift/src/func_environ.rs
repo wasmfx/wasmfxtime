@@ -297,6 +297,12 @@ mod typed_continuation_helpers {
         }
     }
 
+    
+    /// Low-level implementation of assertion mechanism. Use emit_debug_* macros
+    /// instead.
+    ///
+    /// If `ENABLE_DEBUG_PRINTING` is enabled, `error_str` is printed before
+    /// trapping in case of an assertion violation.
     fn emit_debug_assert_generic<'a>(
         env: &mut crate::func_environ::FuncEnvironment<'a>,
         builder: &mut FunctionBuilder,
@@ -329,6 +335,13 @@ mod typed_continuation_helpers {
         }
     }
 
+    /// Low-level implementation of assertion mechanism. Use emit_debug_* macros
+    /// instead.
+    ///
+    /// If `ENABLE_DEBUG_PRINTING` is enabled, `error_str` is printed before
+    /// trapping in case of an assertion violation. Here, `error_str` is expected
+    /// to contain two placeholders, such as {} or {:p}, which are replaced with
+    /// `v1` and `v2` when printing.
     fn emit_debug_assert_icmp<'a>(
         env: &mut crate::func_environ::FuncEnvironment<'a>,
         builder: &mut FunctionBuilder,
@@ -365,6 +378,7 @@ mod typed_continuation_helpers {
         }
     }
 
+    /// Used to implement other macros, do not use directly.
     macro_rules! emit_debug_assert_icmp {
         ( $env : expr,
             $builder: expr,
