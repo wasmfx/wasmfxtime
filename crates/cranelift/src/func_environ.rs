@@ -386,9 +386,6 @@ mod typed_continuation_helpers {
         $operator_string  : expr,
         $v1 : expr,
         $v2 : expr) => {
-            // `debug_print` *must* take a string literal, which means that we
-            // need macro magic to construct one (rather than just a String
-            // object).
             let msg: &'static str = std::concat!(
                 "assertion failure in ",
                 std::file!(),
@@ -404,9 +401,6 @@ mod typed_continuation_helpers {
 
     macro_rules! emit_debug_assert {
         ($env: expr, $builder: expr, $condition: expr) => {
-            // `debug_print` *must* take a string literal, which means that we
-            // need macro magic to construct one (rather than just a String
-            // object).
             let msg: &'static str = std::concat!(
                 "assertion failure in ",
                 std::file!(),
@@ -643,7 +637,6 @@ mod typed_continuation_helpers {
             builder.ins().iadd(data, byte_offset)
         }
 
-        #[allow(dead_code)]
         pub fn deallocate_buffer<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
