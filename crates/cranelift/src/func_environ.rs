@@ -208,7 +208,7 @@ mod typed_continuation_helpers {
     use wasmtime_environ::BuiltinFunctionIndex;
 
     /// Low-level implementation of debug printing. Do not use directly; see
-    /// debug_println! macro for doing actual printing.
+    /// `emit_debug_println!` macro for doing actual printing.
     ///
     /// Takes a string literal which may contain placeholders similarly to those
     /// supported by `std::fmt`.
