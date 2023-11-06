@@ -3108,10 +3108,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
         // Strategy:
         //
-        // Translate each each (tag, label) pair in the resume table to a
-        // switch-case of the form "case tag: br label".
-        // The switching logic then ensures that we jump to the block
-        // handling the corresponding tag.
+        // Translate each each `(tag, label)` pair in the resume table
+        // to a switch-case of the form "case tag: br label". NOTE:
+        // `tag` may appear multiple times in resume table, only the
+        // first appearance should be processed as it shadows the
+        // subsequent entries.  The switching logic then ensures that
+        // we jump to the block handling the corresponding tag.
         //
         // The fallback/default case performs effect forwarding (TODO).
         //
@@ -3119,7 +3121,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let mut switch = Switch::new();
         // Second, we consume the resume table entry-wise.
         let mut case_blocks = vec![];
+        let mut tag_seen = std::collections::HashSet::new(); // Used to keep track of tags
         for &(tag, target_block) in resumetable {
+            // Skip if this `tag` has been seen previously.
+            if !tag_seen.insert(tag) {
+                continue;
+            }
             let case = builder.create_block();
             switch.set_entry(tag as u128, case);
             builder.switch_to_block(case);
