@@ -297,7 +297,6 @@ mod typed_continuation_helpers {
         }
     }
 
-    
     /// Low-level implementation of assertion mechanism. Use emit_debug_* macros
     /// instead.
     ///
