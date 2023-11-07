@@ -631,6 +631,7 @@ mod typed_continuation_helpers {
             builder.ins().iadd(data, byte_offset)
         }
 
+        #[allow(dead_code)]
         pub fn deallocate_buffer<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
