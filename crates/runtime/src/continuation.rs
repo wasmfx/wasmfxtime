@@ -51,7 +51,7 @@ pub fn cont_obj_forward_tag_return_values_buffer(
     assert!(parent.state == State::Invoked);
     assert!(child.state == State::Invoked);
 
-    assert!(child.tag_return_values.capacity == 0);
+    assert!(child.tag_return_values.length == 0);
 
     mem::swap(&mut child.tag_return_values, &mut parent.tag_return_values);
 }

@@ -631,6 +631,7 @@ mod typed_continuation_helpers {
             builder.ins().iadd(data, byte_offset)
         }
 
+        #[allow(dead_code)]
         pub fn deallocate_buffer<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -815,6 +816,11 @@ mod typed_continuation_helpers {
             self.set_length(builder, store_count);
         }
 
+        pub fn clear(&self, builder: &mut FunctionBuilder) {
+            let zero = builder.ins().iconst(I64, 0);
+            self.set_length(builder, zero);
+        }
+
         /// Silences some unused function warnings
         #[allow(dead_code)]
         pub fn dummy<'a>(
@@ -823,6 +829,8 @@ mod typed_continuation_helpers {
         ) {
             let _index = BuiltinFunctionIndex::tc_allocate();
             let _sig = env.builtin_function_signatures.tc_allocate(builder.func);
+            let _index = BuiltinFunctionIndex::tc_deallocate();
+            let _sig = env.builtin_function_signatures.tc_deallocate(builder.func);
         }
     }
 }
@@ -3597,7 +3605,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
             values = vmctx_payloads.load_data_entries(self, builder, valtypes);
 
-            vmctx_payloads.deallocate_buffer(self, builder);
+            // In theory, we way want to deallocate the buffer instead of just
+            // clearing it if its size is above a certain threshold. That would
+            // avoid keeping a large object unnecessarily long.
+            vmctx_payloads.clear(builder);
         }
         values
     }
@@ -3629,7 +3640,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 offset += self.offsets.ptr.maximum_value_size() as i32;
             }
 
-            tag_return_values.deallocate_buffer(self, builder);
+            // In theory, we way want to deallocate the buffer instead of just
+            // clearing it if its size is above a certain threshold. That would
+            // avoid keeping a large object unnecessarily long.
+            tag_return_values.clear(builder);
         }
         values
     }
