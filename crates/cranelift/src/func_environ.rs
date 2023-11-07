@@ -746,6 +746,9 @@ mod typed_continuation_helpers {
             builder.seal_block(sufficient_capacity_block);
         }
 
+        /// Loads n entries from this Payloads object, where n is the length of
+        /// `load_types`, which also gives the types of the values to load.
+        /// Loading starts at index 0 of the Payloads object.
         pub fn load_data_entries<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -775,6 +778,10 @@ mod typed_continuation_helpers {
             values
         }
 
+        /// Stores the given `values` in this Payloads object, beginning at
+        /// index 0. This expects the Payloads object to be empty (i.e., current
+        /// length is 0), and to be of sufficient capacity to store |`values`|
+        /// entries.
         pub fn store_data_entries<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -785,7 +792,10 @@ mod typed_continuation_helpers {
 
             if cfg!(debug_assertions) {
                 let capacity = self.get_capacity(builder);
+                let length = self.get_length(builder);
+                let zero = builder.ins().iconst(I64, 0);
                 emit_debug_assert_ule!(env, builder, store_count, capacity);
+                emit_debug_assert_eq!(env, builder, length, zero);
             }
 
             let memflags = ir::MemFlags::trusted();
