@@ -3555,6 +3555,7 @@ dependencies = [
  "wasmparser 0.116.0 (git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.50)",
  "wasmprinter",
  "wasmtime-component-util",
+ "wasmtime-continuations",
  "wasmtime-types",
  "wat",
 ]

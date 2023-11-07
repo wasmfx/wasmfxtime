@@ -822,18 +822,6 @@ fn tc_cont_obj_forward_tag_return_values_buffer(
     );
 }
 
-fn tc_allocate_payload_buffer(instance: &mut Instance, element_count: u32) -> *mut u8 {
-    crate::continuation::allocate_payload_buffer(instance, element_count as usize) as *mut u8
-}
-
-fn tc_deallocate_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) {
-    crate::continuation::deallocate_payload_buffer(instance, expected_element_capacity as usize);
-}
-
-fn tc_get_payload_buffer(instance: &mut Instance, expected_element_capacity: u32) -> *mut u8 {
-    crate::continuation::get_payload_buffer(instance, expected_element_capacity as usize) as *mut u8
-}
-
 fn tc_drop_cont_obj(_instance: &mut Instance, contobj: *mut u8) {
     crate::continuation::drop_cont_obj(contobj as *mut crate::continuation::ContinuationObject)
 }

@@ -761,7 +761,7 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
     fn typed_continuations_load_payloads(
         &mut self,
         _builder: &mut FunctionBuilder,
-        _valtypes: &[WasmType],
+        _valtypes: &[ir::Type],
     ) -> Vec<ir::Value> {
         todo!()
     }

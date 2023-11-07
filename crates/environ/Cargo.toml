@@ -14,6 +14,7 @@ edition.workspace = true
 anyhow = { workspace = true }
 cranelift-entity = { workspace = true }
 wasmtime-types = { workspace = true }
+wasmtime-continuations = { workspace = true }
 wasmparser = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
