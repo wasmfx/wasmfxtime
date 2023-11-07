@@ -477,10 +477,11 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
             ),
             size(typed_continuations_store)
                 = ret.ptr.size(),
-             align(std::mem::align_of::<wasmtime_continuations::Payloads>() as u32),
-            //align(u32::from(ret.ptr.size())),
-            size(typed_continuations_payloads) = std::mem::size_of::<wasmtime_continuations::Payloads>() as u32,
-            //size(typed_continuations_payloads) = ret.ptr.size() * 3,
+
+            align(std::mem::align_of::<wasmtime_continuations::Payloads>() as u32),
+            size(typed_continuations_payloads) =
+                std::mem::size_of::<wasmtime_continuations::Payloads>() as u32,
+
             align(16), // TODO(dhil): This could probably be done more
                        // efficiently by packing the pointer into the above 16 byte
                        // alignment
@@ -733,13 +734,18 @@ impl<P: PtrSize> VMOffsets<P> {
         self.builtin_functions
     }
 
-    /// The offset of the typed continuations store.
+    /// The offset of the typed continuations store, where we save the currently
+    /// running continuation (as a pointer to a
+    /// wasmtime_comtinuations::ContinuationObject, or null if running on main
+    /// stack).
     #[inline]
     pub fn vmctx_typed_continuations_store(&self) -> u32 {
         self.typed_continuations_store
     }
 
-    /// The offset of the typed continuations Payloads object.
+    /// The offset of the typed continuations payloads object, stored as a as a
+    /// wasmtime_comtinuations::Payloads object. Used to transfer payloads from
+    /// suspend calls to the corresponding handler/resume instructions.
     #[inline]
     pub fn vmctx_typed_continuations_payloads(&self) -> u32 {
         self.typed_continuations_payloads
