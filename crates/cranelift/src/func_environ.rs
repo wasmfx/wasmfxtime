@@ -232,6 +232,12 @@ mod typed_continuation_helpers {
                          val: ir::Value| {
             let index = BuiltinFunctionIndex::tc_print_int();
             let sig = env.builtin_function_signatures.tc_print_int(builder.func);
+            let ty = builder.func.dfg.value_type(val);
+            let val = match ty {
+                I32 => builder.ins().uextend(I64, val),
+                I64 => val,
+                _ => panic!("Cannot print type {}", ty),
+            };
             env.generate_builtin_call_no_return_val(builder, index, sig, vec![val]);
         };
         let print_pointer = |env: &mut crate::func_environ::FuncEnvironment<'a>,
