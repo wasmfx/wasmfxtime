@@ -454,7 +454,7 @@ impl<'a, 'builtins> CodeGenContext<'a, 'builtins> {
             Val::Local(local) => {
                 let slot = frame.get_local(local.index).expect("valid local at slot");
                 let addr = masm.local_address(&slot);
-                let scratch = <M::ABI as ABI>::scratch_reg();
+                let scratch = <M::ABI as ABI>::scratch_for(&slot.ty);
                 masm.load(addr, scratch, slot.ty.into());
                 let stack_slot = masm.push(scratch, slot.ty.into());
                 *v = Val::mem(slot.ty, stack_slot);
