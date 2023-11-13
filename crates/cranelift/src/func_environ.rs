@@ -167,6 +167,7 @@ pub struct FuncEnvironment<'module_environment> {
     wmemcheck: bool,
 }
 
+#[macro_use]
 mod typed_continuation_helpers {
     use super::IntCC;
     use cranelift_codegen::ir;
@@ -175,6 +176,12 @@ mod typed_continuation_helpers {
     use cranelift_frontend::FunctionBuilder;
     use std::mem;
     use wasmtime_environ::BuiltinFunctionIndex;
+
+    // This is a reference to this very module.
+    // We need it so that we can refer to the functions inside this module from
+    // macros, such that the same path works when the macro is expanded inside
+    // or outside of this module.
+    use crate::func_environ::typed_continuation_helpers as tc;
 
     /// Low-level implementation of debug printing. Do not use directly; see
     /// `emit_debug_println!` macro for doing actual printing.
@@ -189,7 +196,7 @@ mod typed_continuation_helpers {
     /// When printing, we replace them with the corresponding values in `vals`.
     /// Thus, the number of placeholders in `s` must match the number of entries
     /// in `vals`.
-    fn emit_debug_print<'a>(
+    pub fn emit_debug_print<'a>(
         env: &mut crate::func_environ::FuncEnvironment<'a>,
         builder: &mut FunctionBuilder,
         s: &'static str,
@@ -225,6 +232,12 @@ mod typed_continuation_helpers {
                          val: ir::Value| {
             let index = BuiltinFunctionIndex::tc_print_int();
             let sig = env.builtin_function_signatures.tc_print_int(builder.func);
+            let ty = builder.func.dfg.value_type(val);
+            let val = match ty {
+                I32 => builder.ins().uextend(I64, val),
+                I64 => val,
+                _ => panic!("Cannot print type {}", ty),
+            };
             env.generate_builtin_call_no_return_val(builder, index, sig, vec![val]);
         };
         let print_pointer = |env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -288,7 +301,7 @@ mod typed_continuation_helpers {
                 $msg,
                 "\n"
             );
-            emit_debug_print($env, $builder, msg_newline, &[$($arg),*]);
+            tc::emit_debug_print($env, $builder, msg_newline, &[$($arg),*]);
         }
     }
 
@@ -297,7 +310,7 @@ mod typed_continuation_helpers {
     ///
     /// If `ENABLE_DEBUG_PRINTING` is enabled, `error_str` is printed before
     /// trapping in case of an assertion violation.
-    fn emit_debug_assert_generic<'a>(
+    pub fn emit_debug_assert_generic<'a>(
         env: &mut crate::func_environ::FuncEnvironment<'a>,
         builder: &mut FunctionBuilder,
         condition: ir::Value,
@@ -336,7 +349,7 @@ mod typed_continuation_helpers {
     /// trapping in case of an assertion violation. Here, `error_str` is expected
     /// to contain two placeholders, such as {} or {:p}, which are replaced with
     /// `v1` and `v2` when printing.
-    fn emit_debug_assert_icmp<'a>(
+    pub fn emit_debug_assert_icmp<'a>(
         env: &mut crate::func_environ::FuncEnvironment<'a>,
         builder: &mut FunctionBuilder,
         operator: IntCC,
@@ -389,7 +402,7 @@ mod typed_continuation_helpers {
                 $operator_string,
                 " {} does not hold\n"
             );
-            emit_debug_assert_icmp($env, $builder, $operator, $v1, $v2, msg);
+            tc::emit_debug_assert_icmp($env, $builder, $operator, $v1, $v2, msg);
         };
     }
 
@@ -402,7 +415,7 @@ mod typed_continuation_helpers {
                 std::line!(),
                 "\n"
             );
-            emit_debug_assert_generic($env, $builder, $condition, msg);
+            tc::emit_debug_assert_generic($env, $builder, $condition, msg);
         };
     }
 
