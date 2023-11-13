@@ -3509,12 +3509,22 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             // The continuation object to actually call resume on.
             let resume_contobj = builder.block_params(resume_block)[0];
 
-            let (vmctx, result) =
+            let vmctx = self.vmctx(builder.func);
+            let vmctx = builder.ins().global_value(self.pointer_type(), vmctx);
+
+            // We mark `resume_contobj` as the currently running one
+            let vmctx = tc::Vmctx::new(vmctx, self.pointer_type());
+            vmctx.set_active_continuation(self, builder, resume_contobj);
+
+            // We mark `resume_contobj` to be invoked
+            let co = tc::ContinuationObject::new(resume_contobj, self.pointer_type());
+            co.set_state(builder, wasmtime_continuations::State::Invoked);
+
+            let (_vmctx, result) =
                 generate_builtin_call!(self, builder, tc_resume, [resume_contobj]);
 
-            // Update the currently running continuation stored in the vmctx
+            // Now the parent contobj is active
             let parent_contobj = self.typed_continuations_load_parent(builder, resume_contobj);
-            let vmctx = tc::Vmctx::new(vmctx, self.pointer_type());
             vmctx.set_active_continuation(self, builder, parent_contobj);
 
             // The result encodes whether the return happens via ordinary

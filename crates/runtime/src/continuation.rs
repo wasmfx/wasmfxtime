@@ -153,19 +153,11 @@ pub fn resume(
         );
     }
 
-    // Note that this function updates the typed continuation store field in the
-    // VMContext (i.e., the currently running continuation), but does not update
-    // any parent pointers. The latter has to happen elsewhere.
-
-    // We mark `contobj` as the currently running one
-    instance.set_typed_continuations_store(contobj);
-
     unsafe {
         (*(*(*instance.store()).vmruntime_limits())
             .stack_limit
             .get_mut()) = 0
     };
-    unsafe { (*contobj).state = State::Invoked };
 
     match unsafe { fiber.as_mut().unwrap().resume(()) } {
         Ok(()) => {
@@ -173,17 +165,14 @@ pub fn resume(
             // entry of the payload store by virtue of using the array
             // calling trampoline to execute it.
 
-            // Restore the currently running contobj entry in the VMContext
-            let parent = unsafe { (*contobj).parent };
-            instance.set_typed_continuations_store(parent);
-
-            debug_println!(
+            if cfg!(debug_assertions) {
+                let parent = unsafe { (*contobj).parent };
+                debug_println!(
                 "Continuation @ {:p} returned normally, setting running continuation in VMContext to {:p}",
                 contobj,
                 parent
             );
-
-            unsafe { (*contobj).state = State::Returned };
+            }
             Ok(0) // zero value = return normally.
         }
         Err(tag) => {
@@ -193,10 +182,6 @@ pub fn resume(
             // encode the tag into the remainder of the integer.
             let signal_mask = 0xf000_0000;
             debug_assert_eq!(tag & signal_mask, 0);
-
-            // Restore the currently running contobj entry in the VMContext
-            let parent = unsafe { (*contobj).parent };
-            instance.set_typed_continuations_store(parent);
 
             Ok(tag | signal_mask)
         }
