@@ -461,6 +461,12 @@ mod typed_continuation_helpers {
         pointer_type: ir::Type,
     }
 
+    #[derive(Copy, Clone)]
+    pub struct Vmctx {
+        address: ir::Value,
+        pointer_type: ir::Type,
+    }
+
     impl ContinuationObject {
         pub fn new(address: ir::Value, pointer_type: ir::Type) -> ContinuationObject {
             ContinuationObject {
@@ -489,6 +495,22 @@ mod typed_continuation_helpers {
             debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
 
             builder.ins().load(I32, mem_flags, self.address, offset)
+        }
+
+        /// Sets the value of the `state` field of the continuation object,
+        pub fn set_state(
+            &self,
+            builder: &mut FunctionBuilder,
+            state: wasmtime_continuations::State,
+        ) {
+            let mem_flags = ir::MemFlags::trusted();
+            let offset = wasmtime_continuations::offsets::continuation_object::STATE;
+
+            // Let's make sure that we still represent the State enum as i32.
+            debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
+
+            let v = builder.ins().iconst(I32, state.discriminant() as i64);
+            builder.ins().store(mem_flags, v, self.address, offset);
         }
 
         /// Checks whether the continuation object is invoked (i.e., `resume`
@@ -839,6 +861,42 @@ mod typed_continuation_helpers {
             let _sig = env.builtin_function_signatures.tc_allocate(builder.func);
             let _index = BuiltinFunctionIndex::tc_deallocate();
             let _sig = env.builtin_function_signatures.tc_deallocate(builder.func);
+        }
+    }
+
+    impl Vmctx {
+        pub fn new(address: ir::Value, pointer_type: ir::Type) -> Vmctx {
+            Vmctx {
+                address,
+                pointer_type,
+            }
+        }
+
+        pub fn get_active_continuation<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            let base_addr = self.address;
+
+            let memflags = ir::MemFlags::trusted();
+            let offset = i32::try_from(env.offsets.vmctx_typed_continuations_store()).unwrap();
+            builder
+                .ins()
+                .load(self.pointer_type, memflags, base_addr, offset)
+        }
+
+        pub fn set_active_continuation<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            contobj: ir::Value,
+        ) {
+            let base_addr = self.address;
+
+            let memflags = ir::MemFlags::trusted();
+            let offset = i32::try_from(env.offsets.vmctx_typed_continuations_store()).unwrap();
+            builder.ins().store(memflags, contobj, base_addr, offset);
         }
     }
 }
@@ -3451,8 +3509,13 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             // The continuation object to actually call resume on.
             let resume_contobj = builder.block_params(resume_block)[0];
 
-            let (_vmctx, result) =
+            let (vmctx, result) =
                 generate_builtin_call!(self, builder, tc_resume, [resume_contobj]);
+
+            // Update the currently running continuation stored in the vmctx
+            let parent_contobj = self.typed_continuations_load_parent(builder, resume_contobj);
+            let vmctx = tc::Vmctx::new(vmctx, self.pointer_type());
+            vmctx.set_active_continuation(self, builder, parent_contobj);
 
             // The result encodes whether the return happens via ordinary
             // means or via a suspend. If the high bit is set, then it is
@@ -3605,6 +3668,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         {
             builder.switch_to_block(return_block);
             builder.seal_block(return_block);
+
+            let co = tc::ContinuationObject::new(resumed_contobj, self.pointer_type());
+            co.set_state(builder, wasmtime_continuations::State::Returned);
 
             // Load and push the results.
             let returns = self.continuation_returns(type_index).to_vec();
@@ -3845,11 +3911,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let vmctx = self.vmctx(builder.cursor().func);
         let base_addr = builder.ins().global_value(pointer_type, vmctx);
 
-        let memflags = ir::MemFlags::trusted();
-        let offset = i32::try_from(self.offsets.vmctx_typed_continuations_store()).unwrap();
-        builder
-            .ins()
-            .load(self.pointer_type(), memflags, base_addr, offset)
+        let vmctx = tc::Vmctx::new(base_addr, pointer_type);
+
+        vmctx.get_active_continuation(self, builder)
     }
 
     fn typed_continuations_new_cont_ref(
