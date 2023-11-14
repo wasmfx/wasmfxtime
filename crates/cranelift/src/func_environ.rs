@@ -462,7 +462,7 @@ mod typed_continuation_helpers {
     }
 
     #[derive(Copy, Clone)]
-    pub struct Vmctx {
+    pub struct VMContext {
         address: ir::Value,
         pointer_type: ir::Type,
     }
@@ -864,9 +864,9 @@ mod typed_continuation_helpers {
         }
     }
 
-    impl Vmctx {
-        pub fn new(address: ir::Value, pointer_type: ir::Type) -> Vmctx {
-            Vmctx {
+    impl VMContext {
+        pub fn new(address: ir::Value, pointer_type: ir::Type) -> VMContext {
+            VMContext {
                 address,
                 pointer_type,
             }
@@ -3513,7 +3513,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             let vmctx = builder.ins().global_value(self.pointer_type(), vmctx);
 
             // We mark `resume_contobj` as the currently running one
-            let vmctx = tc::Vmctx::new(vmctx, self.pointer_type());
+            let vmctx = tc::VMContext::new(vmctx, self.pointer_type());
             vmctx.set_active_continuation(self, builder, resume_contobj);
 
             // We mark `resume_contobj` to be invoked
@@ -3921,7 +3921,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let vmctx = self.vmctx(builder.cursor().func);
         let base_addr = builder.ins().global_value(pointer_type, vmctx);
 
-        let vmctx = tc::Vmctx::new(base_addr, pointer_type);
+        let vmctx = tc::VMContext::new(base_addr, pointer_type);
 
         vmctx.get_active_continuation(self, builder)
     }
