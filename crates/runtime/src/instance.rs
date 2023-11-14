@@ -1279,6 +1279,7 @@ impl Instance {
         unsafe { *self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store()) }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_typed_continuations_store(
         &mut self,
         contobj: *mut crate::continuation::ContinuationObject,

@@ -77,6 +77,13 @@ pub enum State {
     Returned,
 }
 
+impl State {
+    pub fn discriminant(&self) -> i32 {
+        // This is well-defined for an enum with repr(i32).
+        unsafe { *(self as *const Self as *const i32) }
+    }
+}
+
 /// TODO
 #[repr(C)]
 pub struct ContinuationObject {
