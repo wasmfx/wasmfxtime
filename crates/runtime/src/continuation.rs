@@ -166,11 +166,11 @@ pub fn resume(
             // calling trampoline to execute it.
 
             if cfg!(debug_assertions) {
-                let parent = unsafe { (*contobj).parent };
+                let _parent = unsafe { (*contobj).parent };
                 debug_println!(
                 "Continuation @ {:p} returned normally, setting running continuation in VMContext to {:p}",
                 contobj,
-                parent
+                _parent
             );
             }
             Ok(0) // zero value = return normally.
