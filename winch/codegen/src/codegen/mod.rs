@@ -1,8 +1,9 @@
 use crate::{
-    abi::{ABISig, ABI},
+    abi::{ABIOperand, ABIResultsData, ABISig, RetArea, ABI},
+    codegen::BlockTypeInfo,
     isa::reg::Reg,
     masm::{IntCmpKind, MacroAssembler, OperandSize, RegImm, TrapCode},
-    stack::{TypedReg, Val},
+    stack::TypedReg,
 };
 use anyhow::Result;
 use smallvec::SmallVec;
@@ -80,11 +81,21 @@ where
         self.masm.prologue();
         self.masm.reserve_stack(self.context.frame.locals_size);
 
+        // If the function has multiple returns, assign the corresponding base.
+        let mut results_data = ABIResultsData::wrap(self.sig.results.clone());
+        if self.sig.params.has_retptr() {
+            results_data.ret_area =
+                Some(RetArea::slot(self.context.frame.results_base_slot.unwrap()));
+        }
         // Once we have emitted the epilogue and reserved stack space for the locals, we push the
         // base control flow block.
         self.control_frames
             .push(ControlStackFrame::function_body_block(
-                self.sig.result,
+                results_data,
+                BlockTypeInfo::new(
+                    self.sig.params_without_retptr().len(),
+                    self.sig.results.len(),
+                ),
                 self.masm,
                 &mut self.context,
             ));
@@ -100,29 +111,14 @@ where
     /// are not visited.
     pub fn handle_unreachable_else(&mut self) {
         let frame = self.control_frames.last_mut().unwrap();
-        match frame {
-            ControlStackFrame::If {
-                reachable,
-                original_stack_len,
-                original_sp_offset,
-                ..
-            } => {
-                if *reachable {
-                    // We entered an unreachable state when compiling the
-                    // if-then branch, but if the `if` was reachable at
-                    // entry, the if-else branch will be reachable.
-                    self.context.reachable = true;
-                    // Reset the stack to the original length and offset.
-                    Self::reset_stack(
-                        &mut self.context,
-                        self.masm,
-                        *original_stack_len,
-                        *original_sp_offset,
-                    );
-                    frame.bind_else(self.masm, self.context.reachable);
-                }
-            }
-            _ => unreachable!(),
+        debug_assert!(frame.is_if());
+        if frame.is_next_sequence_reachable() {
+            // We entered an unreachable state when compiling the
+            // if-then branch, but if the `if` was reachable at
+            // entry, the if-else branch will be reachable.
+            self.context.reachable = true;
+            self.context.ensure_stack_state(self.masm, &frame);
+            frame.bind_else(self.masm, self.context.reachable);
         }
     }
 
@@ -133,9 +129,7 @@ where
         if frame.is_next_sequence_reachable() {
             self.context.reachable = true;
 
-            let (value_stack_len, target_sp) = frame.original_stack_len_and_sp_offset();
-            // Reset the stack to the original length and offset.
-            Self::reset_stack(&mut self.context, self.masm, value_stack_len, target_sp);
+            self.context.ensure_stack_state(self.masm, &frame);
             // If the current frame is the outermost frame, which corresponds to the
             // current function's body, only bind the exit label as we don't need to
             // push any more values to the value stack, else perform the entire `bind_end`
@@ -150,36 +144,7 @@ where
             // state, perform the necessary cleanup to leave the stack
             // and SP in the expected state.  The compiler can enter
             // in this state through an infinite loop.
-            let (value_stack_len, target_sp) = frame.original_stack_len_and_sp_offset();
-            Self::reset_stack(&mut self.context, self.masm, value_stack_len, target_sp);
-        }
-    }
-
-    /// Helper function to reset value and stack pointer to the given length and stack pointer
-    /// offset respectively. This function is only used when restoring the code generation's
-    /// reachabiliy state when handling an unreachable `end` or `else`.
-    pub fn reset_stack(
-        context: &mut CodeGenContext,
-        masm: &mut M,
-        target_stack_len: usize,
-        target_sp: u32,
-    ) {
-        // `CodeGenContext::reset_stack` only gets called when
-        // handling unreachable end or unreachable else, so we only
-        // care about freeing any registers in the provided range.
-        let mut bytes_freed = 0;
-        context.drop_last(
-            context.stack.len() - target_stack_len,
-            |regalloc, val| match val {
-                Val::Reg(tr) => regalloc.free(tr.reg),
-                Val::Memory(m) => bytes_freed += m.slot.size,
-                _ => {}
-            },
-        );
-        if masm.sp_offset() > target_sp {
-            let bytes = masm.sp_offset() - target_sp;
-            assert!(bytes_freed == bytes);
-            masm.free_stack(bytes);
+            self.context.ensure_stack_state(self.masm, &frame);
         }
     }
 
@@ -195,11 +160,23 @@ where
         // Save the vmctx pointer to its local slot in case we need to reload it
         // at any point.
         let vmctx_addr = self.masm.local_address(&self.context.frame.vmctx_slot);
-        self.masm.store(
-            <M::ABI as ABI>::vmctx_reg().into(),
-            vmctx_addr,
-            OperandSize::S64,
-        );
+        self.masm
+            .store_ptr(<M::ABI as ABI>::vmctx_reg().into(), vmctx_addr);
+
+        // Save the results base parameter register into its slot.
+        self.sig.params.has_retptr().then(|| {
+            match self.sig.params.unwrap_results_area_operand() {
+                ABIOperand::Reg { ty, reg, .. } => {
+                    let results_base_slot = self.context.frame.results_base_slot.as_ref().unwrap();
+                    debug_assert!(results_base_slot.addressed_from_sp());
+                    let addr = self.masm.local_address(results_base_slot);
+                    self.masm.store((*reg).into(), addr, (*ty).into());
+                }
+                // The result base parameter is a stack paramter, addressed
+                // from FP.
+                _ => {}
+            }
+        });
 
         while !body.eof() {
             let offset = body.original_position();
@@ -245,7 +222,9 @@ where
             fn is_reachable(&self) -> bool;
         }
 
-        impl<'a, 'b, 'c, M: MacroAssembler> ReachableState for CodeGen<'a, 'b, 'c, M> {
+        impl<'a, 'translation, 'data, M: MacroAssembler> ReachableState
+            for CodeGen<'a, 'translation, 'data, M>
+        {
             fn is_reachable(&self) -> bool {
                 self.context.reachable
             }
@@ -317,7 +296,9 @@ where
     fn spill_register_arguments(&mut self) {
         use WasmType::*;
         self.sig
-            .params
+            // Skip the results base param if any; [Self::emit_body],
+            // will handle spilling the results base param if it's in a register.
+            .params_without_retptr()
             .iter()
             .enumerate()
             .filter(|(_, a)| a.is_reg())
@@ -348,6 +329,11 @@ where
     /// the given index, returning the typed register holding the
     /// source value.
     pub fn emit_set_local(&mut self, index: u32) -> TypedReg {
+        // Materialize any references to the same local index that are in the
+        // value stack by spilling.
+        if self.context.stack.contains_latent_local(index) {
+            self.context.spill(self.masm);
+        }
         let src = self.context.pop_to_reg(self.masm, None);
         // Need to get address of local after `pop_to_reg` since `pop_to_reg`
         // will pop the machine stack causing an incorrect address to be
@@ -373,7 +359,10 @@ where
         // the builtin's signature.
         let elem_value: Reg = self
             .context
-            .reg(builtin.sig().result.result_reg().unwrap(), self.masm)
+            .reg(
+                builtin.sig().results.unwrap_singleton().unwrap_reg(),
+                self.masm,
+            )
             .into();
 
         let index = self.context.pop_to_reg(self.masm, None);
@@ -414,7 +403,7 @@ where
         // We know the signature of the libcall in this case, so we assert that there's
         // one element in the stack and that it's  the ABI signature's result register.
         let top = self.context.stack.peek().unwrap();
-        let top = top.get_reg();
+        let top = top.unwrap_reg();
         debug_assert!(top.reg == elem_value);
         self.masm.jmp(cont);
 

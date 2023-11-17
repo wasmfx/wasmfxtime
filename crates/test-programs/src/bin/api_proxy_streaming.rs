@@ -33,6 +33,8 @@ impl bindings::exports::wasi::http::incoming_handler::Guest for Handler {
 async fn handle_request(request: IncomingRequest, response_out: ResponseOutparam) {
     let headers = request.headers().entries();
 
+    assert!(request.authority().is_some());
+
     match (request.method(), request.path_with_query().as_deref()) {
         (Method::Get, Some("/hash-all")) => {
             // Send outgoing GET requests to the specified URLs and stream the hashes of the response bodies as
@@ -258,7 +260,7 @@ fn respond(status: u16, response_out: ResponseOutparam) {
 
     ResponseOutparam::set(response_out, Ok(response));
 
-    OutgoingBody::finish(body, None);
+    OutgoingBody::finish(body, None).expect("outgoing-body.finish");
 }
 
 async fn hash(url: &Url) -> Result<String> {
@@ -390,7 +392,7 @@ mod executor {
             fn drop(&mut self) {
                 if let Some((stream, body)) = self.0.take() {
                     drop(stream);
-                    OutgoingBody::finish(body, None);
+                    OutgoingBody::finish(body, None).expect("outgoing-body.finish");
                 }
             }
         }

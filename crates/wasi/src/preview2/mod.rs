@@ -30,6 +30,8 @@ mod network;
 pub mod pipe;
 mod poll;
 #[cfg(feature = "preview1-on-preview2")]
+pub mod preview0;
+#[cfg(feature = "preview1-on-preview2")]
 pub mod preview1;
 mod random;
 mod stdio;
@@ -68,9 +70,9 @@ pub mod bindings {
             wasmtime::component::bindgen!({
                 path: "wit",
                 interfaces: "
-                    import wasi:io/poll@0.2.0-rc-2023-11-05;
-                    import wasi:io/streams@0.2.0-rc-2023-11-05;
-                    import wasi:filesystem/types@0.2.0-rc-2023-11-05;
+                    import wasi:io/poll@0.2.0-rc-2023-11-10;
+                    import wasi:io/streams@0.2.0-rc-2023-11-10;
+                    import wasi:filesystem/types@0.2.0-rc-2023-11-10;
                 ",
                 tracing: true,
                 trappable_error_type: {
