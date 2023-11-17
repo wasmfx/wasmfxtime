@@ -47,6 +47,28 @@ asm_func!(
 //    entry_point(rsi): extern fn(*mut u8, *mut u8),
 //    entry_arg0(rdx): *mut u8,
 // )
+//
+// This function is only every called such that `entry_point` is a pointer to
+// (an instantiation of) the `fiber_start` function in unix.rs and `entry_arg0`
+// is a a Box<*mut u8>, containing the function to actually run as the
+// continuation as a FnOnce(A, &super::Suspend<A, B, C>) -> C, for some A,B,C.
+//
+// The layout of the FiberStack near the top of stack (TOS) *after* running this
+// function is as follows:
+//
+//  Offset from    |
+//       TOS       | Contents
+//  ---------------|-----------------------------------------------------------
+//          -0x08   undefined
+//          -0x10   TOS - 0x48
+//          -0x18   (RIP-relative) address of wasmtime_fibre_start function
+//          -0x20   TOS
+//          -0x28   entry_point (= pointer to fiber_start function)
+//          -0x30   entry_arg0  (= Box<*mut u8> containing pointer to
+//                                 FuncOne closure to actually execute)
+//          -0x38   undefined
+//          -0x40   undefined
+//          -0x48   undefined
 #[rustfmt::skip]
 asm_func!(
     "wasmtime_fibre_init",
@@ -88,6 +110,43 @@ asm_func!(
 //
 // If you're curious a decent introduction to CFI things and unwinding is at
 // https://www.imperialviolet.org/2017/01/18/cfi.html
+//
+// Note that this function is never called directly. It is only ever entered via
+// the return instruction in wasmtime_fibre_switch, with a stack that
+// was prepared by wasmtime_fibre_init before calling wasmtime_fibre_switch.
+//
+// This execution of wasmtime_fibre_switch on a stack as described in the
+// comment on wasmtime_fibre_init leads to the following values in various
+// registers at the right before the RET instruction of the latter is executed:
+//
+// RSP: TOS - 0x18
+// RDI: irrelevant  (not read by wasmtime_fibre_start)
+// RSI: irrelevant  (not read by wasmtime_fibre_start)
+// RAX: irrelevant  (not read by wasmtime_fibre_start)
+// RBP: TOS
+// RBX: entry_point (= pointer to fiber_start function)
+// R12: entry_arg0  (Box with FuncOnce closure to run as contination)
+// R13: irrelevant  (not read by wasmtime_fibre_start)
+// R14: irrelevant  (not read by wasmtime_fibre_start)
+// R15: irrelevant  (not read by wasmtime_fibre_start)
+//
+// At this point in time, the stack layout is as follows:
+//
+//  Offset from   |
+//       TOS      | Contents
+//  --------------|---------------------------------
+//         -0x08   &Cell<RunSesult<A,B,C>>
+//
+//         -0x10   stack pointer stored by wasmtime_fibre_switch
+//                 thus pointing into stack of caller of Fiber::resume,
+//                 with pseudo-frame of wasmtime_fibre_switch
+//                 at bottom.
+//
+//         -0x18   (RIP-relative) address of wasmtime_fibre_start function
+//
+//
+// Note that after executing the RET instruction in wasmtime_fibre_switch,
+// we then start executing wasmtime_fibre_start with RSP = TOS - 0x10.
 asm_func!(
     "wasmtime_fibre_start",
     "
@@ -149,11 +208,20 @@ asm_func!(
         // materialized into the registers used here. Our job is to then move
         // the values into the ABI-defined registers and call the entry-point.
         // Note that `call` is used here to leave this frame on the stack so we
-        // can use the dwarf info here for unwinding. The trailing `ud2` is just
-        // for safety.
+        // can use the dwarf info here for unwinding.
+        //
+        // Note that the next three instructions amount to calling fiber_start
+        // with the following arguments:
+        // 1. entry_arg0  (Box with FuncOnce closure to run as contination)
+        // 2. TOS
+        //
+        // Note that fiber_start never returns: It calls Suspend::execute, which
+        // runs the FuncOnce closure, and calls impl::Suspend::switch afterwards,
+        // which returns to the parent FiberStack via wasmtime_fibre_switch.
         mov rdi, r12
         mov rsi, rbp
         call rbx
+        // We should never get here and purposely emit an invalid instruction.
         ud2
         .cfi_endproc
     ",
