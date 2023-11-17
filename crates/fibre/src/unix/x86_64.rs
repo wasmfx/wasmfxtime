@@ -90,7 +90,7 @@ asm_func!(
         // `wasmtime_fibre_switch` function consumes 6 registers plus a return
         // pointer, and the top 16 bytes are reserved, so that's:
         //
-        //	(6 + 1) * 16 + 16 = 0x48
+        //	(6 + 1) * 8 + 16 = 0x48
         lea rax, -0x48[rdi]
         mov -0x10[rdi], rax
         ret
