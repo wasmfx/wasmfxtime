@@ -16,19 +16,24 @@ struct T;
 
 impl bindings::exports::wasi::http::incoming_handler::Guest for T {
     fn handle(request: IncomingRequest, outparam: ResponseOutparam) {
+        assert!(request.scheme().is_some());
+        assert!(request.authority().is_some());
+        assert!(request.path_with_query().is_some());
+
         let header = String::from("custom-forbidden-header");
         let req_hdrs = request.headers();
 
         assert!(
-            !req_hdrs.get(&header).is_empty(),
-            "missing `custom-forbidden-header` from request"
+            req_hdrs.get(&header).is_empty(),
+            "forbidden `custom-forbidden-header` found in request"
         );
 
         assert!(req_hdrs.delete(&header).is_err());
+        assert!(req_hdrs.append(&header, &b"no".to_vec()).is_err());
 
         assert!(
-            !req_hdrs.get(&header).is_empty(),
-            "delete of forbidden header succeeded"
+            req_hdrs.get(&header).is_empty(),
+            "append of forbidden header succeeded"
         );
 
         let hdrs = bindings::wasi::http::types::Headers::new();
@@ -42,7 +47,8 @@ impl bindings::exports::wasi::http::incoming_handler::Guest for T {
             .expect("writing response");
 
         drop(out);
-        bindings::wasi::http::types::OutgoingBody::finish(body, None);
+        bindings::wasi::http::types::OutgoingBody::finish(body, None)
+            .expect("outgoing-body.finish");
     }
 }
 

@@ -4,7 +4,6 @@ use crate::bindings::wasi::filesystem::types as filesystem;
 use crate::bindings::wasi::io::poll;
 use crate::bindings::wasi::io::streams;
 use crate::bindings::wasi::random::random;
-use crate::bindings::wasi::sockets::network;
 use core::cell::OnceCell;
 use core::cell::{Cell, RefCell, RefMut, UnsafeCell};
 use core::cmp::min;
@@ -58,7 +57,7 @@ pub mod bindings {
     });
 }
 
-#[export_name = "wasi:cli/run@0.2.0-rc-2023-11-05#run"]
+#[export_name = "wasi:cli/run@0.2.0-rc-2023-11-10#run"]
 #[cfg(feature = "command")]
 pub unsafe extern "C" fn run() -> u32 {
     #[link(wasm_import_module = "__main_module__")]
@@ -569,7 +568,7 @@ pub unsafe extern "C" fn fd_fdstat_get(fd: Fd, stat: *mut Fdstat) -> Errno {
             Descriptor::Streams(Streams {
                 input,
                 output,
-                type_: StreamType::Stdio(isatty),
+                type_: StreamType::Stdio(stdio),
             }) => {
                 let fs_flags = 0;
                 let mut fs_rights_base = 0;
@@ -581,7 +580,7 @@ pub unsafe extern "C" fn fd_fdstat_get(fd: Fd, stat: *mut Fdstat) -> Errno {
                 }
                 let fs_rights_inheriting = fs_rights_base;
                 stat.write(Fdstat {
-                    fs_filetype: isatty.filetype(),
+                    fs_filetype: stdio.filetype(),
                     fs_flags,
                     fs_rights_base,
                     fs_rights_inheriting,
@@ -589,11 +588,6 @@ pub unsafe extern "C" fn fd_fdstat_get(fd: Fd, stat: *mut Fdstat) -> Errno {
                 Ok(())
             }
             Descriptor::Closed(_) => Err(ERRNO_BADF),
-            Descriptor::Streams(Streams {
-                input: _,
-                output: _,
-                type_: StreamType::Socket(_),
-            }) => unreachable!(),
         }
     })
 }
@@ -669,13 +663,13 @@ pub unsafe extern "C" fn fd_filestat_get(fd: Fd, buf: *mut Filestat) -> Errno {
             }
             // Stdio is all zero fields, except for filetype character device
             Descriptor::Streams(Streams {
-                type_: StreamType::Stdio(isatty),
+                type_: StreamType::Stdio(stdio),
                 ..
             }) => {
                 *buf = Filestat {
                     dev: 0,
                     ino: 0,
-                    filetype: isatty.filetype(),
+                    filetype: stdio.filetype(),
                     nlink: 0,
                     size: 0,
                     atim: 0,
@@ -1645,26 +1639,6 @@ impl Drop for Pollables {
     }
 }
 
-impl From<network::ErrorCode> for Errno {
-    fn from(error: network::ErrorCode) -> Errno {
-        match error {
-            network::ErrorCode::Unknown => unreachable!(), // TODO
-            /* TODO
-            // Use a black box to prevent the optimizer from generating a
-            // lookup table, which would require a static initializer.
-            ConnectionAborted => black_box(ERRNO_CONNABORTED),
-            ConnectionRefused => ERRNO_CONNREFUSED,
-            ConnectionReset => ERRNO_CONNRESET,
-            HostUnreachable => ERRNO_HOSTUNREACH,
-            NetworkDown => ERRNO_NETDOWN,
-            NetworkUnreachable => ERRNO_NETUNREACH,
-            Timedout => ERRNO_TIMEDOUT,
-            */
-            _ => unreachable!(),
-        }
-    }
-}
-
 /// Concurrently poll for the occurrence of a set of events.
 #[no_mangle]
 pub unsafe extern "C" fn poll_oneoff(
@@ -1784,7 +1758,7 @@ pub unsafe extern "C" fn poll_oneoff(
             });
         }
 
-        #[link(wasm_import_module = "wasi:io/poll@0.2.0-rc-2023-11-05")]
+        #[link(wasm_import_module = "wasi:io/poll@0.2.0-rc-2023-11-10")]
         #[allow(improper_ctypes)] // FIXME(bytecodealliance/wit-bindgen#684)
         extern "C" {
             #[link_name = "poll"]
@@ -1852,25 +1826,6 @@ pub unsafe extern "C" fn poll_oneoff(
                                 }
                                 Err(e) => (e.into(), 1, 0),
                             },
-                            StreamType::Socket(_connection) => {
-                                unreachable!() // TODO
-                                               /*
-                                               match tcp::bytes_readable(*connection) {
-                                                   Ok(result) => (
-                                                       ERRNO_SUCCESS,
-                                                       result.0,
-                                                       if result.1 {
-                                                           EVENTRWFLAGS_FD_READWRITE_HANGUP
-                                                       } else {
-                                                           0
-                                                       }
-                                                   )
-                                                   Err(e) => {
-                                                       (e.into(), 1, 0)
-                                                   }
-                                               }
-                                               */
-                            }
                             StreamType::Stdio(_) => (ERRNO_SUCCESS, 1, 0),
                         },
                         _ => unreachable!(),
@@ -1885,25 +1840,6 @@ pub unsafe extern "C" fn poll_oneoff(
                     match desc {
                         Descriptor::Streams(streams) => match &streams.type_ {
                             StreamType::File(_) | StreamType::Stdio(_) => (ERRNO_SUCCESS, 1, 0),
-                            StreamType::Socket(_connection) => {
-                                unreachable!() // TODO
-                                               /*
-                                               match tcp::bytes_writable(connection) {
-                                                   Ok(result) => (
-                                                       ERRNO_SUCCESS,
-                                                       result.0,
-                                                       if result.1 {
-                                                           EVENTRWFLAGS_FD_READWRITE_HANGUP
-                                                       } else {
-                                                            0
-                                                       }
-                                                   )
-                                                   Err(e) => {
-                                                       (e.into(), 0, 0)
-                                                   }
-                                               }
-                                               */
-                            }
                         },
                         _ => unreachable!(),
                     }
@@ -2511,7 +2447,7 @@ impl State {
 
     fn get_environment(&self) -> &[StrTuple] {
         if self.env_vars.get().is_none() {
-            #[link(wasm_import_module = "wasi:cli/environment@0.2.0-rc-2023-11-05")]
+            #[link(wasm_import_module = "wasi:cli/environment@0.2.0-rc-2023-11-10")]
             extern "C" {
                 #[link_name = "get-environment"]
                 fn get_environment_import(rval: *mut StrTupleList);
@@ -2535,7 +2471,7 @@ impl State {
 
     fn get_args(&self) -> &[WasmStr] {
         if self.args.get().is_none() {
-            #[link(wasm_import_module = "wasi:cli/environment@0.2.0-rc-2023-11-05")]
+            #[link(wasm_import_module = "wasi:cli/environment@0.2.0-rc-2023-11-10")]
             extern "C" {
                 #[link_name = "get-arguments"]
                 fn get_args_import(rval: *mut WasmStrList);
