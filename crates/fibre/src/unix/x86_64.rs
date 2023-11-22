@@ -48,6 +48,10 @@ asm_func!(
 //    entry_arg0(rdx): *mut u8,
 // )
 //
+// This function installs the launchpad for the computation to run on the fiber,
+// such that invoking wasmtime_fibre_switch on the stack actually runs the
+// desired computation.
+//
 // This function is only every called such that `entry_point` is a pointer to
 // (an instantiation of) the `fiber_start` function in unix.rs and `entry_arg0`
 // is a a Box<*mut u8>, containing the function to actually run as the
@@ -119,6 +123,7 @@ asm_func!(
 // comment on wasmtime_fibre_init leads to the following values in various
 // registers at the right before the RET instruction of the latter is executed:
 //
+// RBP: frame pointer of *caller* of wasmtime_fibre_switch
 // RSP: TOS - 0x18
 // RDI: irrelevant  (not read by wasmtime_fibre_start)
 // RSI: irrelevant  (not read by wasmtime_fibre_start)
