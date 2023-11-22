@@ -52,11 +52,10 @@ asm_func!(
 // such that invoking wasmtime_fibre_switch on the stack actually runs the
 // desired computation.
 //
-// This function is only every called such that `entry_point` is a pointer to
-// (an instantiation of) the `fiber_start` function in unix.rs and `entry_arg0`
-// is a `Box<*mut u8>`, containing the function to actually run as the
-// continuation as a `FnOnce(A, &super::Suspend<A, B, C>) -> C`, for some `A`,
-// `B`, `C`.
+// This function is only ever called such that `entry_point` is a pointer to (an
+// instantiation of) the `fiber_start` function in unix.rs and `entry_arg0` is a
+// `Box<*mut u8>`, containing the function to actually run as the continuation
+// as a `FnOnce(A, &super::Suspend<A, B, C>) -> C`, for some `A`, `B`, `C`.
 //
 // The layout of the FiberStack near the top of stack (TOS) *after* running this
 // function is as follows:
