@@ -54,8 +54,9 @@ asm_func!(
 //
 // This function is only every called such that `entry_point` is a pointer to
 // (an instantiation of) the `fiber_start` function in unix.rs and `entry_arg0`
-// is a a Box<*mut u8>, containing the function to actually run as the
-// continuation as a FnOnce(A, &super::Suspend<A, B, C>) -> C, for some A,B,C.
+// is a `Box<*mut u8>`, containing the function to actually run as the
+// continuation as a `FnOnce(A, &super::Suspend<A, B, C>) -> C`, for some `A`,
+// `B`, `C`.
 //
 // The layout of the FiberStack near the top of stack (TOS) *after* running this
 // function is as follows:
