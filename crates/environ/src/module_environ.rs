@@ -5,8 +5,8 @@ use crate::module::{
 use crate::{
     DataIndex, DefinedFuncIndex, ElemIndex, EntityIndex, EntityType, FuncIndex, GlobalIndex,
     GlobalInit, MemoryIndex, ModuleTypesBuilder, PrimaryMap, SignatureIndex, TableIndex,
-    TableInitialValue, Tunables, TypeConvert, TypeIndex, Unsigned, WasmContType, WasmError, WasmFuncType,
-    WasmHeapType, WasmResult, WasmType,
+    TableInitialValue, Tunables, TypeConvert, TypeIndex, Unsigned, WasmContType, WasmError,
+    WasmFuncType, WasmHeapType, WasmResult, WasmType,
 };
 use cranelift_entity::packed_option::ReservedValue;
 use std::borrow::Cow;
