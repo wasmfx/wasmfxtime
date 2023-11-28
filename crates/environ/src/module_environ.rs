@@ -821,7 +821,10 @@ and for re-adding support for interface types you can see this issue:
             CompositeType::Cont(ct) => {
                 let wasm = self.convert_cont_type(ct);
                 let sig_index = self.types.wasm_cont_type(id, wasm);
-                self.result.module.types.push(ModuleType::Continuation(sig_index));
+                self.result
+                    .module
+                    .types
+                    .push(ModuleType::Continuation(sig_index));
             }
         }
         Ok(())

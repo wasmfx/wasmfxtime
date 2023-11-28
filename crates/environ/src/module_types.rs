@@ -1,6 +1,6 @@
 use crate::{
-    Module, ModuleType, PrimaryMap, SignatureIndex, TypeConvert, TypeIndex, WasmContType, WasmFuncType,
-    WasmHeapType,
+    Module, ModuleType, PrimaryMap, SignatureIndex, TypeConvert, TypeIndex, WasmContType,
+    WasmFuncType, WasmHeapType,
 };
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -83,7 +83,6 @@ impl ModuleTypesBuilder {
         self.interned_cont_types.insert(sig, idx);
         return idx;
     }
-
 
     fn intern_func_type(&mut self, sig: WasmFuncType) -> SignatureIndex {
         if let Some(idx) = self.interned_func_types.get(&sig) {
