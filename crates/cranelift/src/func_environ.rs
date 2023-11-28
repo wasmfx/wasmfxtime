@@ -23,8 +23,8 @@ use std::mem;
 use std::vec::Vec;
 use wasmparser::Operator;
 use wasmtime_environ::{
-    BuiltinFunctionIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation, ModuleTypes, PtrSize,
-    TableStyle, Tunables, TypeConvert, VMOffsets, WASM_PAGE_SIZE,
+    BuiltinFunctionIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation, ModuleTypesBuilder,
+    PtrSize, TableStyle, Tunables, TypeConvert, VMOffsets, WASM_PAGE_SIZE,
 };
 use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
@@ -114,7 +114,7 @@ wasmtime_environ::foreach_builtin_function!(declare_function_signatures);
 pub struct FuncEnvironment<'module_environment> {
     isa: &'module_environment (dyn TargetIsa + 'module_environment),
     module: &'module_environment Module,
-    types: &'module_environment ModuleTypes,
+    types: &'module_environment ModuleTypesBuilder,
 
     translation: &'module_environment ModuleTranslation<'module_environment>,
 
@@ -907,7 +907,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
     pub fn new(
         isa: &'module_environment (dyn TargetIsa + 'module_environment),
         translation: &'module_environment ModuleTranslation<'module_environment>,
-        types: &'module_environment ModuleTypes,
+        types: &'module_environment ModuleTypesBuilder,
         tunables: &'module_environment Tunables,
         wmemcheck: bool,
     ) -> Self {
@@ -1996,8 +1996,12 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
 }
 
 impl TypeConvert for FuncEnvironment<'_> {
-    fn lookup_heap_type(&self, ty: TypeIndex) -> WasmHeapType {
-        self.module.lookup_heap_type(ty)
+    fn lookup_heap_type(&self, ty: wasmparser::UnpackedIndex) -> WasmHeapType {
+        wasmtime_environ::WasmparserTypeConverter {
+            module: self.module,
+            types: self.types,
+        }
+        .lookup_heap_type(ty)
     }
 }
 

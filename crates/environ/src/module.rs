@@ -1071,15 +1071,6 @@ impl Module {
     }
 }
 
-impl TypeConvert for Module {
-    fn lookup_heap_type(&self, index: TypeIndex) -> WasmHeapType {
-        match self.types[index] {
-            ModuleType::Function(i) => WasmHeapType::TypedFunc(i),
-            ModuleType::Continuation(i) => WasmHeapType::TypedFunc(i), // TODO(dhil): Perhaps we should have a continuation heap type...
-        }
-    }
-}
-
 /// Type information about functions in a wasm module.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FunctionType {

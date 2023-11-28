@@ -167,14 +167,14 @@ impl WasmFuncType {
 
 /// WebAssembly continuation type -- equivalent of `wasmparser`'s ContType.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct WasmContType(TypeIndex);
+pub struct WasmContType(SignatureIndex);
 
 impl WasmContType {
-    pub fn new(idx: TypeIndex) -> Self {
+    pub fn new(idx: SignatureIndex) -> Self {
         WasmContType(idx)
     }
 
-    pub fn type_index(self) -> TypeIndex {
+    pub fn signature_index(self) -> SignatureIndex {
         self.0
     }
 }
@@ -478,7 +478,11 @@ pub trait TypeConvert {
 
     /// Converts a wasmparser continuation type to a wasmtime type
     fn convert_cont_type(&self, ty: &wasmparser::ContType) -> WasmContType {
-        WasmContType(TypeIndex::from_u32(ty.0))
+        if let WasmHeapType::TypedFunc(sigidx) = self.lookup_heap_type(ty.0) {
+            WasmContType::new(sigidx)
+        } else {
+            panic!("Failed to extract signature index for continuation type.")
+        }
     }
 
     /// Converts a wasmparser value type to a wasmtime type
@@ -508,7 +512,7 @@ pub trait TypeConvert {
             wasmparser::HeapType::Extern => WasmHeapType::Extern,
             wasmparser::HeapType::Cont => WasmHeapType::Cont,
             wasmparser::HeapType::NoCont => WasmHeapType::NoCont,
-            wasmparser::HeapType::Concrete(i) => self.lookup_heap_type(TypeIndex::from_u32(i)),
+            wasmparser::HeapType::Concrete(i) => self.lookup_heap_type(i),
 
             wasmparser::HeapType::Any
             | wasmparser::HeapType::None
@@ -525,5 +529,5 @@ pub trait TypeConvert {
 
     /// Converts the specified type index from a heap type into a canonicalized
     /// heap type.
-    fn lookup_heap_type(&self, index: TypeIndex) -> WasmHeapType;
+    fn lookup_heap_type(&self, index: wasmparser::UnpackedIndex) -> WasmHeapType;
 }

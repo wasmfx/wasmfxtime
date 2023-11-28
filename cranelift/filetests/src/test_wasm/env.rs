@@ -243,7 +243,7 @@ impl<'data> ModuleEnvironment<'data> for ModuleEnv {
 }
 
 impl TypeConvert for ModuleEnv {
-    fn lookup_heap_type(&self, _index: TypeIndex) -> WasmHeapType {
+    fn lookup_heap_type(&self, _index: wasmparser::UnpackedIndex) -> WasmHeapType {
         todo!()
     }
 }
@@ -278,7 +278,7 @@ impl<'a> FuncEnv<'a> {
 }
 
 impl TypeConvert for FuncEnv<'_> {
-    fn lookup_heap_type(&self, _index: TypeIndex) -> WasmHeapType {
+    fn lookup_heap_type(&self, _index: wasmparser::UnpackedIndex) -> WasmHeapType {
         todo!()
     }
 }
