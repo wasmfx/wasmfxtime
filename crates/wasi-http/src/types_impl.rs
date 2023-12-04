@@ -1,6 +1,6 @@
 use crate::{
     bindings::http::types::{self, Headers, Method, Scheme, StatusCode, Trailers},
-    body::{HostFutureTrailers, HostIncomingBody, HostOutgoingBody},
+    body::{HostFutureTrailers, HostIncomingBody, HostOutgoingBody, StreamContext},
     types::{
         is_forbidden_header, remove_forbidden_headers, FieldMap, HostFields,
         HostFutureIncomingResponse, HostIncomingRequest, HostIncomingResponse, HostOutgoingRequest,
@@ -384,7 +384,7 @@ impl<T: WasiHttpView> crate::bindings::http::types::HostOutgoingRequest for T {
             Err(e) => return Ok(Err(e)),
         };
 
-        let (host_body, hyper_body) = HostOutgoingBody::new(size);
+        let (host_body, hyper_body) = HostOutgoingBody::new(StreamContext::Request, size);
 
         req.body = Some(hyper_body);
 
@@ -490,7 +490,6 @@ impl<T: WasiHttpView> crate::bindings::http::types::HostOutgoingRequest for T {
         let req = self.table().get_mut(&request)?;
 
         if let Some(s) = authority.as_ref() {
-            println!("checking authority {s}");
             let auth = match http::uri::Authority::from_str(s.as_str()) {
                 Ok(auth) => auth,
                 Err(_) => return Ok(Err(())),
@@ -637,32 +636,31 @@ impl<T: WasiHttpView> crate::bindings::http::types::HostFutureTrailers for T {
     fn get(
         &mut self,
         id: Resource<HostFutureTrailers>,
-    ) -> wasmtime::Result<Option<Result<Option<Resource<Trailers>>, types::ErrorCode>>> {
+    ) -> wasmtime::Result<Option<Result<Result<Option<Resource<Trailers>>, types::ErrorCode>, ()>>>
+    {
         let trailers = self.table().get_mut(&id)?;
         match trailers {
             HostFutureTrailers::Waiting(_) => return Ok(None),
-            HostFutureTrailers::Done(Err(e)) => return Ok(Some(Err(e.clone()))),
-            HostFutureTrailers::Done(Ok(None)) => return Ok(Some(Ok(None))),
-            HostFutureTrailers::Done(Ok(_)) => {}
-        }
+            HostFutureTrailers::Consumed => return Ok(Some(Err(()))),
+            HostFutureTrailers::Done(_) => {}
+        };
 
-        fn get_fields(elem: &mut dyn Any) -> &mut FieldMap {
-            let trailers = elem.downcast_mut::<HostFutureTrailers>().unwrap();
-            match trailers {
-                HostFutureTrailers::Done(Ok(Some(e))) => e,
-                _ => unreachable!(),
-            }
-        }
+        let res = match std::mem::replace(trailers, HostFutureTrailers::Consumed) {
+            HostFutureTrailers::Done(res) => res,
+            _ => unreachable!(),
+        };
 
-        let hdrs = self.table().push_child(
-            HostFields::Ref {
-                parent: id.rep(),
-                get_fields,
-            },
-            &id,
-        )?;
+        let mut fields = match res {
+            Ok(Some(fields)) => fields,
+            Ok(None) => return Ok(Some(Ok(Ok(None)))),
+            Err(e) => return Ok(Some(Ok(Err(e)))),
+        };
 
-        Ok(Some(Ok(Some(hdrs))))
+        remove_forbidden_headers(self, &mut fields);
+
+        let ts = self.table().push(HostFields::Owned { fields })?;
+
+        Ok(Some(Ok(Ok(Some(ts)))))
     }
 }
 
@@ -728,7 +726,7 @@ impl<T: WasiHttpView> crate::bindings::http::types::HostOutgoingResponse for T {
             Err(e) => return Ok(Err(e)),
         };
 
-        let (host, body) = HostOutgoingBody::new(size);
+        let (host, body) = HostOutgoingBody::new(StreamContext::Response, size);
 
         resp.body.replace(body);
 
@@ -886,84 +884,84 @@ impl<T: WasiHttpView> crate::bindings::http::types::HostRequestOptions for T {
         Ok(id)
     }
 
-    fn connect_timeout_ms(
+    fn connect_timeout(
         &mut self,
         opts: Resource<types::RequestOptions>,
     ) -> wasmtime::Result<Option<types::Duration>> {
-        let millis = self
+        let nanos = self
             .table()
             .get(&opts)?
             .connect_timeout
-            .map(|d| d.as_millis());
+            .map(|d| d.as_nanos());
 
-        if let Some(millis) = millis {
-            Ok(Some(millis.try_into()?))
+        if let Some(nanos) = nanos {
+            Ok(Some(nanos.try_into()?))
         } else {
             Ok(None)
         }
     }
 
-    fn set_connect_timeout_ms(
+    fn set_connect_timeout(
         &mut self,
         opts: Resource<types::RequestOptions>,
-        ms: Option<types::Duration>,
+        duration: Option<types::Duration>,
     ) -> wasmtime::Result<Result<(), ()>> {
         self.table().get_mut(&opts)?.connect_timeout =
-            ms.map(|ms| std::time::Duration::from_millis(ms));
+            duration.map(std::time::Duration::from_nanos);
         Ok(Ok(()))
     }
 
-    fn first_byte_timeout_ms(
+    fn first_byte_timeout(
         &mut self,
         opts: Resource<types::RequestOptions>,
     ) -> wasmtime::Result<Option<types::Duration>> {
-        let millis = self
+        let nanos = self
             .table()
             .get(&opts)?
             .first_byte_timeout
-            .map(|d| d.as_millis());
+            .map(|d| d.as_nanos());
 
-        if let Some(millis) = millis {
-            Ok(Some(millis.try_into()?))
+        if let Some(nanos) = nanos {
+            Ok(Some(nanos.try_into()?))
         } else {
             Ok(None)
         }
     }
 
-    fn set_first_byte_timeout_ms(
+    fn set_first_byte_timeout(
         &mut self,
         opts: Resource<types::RequestOptions>,
-        ms: Option<types::Duration>,
+        duration: Option<types::Duration>,
     ) -> wasmtime::Result<Result<(), ()>> {
         self.table().get_mut(&opts)?.first_byte_timeout =
-            ms.map(|ms| std::time::Duration::from_millis(ms));
+            duration.map(std::time::Duration::from_nanos);
         Ok(Ok(()))
     }
 
-    fn between_bytes_timeout_ms(
+    fn between_bytes_timeout(
         &mut self,
         opts: Resource<types::RequestOptions>,
     ) -> wasmtime::Result<Option<types::Duration>> {
-        let millis = self
+        let nanos = self
             .table()
             .get(&opts)?
             .between_bytes_timeout
-            .map(|d| d.as_millis());
+            .map(|d| d.as_nanos());
 
-        if let Some(millis) = millis {
-            Ok(Some(millis.try_into()?))
+        if let Some(nanos) = nanos {
+            Ok(Some(nanos.try_into()?))
         } else {
             Ok(None)
         }
     }
 
-    fn set_between_bytes_timeout_ms(
+    fn set_between_bytes_timeout(
         &mut self,
         opts: Resource<types::RequestOptions>,
-        ms: Option<types::Duration>,
+        duration: Option<types::Duration>,
     ) -> wasmtime::Result<Result<(), ()>> {
         self.table().get_mut(&opts)?.between_bytes_timeout =
-            ms.map(|ms| std::time::Duration::from_millis(ms));
+            duration.map(std::time::Duration::from_nanos);
         Ok(Ok(()))
     }
 

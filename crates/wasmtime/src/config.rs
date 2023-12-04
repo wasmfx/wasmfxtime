@@ -2435,7 +2435,7 @@ impl PoolingAllocationConfig {
     /// same method that [`MpkEnabled::Auto`] does. See
     /// [`PoolingAllocationConfig::memory_protection_keys`] for more
     /// information.
-    pub fn are_memory_protection_keys_available(&self) -> bool {
+    pub fn are_memory_protection_keys_available() -> bool {
         mpk::is_supported()
     }
 }
