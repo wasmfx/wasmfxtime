@@ -49,7 +49,7 @@ pub fn parse_type_section<'a>(
     let count = types.count();
     environ.reserve_types(count)?;
 
-    for ty in types.into_iter_err_on_gc_types() {
+    for ty in types.into_iter_err_on_gc_types_tc() {
         match ty? {
             wasmparser::FuncOrContType::Func(ty) => {
                 let ty = environ.convert_func_type(&ty);
