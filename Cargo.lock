@@ -3489,7 +3489,7 @@ version = "17.0.0"
 
 [[package]]
 name = "wasmtime-continuations"
-version = "16.0.0"
+version = "17.0.0"
 dependencies = [
  "memoffset",
  "num_enum",
@@ -3604,7 +3604,7 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-fibre"
-version = "16.0.0"
+version = "17.0.0"
 dependencies = [
  "backtrace",
  "cc",
