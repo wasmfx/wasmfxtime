@@ -4,6 +4,14 @@
 (rule (simplify (sextend ty (sextend _intermediate_ty x)))
       (sextend ty x))
 
+;; Once something has be `uextend`ed, further `sextend`ing is the same as `uextend`
+(rule (simplify (sextend ty (uextend _intermediate_ty x)))
+      (uextend ty x))
+
+;; `icmp` is zero or one, so sign-extending is the same as zero-extending
+(rule (simplify (sextend ty x@(icmp _ _ _ _)))
+      (uextend ty x))
+
 ;; Masking out any of the top bits of the result of `uextend` is a no-op. (This
 ;; is like a cheap version of known-bits analysis.)
 (rule (simplify (band wide x @ (uextend _ (value_type narrow)) (iconst _ (u64_from_imm64 mask))))
@@ -27,6 +35,15 @@
              (uextend $I64 x @ (value_type $I32))
              (iconst _ (u64_from_imm64 0))))
       (iconst ty (imm64 1)))
+
+;; Sign-extending can't change whether a number is zero nor how it signed-compares to zero
+(rule (simplify (eq _ (sextend _ x@(value_type ty)) (iconst _ (u64_from_imm64 0))))
+      (eq ty x (iconst ty (imm64 0))))
+(rule (simplify (ne _ (sextend _ x@(value_type ty)) (iconst _ (u64_from_imm64 0))))
+      (ne ty x (iconst ty (imm64 0))))
+(rule (simplify (icmp _ cc (sextend _ x@(value_type ty)) (iconst _ (u64_from_imm64 0))))
+      (if (signed_cond_code cc))
+      (icmp ty cc x (iconst ty (imm64 0))))
 
 ;; A reduction-of-an-extend back to the same original type is the same as not
 ;; actually doing the extend in the first place.
