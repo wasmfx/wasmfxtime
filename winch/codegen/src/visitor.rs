@@ -7,8 +7,8 @@
 use crate::abi::ABI;
 use crate::codegen::{control_index, Callee, CodeGen, ControlStackFrame, FnCall};
 use crate::masm::{
-    DivKind, FloatCmpKind, IntCmpKind, MacroAssembler, OperandSize, RegImm, RemKind, RoundingMode,
-    ShiftKind,
+    DivKind, ExtendKind, FloatCmpKind, IntCmpKind, MacroAssembler, OperandSize, RegImm, RemKind,
+    RoundingMode, ShiftKind,
 };
 use crate::stack::{TypedReg, Val};
 use cranelift_codegen::ir::TrapCode;
@@ -143,6 +143,14 @@ macro_rules! def_unsupported {
     (emit I64Ctz $($rest:tt)*) => {};
     (emit I32Popcnt $($rest:tt)*) => {};
     (emit I64Popcnt $($rest:tt)*) => {};
+    (emit I32WrapI64 $($rest:tt)*) => {};
+    (emit I64ExtendI32S $($rest:tt)*) => {};
+    (emit I64ExtendI32U $($rest:tt)*) => {};
+    (emit I32Extend8S $($rest:tt)*) => {};
+    (emit I32Extend16S $($rest:tt)*) => {};
+    (emit I64Extend8S $($rest:tt)*) => {};
+    (emit I64Extend16S $($rest:tt)*) => {};
+    (emit I64Extend32S $($rest:tt)*) => {};
     (emit LocalGet $($rest:tt)*) => {};
     (emit LocalSet $($rest:tt)*) => {};
     (emit Call $($rest:tt)*) => {};
@@ -203,6 +211,7 @@ where
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_add(dst, dst, src, size);
+                TypedReg::f32(dst)
             },
         );
     }
@@ -213,6 +222,7 @@ where
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_add(dst, dst, src, size);
+                TypedReg::f64(dst)
             },
         );
     }
@@ -223,6 +233,7 @@ where
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_sub(dst, dst, src, size);
+                TypedReg::f32(dst)
             },
         );
     }
@@ -233,6 +244,7 @@ where
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_sub(dst, dst, src, size);
+                TypedReg::f64(dst)
             },
         );
     }
@@ -243,6 +255,7 @@ where
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_mul(dst, dst, src, size);
+                TypedReg::f32(dst)
             },
         );
     }
@@ -253,6 +266,7 @@ where
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_mul(dst, dst, src, size);
+                TypedReg::f64(dst)
             },
         );
     }
@@ -263,6 +277,7 @@ where
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_div(dst, dst, src, size);
+                TypedReg::f32(dst)
             },
         );
     }
@@ -273,6 +288,7 @@ where
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_div(dst, dst, src, size);
+                TypedReg::f64(dst)
             },
         );
     }
@@ -283,6 +299,7 @@ where
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_min(dst, dst, src, size);
+                TypedReg::f32(dst)
             },
         );
     }
@@ -293,6 +310,7 @@ where
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_min(dst, dst, src, size);
+                TypedReg::f64(dst)
             },
         );
     }
@@ -303,6 +321,7 @@ where
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_max(dst, dst, src, size);
+                TypedReg::f32(dst)
             },
         );
     }
@@ -313,6 +332,7 @@ where
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_max(dst, dst, src, size);
+                TypedReg::f64(dst)
             },
         );
     }
@@ -323,6 +343,7 @@ where
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_copysign(dst, dst, src, size);
+                TypedReg::f32(dst)
             },
         );
     }
@@ -333,6 +354,7 @@ where
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
                 masm.float_copysign(dst, dst, src, size);
+                TypedReg::f64(dst)
             },
         );
     }
@@ -341,6 +363,7 @@ where
         self.context
             .unop(self.masm, OperandSize::S32, &mut |masm, reg, size| {
                 masm.float_abs(reg, size);
+                TypedReg::f32(reg)
             });
     }
 
@@ -348,6 +371,7 @@ where
         self.context
             .unop(self.masm, OperandSize::S64, &mut |masm, reg, size| {
                 masm.float_abs(reg, size);
+                TypedReg::f64(reg)
             });
     }
 
@@ -355,6 +379,7 @@ where
         self.context
             .unop(self.masm, OperandSize::S32, &mut |masm, reg, size| {
                 masm.float_neg(reg, size);
+                TypedReg::f32(reg)
             });
     }
 
@@ -362,6 +387,7 @@ where
         self.context
             .unop(self.masm, OperandSize::S64, &mut |masm, reg, size| {
                 masm.float_neg(reg, size);
+                TypedReg::f64(reg)
             });
     }
 
@@ -409,6 +435,7 @@ where
         self.context
             .unop(self.masm, OperandSize::S32, &mut |masm, reg, size| {
                 masm.float_sqrt(reg, reg, size);
+                TypedReg::f32(reg)
             });
     }
 
@@ -416,6 +443,7 @@ where
         self.context
             .unop(self.masm, OperandSize::S64, &mut |masm, reg, size| {
                 masm.float_sqrt(reg, reg, size);
+                TypedReg::f64(reg)
             });
     }
 
@@ -542,36 +570,42 @@ where
     fn visit_i32_add(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
             masm.add(dst, dst, src, size);
+            TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_add(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
             masm.add(dst, dst, src, size);
+            TypedReg::i64(dst)
         });
     }
 
     fn visit_i32_sub(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
             masm.sub(dst, dst, src, size);
+            TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_sub(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
             masm.sub(dst, dst, src, size);
+            TypedReg::i64(dst)
         });
     }
 
     fn visit_i32_mul(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
             masm.mul(dst, dst, src, size);
+            TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_mul(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
             masm.mul(dst, dst, src, size);
+            TypedReg::i64(dst)
         });
     }
 
@@ -716,6 +750,7 @@ where
 
         self.context.unop(self.masm, S32, &mut |masm, reg, size| {
             masm.cmp_with_set(RegImm::i32(0), reg.into(), IntCmpKind::Eq, size);
+            TypedReg::i32(reg)
         });
     }
 
@@ -724,6 +759,7 @@ where
 
         self.context.unop(self.masm, S64, &mut |masm, reg, size| {
             masm.cmp_with_set(RegImm::i64(0), reg.into(), IntCmpKind::Eq, size);
+            TypedReg::i32(reg) // Return value for `i64.eqz` is an `i32`.
         });
     }
 
@@ -732,6 +768,7 @@ where
 
         self.context.unop(self.masm, S32, &mut |masm, reg, size| {
             masm.clz(reg, reg, size);
+            TypedReg::i32(reg)
         });
     }
 
@@ -740,6 +777,7 @@ where
 
         self.context.unop(self.masm, S64, &mut |masm, reg, size| {
             masm.clz(reg, reg, size);
+            TypedReg::i64(reg)
         });
     }
 
@@ -748,6 +786,7 @@ where
 
         self.context.unop(self.masm, S32, &mut |masm, reg, size| {
             masm.ctz(reg, reg, size);
+            TypedReg::i32(reg)
         });
     }
 
@@ -756,42 +795,49 @@ where
 
         self.context.unop(self.masm, S64, &mut |masm, reg, size| {
             masm.ctz(reg, reg, size);
+            TypedReg::i64(reg)
         });
     }
 
     fn visit_i32_and(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
             masm.and(dst, dst, src, size);
+            TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_and(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
             masm.and(dst, dst, src, size);
+            TypedReg::i64(dst)
         });
     }
 
     fn visit_i32_or(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
             masm.or(dst, dst, src, size);
+            TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_or(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
             masm.or(dst, dst, src, size);
+            TypedReg::i64(dst)
         });
     }
 
     fn visit_i32_xor(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
             masm.xor(dst, dst, src, size);
+            TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_xor(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
             masm.xor(dst, dst, src, size);
+            TypedReg::i64(dst)
         });
     }
 
@@ -895,6 +941,78 @@ where
         use OperandSize::*;
 
         self.masm.popcnt(&mut self.context, S64);
+    }
+
+    fn visit_i32_wrap_i64(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S64, &mut |masm, reg, _size| {
+            masm.wrap(reg, reg);
+            TypedReg::i32(reg)
+        });
+    }
+
+    fn visit_i64_extend_i32_s(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S32, &mut |masm, reg, _size| {
+            masm.extend(reg, reg, ExtendKind::I64ExtendI32S);
+            TypedReg::i64(reg)
+        });
+    }
+
+    fn visit_i64_extend_i32_u(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S32, &mut |masm, reg, _size| {
+            masm.extend(reg, reg, ExtendKind::I64ExtendI32U);
+            TypedReg::i64(reg)
+        });
+    }
+
+    fn visit_i32_extend8_s(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S32, &mut |masm, reg, _size| {
+            masm.extend(reg, reg, ExtendKind::I32Extend8S);
+            TypedReg::i32(reg)
+        });
+    }
+
+    fn visit_i32_extend16_s(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S32, &mut |masm, reg, _size| {
+            masm.extend(reg, reg, ExtendKind::I32Extend16S);
+            TypedReg::i32(reg)
+        });
+    }
+
+    fn visit_i64_extend8_s(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S64, &mut |masm, reg, _size| {
+            masm.extend(reg, reg, ExtendKind::I64Extend8S);
+            TypedReg::i64(reg)
+        });
+    }
+
+    fn visit_i64_extend16_s(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S64, &mut |masm, reg, _size| {
+            masm.extend(reg, reg, ExtendKind::I64Extend16S);
+            TypedReg::i64(reg)
+        });
+    }
+
+    fn visit_i64_extend32_s(&mut self) {
+        use OperandSize::*;
+
+        self.context.unop(self.masm, S64, &mut |masm, reg, _size| {
+            masm.extend(reg, reg, ExtendKind::I64Extend32S);
+            TypedReg::i64(reg)
+        });
     }
 
     fn visit_local_get(&mut self, index: u32) {
@@ -1368,6 +1486,7 @@ where
     fn cmp_i32s(&mut self, kind: IntCmpKind) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
             masm.cmp_with_set(src, dst, kind, size);
+            TypedReg::i32(dst)
         });
     }
 
@@ -1375,6 +1494,7 @@ where
         self.context
             .i64_binop(self.masm, move |masm, dst, src, size| {
                 masm.cmp_with_set(src, dst, kind, size);
+                TypedReg::i32(dst) // Return value for comparisons is an `i32`.
             });
     }
 }
