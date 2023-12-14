@@ -1,4 +1,5 @@
 use crate::preview2::host::network::util;
+use crate::preview2::network::SocketAddrUse;
 use crate::preview2::tcp::{TcpSocket, TcpState};
 use crate::preview2::{
     bindings::{
@@ -9,8 +10,7 @@ use crate::preview2::{
     network::SocketAddressFamily,
 };
 use crate::preview2::{Pollable, SocketResult, WasiView};
-use cap_net_ext::{Blocking, PoolExt};
-use cap_std::net::TcpListener;
+use cap_net_ext::Blocking;
 use io_lifetimes::AsSocketlike;
 use rustix::io::Errno;
 use rustix::net::sockopt;
@@ -44,22 +44,20 @@ impl<T: WasiView> crate::preview2::host::tcp::tcp::HostTcpSocket for T {
         util::validate_address_family(&local_address, &socket.family)?;
 
         {
-            let binder = network.pool.tcp_binder(local_address)?;
-            let listener = &*socket.tcp_socket().as_socketlike_view::<TcpListener>();
+            // Ensure that we're allowed to connect to this address.
+            network.check_socket_addr(&local_address, SocketAddrUse::TcpBind)?;
 
             // Perform the OS bind call.
-            util::tcp_bind(listener, &binder).map_err(|error| {
-                match Errno::from_io_error(&error) {
-                    // From https://pubs.opengroup.org/onlinepubs/9699919799/functions/bind.html:
-                    // > [EAFNOSUPPORT] The specified address is not a valid address for the address family of the specified socket
-                    //
-                    // The most common reasons for this error should have already
-                    // been handled by our own validation slightly higher up in this
-                    // function. This error mapping is here just in case there is
-                    // an edge case we didn't catch.
-                    Some(Errno::AFNOSUPPORT) => ErrorCode::InvalidArgument,
-                    _ => ErrorCode::from(error),
-                }
+            util::tcp_bind(socket.tcp_socket(), &local_address).map_err(|error| match error {
+                // From https://pubs.opengroup.org/onlinepubs/9699919799/functions/bind.html:
+                // > [EAFNOSUPPORT] The specified address is not a valid address for the address family of the specified socket
+                //
+                // The most common reasons for this error should have already
+                // been handled by our own validation slightly higher up in this
+                // function. This error mapping is here just in case there is
+                // an edge case we didn't catch.
+                Errno::AFNOSUPPORT => ErrorCode::InvalidArgument,
+                _ => ErrorCode::from(error),
             })?;
         }
 
@@ -112,11 +110,11 @@ impl<T: WasiView> crate::preview2::host::tcp::tcp::HostTcpSocket for T {
             util::validate_remote_address(&remote_address)?;
             util::validate_address_family(&remote_address, &socket.family)?;
 
-            let connecter = network.pool.tcp_connecter(remote_address)?;
-            let listener = &*socket.tcp_socket().as_socketlike_view::<TcpListener>();
+            // Ensure that we're allowed to connect to this address.
+            network.check_socket_addr(&remote_address, SocketAddrUse::TcpConnect)?;
 
             // Do an OS `connect`. Our socket is non-blocking, so it'll either...
-            util::tcp_connect(listener, &connecter)
+            util::tcp_connect(socket.tcp_socket(), &remote_address)
         };
 
         match r {
@@ -127,11 +125,11 @@ impl<T: WasiView> crate::preview2::host::tcp::tcp::HostTcpSocket for T {
                 return Ok(());
             }
             // continue in progress,
-            Err(err) if Errno::from_io_error(&err) == Some(Errno::INPROGRESS) => {}
+            Err(err) if err == Errno::INPROGRESS => {}
             // or fail immediately.
             Err(err) => {
-                return Err(match Errno::from_io_error(&err) {
-                    Some(Errno::AFNOSUPPORT) => ErrorCode::InvalidArgument.into(), // See `bind` implementation.
+                return Err(match err {
+                    Errno::AFNOSUPPORT => ErrorCode::InvalidArgument.into(), // See `bind` implementation.
                     _ => err.into(),
                 });
             }
@@ -204,10 +202,7 @@ impl<T: WasiView> crate::preview2::host::tcp::tcp::HostTcpSocket for T {
             | TcpState::BindStarted => return Err(ErrorCode::ConcurrencyConflict.into()),
         }
 
-        {
-            let listener = &*socket.tcp_socket().as_socketlike_view::<TcpListener>();
-            util::tcp_listen(listener, socket.listen_backlog_size)?;
-        }
+        util::tcp_listen(socket.tcp_socket(), socket.listen_backlog_size)?;
 
         socket.tcp_state = TcpState::ListenStarted;
 
@@ -247,9 +242,8 @@ impl<T: WasiView> crate::preview2::host::tcp::tcp::HostTcpSocket for T {
 
         // Do the OS accept call.
         let tcp_socket = socket.tcp_socket();
-        let (connection, _addr) = tcp_socket.try_io(Interest::READABLE, || {
-            let listener = &*tcp_socket.as_socketlike_view::<TcpListener>();
-            util::tcp_accept(listener, Blocking::No)
+        let (client_fd, _addr) = tcp_socket.try_io(Interest::READABLE, || {
+            util::tcp_accept(tcp_socket, Blocking::No)
         })?;
 
         #[cfg(target_os = "macos")]
@@ -259,25 +253,25 @@ impl<T: WasiView> crate::preview2::host::tcp::tcp::HostTcpSocket for T {
             // and only if a specific value was explicitly set on the listener.
 
             if let Some(size) = socket.receive_buffer_size {
-                _ = util::set_socket_recv_buffer_size(&connection, size); // Ignore potential error.
+                _ = util::set_socket_recv_buffer_size(&client_fd, size); // Ignore potential error.
             }
 
             if let Some(size) = socket.send_buffer_size {
-                _ = util::set_socket_send_buffer_size(&connection, size); // Ignore potential error.
+                _ = util::set_socket_send_buffer_size(&client_fd, size); // Ignore potential error.
             }
 
             // For some reason, IP_TTL is inherited, but IPV6_UNICAST_HOPS isn't.
             if let (SocketAddressFamily::Ipv6 { .. }, Some(ttl)) = (socket.family, socket.hop_limit)
             {
-                _ = util::set_ipv6_unicast_hops(&connection, ttl); // Ignore potential error.
+                _ = util::set_ipv6_unicast_hops(&client_fd, ttl); // Ignore potential error.
             }
 
             if let Some(value) = socket.keep_alive_idle_time {
-                _ = util::set_tcp_keepidle(&connection, value); // Ignore potential error.
+                _ = util::set_tcp_keepidle(&client_fd, value); // Ignore potential error.
             }
         }
 
-        let mut tcp_socket = TcpSocket::from_tcp_stream(connection, socket.family)?;
+        let mut tcp_socket = TcpSocket::from_fd(client_fd, socket.family)?;
 
         // Mark the socket as connected so that we can exit early from methods like `start-bind`.
         tcp_socket.tcp_state = TcpState::Connected;
