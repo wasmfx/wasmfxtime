@@ -115,7 +115,7 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     env:
-      QEMU_BUILD_VERSION: 7.2.0
+      QEMU_BUILD_VERSION: 8.1.1
     strategy:
       fail-fast: true
       matrix:
@@ -137,6 +137,10 @@ jobs:
     - run: rustup target add wasm32-wasi wasm32-unknown-unknown ${{ matrix.target }}
     - run: echo CARGO_BUILD_TARGET=${{ matrix.target }} >> $GITHUB_ENV
       if: matrix.target != ''
+
+    # Install OpenVINO for testing wasmtime-wasi-nn.
+    - uses: abrown/install-openvino-action@v8
+      if: runner.arch == 'X64'
 
     - run: cargo fetch --locked
 
@@ -189,6 +193,12 @@ jobs:
       if: matrix.target == ''
     - run: cmake --build examples/build --config Debug
       if: matrix.target == ''
+
+    # Ensure wit definitions are in sync: both wasmtime-wasi and wasmtime-wasi-http need their own
+    # copy of the wit definitions so publishing works, but we need to ensure they are identical copies.
+    - name: Check that the wasi and wasi-http wit directories agree
+      run: |
+        diff -ru crates/wasi/wit crates/wasi-http/wit
 
     # Build and test all features
     - run: ./ci/run-tests.sh --locked
