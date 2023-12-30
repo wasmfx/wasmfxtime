@@ -269,7 +269,7 @@ fn ignore(testsuite: &str, testname: &str, strategy: &str) -> bool {
     // stacks.
     if testsuite == "typed_continuations" {
         if testname == "unhandled" {
-            return true
+            return true;
         }
     }
 
