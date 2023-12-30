@@ -724,7 +724,7 @@ dependencies = [
  "region",
  "target-lexicon",
  "wasmtime-jit-icache-coherence",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2638,6 +2638,7 @@ dependencies = [
  "sha2",
  "url",
  "wasi",
+ "wasi-nn",
  "wit-bindgen",
 ]
 
@@ -3020,7 +3021,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "wasi-common",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3044,7 +3045,16 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wiggle",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "wasi-nn"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7031683cc05a71515d9200fb159b28d717ded3c40dbb979d1602cf46f3a68f40"
+dependencies = [
+ "thiserror",
 ]
 
 [[package]]
@@ -3315,7 +3325,7 @@ dependencies = [
  "wasmtime-wasi",
  "wasmtime-winch",
  "wat",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3394,7 +3404,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "toml",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
  "zstd",
 ]
 
@@ -3451,7 +3461,7 @@ dependencies = [
  "wasmtime-wast",
  "wast 69.0.1",
  "wat",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3599,7 +3609,7 @@ dependencies = [
  "rustix",
  "wasmtime-asm-macros",
  "wasmtime-versioned-export-macros",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3611,7 +3621,7 @@ dependencies = [
  "cfg-if",
  "rustix",
  "wasmtime-asm-macros",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3691,7 +3701,7 @@ dependencies = [
  "wasmtime-jit-debug",
  "wasmtime-jit-icache-coherence",
  "wasmtime-runtime",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3710,7 +3720,7 @@ version = "17.0.0"
 dependencies = [
  "cfg-if",
  "libc",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3743,7 +3753,7 @@ dependencies = [
  "wasmtime-jit-debug",
  "wasmtime-versioned-export-macros",
  "wasmtime-wmemcheck",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3801,7 +3811,7 @@ dependencies = [
  "wasi-tokio",
  "wasmtime",
  "wiggle",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3835,11 +3845,14 @@ name = "wasmtime-wasi-nn"
 version = "17.0.0"
 dependencies = [
  "anyhow",
+ "cap-std",
  "openvino",
+ "test-programs-artifacts",
  "thiserror",
  "tracing",
  "walkdir",
  "wasmtime",
+ "wasmtime-wasi",
  "wiggle",
 ]
 
