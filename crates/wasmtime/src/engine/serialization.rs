@@ -223,6 +223,7 @@ impl Metadata<'_> {
             typed_continuations,
             gc,
             component_model_values,
+            component_model_nested_names,
 
             // Always on; we don't currently have knobs for these.
             mutable_global: _,
@@ -234,6 +235,7 @@ impl Metadata<'_> {
         assert!(!memory_control);
         assert!(!gc);
         assert!(!component_model_values);
+        assert!(!component_model_nested_names);
 
         Metadata {
             target: engine.compiler().triple().to_string(),
