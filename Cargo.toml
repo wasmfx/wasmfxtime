@@ -167,7 +167,6 @@ wasmtime-explorer = { path = "crates/explorer", version = "=18.0.0" }
 wasmtime-fiber = { path = "crates/fiber", version = "=18.0.0" }
 wasmtime-fibre = { path = "crates/fibre", version = "=18.0.0" }
 wasmtime-types = { path = "crates/types", version = "18.0.0" }
-wasmtime-jit = { path = "crates/jit", version = "=18.0.0" }
 wasmtime-jit-debug = { path = "crates/jit-debug", version = "=18.0.0" }
 wasmtime-runtime = { path = "crates/runtime", version = "=18.0.0" }
 wasmtime-wast = { path = "crates/wast", version = "=18.0.0" }
@@ -184,7 +183,7 @@ component-fuzz-util = { path = "crates/misc/component-fuzz-util" }
 wiggle = { path = "crates/wiggle", version = "=18.0.0", default-features = false }
 wiggle-macro = { path = "crates/wiggle/macro", version = "=18.0.0" }
 wiggle-generate = { path = "crates/wiggle/generate", version = "=18.0.0" }
-wasi-common = { path = "crates/wasi-common", version = "=18.0.0" }
+wasi-common = { path = "crates/wasi-common", version = "=18.0.0", default-features = false }
 wasi-tokio = { path = "crates/wasi-common/tokio", version = "=18.0.0" }
 wasi-cap-std-sync = { path = "crates/wasi-common/cap-std-sync", version = "=18.0.0" }
 wasmtime-fuzzing = { path = "crates/fuzzing" }

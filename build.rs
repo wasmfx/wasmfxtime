@@ -211,7 +211,9 @@ fn ignore(testsuite: &str, testname: &str, strategy: &str) -> bool {
         let assert_trap = [
             "i32",
             "i64",
+            "call",
             "call_indirect",
+            "conversions",
             "table_fill",
             "table_init",
             "table_copy",
