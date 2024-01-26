@@ -523,7 +523,7 @@ mod typed_continuation_helpers {
             // that we can use the null-ness of the `fiber` field as an indicator
             // for invokedness.
             let actual_state = self.load_state(builder);
-            let invoked: i32 = wasmtime_continuations::State::Invoked.into();
+            let invoked: i32 = i32::from(wasmtime_continuations::State::Invoked);
             builder
                 .ins()
                 .icmp_imm(IntCC::Equal, actual_state, invoked as i64)
@@ -533,7 +533,7 @@ mod typed_continuation_helpers {
         /// function used as continuation has returned normally).
         pub fn has_returned(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let actual_state = self.load_state(builder);
-            let returned: i32 = wasmtime_continuations::State::Returned.into();
+            let returned: i32 = i32::from(wasmtime_continuations::State::Returned);
             builder
                 .ins()
                 .icmp_imm(IntCC::Equal, actual_state, returned as i64)

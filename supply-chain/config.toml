@@ -424,16 +424,6 @@ notes = "we are exempting tokio, hyper, and their tightly coupled dependencies b
 version = "1.13.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.num_enum]]
-version = "0.5.11"
-criteria = "safe-to-deploy"
-notes = "TODO(dhil): Review deferred as deployment of our software in production is not supported."
-
-[[exemptions.num_enum_derive]]
-version = "0.5.11"
-criteria = "safe-to-deploy"
-notes = "TODO(dhil): Review deferred as deployment of our software in production is not supported."
-
 [[exemptions.number_prefix]]
 version = "0.3.0"
 criteria = "safe-to-deploy"
@@ -485,11 +475,6 @@ criteria = "safe-to-deploy"
 [[exemptions.pretty_env_logger]]
 version = "0.4.0"
 criteria = "safe-to-deploy"
-
-[[exemptions.proc-macro-crate]]
-version = "1.3.1"
-criteria = "safe-to-deploy"
-notes = "TODO(dhil): Review deferred as deployment of our software in production is not supported."
 
 [[exemptions.proptest]]
 version = "1.0.0"
@@ -612,16 +597,6 @@ notes = "we are exempting tokio, hyper, and their tightly coupled dependencies b
 version = "1.7.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.toml_datetime]]
-version = "0.6.5"
-criteria = "safe-to-deploy"
-notes = "TODO(dhil): Review deferred as deployment of our software in production is not supported."
-
-[[exemptions.toml_edit]]
-version = "0.19.15"
-criteria = "safe-to-deploy"
-notes = "TODO(dhil): Review deferred as deployment of our software in production is not supported."
-
 [[exemptions.tracing]]
 version = "0.1.34"
 criteria = "safe-to-deploy"
@@ -690,11 +665,6 @@ criteria = "safe-to-deploy"
 [[exemptions.winapi-x86_64-pc-windows-gnu]]
 version = "0.4.0"
 criteria = "safe-to-deploy"
-
-[[exemptions.winnow]]
-version = "0.5.34"
-criteria = "safe-to-deploy"
-notes = "TODO(dhil): Review deferred as deployment of our software in production is not supported."
 
 [[exemptions.zstd]]
 version = "0.11.1+zstd.1.5.2"

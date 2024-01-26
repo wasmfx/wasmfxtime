@@ -1,4 +1,3 @@
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::ptr;
 use wasmtime_fibre::Fiber;
 
@@ -60,7 +59,7 @@ impl Payloads {
 }
 
 /// Encodes the life cycle of a `ContinuationObject`.
-#[derive(PartialEq, IntoPrimitive, TryFromPrimitive)]
+#[derive(PartialEq)]
 #[repr(i32)]
 pub enum State {
     /// The `ContinuationObject` has been created, but `resume` has never been
@@ -81,6 +80,12 @@ impl State {
     pub fn discriminant(&self) -> i32 {
         // This is well-defined for an enum with repr(i32).
         unsafe { *(self as *const Self as *const i32) }
+    }
+}
+
+impl From<State> for i32 {
+    fn from(st: State) -> Self {
+        st.discriminant()
     }
 }
 
