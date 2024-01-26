@@ -190,7 +190,7 @@ mod typed_continuation_helpers {
     /// supported by `std::fmt`.
     ///
     /// Currently supported placeholders:
-    /// {}       for unsinged integers
+    /// {}       for unsigned integers
     /// {:p}     for printing pointers (in hex form)
     ///
     /// When printing, we replace them with the corresponding values in `vals`.
@@ -199,89 +199,96 @@ mod typed_continuation_helpers {
     pub fn emit_debug_print<'a>(
         env: &mut crate::func_environ::FuncEnvironment<'a>,
         builder: &mut FunctionBuilder,
-        s: &'static str,
-        vals: &[ir::Value],
+        _s: &'static str,
+        _vals: &[ir::Value],
     ) {
-        let print_s_infix = |env: &mut crate::func_environ::FuncEnvironment<'a>,
-                             builder: &mut FunctionBuilder,
-                             start: usize,
-                             end: usize| {
-            if start < end {
-                let s: &'static str = &s[start..end];
-                // This is quite dodgy, which is why we can only do this for
-                // debugging purposes:
-                // At jit time, we take a pointer to the slice of the (static)
-                // string, thus yielding an address within wasmtime's DATA
-                // section. This pointer is hard-code into generated code. We do
-                // not emit any kind of relocation information, which means that
-                // this breaks if we were to store the generated code and use it
-                // during subsequent executions of wasmtime (e.g., when using
-                // wasmtime compile).
-                let ptr = s.as_ptr();
-                let ptr = builder.ins().iconst(env.pointer_type(), ptr as i64);
-                let len = s.len();
-                let len = builder.ins().iconst(I64, len as i64);
+        let _dummy = BuiltinFunctionIndex::tc_print_pointer();
+        let _dummy = BuiltinFunctionIndex::tc_print_int();
+        let _dummy = BuiltinFunctionIndex::tc_print_str();
+        let _dummy = env.builtin_function_signatures.tc_print_str(builder.func);
+        let _dummy = env.builtin_function_signatures.tc_print_int(builder.func);
+        let _dummy = env.builtin_function_signatures.tc_print_pointer(builder.func);
+        todo!("emit_debug_print needs to be rewritten to drop the regex dependency.")
+        // let print_s_infix = |env: &mut crate::func_environ::FuncEnvironment<'a>,
+        //                      builder: &mut FunctionBuilder,
+        //                      start: usize,
+        //                      end: usize| {
+        //     if start < end {
+        //         let s: &'static str = &s[start..end];
+        //         // This is quite dodgy, which is why we can only do this for
+        //         // debugging purposes:
+        //         // At jit time, we take a pointer to the slice of the (static)
+        //         // string, thus yielding an address within wasmtime's DATA
+        //         // section. This pointer is hard-code into generated code. We do
+        //         // not emit any kind of relocation information, which means that
+        //         // this breaks if we were to store the generated code and use it
+        //         // during subsequent executions of wasmtime (e.g., when using
+        //         // wasmtime compile).
+        //         let ptr = s.as_ptr();
+        //         let ptr = builder.ins().iconst(env.pointer_type(), ptr as i64);
+        //         let len = s.len();
+        //         let len = builder.ins().iconst(I64, len as i64);
 
-                let index = BuiltinFunctionIndex::tc_print_str();
-                let sig = env.builtin_function_signatures.tc_print_str(builder.func);
-                env.generate_builtin_call_no_return_val(builder, index, sig, vec![ptr, len]);
-            }
-        };
-        let print_int = |env: &mut crate::func_environ::FuncEnvironment<'a>,
-                         builder: &mut FunctionBuilder,
-                         val: ir::Value| {
-            let index = BuiltinFunctionIndex::tc_print_int();
-            let sig = env.builtin_function_signatures.tc_print_int(builder.func);
-            let ty = builder.func.dfg.value_type(val);
-            let val = match ty {
-                I32 => builder.ins().uextend(I64, val),
-                I64 => val,
-                _ => panic!("Cannot print type {}", ty),
-            };
-            env.generate_builtin_call_no_return_val(builder, index, sig, vec![val]);
-        };
-        let print_pointer = |env: &mut crate::func_environ::FuncEnvironment<'a>,
-                             builder: &mut FunctionBuilder,
-                             ptr: ir::Value| {
-            let index = BuiltinFunctionIndex::tc_print_pointer();
-            let sig = env
-                .builtin_function_signatures
-                .tc_print_pointer(builder.func);
-            env.generate_builtin_call_no_return_val(builder, index, sig, vec![ptr]);
-        };
+        //         let index = BuiltinFunctionIndex::tc_print_str();
+        //         let sig = env.builtin_function_signatures.tc_print_str(builder.func);
+        //         env.generate_builtin_call_no_return_val(builder, index, sig, vec![ptr, len]);
+        //     }
+        // };
+        // let print_int = |env: &mut crate::func_environ::FuncEnvironment<'a>,
+        //                  builder: &mut FunctionBuilder,
+        //                  val: ir::Value| {
+        //     let index = BuiltinFunctionIndex::tc_print_int();
+        //     let sig = env.builtin_function_signatures.tc_print_int(builder.func);
+        //     let ty = builder.func.dfg.value_type(val);
+        //     let val = match ty {
+        //         I32 => builder.ins().uextend(I64, val),
+        //         I64 => val,
+        //         _ => panic!("Cannot print type {}", ty),
+        //     };
+        //     env.generate_builtin_call_no_return_val(builder, index, sig, vec![val]);
+        // };
+        // let print_pointer = |env: &mut crate::func_environ::FuncEnvironment<'a>,
+        //                      builder: &mut FunctionBuilder,
+        //                      ptr: ir::Value| {
+        //     let index = BuiltinFunctionIndex::tc_print_pointer();
+        //     let sig = env
+        //         .builtin_function_signatures
+        //         .tc_print_pointer(builder.func);
+        //     env.generate_builtin_call_no_return_val(builder, index, sig, vec![ptr]);
+        // };
 
-        if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
-            // Regex matching { followed by something without { or } followed by }.
-            // let placeholder_re = regex::Regex::new(r"\{[^{}]*\}").unwrap();
+        // if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
+        //     // Regex matching { followed by something without { or } followed by }.
+        //     let placeholder_re = regex::Regex::new(r"\{[^{}]*\}").unwrap();
 
-            // let mut prev_end = 0;
-            // let mut i = 0;
-            // for ph_match in placeholder_re.find_iter(s) {
-            //     let start = ph_match.start();
-            //     let end = ph_match.end();
+        //     let mut prev_end = 0;
+        //     let mut i = 0;
+        //     for ph_match in placeholder_re.find_iter(s) {
+        //         let start = ph_match.start();
+        //         let end = ph_match.end();
 
-            //     assert!(
-            //         i < vals.len(),
-            //         "Must supply as many entries in vals as there are placeholders in the string"
-            //     );
+        //         assert!(
+        //             i < vals.len(),
+        //             "Must supply as many entries in vals as there are placeholders in the string"
+        //         );
 
-            //     print_s_infix(env, builder, prev_end, start);
-            //     match ph_match.as_str() {
-            //         "{}" => print_int(env, builder, vals[i]),
-            //         "{:p}" => print_pointer(env, builder, vals[i]),
-            //         u => panic!("Unsupported placeholder in debug_print input string: {}", u),
-            //     }
-            //     prev_end = end;
-            //     i += 1;
-            // }
-            // assert_eq!(
-            //     i,
-            //     vals.len(),
-            //     "Must supply as many entries in vals as there are placeholders in the string"
-            // );
+        //         print_s_infix(env, builder, prev_end, start);
+        //         match ph_match.as_str() {
+        //             "{}" => print_int(env, builder, vals[i]),
+        //             "{:p}" => print_pointer(env, builder, vals[i]),
+        //             u => panic!("Unsupported placeholder in debug_print input string: {}", u),
+        //         }
+        //         prev_end = end;
+        //         i += 1;
+        //     }
+        //     assert_eq!(
+        //         i,
+        //         vals.len(),
+        //         "Must supply as many entries in vals as there are placeholders in the string"
+        //     );
 
-            // print_s_infix(env, builder, prev_end, s.len());
-        }
+        //     print_s_infix(env, builder, prev_end, s.len());
+        // }
     }
 
     /// Emits code to print debug information. Only actually prints in debug
