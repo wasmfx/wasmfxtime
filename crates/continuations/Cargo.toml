@@ -3,10 +3,16 @@ name = "wasmtime-continuations"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+description = "Continuation support library for WasmFXtime"
+documentation = "https://docs.rs/wasmtime-runtime"
+license = "Apache-2.0 WITH LLVM-exception"
+categories = ["wasm"]
+keywords = ["webassembly", "wasm"]
+repository = "https://github.com/wasmfx/wasmtime"
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 wasmtime-fibre = { workspace = true }
-num_enum = "0.5"
 memoffset = "0.9.0"

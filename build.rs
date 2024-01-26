@@ -38,7 +38,11 @@ fn main() -> anyhow::Result<()> {
             test_directory_module(out, "tests/misc_testsuite/memory64", strategy)?;
             test_directory_module(out, "tests/misc_testsuite/component-model", strategy)?;
             test_directory_module(out, "tests/misc_testsuite/function-references", strategy)?;
-            test_directory_module(out, "tests/misc_testsuite/typed-continuations", strategy)?;
+            // TODO(dhil): For now we only test WasmFX on x86_64;
+            // eventually we should other architectures.
+            if cfg!(all(target_arch = "x86_64")) {
+                test_directory_module(out, "tests/misc_testsuite/typed-continuations", strategy)?;
+            }
             // The testsuite of Winch is a subset of the official
             // WebAssembly test suite, until parity is reached. This
             // check is in place to prevent Cranelift from duplicating

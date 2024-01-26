@@ -190,7 +190,7 @@ mod typed_continuation_helpers {
     /// supported by `std::fmt`.
     ///
     /// Currently supported placeholders:
-    /// {}       for unsinged integers
+    /// {}       for unsigned integers
     /// {:p}     for printing pointers (in hex form)
     ///
     /// When printing, we replace them with the corresponding values in `vals`.
@@ -227,9 +227,9 @@ mod typed_continuation_helpers {
                 env.generate_builtin_call_no_return_val(builder, index, sig, vec![ptr, len]);
             }
         };
-        let print_int = |env: &mut crate::func_environ::FuncEnvironment<'a>,
-                         builder: &mut FunctionBuilder,
-                         val: ir::Value| {
+        let _print_int = |env: &mut crate::func_environ::FuncEnvironment<'a>,
+                          builder: &mut FunctionBuilder,
+                          val: ir::Value| {
             let index = BuiltinFunctionIndex::tc_print_int();
             let sig = env.builtin_function_signatures.tc_print_int(builder.func);
             let ty = builder.func.dfg.value_type(val);
@@ -240,9 +240,9 @@ mod typed_continuation_helpers {
             };
             env.generate_builtin_call_no_return_val(builder, index, sig, vec![val]);
         };
-        let print_pointer = |env: &mut crate::func_environ::FuncEnvironment<'a>,
-                             builder: &mut FunctionBuilder,
-                             ptr: ir::Value| {
+        let _print_pointer = |env: &mut crate::func_environ::FuncEnvironment<'a>,
+                              builder: &mut FunctionBuilder,
+                              ptr: ir::Value| {
             let index = BuiltinFunctionIndex::tc_print_pointer();
             let sig = env
                 .builtin_function_signatures
@@ -251,29 +251,30 @@ mod typed_continuation_helpers {
         };
 
         if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
+            // TODO(dhil): This needs to be rewritten to drop the regex dependency.
             // Regex matching { followed by something without { or } followed by }.
-            let placeholder_re = regex::Regex::new(r"\{[^{}]*\}").unwrap();
+            //let placeholder_re = regex::Regex::new(r"\{[^{}]*\}").unwrap();
 
-            let mut prev_end = 0;
-            let mut i = 0;
-            for ph_match in placeholder_re.find_iter(s) {
-                let start = ph_match.start();
-                let end = ph_match.end();
+            let prev_end = 0;
+            let i = 0;
+            // for ph_match in placeholder_re.find_iter(s) {
+            //     let start = ph_match.start();
+            //     let end = ph_match.end();
 
-                assert!(
-                    i < vals.len(),
-                    "Must supply as many entries in vals as there are placeholders in the string"
-                );
+            //     assert!(
+            //         i < vals.len(),
+            //         "Must supply as many entries in vals as there are placeholders in the string"
+            //     );
 
-                print_s_infix(env, builder, prev_end, start);
-                match ph_match.as_str() {
-                    "{}" => print_int(env, builder, vals[i]),
-                    "{:p}" => print_pointer(env, builder, vals[i]),
-                    u => panic!("Unsupported placeholder in debug_print input string: {}", u),
-                }
-                prev_end = end;
-                i += 1;
-            }
+            //     print_s_infix(env, builder, prev_end, start);
+            //     match ph_match.as_str() {
+            //         "{}" => print_int(env, builder, vals[i]),
+            //         "{:p}" => print_pointer(env, builder, vals[i]),
+            //         u => panic!("Unsupported placeholder in debug_print input string: {}", u),
+            //     }
+            //     prev_end = end;
+            //     i += 1;
+            // }
             assert_eq!(
                 i,
                 vals.len(),
@@ -295,7 +296,7 @@ mod typed_continuation_helpers {
     /// * `msg` : String literal, containing placeholders like those supported by println!
     /// * remaining arguments: ir::Values filled into the placeholders in `msg`
     #[allow(unused_macros)]
-    macro_rules! emit_debug_println {
+    macro_rules! _emit_debug_println {
         ($env : expr, $builder : expr, $msg : literal, $( $arg:expr ),*) => {
             let msg_newline : &'static str= std::concat!(
                 $msg,
@@ -419,7 +420,7 @@ mod typed_continuation_helpers {
         };
     }
 
-    macro_rules! emit_debug_assert_eq {
+    macro_rules! _emit_debug_assert_eq {
         ($env: expr, $builder: expr, $v1 : expr, $v2: expr) => {
             emit_debug_assert_icmp!($env, $builder, IntCC::Equal, "==", $v1, $v2);
         };
@@ -523,7 +524,7 @@ mod typed_continuation_helpers {
             // that we can use the null-ness of the `fiber` field as an indicator
             // for invokedness.
             let actual_state = self.load_state(builder);
-            let invoked: i32 = wasmtime_continuations::State::Invoked.into();
+            let invoked: i32 = i32::from(wasmtime_continuations::State::Invoked);
             builder
                 .ins()
                 .icmp_imm(IntCC::Equal, actual_state, invoked as i64)
@@ -533,7 +534,7 @@ mod typed_continuation_helpers {
         /// function used as continuation has returned normally).
         pub fn has_returned(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let actual_state = self.load_state(builder);
-            let returned: i32 = wasmtime_continuations::State::Returned.into();
+            let returned: i32 = i32::from(wasmtime_continuations::State::Returned);
             builder
                 .ins()
                 .icmp_imm(IntCC::Equal, actual_state, returned as i64)
@@ -699,16 +700,16 @@ mod typed_continuation_helpers {
             let zero = builder.ins().iconst(ir::types::I64, 0);
             emit_debug_assert_ne!(env, builder, required_capacity, zero);
 
-            if cfg!(debug_assertions) {
-                let data = self.get_data(builder);
-                emit_debug_println!(
-                    env,
-                    builder,
-                    "[ensure_capacity] contobj/base {:p}, buffer is {:p}",
-                    self.base,
-                    data
-                );
-            }
+            // if cfg!(debug_assertions) {
+            //     let data = self.get_data(builder);
+            //     emit_debug_println!(
+            //         env,
+            //         builder,
+            //         "[ensure_capacity] contobj/base {:p}, buffer is {:p}",
+            //         self.base,
+            //         data
+            //     );
+            // }
 
             let capacity = self.get_capacity(builder);
 
@@ -732,19 +733,19 @@ mod typed_continuation_helpers {
                 builder.switch_to_block(insufficient_capacity_block);
                 builder.seal_block(insufficient_capacity_block);
 
-                emit_debug_println!(
-                    env,
-                    builder,
-                    "[ensure_capacity] need to increase capacity from {} to {}",
-                    capacity,
-                    required_capacity
-                );
+                // emit_debug_println!(
+                //     env,
+                //     builder,
+                //     "[ensure_capacity] need to increase capacity from {} to {}",
+                //     capacity,
+                //     required_capacity
+                // );
 
-                if cfg!(debug_assertions) {
-                    // We must only re-allocate while there is no data in the buffer.
-                    let length = self.get_length(builder);
-                    emit_debug_assert_eq!(env, builder, length, zero);
-                }
+                // if cfg!(debug_assertions) {
+                //     // We must only re-allocate while there is no data in the buffer.
+                //     let length = self.get_length(builder);
+                //     emit_debug_assert_eq!(env, builder, length, zero);
+                // }
 
                 let align = builder.ins().iconst(
                     I64,
@@ -782,15 +783,15 @@ mod typed_continuation_helpers {
         /// Loading starts at index 0 of the Payloads object.
         pub fn load_data_entries<'a>(
             &self,
-            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
             load_types: &[ir::Type],
         ) -> Vec<ir::Value> {
-            if cfg!(debug_assertions) {
-                let length = self.get_length(builder);
-                let load_count = builder.ins().iconst(I64, load_types.len() as i64);
-                emit_debug_assert_ule!(env, builder, load_count, length);
-            }
+            // if cfg!(debug_assertions) {
+            //     let length = self.get_length(builder);
+            //     let load_count = builder.ins().iconst(I64, load_types.len() as i64);
+            //     emit_debug_assert_ule!(env, builder, load_count, length);
+            // }
 
             let memflags = ir::MemFlags::trusted();
 
@@ -815,19 +816,19 @@ mod typed_continuation_helpers {
         /// entries.
         pub fn store_data_entries<'a>(
             &self,
-            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
             values: &[ir::Value],
         ) {
             let store_count = builder.ins().iconst(I64, values.len() as i64);
 
-            if cfg!(debug_assertions) {
-                let capacity = self.get_capacity(builder);
-                let length = self.get_length(builder);
-                let zero = builder.ins().iconst(I64, 0);
-                emit_debug_assert_ule!(env, builder, store_count, capacity);
-                emit_debug_assert_eq!(env, builder, length, zero);
-            }
+            // if cfg!(debug_assertions) {
+            //     let capacity = self.get_capacity(builder);
+            //     let length = self.get_length(builder);
+            //     let zero = builder.ins().iconst(I64, 0);
+            //     emit_debug_assert_ule!(env, builder, store_count, capacity);
+            //     emit_debug_assert_eq!(env, builder, length, zero);
+            // }
 
             let memflags = ir::MemFlags::trusted();
 

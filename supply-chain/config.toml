@@ -402,6 +402,11 @@ criteria = "safe-to-deploy"
 version = "0.3.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.memchr]]
+version = "2.7.1"
+criteria = "safe-to-deploy"
+notes = "TODO(dhil): Review deferred as deployment of our software in production is not supported."
+
 [[exemptions.memmap2]]
 version = "0.2.3"
 criteria = "safe-to-deploy"
@@ -502,6 +507,21 @@ criteria = "safe-to-deploy"
 [[exemptions.redox_users]]
 version = "0.4.3"
 criteria = "safe-to-deploy"
+
+[[exemptions.regex]]
+version = "1.10.3"
+criteria = "safe-to-deploy"
+notes = "TODO(dhil): Review deferred as deployment of our software in production is not supported."
+
+[[exemptions.regex-automata]]
+version = "0.4.5"
+criteria = "safe-to-deploy"
+notes = "TODO(dhil): Review deferred as deployment of our software in production is not supported."
+
+[[exemptions.regex-syntax]]
+version = "0.8.2"
+criteria = "safe-to-deploy"
+notes = "TODO(dhil): Review deferred as deployment of our software in production is not supported."
 
 [[exemptions.region]]
 version = "2.2.0"

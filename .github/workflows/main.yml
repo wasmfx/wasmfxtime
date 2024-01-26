@@ -6,7 +6,7 @@ on:
   # `release-*` branches will run full CI.
   pull_request:
     branches:
-    - wasmtime-main
+    - main
     - 'release-*'
 
   # Run full CI on the `main` branch once a day to prime the GitHub Actions
