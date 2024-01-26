@@ -252,35 +252,35 @@ mod typed_continuation_helpers {
 
         if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
             // Regex matching { followed by something without { or } followed by }.
-            let placeholder_re = regex::Regex::new(r"\{[^{}]*\}").unwrap();
+            // let placeholder_re = regex::Regex::new(r"\{[^{}]*\}").unwrap();
 
-            let mut prev_end = 0;
-            let mut i = 0;
-            for ph_match in placeholder_re.find_iter(s) {
-                let start = ph_match.start();
-                let end = ph_match.end();
+            // let mut prev_end = 0;
+            // let mut i = 0;
+            // for ph_match in placeholder_re.find_iter(s) {
+            //     let start = ph_match.start();
+            //     let end = ph_match.end();
 
-                assert!(
-                    i < vals.len(),
-                    "Must supply as many entries in vals as there are placeholders in the string"
-                );
+            //     assert!(
+            //         i < vals.len(),
+            //         "Must supply as many entries in vals as there are placeholders in the string"
+            //     );
 
-                print_s_infix(env, builder, prev_end, start);
-                match ph_match.as_str() {
-                    "{}" => print_int(env, builder, vals[i]),
-                    "{:p}" => print_pointer(env, builder, vals[i]),
-                    u => panic!("Unsupported placeholder in debug_print input string: {}", u),
-                }
-                prev_end = end;
-                i += 1;
-            }
-            assert_eq!(
-                i,
-                vals.len(),
-                "Must supply as many entries in vals as there are placeholders in the string"
-            );
+            //     print_s_infix(env, builder, prev_end, start);
+            //     match ph_match.as_str() {
+            //         "{}" => print_int(env, builder, vals[i]),
+            //         "{:p}" => print_pointer(env, builder, vals[i]),
+            //         u => panic!("Unsupported placeholder in debug_print input string: {}", u),
+            //     }
+            //     prev_end = end;
+            //     i += 1;
+            // }
+            // assert_eq!(
+            //     i,
+            //     vals.len(),
+            //     "Must supply as many entries in vals as there are placeholders in the string"
+            // );
 
-            print_s_infix(env, builder, prev_end, s.len());
+            // print_s_infix(env, builder, prev_end, s.len());
         }
     }
 
