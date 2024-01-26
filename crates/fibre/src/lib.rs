@@ -6,10 +6,7 @@ use std::ops::Range;
 use std::panic::{self, AssertUnwindSafe};
 
 cfg_if::cfg_if! {
-    if #[cfg(windows)] {
-        mod windows;
-        use windows as imp;
-    } else if #[cfg(unix)] {
+    if #[cfg(unix)] {
         pub mod unix;
         use unix as imp;
     } else {
