@@ -207,7 +207,9 @@ mod typed_continuation_helpers {
         let _dummy = BuiltinFunctionIndex::tc_print_str();
         let _dummy = env.builtin_function_signatures.tc_print_str(builder.func);
         let _dummy = env.builtin_function_signatures.tc_print_int(builder.func);
-        let _dummy = env.builtin_function_signatures.tc_print_pointer(builder.func);
+        let _dummy = env
+            .builtin_function_signatures
+            .tc_print_pointer(builder.func);
         todo!("emit_debug_print needs to be rewritten to drop the regex dependency.")
         // let print_s_infix = |env: &mut crate::func_environ::FuncEnvironment<'a>,
         //                      builder: &mut FunctionBuilder,
