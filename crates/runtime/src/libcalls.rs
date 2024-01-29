@@ -782,73 +782,80 @@ fn tc_cont_new(
     func: *mut u8,
     param_count: u64,
     result_count: u64,
-) -> *mut u8 {
-    match crate::continuation::cont_new(instance, func, param_count as usize, result_count as usize)
-    {
-        Ok(ptr) => ptr as *mut u8,
-        Err(_) => panic!("cont_new failed!"),
-        // TODO(dhil): I see sporadic crashes if I change the return
-        // type to be Result<*mut u8, TrapReason>.
-    }
+) -> Result<*mut u8, TrapReason> {
+    let ans =
+        crate::continuation::cont_new(instance, func, param_count as usize, result_count as usize)?;
+    Ok(ans.cast::<u8>())
 }
 
 fn tc_resume(instance: &mut Instance, contobj: *mut u8) -> Result<u32, TrapReason> {
     crate::continuation::resume(
         instance,
-        contobj as *mut crate::continuation::ContinuationObject,
+        contobj.cast::<crate::continuation::ContinuationObject>(),
     )
 }
 
-fn tc_suspend(instance: &mut Instance, tag_index: u32) {
+fn tc_suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {
     crate::continuation::suspend(instance, tag_index)
 }
 
-// TODO(dhil): This function can trap, so the return type ought to be
-// Result<*mut u8, TrapReason>.
 fn tc_new_cont_ref(_instance: &mut Instance, contobj: *mut u8) -> *mut u8 {
-    crate::continuation::new_cont_ref(contobj as *mut crate::continuation::ContinuationObject)
-        as *mut u8
+    crate::continuation::new_cont_ref(contobj.cast::<crate::continuation::ContinuationObject>())
+        .cast::<u8>()
 }
 
 fn tc_cont_ref_get_cont_obj(
     _instance: &mut Instance,
     contref: *mut u8,
 ) -> Result<*mut u8, TrapReason> {
-    Ok(crate::continuation::cont_ref_get_cont_obj(
-        contref as *mut crate::continuation::ContinuationReference,
-    )? as *mut u8)
+    let ans = crate::continuation::cont_ref_get_cont_obj(
+        contref.cast::<crate::continuation::ContinuationReference>(),
+    )?;
+    Ok(ans.cast::<u8>())
 }
 
 fn tc_cont_obj_forward_tag_return_values_buffer(
     _instance: &mut Instance,
     parent_contobj: *mut u8,
     child_contobj: *mut u8,
-) {
+) -> Result<(), TrapReason> {
     crate::continuation::cont_obj_forward_tag_return_values_buffer(
-        parent_contobj as *mut crate::continuation::ContinuationObject,
-        child_contobj as *mut crate::continuation::ContinuationObject,
-    );
+        parent_contobj.cast::<crate::continuation::ContinuationObject>(),
+        child_contobj.cast::<crate::continuation::ContinuationObject>(),
+    )
 }
 
 fn tc_drop_cont_obj(_instance: &mut Instance, contobj: *mut u8) {
-    crate::continuation::drop_cont_obj(contobj as *mut crate::continuation::ContinuationObject)
+    crate::continuation::drop_cont_obj(contobj.cast::<crate::continuation::ContinuationObject>())
 }
 
-// TODO(dhil): This function can trap, so the return type ought to be
-// Result<*mut u8, TrapReason>.
-fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> *mut u8 {
+fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> Result<*mut u8, TrapReason> {
     debug_assert!(size > 0);
-    let layout =
-        std::alloc::Layout::from_size_align(size as usize, align as usize).expect("invalid Layout");
-    unsafe { std::alloc::alloc(layout) }
+    let layout = std::alloc::Layout::from_size_align(size as usize, align as usize)
+        .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+    let ptr = unsafe { std::alloc::alloc(layout) };
+    // TODO(dhil): We can consider making this a debug-build only
+    // check.
+    if ptr.is_null() {
+        Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
+            "Memory allocation failed!"
+        )))
+    } else {
+        Ok(ptr)
+    }
 }
 
 // TODO(dhil): Similar as above.
-fn tc_deallocate(_instance: &mut Instance, ptr: *mut u8, size: u64, align: u64) {
+fn tc_deallocate(
+    _instance: &mut Instance,
+    ptr: *mut u8,
+    size: u64,
+    align: u64,
+) -> Result<(), TrapReason> {
     debug_assert!(size > 0);
-    let layout =
-        std::alloc::Layout::from_size_align(size as usize, align as usize).expect("invalid Layout");
-    unsafe { std::alloc::dealloc(ptr, layout) };
+    let layout = std::alloc::Layout::from_size_align(size as usize, align as usize)
+        .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+    Ok(unsafe { std::alloc::dealloc(ptr, layout) })
 }
 
 // TODO(dhil): Similar as above.
@@ -858,11 +865,11 @@ fn tc_reallocate(
     old_size: u64,
     new_size: u64,
     align: u64,
-) -> *mut u8 {
+) -> Result<*mut u8, TrapReason> {
     debug_assert!(old_size < new_size);
 
     if old_size > 0 {
-        tc_deallocate(instance, ptr, old_size, align);
+        tc_deallocate(instance, ptr, old_size, align)?;
     }
 
     tc_allocate(instance, new_size, align)
