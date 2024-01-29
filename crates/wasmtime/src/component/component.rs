@@ -1,6 +1,6 @@
 use crate::{
     code::CodeObject, code_memory::CodeMemory, instantiate::finish_object,
-    signatures::SignatureCollection, Engine, Module, ResourcesRequired,
+    type_registry::TypeCollection, Engine, Module, ResourcesRequired,
 };
 use anyhow::{bail, Context, Result};
 use serde_derive::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 use wasmtime_environ::component::{
     AllCallFunc, ComponentTypes, GlobalInitializer, InstantiateModule, StaticModuleIndex,
-    TrampolineIndex, Translator, VMComponentOffsets,
+    TrampolineIndex, Translator, TypeComponentIndex, VMComponentOffsets,
 };
 use wasmtime_environ::{
     CompiledModuleInfo, FunctionLoc, HostPtr, ObjectKind, PrimaryMap, ScopeVec,
@@ -31,6 +31,9 @@ pub struct Component {
 }
 
 struct ComponentInner {
+    /// Component type index
+    ty: TypeComponentIndex,
+
     /// Core wasm modules that the component defined internally, indexed by the
     /// compile-time-assigned `ModuleUpvarIndex`.
     static_modules: PrimaryMap<StaticModuleIndex, Module>,
@@ -77,6 +80,7 @@ pub(crate) struct AllCallFuncPointers {
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct ComponentArtifacts {
+    ty: TypeComponentIndex,
     info: CompiledComponentInfo,
     types: ComponentTypes,
     static_modules: PrimaryMap<StaticModuleIndex, CompiledModuleInfo>,
@@ -239,7 +243,7 @@ impl Component {
             }),
         );
         let unlinked_compile_outputs = compile_inputs.compile(&engine)?;
-        let types = types.finish();
+
         let (compiled_funcs, function_indices) = unlinked_compile_outputs.pre_link();
 
         let mut object = compiler.object(ObjectKind::Component)?;
@@ -252,6 +256,19 @@ impl Component {
             compiled_funcs,
             module_translations,
         )?;
+        let (types, ty) = types.finish(
+            &compilation_artifacts.modules,
+            component
+                .component
+                .import_types
+                .iter()
+                .map(|(_, (name, ty))| (name.clone(), *ty)),
+            component
+                .component
+                .exports
+                .iter()
+                .map(|(name, ty)| (name.clone(), ty)),
+        );
 
         let info = CompiledComponentInfo {
             component: component.component,
@@ -261,6 +278,7 @@ impl Component {
         };
         let artifacts = ComponentArtifacts {
             info,
+            ty,
             types,
             static_modules: compilation_artifacts.modules,
         };
@@ -280,6 +298,7 @@ impl Component {
         artifacts: Option<ComponentArtifacts>,
     ) -> Result<Component> {
         let ComponentArtifacts {
+            ty,
             info,
             types,
             static_modules,
@@ -299,8 +318,7 @@ impl Component {
         // Create a signature registration with the `Engine` for all trampolines
         // and core wasm types found within this component, both for the
         // component and for all included core wasm modules.
-        let signatures =
-            SignatureCollection::new_for_module(engine.signatures(), types.module_types());
+        let signatures = TypeCollection::new_for_module(engine.signatures(), types.module_types());
 
         // Assemble the `CodeObject` artifact which is shared by all core wasm
         // modules as well as the final component.
@@ -317,11 +335,16 @@ impl Component {
 
         Ok(Component {
             inner: Arc::new(ComponentInner {
+                ty,
                 static_modules,
                 code,
                 info,
             }),
         })
+    }
+
+    pub(crate) fn ty(&self) -> TypeComponentIndex {
+        self.inner.ty
     }
 
     pub(crate) fn env_component(&self) -> &wasmtime_environ::component::Component {
@@ -337,7 +360,7 @@ impl Component {
         self.inner.component_types()
     }
 
-    pub(crate) fn signatures(&self) -> &SignatureCollection {
+    pub(crate) fn signatures(&self) -> &TypeCollection {
         self.inner.code.signatures()
     }
 
