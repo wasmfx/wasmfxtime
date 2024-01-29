@@ -1,8 +1,7 @@
 //! Continuations TODO
 
-use crate::vmcontext::{VMArrayCallFunction, VMFuncRef, VMOpaqueContext, ValRaw};
+use crate::vmcontext::{VMFuncRef, VMOpaqueContext, ValRaw};
 use crate::{Instance, TrapReason};
-//use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::cmp;
 use std::mem;
 use std::ptr;
@@ -13,6 +12,8 @@ pub use wasmtime_continuations::{
 use wasmtime_fibre::{Fiber, FiberStack, Suspend};
 
 type Yield = Suspend<(), u32, ()>;
+
+const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
 
 /// TODO
 #[inline(always)]
@@ -26,9 +27,18 @@ pub fn cont_ref_get_cont_obj(
         feature = "unsafe_disable_continuation_linearity_check"
     ));
 
-    let contopt = unsafe { contref.as_mut().unwrap().0 };
+    let contopt = unsafe {
+        contref
+            .as_mut()
+            .ok_or_else(|| {
+                TrapReason::user_without_backtrace(anyhow::anyhow!(
+                    "Attempt to dereference null ContinuationReference!"
+                ))
+            })?
+            .0
+    };
     match contopt {
-        None => Err(TrapReason::user_with_backtrace(anyhow::Error::msg(
+        None => Err(TrapReason::user_without_backtrace(anyhow::Error::msg(
             "Continuation is already taken",
         ))), // TODO(dhil): presumably we can set things up such that
         // we always read from a non-null reference.
@@ -36,7 +46,7 @@ pub fn cont_ref_get_cont_obj(
             unsafe {
                 *contref = ContinuationReference(None);
             }
-            Ok(contobj as *mut ContinuationObject)
+            Ok(contobj.cast::<ContinuationObject>())
         }
     }
 }
@@ -45,15 +55,27 @@ pub fn cont_ref_get_cont_obj(
 pub fn cont_obj_forward_tag_return_values_buffer(
     parent: *mut ContinuationObject,
     child: *mut ContinuationObject,
-) {
-    let parent = unsafe { parent.as_mut().unwrap() };
-    let child = unsafe { child.as_mut().unwrap() };
+) -> Result<(), TrapReason> {
+    let parent = unsafe {
+        parent.as_mut().ok_or_else(|| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "Attempt to dereference null (parent) ContinuationObject"
+            ))
+        })?
+    };
+    let child = unsafe {
+        child.as_mut().ok_or_else(|| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "Attempt to dereference null (child) ContinuationObject"
+            ))
+        })?
+    };
     assert!(parent.state == State::Invoked);
     assert!(child.state == State::Invoked);
-
     assert!(child.tag_return_values.length == 0);
 
     mem::swap(&mut child.tag_return_values, &mut parent.tag_return_values);
+    Ok(())
 }
 
 /// TODO
@@ -95,30 +117,30 @@ pub fn cont_new(
     func: *mut u8,
     param_count: usize,
     result_count: usize,
-) -> *mut ContinuationObject {
-    let func = func as *mut VMFuncRef;
-    let callee_ctx = unsafe { (*func).vmctx };
-    let caller_ctx = VMOpaqueContext::from_vmcontext(instance.vmctx());
-    let f = unsafe {
-        mem::transmute::<
-            VMArrayCallFunction,
-            unsafe extern "C" fn(*mut VMOpaqueContext, *mut VMOpaqueContext, *mut ValRaw, usize),
-        >((*func).array_call)
+) -> Result<*mut ContinuationObject, TrapReason> {
+    let func_ref = unsafe {
+        func.cast::<VMFuncRef>().as_ref().ok_or_else(|| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "Attempt to dereference null VMFuncRef"
+            ))
+        })?
     };
-    let capacity = cmp::max(param_count, result_count);
+    let callee_ctx = func_ref.vmctx;
+    let caller_ctx = VMOpaqueContext::from_vmcontext(instance.vmctx());
 
+    let capacity = cmp::max(param_count, result_count);
     let payload = Payloads::new(capacity);
 
-    let args_ptr = payload.data;
-    let fiber = Box::new(
-        Fiber::new(
-            FiberStack::malloc(4096).unwrap(),
-            move |_first_val: (), _suspend: &Yield| unsafe {
-                f(callee_ctx, caller_ctx, args_ptr as *mut ValRaw, capacity)
-            },
-        )
-        .unwrap(),
-    );
+    let fiber = {
+        let stack = FiberStack::malloc(DEFAULT_FIBER_SIZE)
+            .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+        let args_ptr = payload.data;
+        let fiber = Fiber::new(stack, move |_first_val: (), _suspend: &Yield| unsafe {
+            (func_ref.array_call)(callee_ctx, caller_ctx, args_ptr.cast::<ValRaw>(), capacity)
+        })
+        .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+        Box::new(fiber)
+    };
 
     let contobj = Box::new(ContinuationObject {
         fiber: Box::into_raw(fiber),
@@ -132,7 +154,7 @@ pub fn cont_new(
     // continuation reference objects.
     let pointer = Box::into_raw(contobj);
     debug_println!("Created contobj @ {:p}", pointer);
-    return pointer;
+    Ok(pointer)
 }
 
 /// TODO
@@ -141,8 +163,21 @@ pub fn resume(
     instance: &mut Instance,
     contobj: *mut ContinuationObject,
 ) -> Result<u32, TrapReason> {
-    assert!(unsafe { (*contobj).state == State::Allocated || (*contobj).state == State::Invoked });
-    let fiber = unsafe { (*contobj).fiber };
+    let cont = unsafe {
+        contobj.as_ref().ok_or_else(|| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "Attempt to dereference null ContinuationObject!"
+            ))
+        })?
+    };
+    assert!(cont.state == State::Allocated || cont.state == State::Invoked);
+    let fiber = unsafe {
+        cont.fiber.as_mut().ok_or_else(|| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "Attempt to dereference null Fiber!"
+            ))
+        })?
+    };
 
     if ENABLE_DEBUG_PRINTING {
         let _running_contobj = instance.typed_continuations_store();
@@ -159,7 +194,9 @@ pub fn resume(
             .get_mut()) = 0
     };
 
-    match unsafe { fiber.as_mut().unwrap().resume(()) } {
+    // TODO(dhil): We need to think carefully about how resume
+    // interacts with traps.
+    match fiber.resume(()) {
         Ok(()) => {
             // The result of the continuation was written to the first
             // entry of the payload store by virtue of using the array
@@ -190,15 +227,28 @@ pub fn resume(
 
 /// TODO
 #[inline(always)]
-pub fn suspend(instance: &mut Instance, tag_index: u32) {
+pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {
     let running = instance.typed_continuations_store();
     let running = unsafe {
-        running
-            .as_ref()
-            .expect("Calling suspend outside of a continuation") // TODO(dhil): we should emit the trap UnhandledTag here.
+        running.as_ref().ok_or_else(|| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "Calling suspend outside of a continuation"
+            ))
+        })?
+    };
+    // TODO(dhil): This should be handled in generated code.
+
+    let fiber = unsafe {
+        running.fiber.as_ref().ok_or_else(|| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "Attempt to dereference null fiber!"
+            ))
+        })?
     };
 
-    let stack_ptr = unsafe { (*running.fiber).stack().top().unwrap() };
+    let stack_ptr = fiber.stack().top().ok_or_else(|| {
+        TrapReason::user_without_backtrace(anyhow::anyhow!("Failed to retrieve stack top pointer!"))
+    })?;
     debug_println!(
         "Suspending while running {:p}, parent is {:p}",
         running,
@@ -206,5 +256,6 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) {
     );
 
     let suspend = wasmtime_fibre::unix::Suspend::from_top_ptr(stack_ptr);
-    suspend.switch::<(), u32, ()>(wasmtime_fibre::RunResult::Yield(tag_index))
+    suspend.switch::<(), u32, ()>(wasmtime_fibre::RunResult::Yield(tag_index));
+    Ok(())
 }
