@@ -2,7 +2,6 @@
 
 use crate::vmcontext::{VMArrayCallFunction, VMFuncRef, VMOpaqueContext, ValRaw};
 use crate::{Instance, TrapReason};
-//use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::cmp;
 use std::mem;
 use std::ptr;
@@ -28,7 +27,7 @@ pub fn cont_ref_get_cont_obj(
 
     let contopt = unsafe { contref.as_mut().unwrap().0 };
     match contopt {
-        None => Err(TrapReason::user_with_backtrace(anyhow::Error::msg(
+        None => Err(TrapReason::user_without_backtrace(anyhow::Error::msg(
             "Continuation is already taken",
         ))), // TODO(dhil): presumably we can set things up such that
         // we always read from a non-null reference.
@@ -95,30 +94,25 @@ pub fn cont_new(
     func: *mut u8,
     param_count: usize,
     result_count: usize,
-) -> *mut ContinuationObject {
-    let func = func as *mut VMFuncRef;
-    let callee_ctx = unsafe { (*func).vmctx };
+) -> Result<*mut ContinuationObject, TrapReason> {
+    let func_ref = unsafe { (func as *mut VMFuncRef).as_ref().ok_or_else(|| {
+        TrapReason::user_without_backtrace(anyhow::anyhow!("Attempt to dereference null VMFuncRef"))
+    })? };
+    let callee_ctx = func_ref.vmctx;
     let caller_ctx = VMOpaqueContext::from_vmcontext(instance.vmctx());
-    let f = unsafe {
-        mem::transmute::<
-            VMArrayCallFunction,
-            unsafe extern "C" fn(*mut VMOpaqueContext, *mut VMOpaqueContext, *mut ValRaw, usize),
-        >((*func).array_call)
-    };
-    let capacity = cmp::max(param_count, result_count);
 
+    let capacity = cmp::max(param_count, result_count);
     let payload = Payloads::new(capacity);
 
-    let args_ptr = payload.data;
-    let fiber = Box::new(
-        Fiber::new(
-            FiberStack::malloc(4096).unwrap(),
-            move |_first_val: (), _suspend: &Yield| unsafe {
-                f(callee_ctx, caller_ctx, args_ptr as *mut ValRaw, capacity)
-            },
-        )
-        .unwrap(),
-    );
+    let fiber = {
+        let stack = FiberStack::malloc(4096).map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+        let args_ptr = payload.data;
+        let fiber = Fiber::new(stack, move |_first_val: (), _suspend: &Yield| unsafe {
+            (func_ref.array_call)(callee_ctx, caller_ctx, args_ptr as *mut ValRaw, capacity)
+        })
+        .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+        Box::new(fiber)
+    };
 
     let contobj = Box::new(ContinuationObject {
         fiber: Box::into_raw(fiber),
@@ -132,7 +126,7 @@ pub fn cont_new(
     // continuation reference objects.
     let pointer = Box::into_raw(contobj);
     debug_println!("Created contobj @ {:p}", pointer);
-    return pointer;
+    Ok(pointer)
 }
 
 /// TODO

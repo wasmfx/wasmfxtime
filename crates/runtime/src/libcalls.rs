@@ -783,8 +783,12 @@ fn tc_cont_new(
     param_count: u64,
     result_count: u64,
 ) -> *mut u8 {
-    crate::continuation::cont_new(instance, func, param_count as usize, result_count as usize)
-        as *mut u8
+    match crate::continuation::cont_new(instance, func, param_count as usize, result_count as usize) {
+        Ok(ptr) => ptr as *mut u8,
+        Err(_) => panic!("cont_new failed!"),
+        // TODO(dhil): I see sporadic crashes if I change the return
+        // type to be Result<*mut u8, TrapReason>.
+    }
 }
 
 fn tc_resume(instance: &mut Instance, contobj: *mut u8) -> Result<u32, TrapReason> {
@@ -798,6 +802,8 @@ fn tc_suspend(instance: &mut Instance, tag_index: u32) {
     crate::continuation::suspend(instance, tag_index)
 }
 
+// TODO(dhil): This function can trap, so the return type ought to be
+// Result<*mut u8, TrapReason>.
 fn tc_new_cont_ref(_instance: &mut Instance, contobj: *mut u8) -> *mut u8 {
     crate::continuation::new_cont_ref(contobj as *mut crate::continuation::ContinuationObject)
         as *mut u8
@@ -827,6 +833,8 @@ fn tc_drop_cont_obj(_instance: &mut Instance, contobj: *mut u8) {
     crate::continuation::drop_cont_obj(contobj as *mut crate::continuation::ContinuationObject)
 }
 
+// TODO(dhil): This function can trap, so the return type ought to be
+// Result<*mut u8, TrapReason>.
 fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> *mut u8 {
     debug_assert!(size > 0);
     let layout =
@@ -834,6 +842,7 @@ fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> *mut u8 {
     unsafe { std::alloc::alloc(layout) }
 }
 
+// TODO(dhil): Similar as above.
 fn tc_deallocate(_instance: &mut Instance, ptr: *mut u8, size: u64, align: u64) {
     debug_assert!(size > 0);
     let layout =
@@ -841,6 +850,7 @@ fn tc_deallocate(_instance: &mut Instance, ptr: *mut u8, size: u64, align: u64) 
     unsafe { std::alloc::dealloc(ptr, layout) };
 }
 
+// TODO(dhil): Similar as above.
 fn tc_reallocate(
     instance: &mut Instance,
     ptr: *mut u8,
