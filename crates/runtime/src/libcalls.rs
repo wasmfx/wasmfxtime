@@ -845,7 +845,6 @@ fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> Result<*mut u
     }
 }
 
-// TODO(dhil): Similar as above.
 fn tc_deallocate(
     _instance: &mut Instance,
     ptr: *mut u8,
@@ -858,7 +857,6 @@ fn tc_deallocate(
     Ok(unsafe { std::alloc::dealloc(ptr, layout) })
 }
 
-// TODO(dhil): Similar as above.
 fn tc_reallocate(
     instance: &mut Instance,
     ptr: *mut u8,
