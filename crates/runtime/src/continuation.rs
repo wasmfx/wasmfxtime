@@ -95,9 +95,13 @@ pub fn cont_new(
     param_count: usize,
     result_count: usize,
 ) -> Result<*mut ContinuationObject, TrapReason> {
-    let func_ref = unsafe { (func as *mut VMFuncRef).as_ref().ok_or_else(|| {
-        TrapReason::user_without_backtrace(anyhow::anyhow!("Attempt to dereference null VMFuncRef"))
-    })? };
+    let func_ref = unsafe {
+        (func as *mut VMFuncRef).as_ref().ok_or_else(|| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "Attempt to dereference null VMFuncRef"
+            ))
+        })?
+    };
     let callee_ctx = func_ref.vmctx;
     let caller_ctx = VMOpaqueContext::from_vmcontext(instance.vmctx());
 
@@ -105,7 +109,8 @@ pub fn cont_new(
     let payload = Payloads::new(capacity);
 
     let fiber = {
-        let stack = FiberStack::malloc(4096).map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+        let stack = FiberStack::malloc(4096)
+            .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
         let args_ptr = payload.data;
         let fiber = Fiber::new(stack, move |_first_val: (), _suspend: &Yield| unsafe {
             (func_ref.array_call)(callee_ctx, caller_ctx, args_ptr as *mut ValRaw, capacity)
