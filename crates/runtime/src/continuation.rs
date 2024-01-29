@@ -1,6 +1,6 @@
 //! Continuations TODO
 
-use crate::vmcontext::{VMArrayCallFunction, VMFuncRef, VMOpaqueContext, ValRaw};
+use crate::vmcontext::{VMFuncRef, VMOpaqueContext, ValRaw};
 use crate::{Instance, TrapReason};
 use std::cmp;
 use std::mem;
