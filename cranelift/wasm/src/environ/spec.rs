@@ -9,8 +9,8 @@
 use crate::state::FuncTranslationState;
 use crate::{
     DataIndex, ElemIndex, FuncIndex, Global, GlobalIndex, GlobalInit, Heap, HeapData, Memory,
-    MemoryIndex, Table, TableIndex, Tag, TagIndex, TypeConvert, TypeIndex, WasmError, WasmContType, WasmFuncType,
-    WasmHeapType, WasmResult,
+    MemoryIndex, Table, TableIndex, Tag, TagIndex, TypeConvert, TypeIndex, WasmContType, WasmError,
+    WasmFuncType, WasmHeapType, WasmResult,
 };
 use core::convert::From;
 use cranelift_codegen::cursor::FuncCursor;

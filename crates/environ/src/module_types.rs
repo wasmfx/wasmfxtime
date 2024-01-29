@@ -1,4 +1,6 @@
-use crate::{Module, ModuleType, PrimaryMap, TypeConvert, WasmContType, WasmFuncType, WasmHeapType};
+use crate::{
+    Module, ModuleType, PrimaryMap, TypeConvert, WasmContType, WasmFuncType, WasmHeapType,
+};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Index;
