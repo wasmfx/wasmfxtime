@@ -13,7 +13,7 @@ use wasmtime_fibre::{Fiber, FiberStack, Suspend};
 
 type Yield = Suspend<(), u32, ()>;
 
-const DEFAULT_FIBER_SIZE: usize = 2000000; // 2MB
+const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
 
 /// TODO
 #[inline(always)]
