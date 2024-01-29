@@ -1,12 +1,12 @@
 use crate::{
-    Module, ModuleType, PrimaryMap, SignatureIndex, TypeConvert, TypeIndex, WasmContType,
-    WasmFuncType, WasmHeapType,
+    Module, ModuleType, PrimaryMap, TypeConvert, WasmContType, WasmFuncType, WasmHeapType,
 };
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Index;
 use wasmparser::types::CoreTypeId;
 use wasmparser::UnpackedIndex;
+use wasmtime_types::{ModuleInternedTypeIndex, TypeIndex};
 
 /// All types used in a core wasm module.
 ///
@@ -18,22 +18,22 @@ use wasmparser::UnpackedIndex;
 #[derive(Default, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct ModuleTypes {
-    wasm_signatures: PrimaryMap<SignatureIndex, WasmFuncType>,
+    wasm_types: PrimaryMap<ModuleInternedTypeIndex, WasmFuncType>,
 }
 
 impl ModuleTypes {
     /// Returns an iterator over all the wasm function signatures found within
     /// this module.
-    pub fn wasm_signatures(&self) -> impl Iterator<Item = (SignatureIndex, &WasmFuncType)> {
-        self.wasm_signatures.iter()
+    pub fn wasm_types(&self) -> impl Iterator<Item = (ModuleInternedTypeIndex, &WasmFuncType)> {
+        self.wasm_types.iter()
     }
 }
 
-impl Index<SignatureIndex> for ModuleTypes {
+impl Index<ModuleInternedTypeIndex> for ModuleTypes {
     type Output = WasmFuncType;
 
-    fn index(&self, sig: SignatureIndex) -> &WasmFuncType {
-        &self.wasm_signatures[sig]
+    fn index(&self, sig: ModuleInternedTypeIndex) -> &WasmFuncType {
+        &self.wasm_types[sig]
     }
 }
 
@@ -42,21 +42,21 @@ impl Index<SignatureIndex> for ModuleTypes {
 #[allow(missing_docs)]
 pub struct ModuleTypesBuilder {
     types: ModuleTypes,
-    interned_func_types: HashMap<WasmFuncType, SignatureIndex>,
-    interned_cont_types: HashMap<WasmContType, SignatureIndex>,
-    wasmparser_to_wasmtime: HashMap<CoreTypeId, SignatureIndex>,
+    interned_func_types: HashMap<WasmFuncType, ModuleInternedTypeIndex>,
+    interned_cont_types: HashMap<WasmContType, ModuleInternedTypeIndex>,
+    wasmparser_to_wasmtime: HashMap<CoreTypeId, ModuleInternedTypeIndex>,
 }
 
 impl ModuleTypesBuilder {
     /// Reserves space for `amt` more type signatures.
     pub fn reserve_wasm_signatures(&mut self, amt: usize) {
-        self.types.wasm_signatures.reserve(amt);
+        self.types.wasm_types.reserve(amt);
     }
 
     /// Interns the `sig` specified and returns a unique `SignatureIndex` that
     /// can be looked up within [`ModuleTypes`] to recover the [`WasmFuncType`]
     /// at runtime.
-    pub fn wasm_func_type(&mut self, id: CoreTypeId, sig: WasmFuncType) -> SignatureIndex {
+    pub fn wasm_func_type(&mut self, id: CoreTypeId, sig: WasmFuncType) -> ModuleInternedTypeIndex {
         let sig = self.intern_func_type(sig);
         self.wasmparser_to_wasmtime.insert(id, sig);
         sig
@@ -64,7 +64,7 @@ impl ModuleTypesBuilder {
 
     /// Returns a unique `SignatureIndex` that can be looked up within
     /// [`ModuleTypes`] to recover the [`WasmContType`] at runtime.
-    pub fn wasm_cont_type(&mut self, id: CoreTypeId, sig: WasmContType) -> SignatureIndex {
+    pub fn wasm_cont_type(&mut self, id: CoreTypeId, sig: WasmContType) -> ModuleInternedTypeIndex {
         // TODO(dhil): Continuation types should be interned
         // like function types... I believe the necessary
         // infrastructure to support this change will come
@@ -74,22 +74,22 @@ impl ModuleTypesBuilder {
         sig_index
     }
 
-    fn intern_cont_type(&mut self, sig: WasmContType) -> SignatureIndex {
+    fn intern_cont_type(&mut self, sig: WasmContType) -> ModuleInternedTypeIndex {
         if let Some(idx) = self.interned_cont_types.get(&sig) {
             return *idx;
         }
 
-        let idx = WasmContType::signature_index(sig.clone());
+        let idx = WasmContType::interned_type_index(sig.clone());
         self.interned_cont_types.insert(sig, idx);
         return idx;
     }
 
-    fn intern_func_type(&mut self, sig: WasmFuncType) -> SignatureIndex {
+    fn intern_func_type(&mut self, sig: WasmFuncType) -> ModuleInternedTypeIndex {
         if let Some(idx) = self.interned_func_types.get(&sig) {
             return *idx;
         }
 
-        let idx = self.types.wasm_signatures.push(sig.clone());
+        let idx = self.types.wasm_types.push(sig.clone());
         self.interned_func_types.insert(sig, idx);
         return idx;
     }
@@ -101,8 +101,10 @@ impl ModuleTypesBuilder {
 
     /// Returns an iterator over all the wasm function signatures found within
     /// this module.
-    pub fn wasm_signatures(&self) -> impl Iterator<Item = (SignatureIndex, &WasmFuncType)> {
-        self.types.wasm_signatures()
+    pub fn wasm_signatures(
+        &self,
+    ) -> impl Iterator<Item = (ModuleInternedTypeIndex, &WasmFuncType)> {
+        self.types.wasm_types()
     }
 }
 
@@ -136,7 +138,11 @@ impl TypeConvert for WasmparserTypeConverter<'_> {
                 let i = TypeIndex::from_u32(i);
                 match self.module.types[i] {
                     ModuleType::Function(sig) => WasmHeapType::TypedFunc(sig),
-                    ModuleType::Continuation(sig) => WasmHeapType::TypedFunc(sig), // TODO(dhil): ehh
+                    ModuleType::Continuation(sig) => WasmHeapType::TypedFunc(sig),
+                    // TODO(dhil): It is not really a function, but I
+                    // suppose the `TypedFunc` constructor is not
+                    // really exclusively a constructor for indexed
+                    // functions.
                 }
             }
         }

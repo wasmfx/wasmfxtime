@@ -9,8 +9,8 @@
 use crate::state::FuncTranslationState;
 use crate::{
     DataIndex, ElemIndex, FuncIndex, Global, GlobalIndex, GlobalInit, Heap, HeapData, Memory,
-    MemoryIndex, SignatureIndex, Table, TableIndex, Tag, TagIndex, TypeConvert, TypeIndex,
-    WasmContType, WasmError, WasmFuncType, WasmHeapType, WasmResult,
+    MemoryIndex, Table, TableIndex, Tag, TagIndex, TypeConvert, TypeIndex, WasmContType, WasmError,
+    WasmFuncType, WasmHeapType, WasmResult,
 };
 use core::convert::From;
 use cranelift_codegen::cursor::FuncCursor;
@@ -23,6 +23,7 @@ use std::boxed::Box;
 use std::string::ToString;
 use std::vec::Vec;
 use wasmparser::{FuncValidator, FunctionBody, Operator, ValidatorResources, WasmFeatures};
+use wasmtime_types::ModuleInternedTypeIndex;
 
 /// The value of a WebAssembly global variable.
 #[derive(Clone, Copy)]
@@ -848,7 +849,7 @@ pub trait ModuleEnvironment<'data>: TypeConvert {
 
     /// Translates a type index to its signature index, only called for type
     /// indices which point to functions.
-    fn type_to_signature(&self, index: TypeIndex) -> WasmResult<SignatureIndex> {
+    fn type_to_signature(&self, index: TypeIndex) -> WasmResult<ModuleInternedTypeIndex> {
         let _ = index;
         Err(WasmError::Unsupported("module linking".to_string()))
     }

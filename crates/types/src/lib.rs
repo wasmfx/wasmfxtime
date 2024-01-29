@@ -81,17 +81,17 @@ pub enum WasmHeapType {
     Extern,
     Cont,
     NoCont,
-    // FIXME: the `SignatureIndex` payload here is not suitable given all the
+    // FIXME: the `TypeIndex` payload here is not suitable given all the
     // contexts that this type is used within. For example the Engine in
     // wasmtime hashes this index which is not appropriate because the index is
     // not globally unique.
     //
     // This probably needs to become `WasmHeapType<T>` where all of translation
-    // uses `WasmHeapType<SignatureIndex>` and all of engine-level "stuff"  uses
-    // `WasmHeapType<VMSharedSignatureIndex>`. This `<T>` would need to be
+    // uses `WasmHeapType<TypeIndex>` and all of engine-level "stuff"  uses
+    // `WasmHeapType<VMSharedTypeIndex>`. This `<T>` would need to be
     // propagated to quite a few locations though so it's left for a future
     // refactoring at this time.
-    TypedFunc(SignatureIndex),
+    TypedFunc(ModuleInternedTypeIndex),
 }
 
 impl fmt::Display for WasmHeapType {
@@ -167,14 +167,14 @@ impl WasmFuncType {
 
 /// WebAssembly continuation type -- equivalent of `wasmparser`'s ContType.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct WasmContType(SignatureIndex);
+pub struct WasmContType(ModuleInternedTypeIndex);
 
 impl WasmContType {
-    pub fn new(idx: SignatureIndex) -> Self {
+    pub fn new(idx: ModuleInternedTypeIndex) -> Self {
         WasmContType(idx)
     }
 
-    pub fn signature_index(self) -> SignatureIndex {
+    pub fn interned_type_index(self) -> ModuleInternedTypeIndex {
         self.0
     }
 }
@@ -224,10 +224,19 @@ entity_impl!(GlobalIndex);
 pub struct MemoryIndex(u32);
 entity_impl!(MemoryIndex);
 
-/// Index type of a signature (imported or defined) inside the WebAssembly module.
+/// Index type of a type (imported or defined) inside the WebAssembly module.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
-pub struct SignatureIndex(u32);
-entity_impl!(SignatureIndex);
+pub struct TypeIndex(u32);
+entity_impl!(TypeIndex);
+
+/// Index type of a deduplicated type (imported or defined) inside a WebAssembly
+/// module.
+///
+/// Note that this is deduplicated only at the level of a WebAssembly module,
+/// not at the level of a whole store or engine.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub struct ModuleInternedTypeIndex(u32);
+entity_impl!(ModuleInternedTypeIndex);
 
 /// Index type of a passive data segment inside the WebAssembly module.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -238,11 +247,6 @@ entity_impl!(DataIndex);
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct ElemIndex(u32);
 entity_impl!(ElemIndex);
-
-/// Index type of a type inside the WebAssembly module.
-#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
-pub struct TypeIndex(u32);
-entity_impl!(TypeIndex);
 
 /// Index type of an event inside the WebAssembly module.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -309,7 +313,7 @@ pub enum EntityType {
     Table(Table),
     /// A function type where the index points to the type section and records a
     /// function signature.
-    Function(SignatureIndex),
+    Function(ModuleInternedTypeIndex),
 }
 
 impl EntityType {
@@ -346,7 +350,7 @@ impl EntityType {
     }
 
     /// Assert that this entity is a function
-    pub fn unwrap_func(&self) -> SignatureIndex {
+    pub fn unwrap_func(&self) -> ModuleInternedTypeIndex {
         match self {
             EntityType::Function(g) => *g,
             _ => panic!("not a func"),
