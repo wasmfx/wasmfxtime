@@ -3,5 +3,4 @@ fn main() {
     // and the crate will otherwise have a `compile_error!` for unsupported
     // platforms.
     println!("cargo:rerun-if-changed=build.rs");
-    return;
 }
