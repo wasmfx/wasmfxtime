@@ -233,7 +233,7 @@ io-extras = "0.18.0"
 rustix = "0.38.21"
 is-terminal = "0.4.0"
 # wit-bindgen:
-wit-bindgen = { version = "0.15.0", default-features = false }
+wit-bindgen = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "wit-bindgenfx-cli-0.16.0", default-features = false }
 
 # wasm-tools family:
 wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }

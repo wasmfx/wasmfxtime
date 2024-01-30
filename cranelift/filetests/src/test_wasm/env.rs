@@ -13,7 +13,7 @@ use cranelift_codegen::{
 };
 use cranelift_wasm::{
     DummyEnvironment, FuncEnvironment, FuncIndex, ModuleEnvironment, TargetEnvironment,
-    TypeConvert, TypeIndex, WasmHeapType, WasmType,
+    TypeConvert, TypeIndex, WasmHeapType, WasmValType,
 };
 
 pub struct ModuleEnv {
@@ -701,8 +701,8 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
         builder: &mut cranelift_frontend::FunctionBuilder,
         state: &cranelift_wasm::FuncTranslationState,
         func: ir::Value,
-        arg_types: &[WasmType],
-        return_types: &[WasmType],
+        arg_types: &[WasmValType],
+        return_types: &[WasmValType],
     ) -> cranelift_wasm::WasmResult<ir::Value> {
         self.inner
             .translate_cont_new(builder, state, func, arg_types, return_types)
@@ -743,12 +743,12 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     }
 
     /// TODO
-    fn continuation_arguments(&self, type_index: u32) -> &[WasmType] {
+    fn continuation_arguments(&self, type_index: u32) -> &[WasmValType] {
         self.inner.continuation_arguments(type_index)
     }
 
     /// TODO
-    fn continuation_returns(&self, type_index: u32) -> &[WasmType] {
+    fn continuation_returns(&self, type_index: u32) -> &[WasmValType] {
         self.inner.continuation_returns(type_index)
     }
 
@@ -766,7 +766,7 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     fn typed_continuations_store_payloads(
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
-        valtypes: &[WasmType],
+        valtypes: &[WasmValType],
         values: &[ir::Value],
     ) {
         self.inner
@@ -774,12 +774,12 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     }
 
     /// TODO
-    fn tag_params(&self, tag_index: u32) -> &[WasmType] {
+    fn tag_params(&self, tag_index: u32) -> &[WasmValType] {
         self.inner.tag_params(tag_index)
     }
 
     /// TODO
-    fn tag_returns(&self, tag_index: u32) -> &[WasmType] {
+    fn tag_returns(&self, tag_index: u32) -> &[WasmValType] {
         self.inner.tag_returns(tag_index)
     }
 
@@ -813,7 +813,7 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     fn typed_continuations_load_return_values(
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
-        valtypes: &[WasmType],
+        valtypes: &[WasmValType],
         contobj: ir::Value,
     ) -> std::vec::Vec<ir::Value> {
         self.inner
@@ -869,7 +869,7 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
         contobj: ir::Value,
-        valtypes: &[WasmType],
+        valtypes: &[WasmValType],
     ) -> Vec<ir::Value> {
         return self
             .inner

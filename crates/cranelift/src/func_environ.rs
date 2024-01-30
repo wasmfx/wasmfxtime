@@ -14,8 +14,8 @@ use cranelift_frontend::Variable;
 use cranelift_frontend::{FunctionBuilder, Switch};
 use cranelift_wasm::{
     self, FuncIndex, FuncTranslationState, GlobalIndex, GlobalVariable, Heap, HeapData, HeapStyle,
-    MemoryIndex, TableIndex, TagIndex, TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType, WasmResult,
-    WasmValType,
+    MemoryIndex, TableIndex, TagIndex, TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType,
+    WasmResult, WasmValType,
 };
 
 use std::convert::TryFrom;

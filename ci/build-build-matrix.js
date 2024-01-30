@@ -14,41 +14,43 @@ const array = [
     // The Rust target that will be used for the build.
     "target": "x86_64-unknown-linux-gnu",
   },
-  {
-    "build": "aarch64-linux",
-    "os": "ubuntu-latest",
-    "target": "aarch64-unknown-linux-gnu",
-  },
-  {
-    "build": "s390x-linux",
-    "os": "ubuntu-latest",
-    "target": "s390x-unknown-linux-gnu",
-  },
-  {
-    "build": "riscv64gc-linux",
-    "os": "ubuntu-latest",
-    "target": "riscv64gc-unknown-linux-gnu",
-  },
-  {
-    "build": "x86_64-macos",
-    "os": "macos-latest",
-    "target": "x86_64-apple-darwin",
-  },
-  {
-    "build": "aarch64-macos",
-    "os": "macos-latest",
-    "target": "aarch64-apple-darwin",
-  },
-  {
-    "build": "x86_64-windows",
-    "os": "windows-latest",
-    "target": "x86_64-pc-windows-msvc",
-  },
-  {
-    "build": "x86_64-mingw",
-    "os": "windows-latest",
-    "target": "x86_64-pc-windows-gnu",
-  },
+  // TODO(dhil): Disabled as long as we don't support other platforms
+  // than x86_64 Linux.
+  // {
+  //   "build": "aarch64-linux",
+  //   "os": "ubuntu-latest",
+  //   "target": "aarch64-unknown-linux-gnu",
+  // },
+  // {
+  //   "build": "s390x-linux",
+  //   "os": "ubuntu-latest",
+  //   "target": "s390x-unknown-linux-gnu",
+  // },
+  // {
+  //   "build": "riscv64gc-linux",
+  //   "os": "ubuntu-latest",
+  //   "target": "riscv64gc-unknown-linux-gnu",
+  // },
+  // {
+  //   "build": "x86_64-macos",
+  //   "os": "macos-latest",
+  //   "target": "x86_64-apple-darwin",
+  // },
+  // {
+  //   "build": "aarch64-macos",
+  //   "os": "macos-latest",
+  //   "target": "aarch64-apple-darwin",
+  // },
+  // {
+  //   "build": "x86_64-windows",
+  //   "os": "windows-latest",
+  //   "target": "x86_64-pc-windows-msvc",
+  // },
+  // {
+  //   "build": "x86_64-mingw",
+  //   "os": "windows-latest",
+  //   "target": "x86_64-pc-windows-gnu",
+  // },
 ];
 
 const builds = [];

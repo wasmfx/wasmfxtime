@@ -320,17 +320,18 @@ jobs:
     - run: rustup target add x86_64-unknown-freebsd
     - run: cargo check -p wasmtime --no-default-features --features cranelift,wat,async,cache --target x86_64-unknown-freebsd
 
+    # TODO(dhil): Disabled due to unsupported platform
     # Check whether `wasmtime` cross-compiles to aarch64-linux-android
-    - run: rustup target add aarch64-linux-android
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v2
-    - uses: actions/cache@v4
-      with:
-        path: ${{ runner.tool_cache }}/cargo-ndk
-        key: cargo-ndk-bin-${{ env.CARGO_NDK_VERSION }}
-    - run: echo "${{ runner.tool_cache }}/cargo-ndk/bin" >> $GITHUB_PATH
-    - run: cargo install --root ${{ runner.tool_cache }}/cargo-ndk --version ${{ env.CARGO_NDK_VERSION }} cargo-ndk
-    - run: cargo ndk -t arm64-v8a check -p wasmtime
+    # - run: rustup target add aarch64-linux-android
+    # - name: Setup Android SDK
+    #   uses: android-actions/setup-android@v2
+    # - uses: actions/cache@v4
+    #   with:
+    #     path: ${{ runner.tool_cache }}/cargo-ndk
+    #     key: cargo-ndk-bin-${{ env.CARGO_NDK_VERSION }}
+    # - run: echo "${{ runner.tool_cache }}/cargo-ndk/bin" >> $GITHUB_PATH
+    # - run: cargo install --root ${{ runner.tool_cache }}/cargo-ndk --version ${{ env.CARGO_NDK_VERSION }} cargo-ndk
+    # - run: cargo ndk -t arm64-v8a check -p wasmtime
 
     # Run clippy configuration
     - run: rustup component add clippy
@@ -347,7 +348,8 @@ jobs:
   # Tracking issue: https://github.com/bytecodealliance/wasmtime/issues/4992
   checks_winarm64:
     needs: determine
-    if: needs.determine.outputs.run-full
+    # TODO(dhil): This check is disabled due to lack of platform support.
+    if: needs.determine.outputs.run-full && false
     name: Check Windows ARM64
     runs-on: windows-latest
     steps:
@@ -573,6 +575,8 @@ jobs:
   build-wasmtime-target-wasm32:
     name: Build wasmtime-target-wasm32
     needs: determine
+    # TODO(dhil): This platform is unsupported.
+    if: false
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
