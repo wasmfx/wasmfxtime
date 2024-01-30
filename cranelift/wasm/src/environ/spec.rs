@@ -630,8 +630,8 @@ pub trait FuncEnvironment: TargetEnvironment {
         builder: &mut FunctionBuilder,
         state: &FuncTranslationState,
         func: ir::Value,
-        arg_types: &[wasmtime_types::WasmType],
-        return_types: &[wasmtime_types::WasmType],
+        arg_types: &[wasmtime_types::WasmValType],
+        return_types: &[wasmtime_types::WasmValType],
     ) -> WasmResult<ir::Value>;
 
     /// Translates resume instructions.
@@ -663,16 +663,16 @@ pub trait FuncEnvironment: TargetEnvironment {
     ) -> ir::Value;
 
     /// TODO
-    fn continuation_arguments(&self, type_index: u32) -> &[wasmtime_types::WasmType];
+    fn continuation_arguments(&self, type_index: u32) -> &[wasmtime_types::WasmValType];
 
     /// TODO
-    fn continuation_returns(&self, type_index: u32) -> &[wasmtime_types::WasmType];
+    fn continuation_returns(&self, type_index: u32) -> &[wasmtime_types::WasmValType];
 
     /// TODO
     fn typed_continuations_load_return_values(
         &mut self,
         builder: &mut FunctionBuilder,
-        valtypes: &[wasmtime_types::WasmType],
+        valtypes: &[wasmtime_types::WasmValType],
         contobj: ir::Value,
     ) -> std::vec::Vec<ir::Value>;
 
@@ -688,7 +688,7 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
         contobj: ir::Value,
-        valtypes: &[wasmtime_types::WasmType],
+        valtypes: &[wasmtime_types::WasmValType],
     ) -> std::vec::Vec<ir::Value>;
 
     /// TODO
@@ -703,7 +703,7 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn typed_continuations_store_payloads(
         &mut self,
         builder: &mut FunctionBuilder,
-        valtypes: &[wasmtime_types::WasmType],
+        valtypes: &[wasmtime_types::WasmValType],
         values: &[ir::Value],
     );
 
@@ -724,10 +724,10 @@ pub trait FuncEnvironment: TargetEnvironment {
     );
 
     /// TODO
-    fn tag_params(&self, tag_index: u32) -> &[wasmtime_types::WasmType];
+    fn tag_params(&self, tag_index: u32) -> &[wasmtime_types::WasmValType];
 
     /// TODO
-    fn tag_returns(&self, tag_index: u32) -> &[wasmtime_types::WasmType];
+    fn tag_returns(&self, tag_index: u32) -> &[wasmtime_types::WasmValType];
 
     /// TODO
     fn typed_continuations_load_continuation_object(

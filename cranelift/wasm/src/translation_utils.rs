@@ -5,7 +5,7 @@ use core::u32;
 use cranelift_codegen::ir;
 use cranelift_frontend::FunctionBuilder;
 use wasmparser::{FuncValidator, WasmModuleResources};
-use wasmtime_types::WasmType;
+use wasmtime_types::WasmValType;
 
 /// Get the parameter and result types for the given Wasm blocktype.
 pub fn blocktype_params_results<'a, T>(
@@ -94,28 +94,28 @@ pub fn get_vmctx_value_label() -> ir::ValueLabel {
 /// Create a `Block` with the given Wasm parameters.
 pub fn block_with_params_wasmtype<PE: TargetEnvironment + ?Sized>(
     builder: &mut FunctionBuilder,
-    params: &[WasmType],
+    params: &[WasmValType],
     environ: &PE,
 ) -> WasmResult<ir::Block> {
     let block = builder.create_block();
     for ty in params {
         match ty {
-            WasmType::I32 => {
+            WasmValType::I32 => {
                 builder.append_block_param(block, ir::types::I32);
             }
-            WasmType::I64 => {
+            WasmValType::I64 => {
                 builder.append_block_param(block, ir::types::I64);
             }
-            WasmType::F32 => {
+            WasmValType::F32 => {
                 builder.append_block_param(block, ir::types::F32);
             }
-            WasmType::F64 => {
+            WasmValType::F64 => {
                 builder.append_block_param(block, ir::types::F64);
             }
-            WasmType::Ref(rt) => {
+            WasmValType::Ref(rt) => {
                 builder.append_block_param(block, environ.reference_type(rt.heap_type));
             }
-            WasmType::V128 => {
+            WasmValType::V128 => {
                 builder.append_block_param(block, ir::types::I8X16);
             }
         }

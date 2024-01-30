@@ -233,18 +233,18 @@ io-extras = "0.18.0"
 rustix = "0.38.21"
 is-terminal = "0.4.0"
 # wit-bindgen:
-wit-bindgen = { version = "0.15.0", default-features = false }
+wit-bindgen = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "wit-bindgenfx-cli-0.16.0", default-features = false }
 
 # wasm-tools family:
-wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.56" }
-wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.56" }
-wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.56" }
-wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.56" }
-wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.56" }
-wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.56" }
-wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.56" }
-wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.56" }
-wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.56" }
+wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
+wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
+wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
+wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
+wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
+wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
+wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
+wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
+wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
 
 # Non-Bytecode Alliance maintained dependencies:
 # --------------------------
@@ -330,6 +330,7 @@ default = [
   "coredump",
   "addr2line",
   "debug-builtins",
+  "component-model",
 
   # Enable some nice features of clap by default, but they come at a binary size
   # cost, so allow disabling this through disabling of our own `default`
@@ -364,7 +365,7 @@ wasi-http = ["component-model", "dep:wasmtime-wasi-http", "dep:tokio", "dep:hype
 pooling-allocator = ["wasmtime/pooling-allocator", "wasmtime-cli-flags/pooling-allocator"]
 component-model = [
   "wasmtime/component-model",
-  "wasmtime-wast/component-model",
+  "wasmtime-wast?/component-model",
   "wasmtime-cli-flags/component-model"
 ]
 wat = ["dep:wat", "wasmtime/wat"]

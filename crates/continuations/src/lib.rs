@@ -41,7 +41,7 @@ pub struct Payloads {
 }
 
 impl Payloads {
-    pub fn new(capacity: usize) -> Payloads {
+    pub fn new(capacity: usize) -> Self {
         let data = if capacity == 0 {
             ptr::null_mut()
         } else {
@@ -50,11 +50,11 @@ impl Payloads {
             args.leak();
             args_ptr
         };
-        return Payloads {
+        Self {
             length: 0,
             capacity,
             data,
-        };
+        }
     }
 }
 
