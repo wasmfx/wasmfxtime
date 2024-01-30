@@ -8,7 +8,7 @@
 use crate::environ::{FuncEnvironment, GlobalVariable, ModuleEnvironment, TargetEnvironment};
 use crate::func_translator::FuncTranslator;
 use crate::state::FuncTranslationState;
-use crate::WasmType;
+use crate::WasmValType;
 use crate::{
     DataIndex, DefinedFuncIndex, ElemIndex, FuncIndex, Global, GlobalIndex, GlobalInit, Heap,
     HeapData, HeapStyle, Memory, MemoryIndex, Table, TableIndex, TypeConvert, TypeIndex,
@@ -280,12 +280,12 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
             gv: vmctx,
             offset,
             ty: match self.mod_info.globals[index].entity.wasm_ty {
-                WasmType::I32 => ir::types::I32,
-                WasmType::I64 => ir::types::I64,
-                WasmType::F32 => ir::types::F32,
-                WasmType::F64 => ir::types::F64,
-                WasmType::V128 => ir::types::I8X16,
-                WasmType::Ref(_) => ir::types::R64,
+                WasmValType::I32 => ir::types::I32,
+                WasmValType::I64 => ir::types::I64,
+                WasmValType::F32 => ir::types::F32,
+                WasmValType::F64 => ir::types::F64,
+                WasmValType::V128 => ir::types::I8X16,
+                WasmValType::Ref(_) => ir::types::R64,
             },
         })
     }
@@ -707,8 +707,8 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         _builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
         _func: ir::Value,
-        _arg_types: &[wasmtime_types::WasmType],
-        _return_types: &[wasmtime_types::WasmType],
+        _arg_types: &[wasmtime_types::WasmValType],
+        _return_types: &[wasmtime_types::WasmValType],
     ) -> WasmResult<ir::Value> {
         todo!()
     }
@@ -742,19 +742,19 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn continuation_arguments(&self, _type_index: u32) -> &[wasmtime_types::WasmType] {
+    fn continuation_arguments(&self, _type_index: u32) -> &[wasmtime_types::WasmValType] {
         todo!()
     }
 
-    fn continuation_returns(&self, _type_index: u32) -> &[WasmType] {
+    fn continuation_returns(&self, _type_index: u32) -> &[WasmValType] {
         todo!()
     }
 
-    fn tag_params(&self, _tag_index: u32) -> &[WasmType] {
+    fn tag_params(&self, _tag_index: u32) -> &[WasmValType] {
         todo!()
     }
 
-    fn tag_returns(&self, _tag_index: u32) -> &[WasmType] {
+    fn tag_returns(&self, _tag_index: u32) -> &[WasmValType] {
         todo!()
     }
 
@@ -770,7 +770,7 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         &mut self,
         _builder: &mut FunctionBuilder,
         _contobj: ir::Value,
-        _valtypes: &[WasmType],
+        _valtypes: &[WasmValType],
     ) -> Vec<ir::Value> {
         todo!()
     }
@@ -798,7 +798,7 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
     fn typed_continuations_store_payloads(
         &mut self,
         _builder: &mut FunctionBuilder,
-        _valtypes: &[WasmType],
+        _valtypes: &[WasmValType],
         _values: &[ir::Value],
     ) {
         todo!()
@@ -839,7 +839,7 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
     fn typed_continuations_load_return_values(
         &mut self,
         _builder: &mut FunctionBuilder,
-        _valtypes: &[WasmType],
+        _valtypes: &[WasmValType],
         _contobj: ir::Value,
     ) -> std::vec::Vec<ir::Value> {
         unimplemented!()
@@ -886,19 +886,19 @@ impl TargetEnvironment for DummyEnvironment {
 impl<'data> ModuleEnvironment<'data> for DummyEnvironment {
     fn declare_type_func(&mut self, wasm: WasmFuncType) -> WasmResult<()> {
         let mut sig = ir::Signature::new(CallConv::Fast);
-        let mut cvt = |ty: &WasmType| {
+        let mut cvt = |ty: &WasmValType| {
             let reference_type = match self.pointer_type() {
                 ir::types::I32 => ir::types::R32,
                 ir::types::I64 => ir::types::R64,
                 _ => panic!("unsupported pointer type"),
             };
             ir::AbiParam::new(match ty {
-                WasmType::I32 => ir::types::I32,
-                WasmType::I64 => ir::types::I64,
-                WasmType::F32 => ir::types::F32,
-                WasmType::F64 => ir::types::F64,
-                WasmType::V128 => ir::types::I8X16,
-                WasmType::Ref(_) => reference_type,
+                WasmValType::I32 => ir::types::I32,
+                WasmValType::I64 => ir::types::I64,
+                WasmValType::F32 => ir::types::F32,
+                WasmValType::F64 => ir::types::F64,
+                WasmValType::V128 => ir::types::I8X16,
+                WasmValType::Ref(_) => reference_type,
             })
         };
         sig.params.extend(wasm.params().iter().map(&mut cvt));

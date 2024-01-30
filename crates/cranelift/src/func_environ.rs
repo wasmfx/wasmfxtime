@@ -14,8 +14,8 @@ use cranelift_frontend::Variable;
 use cranelift_frontend::{FunctionBuilder, Switch};
 use cranelift_wasm::{
     self, FuncIndex, FuncTranslationState, GlobalIndex, GlobalVariable, Heap, HeapData, HeapStyle,
-    MemoryIndex, TableIndex, TagIndex, TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType,
-    WasmResult, WasmType,
+    MemoryIndex, TableIndex, TagIndex, TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType, WasmResult,
+    WasmValType,
 };
 
 use std::convert::TryFrom;
@@ -1611,10 +1611,12 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         let value = builder.ins().load(pointer_type, flags, table_entry_addr, 0);
         // Mask off the "initialized bit". See documentation on
         // FUNCREF_INIT_BIT in crates/environ/src/ref_bits.rs for more
-        // details.
-        let value_masked = builder
-            .ins()
-            .band_imm(value, Imm64::from(FUNCREF_MASK as i64));
+        // details. Note that `FUNCREF_MASK` has type `usize` which may not be
+        // appropriate for the target architecture. Right now its value is
+        // always -2 so assert that part doesn't change and then thread through
+        // -2 as the immediate.
+        assert_eq!(FUNCREF_MASK as isize, -2);
+        let value_masked = builder.ins().band_imm(value, Imm64::from(-2));
 
         let null_block = builder.create_block();
         let continuation_block = builder.create_block();
@@ -2532,7 +2534,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     ) -> WasmResult<ir::Value> {
         debug_assert_eq!(
             self.module.globals[index].wasm_ty,
-            WasmType::Ref(WasmRefType::EXTERNREF),
+            WasmValType::Ref(WasmRefType::EXTERNREF),
             "We only use GlobalVariable::Custom for externref"
         );
 
@@ -2560,7 +2562,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     ) -> WasmResult<()> {
         debug_assert_eq!(
             self.module.globals[index].wasm_ty,
-            WasmType::Ref(WasmRefType::EXTERNREF),
+            WasmValType::Ref(WasmRefType::EXTERNREF),
             "We only use GlobalVariable::Custom for externref"
         );
 
@@ -2825,7 +2827,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             // `GlobalVariable::Custom`, as that is the only kind of
             // `GlobalVariable` for which `cranelift-wasm` supports custom
             // access translation.
-            WasmType::Ref(WasmRefType {
+            WasmValType::Ref(WasmRefType {
                 heap_type: WasmHeapType::Extern,
                 ..
             }) => return Ok(GlobalVariable::Custom),
@@ -2833,19 +2835,23 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             // Funcrefs are represented as pointers which survive for the
             // entire lifetime of the `Store` so there's no need for barriers.
             // This means that they can fall through to memory as well.
-            WasmType::Ref(WasmRefType {
+            WasmValType::Ref(WasmRefType {
                 heap_type: WasmHeapType::Func | WasmHeapType::TypedFunc(_),
                 ..
             }) => {}
 
-            WasmType::Ref(WasmRefType {
+            WasmValType::Ref(WasmRefType {
                 heap_type: WasmHeapType::Cont | WasmHeapType::NoCont,
                 ..
             }) => todo!(), // TODO(dhil): revisit later
 
             // Value types all live in memory so let them fall through to a
             // memory-based global.
-            WasmType::I32 | WasmType::I64 | WasmType::F32 | WasmType::F64 | WasmType::V128 => {}
+            WasmValType::I32
+            | WasmValType::I64
+            | WasmValType::F32
+            | WasmValType::F64
+            | WasmValType::V128 => {}
         }
 
         let (gv, offset) = self.get_global_location(func, index);
@@ -3446,8 +3452,8 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         _state: &FuncTranslationState,
         func: ir::Value,
-        arg_types: &[WasmType],
-        return_types: &[WasmType],
+        arg_types: &[WasmValType],
+        return_types: &[WasmValType],
     ) -> WasmResult<ir::Value> {
         let nargs = builder.ins().iconst(I64, arg_types.len() as i64);
         let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
@@ -3722,22 +3728,22 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         return generate_builtin_call_no_return_val!(self, builder, tc_suspend, [tag_index]);
     }
 
-    fn continuation_arguments(&self, index: u32) -> &[WasmType] {
+    fn continuation_arguments(&self, index: u32) -> &[WasmValType] {
         let idx = self.module.types[TypeIndex::from_u32(index)].unwrap_continuation();
         self.types[idx].params()
     }
 
-    fn continuation_returns(&self, index: u32) -> &[WasmType] {
+    fn continuation_returns(&self, index: u32) -> &[WasmValType] {
         let idx = self.module.types[TypeIndex::from_u32(index)].unwrap_continuation();
         self.types[idx].returns()
     }
 
-    fn tag_params(&self, tag_index: u32) -> &[WasmType] {
+    fn tag_params(&self, tag_index: u32) -> &[WasmValType] {
         let idx = self.module.tags[TagIndex::from_u32(tag_index)].signature;
         self.types[idx].params()
     }
 
-    fn tag_returns(&self, tag_index: u32) -> &[WasmType] {
+    fn tag_returns(&self, tag_index: u32) -> &[WasmValType] {
         let idx = self.module.tags[TagIndex::from_u32(tag_index)].signature;
         self.types[idx].returns()
     }
@@ -3772,7 +3778,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         contobj: ir::Value,
-        valtypes: &[WasmType],
+        valtypes: &[WasmValType],
     ) -> Vec<ir::Value> {
         let memflags = ir::MemFlags::trusted();
         let mut values = vec![];
@@ -3900,7 +3906,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn typed_continuations_store_payloads(
         &mut self,
         builder: &mut FunctionBuilder,
-        valtypes: &[WasmType],
+        valtypes: &[WasmValType],
         values: &[ir::Value],
     ) {
         assert_eq!(values.len(), valtypes.len());
@@ -3984,7 +3990,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn typed_continuations_load_return_values(
         &mut self,
         builder: &mut FunctionBuilder,
-        valtypes: &[WasmType],
+        valtypes: &[WasmValType],
         contobj: ir::Value,
     ) -> std::vec::Vec<ir::Value> {
         let co = tc::ContinuationObject::new(contobj, self.pointer_type());
