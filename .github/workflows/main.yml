@@ -290,6 +290,7 @@ jobs:
     - run: cargo check -p wasmtime --no-default-features --features addr2line
     - run: cargo check --features component-model
     - run: cargo check -p wasmtime --features incremental-cache
+    - run: cargo check -p wasmtime --no-default-features --features typed_continuation_baseline_implementation
 
     # Feature combinations of the `wasmtime-cli`
     - run: cargo check -p wasmtime-cli --no-default-features
@@ -545,6 +546,12 @@ jobs:
         sudo apt-get update && sudo apt-get install -y gdb lldb llvm
         cargo test test_debug_dwarf -- --ignored --test-threads 1
       if: matrix.os == 'ubuntu-latest' && matrix.target == ''&& needs.determine.outputs.run-full
+      env:
+        RUST_BACKTRACE: 1
+
+    # Test baseline implementation
+    - name: Baseline implementation
+      run: cargo test --features=default,typed_continuations_baseline_implementation
       env:
         RUST_BACKTRACE: 1
 
