@@ -366,10 +366,7 @@ pub mod baseline {
 
     /// Continues a given continuation.
     #[inline(always)]
-    pub fn resume(
-        instance: &mut Instance,
-        contref: &mut VMContRef,
-    ) -> Result<u32, TrapReason> {
+    pub fn resume(instance: &mut Instance, contref: &mut VMContRef) -> Result<u32, TrapReason> {
         // Attach parent.
         debug_assert!(contref.parent.is_null());
         contref.parent = get_current_continuation();
@@ -519,10 +516,7 @@ pub mod baseline {
     /// Moves the arguments of `src` continuation to `dst`
     /// continuation.
     #[inline(always)]
-    fn move_continuation_arguments(
-        src: &mut VMContRef,
-        dst: &mut VMContRef,
-    ) {
+    fn move_continuation_arguments(src: &mut VMContRef, dst: &mut VMContRef) {
         let srclen = src.args.len();
         debug_assert!(dst.args.len() == 0);
         dst.args.append(&mut src.args);
@@ -565,10 +559,7 @@ pub mod baseline {
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn resume(
-        _instance: &mut Instance,
-        _contref: &mut VMContRef,
-    ) -> Result<u32, TrapReason> {
+    pub fn resume(_instance: &mut Instance, _contref: &mut VMContRef) -> Result<u32, TrapReason> {
         panic!("attempt to execute continuation::baseline::resume without `typed_continuation_baseline_implementation` toggled!")
     }
 

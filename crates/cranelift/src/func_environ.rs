@@ -4167,11 +4167,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         // Call the builtin.
         let nargs = builder.ins().iconst(I64, arg_types.len() as i64);
         let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
-        let call_inst = builder.ins().call_indirect(
-            func_sig,
-            func_addr,
-            &[vmctx, func, nargs, nreturns],
-        );
+        let call_inst =
+            builder
+                .ins()
+                .call_indirect(func_sig, func_addr, &[vmctx, func, nargs, nreturns]);
         // Unwrap and take ownership of the result.
         assert!(builder.func.dfg.has_results(call_inst));
         let contref = *builder.func.dfg.inst_results(call_inst).first().unwrap();
@@ -4461,7 +4460,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         return self.generate_builtin_call_no_return_val(builder, index, sig, vec![tag_index]);
     }
     // End of baseline implementations.
-
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {
         self.isa.has_x86_blendv_lowering(ty)
