@@ -3450,11 +3450,14 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn translate_cont_new(
         &mut self,
         builder: &mut FunctionBuilder,
-        _state: &FuncTranslationState,
+        state: &FuncTranslationState,
         func: ir::Value,
         arg_types: &[WasmValType],
         return_types: &[WasmValType],
     ) -> WasmResult<ir::Value> {
+        if cfg!(feature = "typed_continuations_baseline_implementation") {
+            return self.translate_cont_new_baseline(builder, state, func, arg_types, return_types);
+        }
         let nargs = builder.ins().iconst(I64, arg_types.len() as i64);
         let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
 
@@ -3476,6 +3479,15 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         resume_args: &[ir::Value],
         resumetable: &[(u32, ir::Block)],
     ) -> Vec<ir::Value> {
+        if cfg!(feature = "typed_continuations_baseline_implementation") {
+            return self.translate_resume_baseline(
+                builder,
+                type_index,
+                contref,
+                resume_args,
+                resumetable,
+            );
+        }
         let resume_block = builder.create_block();
         let return_block = builder.create_block();
         let suspend_block = builder.create_block();
@@ -3724,6 +3736,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         tag_index: ir::Value,
     ) -> ir::Value {
+        if cfg!(feature = "typed_continuations_baseline_implementation") {
+            return self.translate_suspend_baseline(builder, tag_index);
+        }
         // Returns the vmctx
         return generate_builtin_call_no_return_val!(self, builder, tc_suspend, [tag_index]);
     }
@@ -3756,20 +3771,45 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let mut values = vec![];
 
         if valtypes.len() > 0 {
-            let vmctx = self.vmctx(builder.cursor().func);
-            let vmctx = builder.ins().global_value(self.pointer_type(), vmctx);
-            let vmctx_payloads = tc::Payloads::new(
-                vmctx,
-                self.offsets.vmctx_typed_continuations_payloads() as i32,
-                self.pointer_type(),
-            );
+            if cfg!(feature = "typed_continuations_baseline_implementation") {
+                // Retrieve the pointer to the suspend buffer.
+                let index = BuiltinFunctionIndex::tc_baseline_get_payloads_ptr();
+                let sig = self
+                    .builtin_function_signatures
+                    .tc_baseline_get_payloads_ptr(builder.func);
+                let nargs = builder.ins().iconst(I64, 0);
+                let (_vmctx, payloads_ptr) =
+                    self.generate_builtin_call(builder, index, sig, vec![nargs]);
+                // Load payloads.
+                let memflags = ir::MemFlags::trusted();
+                let mut offset = 0;
+                for valtype in valtypes {
+                    let val = builder.ins().load(*valtype, memflags, payloads_ptr, offset);
+                    values.push(val);
+                    offset += self.offsets.ptr.maximum_value_size() as i32;
+                }
+                // Clear the payloads buffer
+                let index = BuiltinFunctionIndex::tc_baseline_clear_payloads();
+                let sig = self
+                    .builtin_function_signatures
+                    .tc_baseline_clear_payloads(builder.func);
+                self.generate_builtin_call_no_return_val(builder, index, sig, vec![]);
+            } else {
+                let vmctx = self.vmctx(builder.cursor().func);
+                let vmctx = builder.ins().global_value(self.pointer_type(), vmctx);
+                let vmctx_payloads = tc::Payloads::new(
+                    vmctx,
+                    self.offsets.vmctx_typed_continuations_payloads() as i32,
+                    self.pointer_type(),
+                );
 
-            values = vmctx_payloads.load_data_entries(self, builder, valtypes);
+                values = vmctx_payloads.load_data_entries(self, builder, valtypes);
 
-            // In theory, we way want to deallocate the buffer instead of just
-            // clearing it if its size is above a certain threshold. That would
-            // avoid keeping a large object unnecessarily long.
-            vmctx_payloads.clear(builder);
+                // In theory, we way want to deallocate the buffer instead of just
+                // clearing it if its size is above a certain threshold. That would
+                // avoid keeping a large object unnecessarily long.
+                vmctx_payloads.clear(builder);
+            }
         }
         values
     }
@@ -3784,27 +3824,51 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let mut values = vec![];
 
         if valtypes.len() > 0 {
-            let co = tc::ContinuationObject::new(contobj, self.pointer_type());
-            let tag_return_values = co.tag_return_values();
+            if cfg!(feature = "typed_continuations_baseline_implementation") {
+                // Retrieve the pointer to the arguments' buffer.
+                let index = BuiltinFunctionIndex::tc_baseline_continuation_arguments_ptr();
+                let sig = self
+                    .builtin_function_signatures
+                    .tc_baseline_continuation_arguments_ptr(builder.func);
+                let nargs = builder.ins().iconst(I64, 0);
+                let (_vmctx, args_ptr) =
+                    self.generate_builtin_call(builder, index, sig, vec![contobj, nargs]);
+                // Load arguments.
+                let args =
+                    self.typed_continuations_load_values_generic(builder, valtypes, args_ptr);
+                assert!(valtypes.len() == args.len());
 
-            let payload_ptr = tag_return_values.get_data(builder);
+                // Clear the arguments buffer
+                let index = BuiltinFunctionIndex::tc_baseline_clear_arguments();
+                let sig = self
+                    .builtin_function_signatures
+                    .tc_baseline_clear_arguments(builder.func);
+                self.generate_builtin_call_no_return_val(builder, index, sig, vec![contobj]);
 
-            let mut offset = 0;
-            for valtype in valtypes {
-                let val = builder.ins().load(
-                    super::value_type(self.isa, *valtype),
-                    memflags,
-                    payload_ptr,
-                    offset,
-                );
-                values.push(val);
-                offset += self.offsets.ptr.maximum_value_size() as i32;
+                return args;
+            } else {
+                let co = tc::ContinuationObject::new(contobj, self.pointer_type());
+                let tag_return_values = co.tag_return_values();
+
+                let payload_ptr = tag_return_values.get_data(builder);
+
+                let mut offset = 0;
+                for valtype in valtypes {
+                    let val = builder.ins().load(
+                        super::value_type(self.isa, *valtype),
+                        memflags,
+                        payload_ptr,
+                        offset,
+                    );
+                    values.push(val);
+                    offset += self.offsets.ptr.maximum_value_size() as i32;
+                }
+
+                // In theory, we way want to deallocate the buffer instead of just
+                // clearing it if its size is above a certain threshold. That would
+                // avoid keeping a large object unnecessarily long.
+                tag_return_values.clear(builder);
             }
-
-            // In theory, we way want to deallocate the buffer instead of just
-            // clearing it if its size is above a certain threshold. That would
-            // avoid keeping a large object unnecessarily long.
-            tag_return_values.clear(builder);
         }
         values
     }
@@ -3848,55 +3912,74 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         contobj: ir::Value,
     ) {
         if values.len() > 0 {
-            let use_args_block = builder.create_block();
-            let use_payloads_block = builder.create_block();
-            let store_data_block = builder.create_block();
-            builder.append_block_param(store_data_block, self.pointer_type());
-
-            let co = tc::ContinuationObject::new(contobj, self.pointer_type());
-            let is_invoked = co.is_invoked(builder);
-            builder
-                .ins()
-                .brif(is_invoked, use_payloads_block, &[], use_args_block, &[]);
-
-            {
-                builder.switch_to_block(use_args_block);
-                builder.seal_block(use_args_block);
-
-                let args = co.args();
-                let ptr = args.occupy_next_slots(self, builder, values.len() as i32);
-
-                builder.ins().jump(store_data_block, &[ptr]);
-            }
-
-            {
-                builder.switch_to_block(use_payloads_block);
-                builder.seal_block(use_payloads_block);
-
-                let tag_return_values = co.tag_return_values();
-
-                // Unlike for the args buffer (where we know the maximum
-                // required capacity at the time of creation of the
-                // ContinuationObject), tag return buffers are re-used and may
-                // be too small.
-                tag_return_values.ensure_capacity(self, builder, remaining_arg_count);
-
-                let ptr = tag_return_values.occupy_next_slots(self, builder, values.len() as i32);
-                builder.ins().jump(store_data_block, &[ptr]);
-            }
-
-            {
-                builder.switch_to_block(store_data_block);
-                builder.seal_block(store_data_block);
-
-                let ptr = builder.block_params(store_data_block)[0];
-
-                // Store the values.
+            if cfg!(feature = "typed_continuations_baseline_implementation") {
+                // Retrieve the pointer to the arguments buffer.
+                let index = BuiltinFunctionIndex::tc_baseline_continuation_arguments_ptr();
+                let sig = self
+                    .builtin_function_signatures
+                    .tc_baseline_continuation_arguments_ptr(builder.func);
+                let nargs = builder.ins().iconst(I64, values.len() as i64);
+                let (_vmctx, args_ptr) =
+                    self.generate_builtin_call(builder, index, sig, vec![contobj, nargs]);
+                // Store arguments.
                 let memflags = ir::MemFlags::trusted();
                 let mut offset = 0;
-                for value in values {
-                    builder.ins().store(memflags, *value, ptr, offset);
+                for arg in values {
+                    builder.ins().store(memflags, *arg, args_ptr, offset);
                     offset += self.offsets.ptr.maximum_value_size() as i32;
+                }
+            } else {
+                let use_args_block = builder.create_block();
+                let use_payloads_block = builder.create_block();
+                let store_data_block = builder.create_block();
+                builder.append_block_param(store_data_block, self.pointer_type());
+
+                let co = tc::ContinuationObject::new(contobj, self.pointer_type());
+                let is_invoked = co.is_invoked(builder);
+                builder
+                    .ins()
+                    .brif(is_invoked, use_payloads_block, &[], use_args_block, &[]);
+
+                {
+                    builder.switch_to_block(use_args_block);
+                    builder.seal_block(use_args_block);
+
+                    let args = co.args();
+                    let ptr = args.occupy_next_slots(self, builder, values.len() as i32);
+
+                    builder.ins().jump(store_data_block, &[ptr]);
+                }
+
+                {
+                    builder.switch_to_block(use_payloads_block);
+                    builder.seal_block(use_payloads_block);
+
+                    let tag_return_values = co.tag_return_values();
+
+                    // Unlike for the args buffer (where we know the maximum
+                    // required capacity at the time of creation of the
+                    // ContinuationObject), tag return buffers are re-used and may
+                    // be too small.
+                    tag_return_values.ensure_capacity(self, builder, remaining_arg_count);
+
+                    let ptr =
+                        tag_return_values.occupy_next_slots(self, builder, values.len() as i32);
+                    builder.ins().jump(store_data_block, &[ptr]);
+                }
+
+                {
+                    builder.switch_to_block(store_data_block);
+                    builder.seal_block(store_data_block);
+
+                    let ptr = builder.block_params(store_data_block)[0];
+
+                    // Store the values.
+                    let memflags = ir::MemFlags::trusted();
+                    let mut offset = 0;
+                    for value in values {
+                        builder.ins().store(memflags, *value, ptr, offset);
+                        offset += self.offsets.ptr.maximum_value_size() as i32;
+                    }
                 }
             }
         }
@@ -3911,18 +3994,36 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     ) {
         assert_eq!(values.len(), valtypes.len());
         if valtypes.len() > 0 {
-            let vmctx = self.vmctx(builder.cursor().func);
-            let vmctx = builder.ins().global_value(self.pointer_type(), vmctx);
-            let payloads = tc::Payloads::new(
-                vmctx,
-                self.offsets.vmctx_typed_continuations_payloads() as i32,
-                self.pointer_type(),
-            );
+            if cfg!(feature = "typed_continuations_baseline_implementation") {
+                // Retrieve the pointer to the payloads buffer.
+                let index = BuiltinFunctionIndex::tc_baseline_get_payloads_ptr();
+                let sig = self
+                    .builtin_function_signatures
+                    .tc_baseline_get_payloads_ptr(builder.func);
+                let nargs = builder.ins().iconst(I64, values.len() as i64);
+                let (_vmctx, payloads_ptr) =
+                    self.generate_builtin_call(builder, index, sig, vec![nargs]);
+                // Store arguments.
+                let memflags = ir::MemFlags::trusted();
+                let mut offset = 0;
+                for arg in values {
+                    builder.ins().store(memflags, *arg, payloads_ptr, offset);
+                    offset += self.offsets.ptr.maximum_value_size() as i32;
+                }
+            } else {
+                let vmctx = self.vmctx(builder.cursor().func);
+                let vmctx = builder.ins().global_value(self.pointer_type(), vmctx);
+                let payloads = tc::Payloads::new(
+                    vmctx,
+                    self.offsets.vmctx_typed_continuations_payloads() as i32,
+                    self.pointer_type(),
+                );
 
-            let nargs = builder.ins().iconst(I64, values.len() as i64);
-            payloads.ensure_capacity(self, builder, nargs);
+                let nargs = builder.ins().iconst(I64, values.len() as i64);
+                payloads.ensure_capacity(self, builder, nargs);
 
-            payloads.store_data_entries(self, builder, values);
+                payloads.store_data_entries(self, builder, values);
+            }
         }
     }
 
@@ -3930,13 +4031,22 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
     ) -> ir::Value {
-        let pointer_type = self.pointer_type();
-        let vmctx = self.vmctx(builder.cursor().func);
-        let base_addr = builder.ins().global_value(pointer_type, vmctx);
+        if cfg!(feature = "typed_continuations_baseline_implementation") {
+            let index = BuiltinFunctionIndex::tc_baseline_get_current_continuation();
+            let sig = self
+                .builtin_function_signatures
+                .tc_baseline_get_current_continuation(builder.func);
+            let (_vmctx, contobj) = self.generate_builtin_call(builder, index, sig, vec![]);
+            return contobj;
+        } else {
+            let pointer_type = self.pointer_type();
+            let vmctx = self.vmctx(builder.cursor().func);
+            let base_addr = builder.ins().global_value(pointer_type, vmctx);
 
-        let vmctx = tc::VMContext::new(base_addr, pointer_type);
+            let vmctx = tc::VMContext::new(base_addr, pointer_type);
 
-        vmctx.get_active_continuation(self, builder)
+            vmctx.get_active_continuation(self, builder)
+        }
     }
 
     fn typed_continuations_new_cont_ref(
@@ -3987,6 +4097,26 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         generate_builtin_call_no_return_val!(self, builder, tc_drop_cont_obj, [contobj]);
     }
 
+    fn typed_continuations_load_values_generic(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        valtypes: &[WasmValType],
+        ptr: ir::Value,
+    ) -> std::vec::Vec<ir::Value> {
+        let mut values = vec![];
+        let mut offset = 0;
+        let memflags = ir::MemFlags::trusted();
+        for valtype in valtypes {
+            let val =
+                builder
+                    .ins()
+                    .load(super::value_type(self.isa, *valtype), memflags, ptr, offset);
+            values.push(val);
+            offset += self.offsets.ptr.maximum_value_size() as i32;
+        }
+        return values;
+    }
+
     fn typed_continuations_load_return_values(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -4014,6 +4144,324 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         }
         return values;
     }
+
+    //
+    // Typed continuation baseline implementations of cont_new, resume, suspend.
+    //
+    fn translate_cont_new_baseline(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        _state: &FuncTranslationState,
+        func: ir::Value,
+        arg_types: &[WasmValType],
+        return_types: &[WasmValType],
+    ) -> WasmResult<ir::Value> {
+        // Load the builtin continuation allocation function.
+        let func_sig = self
+            .builtin_function_signatures
+            .tc_baseline_cont_new(builder.func);
+        let (vmctx, func_addr) = self.translate_load_builtin_function_address(
+            &mut builder.cursor(),
+            BuiltinFunctionIndex::tc_baseline_cont_new(),
+        );
+        // Call the builtin.
+        let nargs = builder.ins().iconst(I64, arg_types.len() as i64);
+        let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
+        let call_inst = builder.ins().call_indirect(
+            func_sig,
+            func_addr,
+            &[vmctx, func, nargs, nreturns],
+        );
+        // Unwrap and take ownership of the result.
+        assert!(builder.func.dfg.has_results(call_inst));
+        let contref = *builder.func.dfg.inst_results(call_inst).first().unwrap();
+
+        Ok(contref)
+    }
+
+    fn translate_resume_baseline(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        type_index: u32,
+        resumee_ref: ir::Value,
+        resume_args: &[ir::Value],
+        resumetable: &[(u32, ir::Block)],
+    ) -> Vec<ir::Value> {
+        // The resume instruction is by far the most involved
+        // instruction to compile as it is responsible for both
+        // continuation application and effect dispatch.
+        //
+        // We store the continuation arguments, continuation return
+        // values, and suspension payloads on objects accessible
+        // inside the libcall context.
+        //
+        // Here we translate a resume instruction into several basic
+        // blocks as follows:
+        //
+        //        prelude_block
+        //              |
+        //              |
+        //        resume_block <--------
+        //        |          |          \
+        //        |          |          |
+        // return_block   handle_block  |
+        //                     |        |
+        //                     |        |
+        //                forward_block /
+        //
+        // * prelude_block pushes the continuation arguments onto the
+        //   buffer in the libcall context.
+        // * resume_block continues a given `resumee_ref`. It jumps to
+        //   return_block on ordinary return and to `handle_block` on
+        //   a suspension
+        // * return_block reads the return values from the libcall
+        //   context.
+        // * handle_block dispatches on a tag provided by the
+        //   resume_block to an associated user-defined block. If
+        //   there is no suitable user-defined block, then it jumps to
+        //   the forward_block.
+        // * forward_block dispatches the handling of a given tag to
+        //   the ambient context. Once control returns it jumps to the
+        //   resume_block to continue continuation at the suspension
+        //   site.
+        let resume_block = builder.create_block();
+        let return_block = builder.create_block();
+        let handle_block = builder.create_block();
+        let forwarding_block = builder.create_block();
+
+        // Prelude: Push the continuation arguments.
+        {
+            let resumee_fiber =
+                self.typed_continuations_cont_ref_get_cont_obj(builder, resumee_ref);
+            if resume_args.len() > 0 {
+                let nargs = builder.ins().iconst(I64, resume_args.len() as i64);
+
+                // Load the arguments pointer
+                let func_sig = self
+                    .builtin_function_signatures
+                    .tc_baseline_continuation_arguments_ptr(builder.func);
+                let (vmctx, func_addr) = self.translate_load_builtin_function_address(
+                    &mut builder.cursor(),
+                    BuiltinFunctionIndex::tc_baseline_continuation_arguments_ptr(),
+                );
+                // Call the builtin.
+                let call_inst = builder.ins().call_indirect(
+                    func_sig,
+                    func_addr,
+                    &[vmctx, resumee_fiber, nargs],
+                );
+                // Unwrap and take ownership of the result.
+                debug_assert!(builder.func.dfg.has_results(call_inst));
+                let args_ptr = *builder.func.dfg.inst_results(call_inst).first().unwrap();
+
+                // Append arguments.
+                let memflags = ir::MemFlags::trusted();
+                let mut offset = 0;
+                for arg in resume_args {
+                    builder.ins().store(memflags, *arg, args_ptr, offset);
+                    offset += self.offsets.ptr.maximum_value_size() as i32;
+                }
+            }
+
+            builder.ins().jump(resume_block, &[resumee_fiber]);
+        }
+
+        // Resume block: here we continue the (suspended) resumee.
+        let (tag, resumee_fiber) = {
+            builder.switch_to_block(resume_block);
+            builder.append_block_param(resume_block, self.pointer_type());
+
+            // The raw continuation fiber
+            let resumee_fiber = builder.block_params(resume_block)[0];
+
+            // Load the builtin continuation resume function.
+            let func_sig = self
+                .builtin_function_signatures
+                .tc_baseline_resume(builder.func);
+            let (vmctx, func_addr) = self.translate_load_builtin_function_address(
+                &mut builder.cursor(),
+                BuiltinFunctionIndex::tc_baseline_resume(),
+            );
+
+            // Continue the resumee.
+            let call_inst =
+                builder
+                    .ins()
+                    .call_indirect(func_sig, func_addr, &[vmctx, resumee_fiber]);
+
+            // Unwrap and take ownership of the result.
+            debug_assert!(builder.func.dfg.has_results(call_inst));
+            let result = *builder.func.dfg.inst_results(call_inst).first().unwrap();
+
+            // The result encodes whether the return happens via ordinary
+            // means or via a suspend. If the high bit is set, then it is
+            // interpreted as the return happened via a suspend, and the
+            // remainder of the integer is to be interpreted as the index
+            // of the control tag that was supplied to the suspend.
+            let signal_mask = 0xf000_0000;
+            let inverse_signal_mask = 0x0fff_ffff;
+            let signal = builder.ins().band_imm(result, signal_mask);
+            let tag = builder.ins().band_imm(result, inverse_signal_mask);
+
+            // Test the signal bit.
+            let is_zero = builder.ins().icmp_imm(IntCC::Equal, signal, 0);
+
+            // Jump to the return block if the signal is 0, otherwise
+            // jump to the suspend block.
+            builder
+                .ins()
+                .brif(is_zero, return_block, &[], handle_block, &[]);
+
+            // We do not seal this block, yet, because the effect forwarding block has a back edge to it
+            (tag, resumee_fiber)
+        };
+
+        // Now we construct the handling block.
+        //
+        // Strategy:
+        //
+        // We encode the resume table as a sparse switch table, where
+        // each `(tag, label)` pair in the resume table translates to
+        // a "case tag: br label" in the switch table.
+        //
+        // The first occurs of a particular tag `t` shadows every
+        // other occurrence of the same tag `t` in the resumetable,
+        // meaning we should only emit code for the first such `t`.
+        //
+        // Effect forwarding is handled by the default/fallthrough
+        // case of the switch.
+
+        // First, initialise the switch structure.
+        let mut switch = Switch::new();
+        // Second, we consume the resume table entry-wise.
+        let mut case_blocks = vec![];
+        let mut tag_seen = std::collections::HashSet::new(); // Used to keep track of tags
+        for &(tag, label) in resumetable {
+            // Skip if this `tag` has been seen previously.
+            if !tag_seen.insert(tag) {
+                continue;
+            }
+            let case = builder.create_block();
+            switch.set_entry(tag as u128, case);
+            builder.switch_to_block(case);
+
+            // Load and push payloads.
+            let param_types: Vec<ir::Type> = self
+                .tag_params(tag)
+                .iter()
+                .map(|wty| crate::value_type(self.isa, *wty))
+                .collect();
+            // NOTE(dhil): For the baseline, `load_payloads` actually
+            // moves the payloads, i.e. consumes the payloads buffer
+            // entirely.
+            let mut args = self.typed_continuations_load_payloads(builder, &param_types);
+
+            // Create and push the continuation reference.
+            let resumee_ref = self.typed_continuations_new_cont_ref(builder, resumee_fiber);
+            args.push(resumee_ref);
+
+            // Finally, emit the jump to `label`.
+            builder.ins().jump(label, &args);
+            case_blocks.push(case);
+        }
+
+        // Forwarding block.
+        {
+            builder.switch_to_block(forwarding_block);
+
+            // Load the builtin forwarding function.
+            let func_sig = self
+                .builtin_function_signatures
+                .tc_baseline_forward(builder.func);
+            let (vmctx, func_addr) = self.translate_load_builtin_function_address(
+                &mut builder.cursor(),
+                BuiltinFunctionIndex::tc_baseline_forward(),
+            );
+
+            // Continue the resumee.
+            let call_inst =
+                builder
+                    .ins()
+                    .call_indirect(func_sig, func_addr, &[vmctx, tag, resumee_fiber]);
+            // Check the result.
+            debug_assert!(!builder.func.dfg.has_results(call_inst));
+
+            builder.ins().jump(resume_block, &[resumee_fiber]);
+            builder.seal_block(resume_block);
+        }
+
+        // Emit the switch.
+        {
+            builder.switch_to_block(handle_block);
+            switch.emit(builder, tag, forwarding_block);
+            builder.seal_block(handle_block);
+            builder.seal_block(forwarding_block);
+
+            for case_block in case_blocks {
+                builder.seal_block(case_block);
+            }
+        }
+
+        // Return block.
+        {
+            builder.switch_to_block(return_block);
+            builder.seal_block(return_block);
+
+            // Load the values pointer.
+            let func_sig = self
+                .builtin_function_signatures
+                .tc_baseline_continuation_values_ptr(builder.func);
+            let (vmctx, func_addr) = self.translate_load_builtin_function_address(
+                &mut builder.cursor(),
+                BuiltinFunctionIndex::tc_baseline_continuation_values_ptr(),
+            );
+            // Call the builtin.
+            let call_inst =
+                builder
+                    .ins()
+                    .call_indirect(func_sig, func_addr, &[vmctx, resumee_fiber]);
+            // Unwrap and take ownership of the result.
+            debug_assert!(builder.func.dfg.has_results(call_inst));
+            let vals_ptr = *builder.func.dfg.inst_results(call_inst).first().unwrap();
+
+            // Load and push the return values.
+            let returns = self.continuation_returns(type_index).to_vec();
+            let values = self.typed_continuations_load_values_generic(builder, &returns, vals_ptr);
+
+            // Free the continuation.
+            let func_sig = self
+                .builtin_function_signatures
+                .tc_baseline_drop_continuation_reference(builder.func);
+            let (vmctx, func_addr) = self.translate_load_builtin_function_address(
+                &mut builder.cursor(),
+                BuiltinFunctionIndex::tc_baseline_drop_continuation_reference(),
+            );
+            // Call the builtin.
+            let call_inst =
+                builder
+                    .ins()
+                    .call_indirect(func_sig, func_addr, &[vmctx, resumee_fiber]);
+            // Check the result.
+            debug_assert!(!builder.func.dfg.has_results(call_inst));
+
+            return values;
+        }
+    }
+
+    fn translate_suspend_baseline(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        tag_index: ir::Value,
+    ) -> ir::Value {
+        let index = BuiltinFunctionIndex::tc_baseline_suspend();
+        let sig = self
+            .builtin_function_signatures
+            .tc_baseline_suspend(builder.func);
+        // Returns the vmctx
+        return self.generate_builtin_call_no_return_val(builder, index, sig, vec![tag_index]);
+    }
+    // End of baseline implementations.
+
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {
         self.isa.has_x86_blendv_lowering(ty)

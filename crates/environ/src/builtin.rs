@@ -88,6 +88,30 @@ macro_rules! foreach_builtin_function {
             /// `old_size` must be smaller than `new_size`
             tc_reallocate(vmctx: vmctx, ptr: pointer, old_size: i64, new_size: i64, align: i64) -> pointer;
 
+            // TC baseline
+            /// Baseline resume
+            tc_baseline_resume(vmctx: vmctx, contobj: pointer) -> i32;
+            /// Baseline suspend
+            tc_baseline_suspend(vmctx: vmctx, tag: i32);
+            /// Like suspend, but forwards handling.
+            tc_baseline_forward(vmctx: vmctx, tag: i32, subcont: pointer);
+            /// Baseline cont.new
+            tc_baseline_cont_new(vmctx: vmctx, r: pointer, param_count: i64, result_count: i64) -> pointer;
+            /// Baseline continuation drop
+            tc_baseline_drop_continuation_reference(vmctx: vmctx, r: pointer);
+            /// Baseline continuation arguments pointer
+            tc_baseline_continuation_arguments_ptr(vmctx: vmctx, r: pointer, nargs: i64) -> pointer;
+            /// Baseline continuation values pointer
+            tc_baseline_continuation_values_ptr(vmctx: vmctx, r: pointer) -> pointer;
+            /// Baseline continuation clear arguments
+            tc_baseline_clear_arguments(vmctx: vmctx, r: pointer);
+            /// Baseline suspend buffer pointer.
+            tc_baseline_get_payloads_ptr(vmctx: vmctx, nargs: i64) -> pointer;
+            /// Baseline clear suspend buffer.
+            tc_baseline_clear_payloads(vmctx: vmctx);
+            /// Baseline get current continuation.
+            tc_baseline_get_current_continuation(vmctx: vmctx) -> pointer;
+
             // General-purpose printing functions.
             //
             /// Prints a string. Note that we transfer the string not as C strings, but as 'static str,
