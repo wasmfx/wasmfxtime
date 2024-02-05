@@ -31,7 +31,11 @@ impl preview2::preview1::WasiPreview1View for WasiHostCtx {
 fn run_wasi_test(wat: &'static str) -> Result<i32> {
     // Construct the wasm engine with async support disabled.
     let mut config = Config::new();
-    config.async_support(false).wasm_exceptions(true).wasm_function_references(true).wasm_typed_continuations(true);
+    config
+        .async_support(false)
+        .wasm_exceptions(true)
+        .wasm_function_references(true)
+        .wasm_typed_continuations(true);
     let engine = Engine::new(&config)?;
 
     // Add the WASI preview1 API to the linker (will be implemented in terms of
@@ -63,7 +67,11 @@ fn run_wasi_test(wat: &'static str) -> Result<i32> {
 async fn run_wasi_test_async(wat: &'static str) -> Result<i32> {
     // Construct the wasm engine with async support enabled.
     let mut config = Config::new();
-    config.async_support(true).wasm_exceptions(true).wasm_function_references(true).wasm_typed_continuations(true);
+    config
+        .async_support(true)
+        .wasm_exceptions(true)
+        .wasm_function_references(true)
+        .wasm_typed_continuations(true);
     let engine = Engine::new(&config)?;
 
     // Add the WASI preview1 API to the linker (will be implemented in terms of
@@ -132,7 +140,6 @@ static WRITE_SOMETHING_WAT: &'static str = &r#"
   )
 )"#;
 
-
 #[test]
 fn write_something_test() -> Result<()> {
     assert_eq!(run_wasi_test(WRITE_SOMETHING_WAT)?, 0);
@@ -144,7 +151,6 @@ async fn write_something_test_async() -> Result<()> {
     assert_eq!(run_wasi_test_async(WRITE_SOMETHING_WAT).await?, 0);
     Ok(())
 }
-
 
 static SCHED_YIELD_WAT: &'static str = r#"
 (module
