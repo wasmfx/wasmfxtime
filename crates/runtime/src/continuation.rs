@@ -274,8 +274,7 @@ pub mod baseline {
     ///
     /// It is a linked list of continuation records. Each element in
     /// the list consists of a pointer to an actual
-    /// wasmtime_fiber::Fiber, a suspend object, a parent pointer, a
-    /// boolean indicating whether the fiber has be resume before, an
+    /// wasmtime_fiber::Fiber, a suspend object, a parent pointer, an
     /// arguments buffer, and a return buffer.
     pub struct VMContRef {
         pub fiber: Box<ContinuationFiber>,
