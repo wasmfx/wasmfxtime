@@ -742,6 +742,41 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
         self.inner.translate_suspend(builder, tag_index)
     }
 
+    /// TODO(dhil): write documentation.
+    fn translate_cont_new_baseline(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        state: &cranelift_wasm::FuncTranslationState,
+        func: ir::Value,
+        arg_types: &[WasmValType],
+        return_types: &[WasmValType],
+    ) -> cranelift_wasm::WasmResult<ir::Value> {
+        self.inner
+            .translate_cont_new_baseline(builder, state, func, arg_types, return_types)
+    }
+
+    /// TODO(frank-emrich): write documentation.
+    fn translate_resume_baseline(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        type_index: u32,
+        contref: ir::Value,
+        resume_args: &[ir::Value],
+        resumetable: &[(u32, ir::Block)],
+    ) -> Vec<ir::Value> {
+        self.inner
+            .translate_resume_baseline(builder, type_index, contref, resume_args, resumetable)
+    }
+
+    /// TODO(dhil): write documentation.
+    fn translate_suspend_baseline(
+        &mut self,
+        builder: &mut cranelift_frontend::FunctionBuilder,
+        tag_index: ir::Value,
+    ) -> ir::Value {
+        self.inner.translate_suspend_baseline(builder, tag_index)
+    }
+
     /// TODO
     fn continuation_arguments(&self, type_index: u32) -> &[WasmValType] {
         self.inner.continuation_arguments(type_index)
