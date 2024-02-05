@@ -281,7 +281,6 @@ pub mod baseline {
         pub fiber: Box<ContinuationFiber>,
         pub suspend: *const Yield,
         pub parent: *mut VMContRef,
-        pub initial: bool,
         pub args: Vec<u128>,
         pub values: Vec<u128>,
         pub _marker: std::marker::PhantomPinned,
@@ -352,7 +351,6 @@ pub mod baseline {
             parent: std::ptr::null_mut(),
             suspend: std::ptr::null(),
             fiber,
-            initial: true,
             args: Vec::with_capacity(param_count),
             values,
             _marker: std::marker::PhantomPinned,
@@ -373,11 +371,13 @@ pub mod baseline {
         // Append arguments to the function args/return buffer if this
         // is the initial resume. Note: the `contref.args` buffer is
         // appended in the generated code.
-        if contref.initial {
+        //
+        // NOTE(dhil): The `suspend` field is set during the initial
+        // invocation.
+        if contref.suspend.is_null() {
             debug_assert!(contref.values.len() == 0);
             debug_assert!(contref.args.len() <= contref.values.capacity());
             contref.values.append(&mut contref.args);
-            contref.initial = false;
             contref.args.clear();
         }
         // Change the current continuation.
