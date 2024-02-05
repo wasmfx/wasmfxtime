@@ -866,15 +866,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn typed_continuations_load_values_generic(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _valtypes: &[WasmValType],
-        _ptr: ir::Value,
-    ) -> std::vec::Vec<ir::Value> {
-        unimplemented!()
-    }
-
     fn typed_continuations_load_return_values(
         &mut self,
         _builder: &mut FunctionBuilder,

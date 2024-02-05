@@ -696,14 +696,6 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn continuation_returns(&self, type_index: u32) -> &[wasmtime_types::WasmValType];
 
     /// TODO
-    fn typed_continuations_load_values_generic(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        valtypes: &[wasmtime_types::WasmValType],
-        ptr: ir::Value,
-    ) -> std::vec::Vec<ir::Value>;
-
-    /// TODO
     fn typed_continuations_load_return_values(
         &mut self,
         builder: &mut FunctionBuilder,

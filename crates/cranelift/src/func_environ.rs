@@ -3834,9 +3834,18 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 let (_vmctx, args_ptr) =
                     self.generate_builtin_call(builder, index, sig, vec![contobj, nargs]);
                 // Load arguments.
-                let args =
-                    self.typed_continuations_load_values_generic(builder, valtypes, args_ptr);
-                assert!(valtypes.len() == args.len());
+                let mut args = vec![];
+                let mut offset = 0;
+                let memflags = ir::MemFlags::trusted();
+                for valtype in valtypes {
+                    let val =
+                        builder
+                        .ins()
+                        .load(super::value_type(self.isa, *valtype), memflags, args_ptr, offset);
+                    args.push(val);
+                    offset += self.offsets.ptr.maximum_value_size() as i32;
+                }
+                debug_assert!(valtypes.len() == args.len());
 
                 // Clear the arguments buffer
                 let index = BuiltinFunctionIndex::tc_baseline_clear_arguments();
@@ -4095,26 +4104,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         contobj: ir::Value,
     ) {
         generate_builtin_call_no_return_val!(self, builder, tc_drop_cont_obj, [contobj]);
-    }
-
-    fn typed_continuations_load_values_generic(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        valtypes: &[WasmValType],
-        ptr: ir::Value,
-    ) -> std::vec::Vec<ir::Value> {
-        let mut values = vec![];
-        let mut offset = 0;
-        let memflags = ir::MemFlags::trusted();
-        for valtype in valtypes {
-            let val =
-                builder
-                    .ins()
-                    .load(super::value_type(self.isa, *valtype), memflags, ptr, offset);
-            values.push(val);
-            offset += self.offsets.ptr.maximum_value_size() as i32;
-        }
-        return values;
     }
 
     fn typed_continuations_load_return_values(
@@ -4424,8 +4413,18 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             let vals_ptr = *builder.func.dfg.inst_results(call_inst).first().unwrap();
 
             // Load and push the return values.
-            let returns = self.continuation_returns(type_index).to_vec();
-            let values = self.typed_continuations_load_values_generic(builder, &returns, vals_ptr);
+            let returns = self.continuation_returns(type_index);
+            let mut values = vec![];
+            let mut offset = 0;
+            let memflags = ir::MemFlags::trusted();
+            for valtype in returns {
+                let val =
+                    builder
+                    .ins()
+                    .load(super::value_type(self.isa, *valtype), memflags, vals_ptr, offset);
+                values.push(val);
+                offset += self.offsets.ptr.maximum_value_size() as i32;
+            }
 
             // Free the continuation.
             let func_sig = self
