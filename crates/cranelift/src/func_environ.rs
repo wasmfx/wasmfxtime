@@ -3838,10 +3838,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 let mut offset = 0;
                 let memflags = ir::MemFlags::trusted();
                 for valtype in valtypes {
-                    let val =
-                        builder
-                        .ins()
-                        .load(super::value_type(self.isa, *valtype), memflags, args_ptr, offset);
+                    let val = builder.ins().load(
+                        super::value_type(self.isa, *valtype),
+                        memflags,
+                        args_ptr,
+                        offset,
+                    );
                     args.push(val);
                     offset += self.offsets.ptr.maximum_value_size() as i32;
                 }
@@ -4418,10 +4420,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             let mut offset = 0;
             let memflags = ir::MemFlags::trusted();
             for valtype in returns {
-                let val =
-                    builder
-                    .ins()
-                    .load(super::value_type(self.isa, *valtype), memflags, vals_ptr, offset);
+                let val = builder.ins().load(
+                    super::value_type(self.isa, *valtype),
+                    memflags,
+                    vals_ptr,
+                    offset,
+                );
                 values.push(val);
                 offset += self.offsets.ptr.maximum_value_size() as i32;
             }
