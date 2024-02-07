@@ -713,29 +713,7 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn translate_cont_new_baseline(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _state: &FuncTranslationState,
-        _func: ir::Value,
-        _arg_types: &[wasmtime_types::WasmValType],
-        _return_types: &[wasmtime_types::WasmValType],
-    ) -> WasmResult<ir::Value> {
-        todo!()
-    }
-
     fn translate_resume(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _type_index: u32,
-        _contref: ir::Value,
-        _resume_args: &[ir::Value],
-        _resumetable: &[(u32, ir::Block)],
-    ) -> Vec<ir::Value> {
-        todo!()
-    }
-
-    fn translate_resume_baseline(
         &mut self,
         _builder: &mut FunctionBuilder,
         _type_index: u32,
@@ -764,14 +742,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn translate_suspend_baseline(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _tag_index: ir::Value,
-    ) -> ir::Value {
-        todo!()
-    }
-
     fn continuation_arguments(&self, _type_index: u32) -> &[wasmtime_types::WasmValType] {
         todo!()
     }
@@ -788,30 +758,12 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn typed_continuations_load_payloads(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _valtypes: &[ir::Type],
-    ) -> Vec<ir::Value> {
-        todo!()
-    }
-
     fn typed_continuations_load_tag_return_values(
         &mut self,
         _builder: &mut FunctionBuilder,
         _contobj: ir::Value,
         _valtypes: &[WasmValType],
     ) -> Vec<ir::Value> {
-        todo!()
-    }
-
-    /// TODO
-    fn typed_continuations_forward_tag_return_values(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _parent_contobj: ir::Value,
-        _child_contobj: ir::Value,
-    ) {
         todo!()
     }
 
@@ -841,23 +793,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn typed_continuations_load_parent(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _contobj: ir::Value,
-    ) -> ir::Value {
-        todo!()
-    }
-
-    fn typed_continuations_store_parent(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _contobj: ir::Value,
-        _new_parent: ir::Value,
-    ) {
-        todo!()
-    }
-
     fn typed_continuations_new_cont_ref(
         &mut self,
         _builder: &mut FunctionBuilder,
@@ -866,29 +801,11 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn typed_continuations_load_return_values(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _valtypes: &[WasmValType],
-        _contobj: ir::Value,
-    ) -> std::vec::Vec<ir::Value> {
-        unimplemented!()
-    }
-
     fn typed_continuations_cont_ref_get_cont_obj(
         &mut self,
         _builder: &mut FunctionBuilder,
         _contref: ir::Value,
     ) -> ir::Value {
-        unimplemented!()
-    }
-
-    /// TODO
-    fn typed_continuations_drop_cont_obj(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _contobj: ir::Value,
-    ) {
         unimplemented!()
     }
 }

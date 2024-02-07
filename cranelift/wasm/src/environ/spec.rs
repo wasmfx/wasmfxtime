@@ -634,30 +634,10 @@ pub trait FuncEnvironment: TargetEnvironment {
         return_types: &[wasmtime_types::WasmValType],
     ) -> WasmResult<ir::Value>;
 
-    /// Baseline version of the above.
-    fn translate_cont_new_baseline(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        state: &FuncTranslationState,
-        func: ir::Value,
-        arg_types: &[wasmtime_types::WasmValType],
-        return_types: &[wasmtime_types::WasmValType],
-    ) -> WasmResult<ir::Value>;
-
     /// Translates resume instructions.
     /// Returns the values returned by the instruction (i.e., the values
     /// returned by the resumed continuation once it returns normally)
     fn translate_resume(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        type_index: u32,
-        contref: ir::Value,
-        resume_args: &[ir::Value],
-        resumetable: &[(u32, ir::Block)],
-    ) -> Vec<ir::Value>;
-
-    /// Baseline version of the above.
-    fn translate_resume_baseline(
         &mut self,
         builder: &mut FunctionBuilder,
         type_index: u32,
@@ -682,33 +662,11 @@ pub trait FuncEnvironment: TargetEnvironment {
         tag_index: ir::Value,
     ) -> ir::Value;
 
-    /// Baseline version of the above.
-    fn translate_suspend_baseline(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        tag_index: ir::Value,
-    ) -> ir::Value;
-
     /// TODO
     fn continuation_arguments(&self, type_index: u32) -> &[wasmtime_types::WasmValType];
 
     /// TODO
     fn continuation_returns(&self, type_index: u32) -> &[wasmtime_types::WasmValType];
-
-    /// TODO
-    fn typed_continuations_load_return_values(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        valtypes: &[wasmtime_types::WasmValType],
-        contobj: ir::Value,
-    ) -> std::vec::Vec<ir::Value>;
-
-    /// TODO
-    fn typed_continuations_load_payloads(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        valtypes: &[ir::Type],
-    ) -> std::vec::Vec<ir::Value>;
 
     /// TODO
     fn typed_continuations_load_tag_return_values(
@@ -717,14 +675,6 @@ pub trait FuncEnvironment: TargetEnvironment {
         contobj: ir::Value,
         valtypes: &[wasmtime_types::WasmValType],
     ) -> std::vec::Vec<ir::Value>;
-
-    /// TODO
-    fn typed_continuations_forward_tag_return_values(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        parent_contobj: ir::Value,
-        child_contobj: ir::Value,
-    );
 
     /// TODO
     fn typed_continuations_store_payloads(
@@ -744,13 +694,6 @@ pub trait FuncEnvironment: TargetEnvironment {
     );
 
     /// TODO
-    fn typed_continuations_drop_cont_obj(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        contobj: ir::Value,
-    );
-
-    /// TODO
     fn tag_params(&self, tag_index: u32) -> &[wasmtime_types::WasmValType];
 
     /// TODO
@@ -761,21 +704,6 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
     ) -> ir::Value;
-
-    /// TODO
-    fn typed_continuations_load_parent(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        contobj: ir::Value,
-    ) -> ir::Value;
-
-    /// TODO
-    fn typed_continuations_store_parent(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        contobj: ir::Value,
-        new_parent: ir::Value,
-    );
 
     /// TODO
     fn typed_continuations_new_cont_ref(
