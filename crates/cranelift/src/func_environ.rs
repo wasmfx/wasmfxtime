@@ -28,7 +28,6 @@ use wasmtime_environ::{
 };
 use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
-
 cfg_if::cfg_if! {
     if #[cfg(feature = "typed_continuations_baseline_implementation")] {
         use crate::wasmfx::baseline as wasmfx_impl;
