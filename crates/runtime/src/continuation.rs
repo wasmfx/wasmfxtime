@@ -491,7 +491,6 @@ pub mod baseline {
         SUSPEND_PAYLOADS.with(|cell| {
             let mut payloads = cell.borrow_mut();
             if nargs > 0 {
-                // println!("LEN: {:?}", unsafe { SUSPEND_PAYLOADS.len() });
                 debug_assert!(payloads.len() == 0);
                 for _ in 0..nargs {
                     payloads.push(0); // zero initialise
