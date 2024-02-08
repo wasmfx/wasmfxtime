@@ -28,11 +28,14 @@ use wasmtime_environ::{
 };
 use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
-#[cfg(feature = "typed_continuations_baseline_implementation")]
-use crate::wasmfx::baseline as wasmfx_impl;
 
-#[cfg(not(feature = "typed_continuations_baseline_implementation"))]
-use crate::wasmfx::optimized as wasmfx_impl;
+cfg_if::cfg_if! {
+    if #[cfg(feature = "typed_continuations_baseline_implementation")] {
+        use crate::wasmfx::baseline as wasmfx_impl;
+    } else {
+        use crate::wasmfx::optimized as wasmfx_impl;
+    }
+}
 
 macro_rules! declare_function_signatures {
     (
