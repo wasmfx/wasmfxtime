@@ -2576,7 +2576,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let cont_return_vals =
                 environ.translate_resume(builder, *type_index, *contref, call_args, &resumetable);
 
-            state.popn(arity + 1);
+            state.popn(arity + 1); // arguments + continuation
             state.pushn(&cont_return_vals);
         }
         Operator::Suspend { tag_index } => {

@@ -17,6 +17,7 @@ mod builder;
 mod compiler;
 mod debug;
 mod func_environ;
+mod wasmfx;
 
 type CompiledFunctionsMetadata<'a> = PrimaryMap<DefinedFuncIndex, &'a CompiledFunctionMetadata>;
 

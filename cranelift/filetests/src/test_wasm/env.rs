@@ -753,16 +753,6 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     }
 
     /// TODO
-    fn typed_continuations_load_payloads(
-        &mut self,
-        builder: &mut cranelift_frontend::FunctionBuilder,
-        valtypes: &[ir::Type],
-    ) -> std::vec::Vec<ir::Value> {
-        self.inner
-            .typed_continuations_load_payloads(builder, valtypes)
-    }
-
-    /// TODO
     fn typed_continuations_store_payloads(
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
@@ -790,34 +780,6 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
     ) -> ir::Value {
         self.inner
             .typed_continuations_load_continuation_object(builder)
-    }
-
-    fn typed_continuations_load_parent(
-        &mut self,
-        builder: &mut cranelift_frontend::FunctionBuilder,
-        contobj: ir::Value,
-    ) -> ir::Value {
-        self.inner.typed_continuations_load_parent(builder, contobj)
-    }
-
-    fn typed_continuations_store_parent(
-        &mut self,
-        builder: &mut cranelift_frontend::FunctionBuilder,
-        contobj: ir::Value,
-        new_parent: ir::Value,
-    ) {
-        self.inner
-            .typed_continuations_store_parent(builder, contobj, new_parent);
-    }
-
-    fn typed_continuations_load_return_values(
-        &mut self,
-        builder: &mut cranelift_frontend::FunctionBuilder,
-        valtypes: &[WasmValType],
-        contobj: ir::Value,
-    ) -> std::vec::Vec<ir::Value> {
-        self.inner
-            .typed_continuations_load_return_values(builder, valtypes, contobj)
     }
 
     fn typed_continuations_store_resume_args(
@@ -855,16 +817,6 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
             .typed_continuations_cont_ref_get_cont_obj(builder, contref)
     }
 
-    /// TODO
-    fn typed_continuations_drop_cont_obj(
-        &mut self,
-        builder: &mut cranelift_frontend::FunctionBuilder,
-        contobj: ir::Value,
-    ) {
-        self.inner
-            .typed_continuations_drop_cont_obj(builder, contobj)
-    }
-
     fn typed_continuations_load_tag_return_values(
         &mut self,
         builder: &mut cranelift_frontend::FunctionBuilder,
@@ -874,19 +826,5 @@ impl<'a> FuncEnvironment for FuncEnv<'a> {
         return self
             .inner
             .typed_continuations_load_tag_return_values(builder, contobj, valtypes);
-    }
-
-    /// TODO
-    fn typed_continuations_forward_tag_return_values(
-        &mut self,
-        builder: &mut cranelift_frontend::FunctionBuilder,
-        parent_contobj: ir::Value,
-        child_contobj: ir::Value,
-    ) {
-        return self.inner.typed_continuations_forward_tag_return_values(
-            builder,
-            parent_contobj,
-            child_contobj,
-        );
     }
 }

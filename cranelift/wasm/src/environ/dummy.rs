@@ -758,30 +758,12 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn typed_continuations_load_payloads(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _valtypes: &[ir::Type],
-    ) -> Vec<ir::Value> {
-        todo!()
-    }
-
     fn typed_continuations_load_tag_return_values(
         &mut self,
         _builder: &mut FunctionBuilder,
         _contobj: ir::Value,
         _valtypes: &[WasmValType],
     ) -> Vec<ir::Value> {
-        todo!()
-    }
-
-    /// TODO
-    fn typed_continuations_forward_tag_return_values(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _parent_contobj: ir::Value,
-        _child_contobj: ir::Value,
-    ) {
         todo!()
     }
 
@@ -811,23 +793,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn typed_continuations_load_parent(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _contobj: ir::Value,
-    ) -> ir::Value {
-        todo!()
-    }
-
-    fn typed_continuations_store_parent(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _contobj: ir::Value,
-        _new_parent: ir::Value,
-    ) {
-        todo!()
-    }
-
     fn typed_continuations_new_cont_ref(
         &mut self,
         _builder: &mut FunctionBuilder,
@@ -836,29 +801,11 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         todo!()
     }
 
-    fn typed_continuations_load_return_values(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _valtypes: &[WasmValType],
-        _contobj: ir::Value,
-    ) -> std::vec::Vec<ir::Value> {
-        unimplemented!()
-    }
-
     fn typed_continuations_cont_ref_get_cont_obj(
         &mut self,
         _builder: &mut FunctionBuilder,
         _contref: ir::Value,
     ) -> ir::Value {
-        unimplemented!()
-    }
-
-    /// TODO
-    fn typed_continuations_drop_cont_obj(
-        &mut self,
-        _builder: &mut FunctionBuilder,
-        _contobj: ir::Value,
-    ) {
         unimplemented!()
     }
 }
