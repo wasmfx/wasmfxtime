@@ -290,7 +290,7 @@ jobs:
     - run: cargo check -p wasmtime --no-default-features --features addr2line
     - run: cargo check --features component-model
     - run: cargo check -p wasmtime --features incremental-cache
-    - run: cargo check -p wasmtime --no-default-features --features typed_continuation_baseline_implementation
+    - run: cargo check -p wasmtime --no-default-features --features typed_continuations_baseline_implementation
 
     # Feature combinations of the `wasmtime-cli`
     - run: cargo check -p wasmtime-cli --no-default-features
