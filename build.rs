@@ -276,15 +276,6 @@ fn ignore(testsuite: &str, testname: &str, strategy: &str) -> bool {
         }
     }
 
-    // TODO(dhil): The unhandled test is flaky as it exposes a
-    // potential problem with trap generation and propagation across
-    // stacks.
-    if testsuite == "typed_continuations" {
-        if testname == "unhandled" {
-            return true;
-        }
-    }
-
     match env::var("CARGO_CFG_TARGET_ARCH").unwrap().as_str() {
         "s390x" => {
             // TODO(#6530): These tests require tail calls, but s390x

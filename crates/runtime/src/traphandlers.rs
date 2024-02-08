@@ -311,6 +311,15 @@ mod call_thread_state {
         old_last_wasm_exit_fp: Cell<usize>,
         old_last_wasm_exit_pc: Cell<usize>,
         old_last_wasm_entry_sp: Cell<usize>,
+
+        // Note that there is no need for saving a `old_callee_stack_chain`
+        // value: Due to the invariant that only the "innermost`
+        // `CallThreadState` executing wasm may do so off the main stack (see
+        // comments in `wasmtime::invoke_wasm_and_catch_traps`), there is no
+        // need to store the previous value of the stack chain: At the time of
+        // pushing a `CallThreadState` for wasm execution to the head of a
+        // thread's CTS list, all other states are on the
+        // main stack.
     }
 
     impl Drop for CallThreadState {
