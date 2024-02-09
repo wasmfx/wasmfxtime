@@ -223,6 +223,7 @@ impl Config {
             compiler_config: CompilerConfig::default(),
             wasmfx_config: WasmFXConfig {
                 stack_size: wasmtime_continuations::DEFAULT_FIBER_SIZE,
+                red_zone_size: wasmtime_continuations::DEFAULT_RED_ZONE_SIZE,
             },
             #[cfg(feature = "cache")]
             cache_config: CacheConfig::new_cache_disabled(),
@@ -696,6 +697,13 @@ impl Config {
     /// Configures the size of the stacks created with cont.new instructions.
     pub fn wasmfx_stack_size(&mut self, size: usize) -> &mut Self {
         self.wasmfx_config.stack_size = size;
+        self
+    }
+
+    /// Configures the amount of space that must be left on stack when starting
+    /// execution of a function while running on a continuation stack.
+    pub fn wasmfx_red_zone_size(&mut self, size: usize) -> &mut Self {
+        self.wasmfx_config.red_zone_size = size;
         self
     }
 

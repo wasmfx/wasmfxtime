@@ -211,6 +211,9 @@ wasmtime_option_group! {
         pub timeout: Option<Duration>,
         /// Size of stacks created with cont.new instructions
         pub wasmfx_stack_size: Option<usize>,
+        /// Space that must be left on stack when starting execution of a
+        /// function while running on a continuation stack.
+        pub wasmfx_red_zone_size: Option<usize>,
         /// Configures support for all WebAssembly proposals implemented.
         pub all_proposals: Option<bool>,
         /// Configure support for the bulk memory proposal.
@@ -552,6 +555,11 @@ impl CommonOptions {
         if let Some(wasmfx_stack_size) = self.wasm.wasmfx_stack_size {
             config.wasmfx_stack_size(wasmfx_stack_size);
         }
+        if let Some(wasmfx_red_zone_size) = self.wasm.wasmfx_red_zone_size {
+            config.wasmfx_red_zone_size(wasmfx_red_zone_size);
+        }
+
+
 
         match_feature! {
             ["pooling-allocator" : self.opts.pooling_allocator]
