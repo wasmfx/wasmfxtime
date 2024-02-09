@@ -91,7 +91,7 @@ pub enum WasmHeapType {
     // `WasmHeapType<VMSharedTypeIndex>`. This `<T>` would need to be
     // propagated to quite a few locations though so it's left for a future
     // refactoring at this time.
-    TypedFunc(ModuleInternedTypeIndex),
+    Concrete(ModuleInternedTypeIndex),
 }
 
 impl fmt::Display for WasmHeapType {
@@ -101,7 +101,7 @@ impl fmt::Display for WasmHeapType {
             Self::Extern => write!(f, "extern"),
             Self::Cont => write!(f, "cont"),
             Self::NoCont => write!(f, "nocont"),
-            Self::TypedFunc(i) => write!(f, "func_sig{}", i.as_u32()),
+            Self::Concrete(i) => write!(f, "func_sig{}", i.as_u32()),
         }
     }
 }
@@ -482,7 +482,7 @@ pub trait TypeConvert {
 
     /// Converts a wasmparser continuation type to a wasmtime type
     fn convert_cont_type(&self, ty: &wasmparser::ContType) -> WasmContType {
-        if let WasmHeapType::TypedFunc(sigidx) = self.lookup_heap_type(ty.0) {
+        if let WasmHeapType::Concrete(sigidx) = self.lookup_heap_type(ty.0) {
             WasmContType::new(sigidx)
         } else {
             panic!("Failed to extract signature index for continuation type.")

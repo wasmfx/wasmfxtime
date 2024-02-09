@@ -652,14 +652,23 @@ fn instance_too_large() -> Result<()> {
     config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
 
     let engine = Engine::new(&config)?;
-    let expected = "\
+    let expected = if cfg!(feature = "wmemcheck") {
+        "\
+instance allocation for this module requires 336 bytes which exceeds the \
+configured maximum of 16 bytes; breakdown of allocation requirement:
+
+ * 76.19% - 256 bytes - instance state management
+"
+    } else {
+        "\
 instance allocation for this module requires 272 bytes which exceeds the \
 configured maximum of 16 bytes; breakdown of allocation requirement:
 
  * 58.82% - 160 bytes - instance state management
  * 8.82% - 24 bytes - typed continuations payloads object
  * 5.88% - 16 bytes - jit store state
-";
+"
+    };
     match Module::new(&engine, "(module)") {
         Ok(_) => panic!("should have failed to compile"),
         Err(e) => assert_eq!(e.to_string(), expected),
@@ -671,13 +680,23 @@ configured maximum of 16 bytes; breakdown of allocation requirement:
     }
     lots_of_globals.push_str(")");
 
-    let expected = "\
+    let expected = if cfg!(feature = "wmemcheck") {
+        "\
+instance allocation for this module requires 1936 bytes which exceeds the \
+configured maximum of 16 bytes; breakdown of allocation requirement:
+
+ * 13.22% - 256 bytes - instance state management
+ * 82.64% - 1600 bytes - defined globals
+"
+    } else {
+        "\
 instance allocation for this module requires 1872 bytes which exceeds the \
 configured maximum of 16 bytes; breakdown of allocation requirement:
 
  * 8.55% - 160 bytes - instance state management
  * 85.47% - 1600 bytes - defined globals
-";
+"
+    };
     match Module::new(&engine, &lots_of_globals) {
         Ok(_) => panic!("should have failed to compile"),
         Err(e) => assert_eq!(e.to_string(), expected),
