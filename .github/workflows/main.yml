@@ -199,7 +199,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_MDBOOK_VERSION: 0.4.21
-      RUSTDOCFLAGS: -Dbroken_intra_doc_links --cfg nightlydoc
+      RUSTDOCFLAGS: -Dbroken_intra_doc_links --cfg docsrs
       OPENVINO_SKIP_LINKING: 1
     steps:
     - uses: actions/checkout@v4
@@ -290,7 +290,6 @@ jobs:
     - run: cargo check -p wasmtime --no-default-features --features addr2line
     - run: cargo check --features component-model
     - run: cargo check -p wasmtime --features incremental-cache
-    - run: cargo check -p wasmtime --no-default-features --features typed_continuations_baseline_implementation
 
     # Feature combinations of the `wasmtime-cli`
     - run: cargo check -p wasmtime-cli --no-default-features
