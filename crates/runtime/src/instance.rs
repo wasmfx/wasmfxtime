@@ -1283,6 +1283,7 @@ impl Instance {
         fault
     }
 
+    #[allow(dead_code)]
     pub(crate) fn typed_continuations_main_stack_limits(
         &mut self,
     ) -> *mut wasmtime_continuations::StackLimits {
