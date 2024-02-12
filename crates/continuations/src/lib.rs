@@ -30,6 +30,98 @@ pub mod types {
 
 pub type ContinuationFiber = Fiber<'static, (), u32, ()>;
 
+/// This type is used to save (and subsequently restore) a subset of the data in
+/// `VMRuntimeLimits`. See documentation of `StackChain` for the exact uses.
+#[repr(C)]
+#[derive(Debug, PartialEq, Clone)]
+pub struct StackLimits {
+    pub stack_limit: usize,
+    pub last_wasm_exit_fp: usize,
+    pub last_wasm_exit_pc: usize,
+    pub last_wasm_entry_sp: usize,
+}
+
+impl StackLimits {
+    pub fn uninitialized() -> Self {
+        Self {
+            stack_limit: 0,
+            last_wasm_exit_fp: 0,
+            last_wasm_exit_pc: 0,
+            last_wasm_entry_sp: 0,
+        }
+    }
+
+    pub fn with_stack_limit(stack_limit: usize) -> Self {
+        Self {
+            stack_limit,
+            last_wasm_exit_fp: 0,
+            last_wasm_exit_pc: 0,
+            last_wasm_entry_sp: 0,
+        }
+    }
+
+    pub fn is_uninitialized(&self) -> bool {
+        self == &Self::uninitialized()
+    }
+}
+
+/// This type represents a linked lists of stacks, additionally associating a
+/// `StackLimits` object with each element of the list. Here, a "stack" is
+/// either a continuation or the main stack. Note that the linked list character
+/// arises from the fact that `StackChain::Continuation` variants have a pointer
+/// to have `ContinuationObject`, which in turn has a `parent_chain` value of
+/// type `StackChain`.
+///
+/// There are generally two uses of such chains:
+///
+/// 1. The `typed_continuations_chain` field in the VMContext contains such a
+/// chain of stacks, where the head of the list denotes the stack that is
+/// currently executing (either a continuation or the main stack), as well as
+/// the parent stacks, in case of a continuation currently running. Note that in
+/// this case, the linked list must contains 0 or more `Continuation` elements,
+/// followed by a final `MainStack` element. In particular, this list always
+/// ends with `MainStack` and never contains an `Absent` variant.
+///
+/// 2. When a continuation is suspended, its chain of parents eventually ends
+/// with an `Absent` variant in its `parent_chain` field. Note that a suspended
+/// continuation never appears in the stack chain in the VMContext!
+///
+///
+/// As mentioned before, each stack in a `StackChain` has a corresponding
+/// `StackLimits` object. For continuations, this is stored in the `limits`
+/// fields of the corresponding `ContinuationObject`. For the main stack, the
+/// `MainStack` variant contains a pointer to the
+/// `typed_continuations_main_stack_limits` field of the VMContext.
+// FIXME(frank-emrich) Note that the data within the StackLimits objects is
+// currently not used or updated in any way.
+#[derive(Debug, Clone, PartialEq)]
+#[repr(usize, C)]
+pub enum StackChain {
+    /// If stored in the VMContext, used to indicate that the MainStack entry
+    /// has not been set, yet. If stored in a ContinuationObject's parent_chain
+    /// field, means that there is currently no parent.
+    Absent = 0,
+    MainStack(*mut StackLimits) = 1,
+    Continuation(*mut ContinuationObject) = 2,
+}
+
+impl StackChain {
+    pub fn absent_discriminant() -> usize {
+        // Keep this in sync with the explicit discriminant given to StackChain::Absent
+        0
+    }
+
+    pub fn main_stack_discriminant() -> usize {
+        // Keep this in sync with the explicit discriminant given to StackChain::MainStack
+        1
+    }
+
+    pub fn continuation_discriminant() -> usize {
+        // Keep this in sync with the explicit discriminant given to StackChain::Continuation
+        2
+    }
+}
+
 pub struct Payloads {
     /// Number of currently occupied slots.
     pub length: types::payloads::Length,
@@ -92,7 +184,9 @@ impl From<State> for i32 {
 /// TODO
 #[repr(C)]
 pub struct ContinuationObject {
-    pub parent: *mut ContinuationObject,
+    pub limits: StackLimits,
+
+    pub parent_chain: StackChain,
 
     pub fiber: *mut ContinuationFiber,
 
@@ -137,13 +231,25 @@ pub mod offsets {
         use crate::ContinuationObject;
         use memoffset::offset_of;
 
+        /// Offset of `limits` field
+        pub const LIMITS: i32 = offset_of!(ContinuationObject, limits) as i32;
         /// Offset of `args` field
         pub const ARGS: i32 = offset_of!(ContinuationObject, args) as i32;
-        /// Offset of `parent` field
-        pub const PARENT: i32 = offset_of!(ContinuationObject, parent) as i32;
+        /// Offset of `parent_chain` field
+        pub const PARENT_CHAIN: i32 = offset_of!(ContinuationObject, parent_chain) as i32;
         /// Offset of `state` field
         pub const STATE: i32 = offset_of!(ContinuationObject, state) as i32;
         /// Offset of `tag_return_values` field
         pub const TAG_RETURN_VALUES: i32 = offset_of!(ContinuationObject, tag_return_values) as i32;
+    }
+
+    pub mod stack_limits {
+        use crate::StackLimits;
+        use memoffset::offset_of;
+
+        pub const STACK_LIMIT: i32 = offset_of!(StackLimits, stack_limit) as i32;
+        pub const LAST_WASM_EXIT_FP: i32 = offset_of!(StackLimits, last_wasm_exit_fp) as i32;
+        pub const LAST_WASM_EXIT_PC: i32 = offset_of!(StackLimits, last_wasm_exit_pc) as i32;
+        pub const LAST_WASM_ENTRY_SP: i32 = offset_of!(StackLimits, last_wasm_entry_sp) as i32;
     }
 }

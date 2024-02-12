@@ -4,10 +4,10 @@ use crate::vmcontext::{VMFuncRef, VMOpaqueContext, ValRaw};
 use crate::{Instance, TrapReason};
 use std::cmp;
 use std::mem;
-use std::ptr;
 use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
 pub use wasmtime_continuations::{
-    ContinuationFiber, ContinuationObject, ContinuationReference, Payloads, State,
+    ContinuationFiber, ContinuationObject, ContinuationReference, Payloads, StackChain,
+    StackLimits, State,
 };
 use wasmtime_fibre::{Fiber, FiberStack, Suspend};
 
@@ -142,9 +142,11 @@ pub fn cont_new(
         Box::new(fiber)
     };
 
+    let tsp = fiber.stack().top().unwrap();
     let contobj = Box::new(ContinuationObject {
+        limits: StackLimits::with_stack_limit(unsafe { tsp.sub(DEFAULT_FIBER_SIZE) } as usize),
         fiber: Box::into_raw(fiber),
-        parent: ptr::null_mut(),
+        parent_chain: StackChain::Absent,
         args: payload,
         tag_return_values: Payloads::new(0),
         state: State::Allocated,
@@ -180,12 +182,26 @@ pub fn resume(
     };
 
     if ENABLE_DEBUG_PRINTING {
-        let _running_contobj = instance.typed_continuations_store();
-        debug_println!(
-            "Resuming contobj @ {:p}, previously running contobj is {:p}",
-            contobj,
-            _running_contobj
-        );
+        let chain = instance.typed_continuations_stack_chain();
+        match unsafe { &*chain } {
+            StackChain::Continuation(running_contobj) => {
+                debug_assert_eq!(contobj, *running_contobj);
+                debug_println!(
+                    "Resuming contobj @ {:p}, previously running contobj is {:p}",
+                    contobj,
+                    running_contobj
+                )
+            }
+            _ => {
+                // Before calling this function as a libcall, we must have set
+                // the parent of the to-be-resumed continuation to the
+                // previously running one. Hence, we must see a
+                // `StackChain::Continuation` variant.
+                return Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
+                    "Invalid StackChain value in VMContext"
+                )));
+            }
+        }
     }
 
     unsafe {
@@ -203,11 +219,11 @@ pub fn resume(
             // calling trampoline to execute it.
 
             if cfg!(debug_assertions) {
-                let _parent = unsafe { (*contobj).parent };
+                let _parent_chain = unsafe { &(*contobj).parent_chain };
                 debug_println!(
-                "Continuation @ {:p} returned normally, setting running continuation in VMContext to {:p}",
+                "Continuation @ {:p} returned normally, setting running continuation in VMContext to {:?}",
                 contobj,
-                _parent
+                _parent_chain
             );
             }
             Ok(0) // zero value = return normally.
@@ -228,18 +244,22 @@ pub fn resume(
 /// TODO
 #[inline(always)]
 pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {
-    let running = instance.typed_continuations_store();
-    let running = unsafe {
-        running.as_ref().ok_or_else(|| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Calling suspend outside of a continuation"
-            ))
-        })?
-    };
+    let chain_ptr = instance.typed_continuations_stack_chain();
+
     // TODO(dhil): This should be handled in generated code.
+    let chain = unsafe { &*chain_ptr };
+    let running = match chain {
+        StackChain::Absent => Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
+            "Internal error: StackChain not initialised"
+        ))),
+        StackChain::MainStack { .. } => Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
+            "Calling suspend outside of a continuation"
+        ))),
+        StackChain::Continuation(running) => Ok(unsafe { &**running }),
+    }?;
 
     let fiber = unsafe {
-        running.fiber.as_ref().ok_or_else(|| {
+        (*running).fiber.as_ref().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
                 "Attempt to dereference null fiber!"
             ))
@@ -250,9 +270,9 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason
         TrapReason::user_without_backtrace(anyhow::anyhow!("Failed to retrieve stack top pointer!"))
     })?;
     debug_println!(
-        "Suspending while running {:p}, parent is {:p}",
+        "Suspending while running {:p}, parent is {:?}",
         running,
-        running.parent
+        running.parent_chain
     );
 
     let suspend = wasmtime_fibre::unix::Suspend::from_top_ptr(stack_ptr);
