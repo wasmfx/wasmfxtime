@@ -164,6 +164,7 @@ pub fn cont_new(
 pub fn resume(
     instance: &mut Instance,
     contobj: *mut ContinuationObject,
+    parent_stack_limits: *mut StackLimits,
 ) -> Result<u32, TrapReason> {
     let cont = unsafe {
         contobj.as_ref().ok_or_else(|| {
@@ -205,6 +206,20 @@ pub fn resume(
                 )));
             }
         }
+    }
+
+    unsafe {
+        let runtime_limits = &**instance.runtime_limits();
+
+        (*parent_stack_limits).stack_limit = *runtime_limits.stack_limit.get();
+        (*parent_stack_limits).last_wasm_entry_sp = *runtime_limits.last_wasm_entry_sp.get();
+        // These last two values were only just updated in the `runtime_limits`
+        // because we entered the current libcall.
+        (*parent_stack_limits).last_wasm_exit_fp = *runtime_limits.last_wasm_exit_fp.get();
+        (*parent_stack_limits).last_wasm_exit_pc = *runtime_limits.last_wasm_exit_pc.get();
+
+        *runtime_limits.stack_limit.get() = (*contobj).limits.stack_limit;
+        *runtime_limits.last_wasm_entry_sp.get() = (*contobj).limits.last_wasm_entry_sp;
     }
 
     unsafe {

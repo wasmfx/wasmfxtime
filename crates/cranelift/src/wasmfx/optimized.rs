@@ -24,6 +24,7 @@ pub(crate) mod typed_continuation_helpers {
     use cranelift_frontend::FunctionBuilder;
     use std::mem;
     use wasmtime_environ::BuiltinFunctionIndex;
+    use wasmtime_environ::PtrSize;
 
     // This is a reference to this very module.
     // We need it so that we can refer to the functions inside this module from
@@ -927,6 +928,106 @@ pub(crate) mod typed_continuation_helpers {
             // the pointer right after the discriminant.
             self.payload
         }
+
+        /// Must only be called if `self` represents a `MainStack` or `Continuation` variant.
+        /// Returns a pointer to the associated `StackLimits` object (i.e., in
+        /// the former case, the pointer directly stored in the variant, or in
+        /// the latter case a pointer to the `StackLimits` data within the
+        /// `ContinuationObject`.
+        pub fn get_stack_limits_ptr<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            use wasmtime_continuations::offsets as o;
+
+            self.assert_not_absent(env, builder);
+
+            // `self` corresponds to a StackChain::MainStack or
+            // StackChain::Continuation.
+            // In both cases, the payload is a pointer.
+            let ptr = self.payload;
+
+            // `obj` is now a pointer to the beginning of either
+            // 1. A ContinuationObject object (in the case of a
+            // StackChain::Continuation)
+            // 2. A StackLimits object (in the case of
+            // StackChain::MainStack)
+            //
+            // Since a ContinuationObject starts with an (inlined) StackLimits
+            // object at offset 0, we actually have in both cases that `ptr` is
+            // now the address of the beginning of a StackLimits object.
+            debug_assert_eq!(o::continuation_object::LIMITS, 0);
+            ptr
+        }
+
+        /// Sets `last_wasm_entry_sp` and `stack_limit` fields in
+        /// `VMRuntimelimits` using the values from the `StackLimits` object
+        /// associated with this stack chain.
+        pub fn write_limits_to_vmcontext<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            vmruntime_limits: cranelift_frontend::Variable,
+        ) {
+            use wasmtime_continuations::offsets as o;
+
+            let stack_limits_ptr = self.get_stack_limits_ptr(env, builder);
+            let vmruntime_limits_ptr = builder.use_var(vmruntime_limits);
+
+            let memflags = ir::MemFlags::trusted();
+
+            let mut copy_to_vm_runtime_limits = |our_offset, their_offset| {
+                let our_value =
+                    builder
+                        .ins()
+                        .load(self.pointer_type, memflags, stack_limits_ptr, our_offset);
+                builder
+                    .ins()
+                    .store(memflags, our_value, vmruntime_limits_ptr, their_offset);
+            };
+
+            let pointer_size = self.pointer_type.bytes() as u8;
+            copy_to_vm_runtime_limits(
+                o::stack_limits::STACK_LIMIT,
+                pointer_size.vmruntime_limits_stack_limit(),
+            );
+            copy_to_vm_runtime_limits(
+                o::stack_limits::LAST_WASM_ENTRY_SP,
+                pointer_size.vmruntime_limits_last_wasm_entry_sp(),
+            );
+        }
+
+        /// Overwrites the `last_wasm_entry_sp` field of the `StackLimits`
+        /// object associated with this stack chain by loading the corresponding
+        /// field from the `VMRuntimeLimits`.
+        pub fn load_limits_from_vmcontext<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            vmruntime_limits: cranelift_frontend::Variable,
+        ) {
+            use wasmtime_continuations::offsets as o;
+
+            let stack_limits_ptr = self.get_stack_limits_ptr(env, builder);
+            let vmruntime_limits_ptr = builder.use_var(vmruntime_limits);
+
+            let memflags = ir::MemFlags::trusted();
+            let pointer_size = self.pointer_type.bytes() as u8;
+
+            let last_wasm_entry_sp = builder.ins().load(
+                self.pointer_type,
+                memflags,
+                vmruntime_limits_ptr,
+                pointer_size.vmruntime_limits_last_wasm_entry_sp(),
+            );
+            builder.ins().store(
+                memflags,
+                last_wasm_entry_sp,
+                stack_limits_ptr,
+                o::stack_limits::LAST_WASM_ENTRY_SP,
+            );
+        }
     }
 }
 
@@ -1212,12 +1313,26 @@ pub(crate) fn translate_resume<'a>(
         let vmctx = tc::VMContext::new(vmctx, env.pointer_type());
         vmctx.set_active_continuation(env, builder, resume_contobj);
 
+        // Note that the resume_contobj libcall a few lines further below
+        // manipulates the stack limits as follows:
+        // 1. Copy stack_limit, last_wasm_entry_sp and last_wasm_exit* values from
+        // VMRuntimeLimits into the currently active continuation (i.e., the
+        // one that will become the parent of the to-be-resumed one)
+        //
+        // 2. Copy `stack_limit` and `last_wasm_entry_sp` in the
+        // `StackLimits` of `resume_contobj` into the `VMRuntimeLimits`.
+        let parent_stacks_limit_pointer = parent_stack_chain.get_stack_limits_ptr(env, builder);
+
         // We mark `resume_contobj` to be invoked
         let co = tc::ContinuationObject::new(resume_contobj, env.pointer_type());
         co.set_state(builder, wasmtime_continuations::State::Invoked);
 
-        let (_vmctx, result) =
-            shared::generate_builtin_call!(env, builder, tc_resume, [resume_contobj]);
+        let (_vmctx, result) = shared::generate_builtin_call!(
+            env,
+            builder,
+            tc_resume,
+            [resume_contobj, parent_stacks_limit_pointer]
+        );
 
         // Now the parent contobj (or main stack) is active again
         vmctx.store_stack_chain(env, builder, &parent_stack_chain);
@@ -1257,6 +1372,15 @@ pub(crate) fn translate_resume<'a>(
     {
         builder.switch_to_block(suspend_block);
         builder.seal_block(suspend_block);
+
+        // We store parts of the VMRuntimeLimits into the continuation that just suspended.
+        let suspended_chain =
+            tc::StackChain::from_continuation(builder, resume_contobj, env.pointer_type());
+        suspended_chain.load_limits_from_vmcontext(env, builder, env.vmruntime_limits_ptr);
+
+        // Afterwards (!), restore parts of the VMRuntimeLimits from the
+        // parent of the suspended continuation (which is now active).
+        parent_stack_chain.write_limits_to_vmcontext(env, builder, env.vmruntime_limits_ptr);
 
         // We need to terminate this block before being allowed to switch to another one
         builder.ins().jump(switch_block, &[]);
@@ -1377,6 +1501,10 @@ pub(crate) fn translate_resume<'a>(
     {
         builder.switch_to_block(return_block);
         builder.seal_block(return_block);
+
+        // Restore parts of the VMRuntimeLimits from the
+        // parent of the returned continuation (which is now active).
+        parent_stack_chain.write_limits_to_vmcontext(env, builder, env.vmruntime_limits_ptr);
 
         let co = tc::ContinuationObject::new(resume_contobj, env.pointer_type());
         co.set_state(builder, wasmtime_continuations::State::Returned);

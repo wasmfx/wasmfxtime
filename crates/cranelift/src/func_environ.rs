@@ -158,7 +158,8 @@ pub struct FuncEnvironment<'module_environment> {
     /// VMRuntimeLimits` for this function's vmctx argument. This pointer is stored
     /// in the vmctx itself, but never changes for the lifetime of the function,
     /// so if we load it up front we can continue to use it throughout.
-    vmruntime_limits_ptr: cranelift_frontend::Variable,
+    /// NOTE(frank-emrich) pub for use in crate::wasmfx::* modules
+    pub(crate) vmruntime_limits_ptr: cranelift_frontend::Variable,
 
     /// A cached epoch deadline value, when performing epoch-based
     /// interruption. Loaded from `VMRuntimeLimits` and reloaded after
@@ -2646,7 +2647,14 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     ) -> WasmResult<()> {
         // If the `vmruntime_limits_ptr` variable will get used then we initialize
         // it here.
-        if self.tunables.consume_fuel || self.tunables.epoch_interruption {
+        if true || self.tunables.consume_fuel || self.tunables.epoch_interruption {
+            // TODO(frank-emrich) This is now done unconditionally because we
+            // need the `vmruntime_limits_ptr` variable when translating resume.
+            // This has no runtime overhead: We are adding a load to every
+            // function, but if it is not actually used, cranelift's DCE pass
+            // will remove it. However, it would be nicer to check if the
+            // function actually contains resume instructions, and only run
+            // `declare_vmruntime_limits_ptr` then.
             self.declare_vmruntime_limits_ptr(builder);
         }
         // Additionally we initialize `fuel_var` if it will get used.
