@@ -374,9 +374,9 @@ dependencies = [
 
 [[package]]
 name = "cargo_metadata"
-version = "0.15.3"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08a1ec454bc3eead8719cb56e15dbbfecdbc14e4b3a3ae4936cc6e31f5fc0d07"
+checksum = "2d886547e41f740c616ae73108f6eb70afe6d940c7bc697cb30f13daec073037"
 dependencies = [
  "camino",
  "cargo-platform",
@@ -553,9 +553,9 @@ checksum = "06ea2b9bc92be3c2baa9334a323ebca2d6f074ff852cd1d7b11064035cd3868f"
 
 [[package]]
 name = "cpp_demangle"
-version = "0.3.5"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eeaa953eaad386a53111e47172c2fedba671e5684c8dd601a5f474f4f118710f"
+checksum = "7e8227005286ec39567949b33df9896bcadfa6051bccca2488129f108ca23119"
 dependencies = [
  "cfg-if",
 ]
@@ -665,7 +665,7 @@ dependencies = [
  "target-lexicon",
  "thiserror",
  "toml",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wat",
 ]
 
@@ -844,7 +844,7 @@ dependencies = [
  "serde_derive",
  "smallvec",
  "target-lexicon",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wasmtime-types",
  "wat",
 ]
@@ -2365,6 +2365,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb3622f419d1296904700073ea6cc23ad690adbd66f13ea683df73298736f0c1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2623,7 +2632,7 @@ version = "0.0.0"
 dependencies = [
  "cargo_metadata",
  "heck",
- "wit-component",
+ "wit-component 0.21.0",
 ]
 
 [[package]]
@@ -2736,11 +2745,36 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.5.9"
+version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d82e1a7758622a465f8cee077614c73484dac5b836c02ff6a40d5d1010324d7"
+checksum = "9a9aad4a3066010876e8dcf5a8a06e70a558751117a145c6ce2b82c2e2054290"
 dependencies = [
  "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_edit",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3550f4e9685620ac18a50ed434eb3aec30db8ba93b0287467bca5826ea25baf1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.22.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c9ffdf896f8daaabf9b66ba8e77ea1ed5ed0f72821b398aba62352e95062951"
+dependencies = [
+ "indexmap 2.0.0",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "winnow",
 ]
 
 [[package]]
@@ -2911,7 +2945,7 @@ name = "verify-component-adapter"
 version = "19.0.0"
 dependencies = [
  "anyhow",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wat",
 ]
 
@@ -3018,7 +3052,7 @@ dependencies = [
  "byte-array-literals",
  "object",
  "wasi",
- "wasm-encoder",
+ "wasm-encoder 0.41.2",
  "wit-bindgen",
 ]
 
@@ -3102,6 +3136,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-encoder"
+version = "0.41.2"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.60#c543e4f52fdad6161e59971d8db1527e9df6047f"
+dependencies = [
+ "leb128",
+]
+
+[[package]]
 name = "wasm-metadata"
 version = "0.10.17"
 source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.57#e2d884a6ff12c2e7993a50b05076f3528c88e132"
@@ -3112,33 +3154,49 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "spdx",
- "wasm-encoder",
- "wasmparser",
+ "wasm-encoder 0.41.0",
+ "wasmparser 0.121.0",
+]
+
+[[package]]
+name = "wasm-metadata"
+version = "0.10.20"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.60#c543e4f52fdad6161e59971d8db1527e9df6047f"
+dependencies = [
+ "anyhow",
+ "indexmap 2.0.0",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "spdx",
+ "wasm-encoder 0.41.2",
+ "wasmparser 0.121.2",
 ]
 
 [[package]]
 name = "wasm-mutate"
-version = "0.2.46"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.57#e2d884a6ff12c2e7993a50b05076f3528c88e132"
+version = "0.2.48"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.60#c543e4f52fdad6161e59971d8db1527e9df6047f"
 dependencies = [
  "egg",
  "log",
  "rand",
  "thiserror",
- "wasm-encoder",
- "wasmparser",
+ "wasm-encoder 0.41.2",
+ "wasmparser 0.121.2",
 ]
 
 [[package]]
 name = "wasm-smith"
-version = "0.15.1"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.57#e2d884a6ff12c2e7993a50b05076f3528c88e132"
+version = "0.16.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.60#c543e4f52fdad6161e59971d8db1527e9df6047f"
 dependencies = [
+ "anyhow",
  "arbitrary",
  "flagset",
  "indexmap 2.0.0",
  "leb128",
- "wasm-encoder",
+ "wasm-encoder 0.41.2",
 ]
 
 [[package]]
@@ -3192,6 +3250,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmparser"
+version = "0.121.2"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.60#c543e4f52fdad6161e59971d8db1527e9df6047f"
+dependencies = [
+ "bitflags 2.4.1",
+ "indexmap 2.0.0",
+ "semver",
+]
+
+[[package]]
 name = "wasmparser-nostd"
 version = "0.100.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3202,11 +3270,11 @@ dependencies = [
 
 [[package]]
 name = "wasmprinter"
-version = "0.2.78"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.57#e2d884a6ff12c2e7993a50b05076f3528c88e132"
+version = "0.2.80"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.60#c543e4f52fdad6161e59971d8db1527e9df6047f"
 dependencies = [
  "anyhow",
- "wasmparser",
+ "wasmparser 0.121.2",
 ]
 
 [[package]]
@@ -3237,8 +3305,8 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "wasi-cap-std-sync",
- "wasm-encoder",
- "wasmparser",
+ "wasm-encoder 0.41.2",
+ "wasmparser 0.121.2",
  "wasmtime-cache",
  "wasmtime-component-macro",
  "wasmtime-component-util",
@@ -3371,7 +3439,7 @@ dependencies = [
  "tokio",
  "tracing",
  "walkdir",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wasmtime",
  "wasmtime-cache",
  "wasmtime-cli-flags",
@@ -3386,10 +3454,10 @@ dependencies = [
  "wasmtime-wasi-nn",
  "wasmtime-wasi-threads",
  "wasmtime-wast",
- "wast 70.0.2",
+ "wast 71.0.1",
  "wat",
  "windows-sys 0.52.0",
- "wit-component",
+ "wit-component 0.21.0",
 ]
 
 [[package]]
@@ -3418,7 +3486,7 @@ dependencies = [
  "wasmtime",
  "wasmtime-component-util",
  "wasmtime-wit-bindgen",
- "wit-parser",
+ "wit-parser 0.14.0",
 ]
 
 [[package]]
@@ -3450,7 +3518,7 @@ dependencies = [
  "object",
  "target-lexicon",
  "thiserror",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wasmtime-continuations",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
@@ -3490,8 +3558,8 @@ dependencies = [
  "serde_derive",
  "target-lexicon",
  "thiserror",
- "wasm-encoder",
- "wasmparser",
+ "wasm-encoder 0.41.2",
+ "wasmparser 0.121.2",
  "wasmprinter",
  "wasmtime-component-util",
  "wasmtime-continuations",
@@ -3507,7 +3575,7 @@ dependencies = [
  "component-fuzz-util",
  "env_logger",
  "libfuzzer-sys",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wasmprinter",
  "wasmtime-environ",
  "wat",
@@ -3575,7 +3643,7 @@ dependencies = [
  "rand",
  "smallvec",
  "target-lexicon",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wasmtime",
  "wasmtime-fuzzing",
 ]
@@ -3595,12 +3663,12 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "v8",
- "wasm-encoder",
+ "wasm-encoder 0.41.2",
  "wasm-mutate",
  "wasm-smith",
  "wasm-spec-interpreter",
  "wasmi",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wasmprinter",
  "wasmtime",
  "wasmtime-wast",
@@ -3647,7 +3715,7 @@ dependencies = [
  "rand",
  "rustix",
  "sptr",
- "wasm-encoder",
+ "wasm-encoder 0.41.2",
  "wasmtime-asm-macros",
  "wasmtime-continuations",
  "wasmtime-environ",
@@ -3667,7 +3735,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "thiserror",
- "wasmparser",
+ "wasmparser 0.121.2",
 ]
 
 [[package]]
@@ -3778,7 +3846,7 @@ dependencies = [
  "anyhow",
  "log",
  "wasmtime",
- "wast 70.0.2",
+ "wast 71.0.1",
 ]
 
 [[package]]
@@ -3790,7 +3858,7 @@ dependencies = [
  "gimli",
  "object",
  "target-lexicon",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
  "winch-codegen",
@@ -3803,7 +3871,7 @@ dependencies = [
  "anyhow",
  "heck",
  "indexmap 2.0.0",
- "wit-parser",
+ "wit-parser 0.14.0",
 ]
 
 [[package]]
@@ -3821,22 +3889,22 @@ dependencies = [
 
 [[package]]
 name = "wast"
-version = "70.0.2"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.57#e2d884a6ff12c2e7993a50b05076f3528c88e132"
+version = "71.0.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.60#c543e4f52fdad6161e59971d8db1527e9df6047f"
 dependencies = [
  "bumpalo",
  "leb128",
  "memchr",
  "unicode-width",
- "wasm-encoder",
+ "wasm-encoder 0.41.2",
 ]
 
 [[package]]
 name = "wat"
-version = "1.0.85"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.57#e2d884a6ff12c2e7993a50b05076f3528c88e132"
+version = "1.0.88"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.60#c543e4f52fdad6161e59971d8db1527e9df6047f"
 dependencies = [
- "wast 70.0.2",
+ "wast 71.0.1",
 ]
 
 [[package]]
@@ -3961,7 +4029,7 @@ dependencies = [
  "regalloc2",
  "smallvec",
  "target-lexicon",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wasmtime-environ",
 ]
 
@@ -3977,7 +4045,7 @@ dependencies = [
  "similar",
  "target-lexicon",
  "toml",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wasmtime-environ",
  "wat",
  "winch-codegen",
@@ -4007,7 +4075,7 @@ dependencies = [
  "similar",
  "target-lexicon",
  "toml",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wasmtime-environ",
  "wat",
  "winch-codegen",
@@ -4157,6 +4225,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
 
 [[package]]
+name = "winnow"
+version = "0.5.39"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5389a154b01683d28c77f8f68f49dea75f0a4da32557a58f68ee51ebba472d29"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "winx"
 version = "0.36.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4168,8 +4245,8 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.16.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.16.0#a9e370e840330647feba8fb37a43b25a094a5340"
+version = "0.17.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.17.0#b0c569257b951694105fac73f5409b329dec4788"
 dependencies = [
  "bitflags 2.4.1",
  "wit-bindgen-rust-macro",
@@ -4177,30 +4254,30 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen-core"
-version = "0.16.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.16.0#a9e370e840330647feba8fb37a43b25a094a5340"
+version = "0.17.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.17.0#b0c569257b951694105fac73f5409b329dec4788"
 dependencies = [
  "anyhow",
- "wit-component",
- "wit-parser",
+ "wit-component 0.20.1",
+ "wit-parser 0.13.1",
 ]
 
 [[package]]
 name = "wit-bindgen-rust"
-version = "0.16.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.16.0#a9e370e840330647feba8fb37a43b25a094a5340"
+version = "0.17.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.17.0#b0c569257b951694105fac73f5409b329dec4788"
 dependencies = [
  "anyhow",
  "heck",
- "wasm-metadata",
+ "wasm-metadata 0.10.17",
  "wit-bindgen-core",
- "wit-component",
+ "wit-component 0.20.1",
 ]
 
 [[package]]
 name = "wit-bindgen-rust-macro"
-version = "0.16.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.16.0#a9e370e840330647feba8fb37a43b25a094a5340"
+version = "0.17.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.17.0#b0c569257b951694105fac73f5409b329dec4788"
 dependencies = [
  "anyhow",
  "proc-macro2",
@@ -4208,7 +4285,7 @@ dependencies = [
  "syn 2.0.32",
  "wit-bindgen-core",
  "wit-bindgen-rust",
- "wit-component",
+ "wit-component 0.20.1",
 ]
 
 [[package]]
@@ -4223,10 +4300,28 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "wasm-encoder",
- "wasm-metadata",
- "wasmparser",
- "wit-parser",
+ "wasm-encoder 0.41.0",
+ "wasm-metadata 0.10.17",
+ "wasmparser 0.121.0",
+ "wit-parser 0.13.1",
+]
+
+[[package]]
+name = "wit-component"
+version = "0.21.0"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.60#c543e4f52fdad6161e59971d8db1527e9df6047f"
+dependencies = [
+ "anyhow",
+ "bitflags 2.4.1",
+ "indexmap 2.0.0",
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "wasm-encoder 0.41.2",
+ "wasm-metadata 0.10.20",
+ "wasmparser 0.121.2",
+ "wit-parser 0.14.0",
 ]
 
 [[package]]
@@ -4243,6 +4338,23 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "unicode-xid",
+]
+
+[[package]]
+name = "wit-parser"
+version = "0.14.0"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=wasmfx-tools-1.0.60#c543e4f52fdad6161e59971d8db1527e9df6047f"
+dependencies = [
+ "anyhow",
+ "id-arena",
+ "indexmap 2.0.0",
+ "log",
+ "semver",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "unicode-xid",
+ "wasmparser 0.121.2",
 ]
 
 [[package]]

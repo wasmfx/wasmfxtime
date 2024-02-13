@@ -62,6 +62,12 @@ const array = [
   // TODO(dhil): Disabled as long as we don't support other platforms
   // than x86_64 Linux.
   // {
+  //   "os": "macos-14",
+  //   "name": "Test macOS arm64",
+  //   "filter": "macos-arm64",
+  //   "target": "aarch64-apple-darwin"
+  // },
+  // {
   //   "os": "windows-latest",
   //   "name": "Test Windows MSVC x86_64",
   //   "filter": "windows-x64"

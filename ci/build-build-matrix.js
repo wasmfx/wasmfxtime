@@ -38,7 +38,7 @@ const array = [
   // },
   // {
   //   "build": "aarch64-macos",
-  //   "os": "macos-latest",
+  //   "os": "macos-14",
   //   "target": "aarch64-apple-darwin",
   // },
   // {
