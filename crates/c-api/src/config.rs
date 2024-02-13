@@ -129,12 +129,18 @@ pub extern "C" fn wasmtime_config_wasm_exceptions_set(c: &mut wasm_config_t, ena
 }
 
 #[no_mangle]
-pub extern "C" fn wasmtime_config_wasm_function_references_set(c: &mut wasm_config_t, enable: bool) {
+pub extern "C" fn wasmtime_config_wasm_function_references_set(
+    c: &mut wasm_config_t,
+    enable: bool,
+) {
     c.config.wasm_function_references(enable);
 }
 
 #[no_mangle]
-pub extern "C" fn wasmtime_config_wasm_typed_continuations_set(c: &mut wasm_config_t, enable: bool) {
+pub extern "C" fn wasmtime_config_wasm_typed_continuations_set(
+    c: &mut wasm_config_t,
+    enable: bool,
+) {
     c.config.wasm_typed_continuations(enable);
 }
 
