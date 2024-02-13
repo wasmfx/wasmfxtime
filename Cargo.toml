@@ -234,18 +234,18 @@ io-extras = "0.18.0"
 rustix = "0.38.21"
 is-terminal = "0.4.0"
 # wit-bindgen:
-wit-bindgen = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "wit-bindgenfx-cli-0.16.0", default-features = false }
+wit-bindgen = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "wit-bindgenfx-cli-0.17.0", default-features = false }
 
 # wasm-tools family:
-wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
-wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
-wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
-wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
-wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
-wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
-wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
-wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
-wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.57" }
+wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.60" }
+wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.60" }
+wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.60" }
+wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.60" }
+wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.60" }
+wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.60" }
+wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.60" }
+wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.60" }
+wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "wasmfx-tools-1.0.60" }
 
 # Non-Bytecode Alliance maintained dependencies:
 # --------------------------
@@ -266,7 +266,7 @@ thiserror = "1.0.43"
 async-trait = "0.1.71"
 heck = "0.4"
 similar = "2.1.0"
-toml = "0.5.9"
+toml = "0.8.10"
 # serde and serde_derive must have the same version
 serde = "1.0.188"
 serde_derive = "1.0.188"
