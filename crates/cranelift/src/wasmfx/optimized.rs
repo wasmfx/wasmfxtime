@@ -417,18 +417,6 @@ pub(crate) mod typed_continuation_helpers {
             return self.args().get_data(builder);
         }
 
-        /// Loads the parent of this continuation, which may either be another
-        /// continuation or the main stack. It is therefore represented as a
-        /// `StackChain` element.
-        pub fn get_parent_stack_chain<'a>(
-            &mut self,
-            env: &mut crate::func_environ::FuncEnvironment<'a>,
-            builder: &mut FunctionBuilder,
-        ) -> StackChain {
-            let offset = wasmtime_continuations::offsets::continuation_object::PARENT_CHAIN;
-            StackChain::load(env, builder, self.address, offset, self.pointer_type)
-        }
-
         /// Stores the parent of this continuation, which may either be another
         /// continuation or the main stack. It is therefore represented as a
         /// `StackChain` element.
@@ -1187,41 +1175,28 @@ pub(crate) fn translate_resume<'a>(
 
     // Preamble: Part of previously active block
 
-    {
-        let original_contobj =
+    let (resume_contobj, parent_stack_chain) = {
+        let resume_contobj =
             shared::typed_continuations_cont_ref_get_cont_obj(env, builder, contref);
 
         if resume_args.len() > 0 {
             // We store the arguments in the continuation object to be resumed.
             let count = builder.ins().iconst(I64, resume_args.len() as i64);
-            typed_continuations_store_resume_args(
-                env,
-                builder,
-                resume_args,
-                count,
-                original_contobj,
-            );
+            typed_continuations_store_resume_args(env, builder, resume_args, count, resume_contobj);
         }
 
         // Make the currently running continuation (if any) the parent of the one we are about to resume.
         let original_stack_chain =
             tc::VMContext::new(vmctx, env.pointer_type()).load_stack_chain(env, builder);
-        let original_stack_chain_raw_parts = original_stack_chain.to_raw_parts();
         original_stack_chain.assert_not_absent(env, builder);
-        tc::ContinuationObject::new(original_contobj, env.pointer_type()).set_parent_stack_chain(
+        tc::ContinuationObject::new(resume_contobj, env.pointer_type()).set_parent_stack_chain(
             env,
             builder,
             &original_stack_chain,
         );
 
-        builder.ins().jump(
-            resume_block,
-            &[
-                original_contobj,
-                original_stack_chain_raw_parts[0],
-                original_stack_chain_raw_parts[1],
-            ],
-        );
+        builder.ins().jump(resume_block, &[]);
+        (resume_contobj, original_stack_chain)
     };
 
     // Resume block: actually resume the fiber corresponding to the
@@ -1230,26 +1205,8 @@ pub(crate) fn translate_resume<'a>(
     // to resume objects other than `original_contobj`.
     // We make the continuation object that was actually resumed available via
     // `resumed_contobj`, so that subsequent blocks can refer to it.
-    let (tag, resumed_contobj, parent_chain) = {
+    let tag = {
         builder.switch_to_block(resume_block);
-        // First parameter: The continuation object to resume
-        builder.append_block_param(resume_block, env.pointer_type());
-        // Second and third parameter: The StackChain object
-        // representing the parent (= another continuation, or the main
-        // stack) of the continuation to resume.
-        builder.append_block_param(resume_block, env.pointer_type());
-        builder.append_block_param(resume_block, env.pointer_type());
-
-        // The continuation object to actually call resume on.
-        let resume_contobj = builder.block_params(resume_block)[0];
-        let parent_chain_raw_parts = (
-            builder.block_params(resume_block)[1],
-            builder.block_params(resume_block)[2],
-        );
-        let parent_chain = tc::StackChain::from_raw_parts(
-            [parent_chain_raw_parts.0, parent_chain_raw_parts.1],
-            env.pointer_type(),
-        );
 
         // We mark `resume_contobj` as the currently running one
         let vmctx = tc::VMContext::new(vmctx, env.pointer_type());
@@ -1263,7 +1220,7 @@ pub(crate) fn translate_resume<'a>(
             shared::generate_builtin_call!(env, builder, tc_resume, [resume_contobj]);
 
         // Now the parent contobj (or main stack) is active again
-        vmctx.store_stack_chain(env, builder, &parent_chain);
+        vmctx.store_stack_chain(env, builder, &parent_stack_chain);
 
         // The result encodes whether the return happens via ordinary
         // means or via a suspend. If the high bit is set, then it is
@@ -1293,7 +1250,7 @@ pub(crate) fn translate_resume<'a>(
             .brif(is_zero, return_block, &[], suspend_block, &[]);
 
         // We do not seal this block, yet, because the effect forwarding block has a back edge to it
-        (tag, resume_contobj, parent_chain)
+        tag
     };
 
     // Suspend block.
@@ -1348,12 +1305,12 @@ pub(crate) fn translate_resume<'a>(
         // link to `StackChain::Absent`.
         let pointer_type = env.pointer_type();
         let chain = tc::StackChain::absent(builder, pointer_type);
-        tc::ContinuationObject::new(resumed_contobj, pointer_type)
+        tc::ContinuationObject::new(resume_contobj, pointer_type)
             .set_parent_stack_chain(env, builder, &chain);
 
         // Create and push the continuation reference. We only create
         // them here because we don't need them when forwarding.
-        let contref = env.typed_continuations_new_cont_ref(builder, resumed_contobj);
+        let contref = env.typed_continuations_new_cont_ref(builder, resume_contobj);
 
         args.push(contref);
 
@@ -1374,8 +1331,11 @@ pub(crate) fn translate_resume<'a>(
     {
         builder.switch_to_block(forwarding_block);
 
-        let parent_contobj =
-            parent_chain.unwrap_continuation_or_trap(env, builder, ir::TrapCode::UnhandledTag);
+        let parent_contobj = parent_stack_chain.unwrap_continuation_or_trap(
+            env,
+            builder,
+            ir::TrapCode::UnhandledTag,
+        );
 
         // We suspend, thus deferring handling to the parent.
         // We do nothing about tag *parameters*, these remain unchanged within the
@@ -1387,28 +1347,15 @@ pub(crate) fn translate_resume<'a>(
         // continuation objects, and we need to move them down the chain
         // back to the continuation object where we originally
         // suspended.
-        typed_continuations_forward_tag_return_values(
-            env,
-            builder,
-            parent_contobj,
-            resumed_contobj,
-        );
+        typed_continuations_forward_tag_return_values(env, builder, parent_contobj, resume_contobj);
 
-        // This is the only place where the parent of the resumed continuation may actually change:
-        // At this point, we suspended to the parent, and then we got resume-d from somewhere, which may be somewhere completely different.
-        // We thus have to re-load the from `resumed_contobj`.
-        let new_parent_chain = tc::ContinuationObject::new(resumed_contobj, env.pointer_type())
-            .get_parent_stack_chain(env, builder);
-        let new_parent_chain_raw_parts = new_parent_chain.to_raw_parts();
-
-        builder.ins().jump(
-            resume_block,
-            &[
-                resumed_contobj,
-                new_parent_chain_raw_parts[0],
-                new_parent_chain_raw_parts[1],
-            ],
-        );
+        // We create a back edge to the resume block.
+        // Note that both `resume_cotobj` and `parent_stack_chain` remain unchanged:
+        // In the current design, where forwarding is implemented by suspending
+        // up the chain of parent continuations and subsequently resume-ing back
+        // down the chain, both the continuation being resumed and its parent
+        // stay the same.
+        builder.ins().jump(resume_block, &[]);
         builder.seal_block(resume_block);
     }
 
@@ -1431,18 +1378,17 @@ pub(crate) fn translate_resume<'a>(
         builder.switch_to_block(return_block);
         builder.seal_block(return_block);
 
-        let co = tc::ContinuationObject::new(resumed_contobj, env.pointer_type());
+        let co = tc::ContinuationObject::new(resume_contobj, env.pointer_type());
         co.set_state(builder, wasmtime_continuations::State::Returned);
 
         // Load and push the results.
         let returns = env.continuation_returns(type_index).to_vec();
-        let values =
-            typed_continuations_load_return_values(env, builder, &returns, resumed_contobj);
+        let values = typed_continuations_load_return_values(env, builder, &returns, resume_contobj);
 
         // The continuation has returned and all `ContinuationReferences`
         // to it should have been be invalidated. We may safely deallocate
         // it.
-        shared::typed_continuations_drop_cont_obj(env, builder, resumed_contobj);
+        shared::typed_continuations_drop_cont_obj(env, builder, resume_contobj);
 
         return values;
     }
