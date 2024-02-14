@@ -1135,7 +1135,7 @@ impl Instance {
 
         let main_stack_limits_ptr =
             self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_main_stack_limits());
-        *main_stack_limits_ptr = wasmtime_continuations::StackLimits::uninitialized();
+        *main_stack_limits_ptr = wasmtime_continuations::StackLimits::default();
 
         *self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_stack_chain()) =
             wasmtime_continuations::StackChain::MainStack(main_stack_limits_ptr);
