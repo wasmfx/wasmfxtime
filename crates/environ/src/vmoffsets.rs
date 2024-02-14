@@ -92,9 +92,13 @@ pub struct VMOffsets<P> {
     defined_func_refs: u32,
     size: u32,
 
-    // NOTE(dhil): The following field is used as "global" to store
-    // the arguments of continuations and payloads of suspensions.
-    typed_continuations_store: u32,
+    // The following field stores a value of type
+    // `wasmtime_continuations::StackLimits`.
+    typed_continuations_main_stack_limits: u32,
+    // The following field stores a value of type
+    // `wasmtime_continuations::StackChain`. The head of the chain is the
+    // currently executing stack (main stack or a continuation).
+    typed_continuations_stack_chain: u32,
     typed_continuations_payloads: u32,
 }
 
@@ -358,7 +362,8 @@ impl<P: PtrSize> VMOffsets<P> {
 
         calculate_sizes! {
             typed_continuations_payloads: "typed continuations payloads object",
-            typed_continuations_store: "typed continuations store",
+            typed_continuations_stack_chain: "typed continuations stack chain",
+            typed_continuations_main_stack_limits: "typed continuations main stack limits",
             defined_func_refs: "module functions",
             defined_globals: "defined globals",
             owned_memories: "owned memories",
@@ -411,7 +416,8 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
             defined_globals: 0,
             defined_func_refs: 0,
             size: 0,
-            typed_continuations_store: 0,
+            typed_continuations_main_stack_limits: 0,
+            typed_continuations_stack_chain: 0,
             typed_continuations_payloads: 0,
         };
 
@@ -475,8 +481,14 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
                 ret.num_escaped_funcs,
                 ret.ptr.size_of_vm_func_ref(),
             ),
-            size(typed_continuations_store)
-                = ret.ptr.size(),
+
+            align(std::mem::align_of::<wasmtime_continuations::StackLimits>() as u32),
+            size(typed_continuations_main_stack_limits)
+                = std::mem::size_of::<wasmtime_continuations::StackLimits>() as u32,
+
+            align(std::mem::align_of::<wasmtime_continuations::StackChain>() as u32),
+            size(typed_continuations_stack_chain)
+                = std::mem::size_of::<wasmtime_continuations::StackChain>() as u32,
 
             align(std::mem::align_of::<wasmtime_continuations::Payloads>() as u32),
             size(typed_continuations_payloads) =
@@ -734,13 +746,16 @@ impl<P: PtrSize> VMOffsets<P> {
         self.builtin_functions
     }
 
-    /// The offset of the typed continuations store, where we save the currently
-    /// running continuation (as a pointer to a
-    /// wasmtime_comtinuations::ContinuationObject, or null if running on main
-    /// stack).
+    /// TODO
     #[inline]
-    pub fn vmctx_typed_continuations_store(&self) -> u32 {
-        self.typed_continuations_store
+    pub fn vmctx_typed_continuations_main_stack_limits(&self) -> u32 {
+        self.typed_continuations_main_stack_limits
+    }
+
+    /// TODO
+    #[inline]
+    pub fn vmctx_typed_continuations_stack_chain(&self) -> u32 {
+        self.typed_continuations_stack_chain
     }
 
     /// The offset of the typed continuations payloads object, stored as a as a

@@ -15,6 +15,7 @@ pub(crate) use shared::typed_continuations_cont_ref_get_cont_obj;
 #[allow(unused_imports)]
 pub(crate) use shared::typed_continuations_new_cont_ref;
 
+#[macro_use]
 pub(crate) mod typed_continuation_helpers {
     use cranelift_codegen::ir;
     use cranelift_codegen::ir::condcodes::IntCC;
@@ -317,6 +318,19 @@ pub(crate) mod typed_continuation_helpers {
         pointer_type: ir::Type,
     }
 
+    /// Size of `wasmtime_continuations::StackChain` in machine words.
+    /// Used to verify that we have not changed its representation.
+    const STACK_CHAIN_POINTER_COUNT: usize =
+        std::mem::size_of::<wasmtime_continuations::StackChain>() / std::mem::size_of::<usize>();
+
+    /// Compile-time representation of wasmtime_continuations::StackChain,
+    /// consisting of two `ir::Value`s.
+    pub struct StackChain {
+        discriminant: ir::Value,
+        payload: ir::Value,
+        pointer_type: ir::Type,
+    }
+
     impl ContinuationObject {
         pub fn new(address: ir::Value, pointer_type: ir::Type) -> ContinuationObject {
             ContinuationObject {
@@ -401,6 +415,19 @@ pub(crate) mod typed_continuation_helpers {
                 emit_debug_assert!(env, builder, has_returned);
             }
             return self.args().get_data(builder);
+        }
+
+        /// Stores the parent of this continuation, which may either be another
+        /// continuation or the main stack. It is therefore represented as a
+        /// `StackChain` element.
+        pub fn set_parent_stack_chain<'a>(
+            &mut self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            new_stack_chain: &StackChain,
+        ) {
+            let offset = wasmtime_continuations::offsets::continuation_object::PARENT_CHAIN;
+            new_stack_chain.store(env, builder, self.address, offset)
         }
     }
 
@@ -722,31 +749,183 @@ pub(crate) mod typed_continuation_helpers {
             }
         }
 
-        pub fn get_active_continuation<'a>(
+        /// Returns the stack chain saved in this `VMContext`. Note that the
+        /// head of the list is the actively running stack (main stack or
+        /// continuation).
+        pub fn load_stack_chain<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
-        ) -> ir::Value {
+        ) -> StackChain {
             let base_addr = self.address;
 
-            let memflags = ir::MemFlags::trusted();
-            let offset = i32::try_from(env.offsets.vmctx_typed_continuations_store()).unwrap();
-            builder
-                .ins()
-                .load(self.pointer_type, memflags, base_addr, offset)
+            let offset =
+                i32::try_from(env.offsets.vmctx_typed_continuations_stack_chain()).unwrap();
+            StackChain::load(env, builder, base_addr, offset, self.pointer_type)
         }
 
+        /// Stores the given stack chain saved in this `VMContext`, overwriting
+        /// the exsiting one.
+        pub fn store_stack_chain<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            stack_chain: &StackChain,
+        ) {
+            let base_addr = self.address;
+
+            let offset =
+                i32::try_from(env.offsets.vmctx_typed_continuations_stack_chain()).unwrap();
+            stack_chain.store(env, builder, base_addr, offset)
+        }
+
+        /// Similar to `store_stack_chain`, but instead of storing an arbitrary
+        /// `StackChain`, stores StackChain::Continuation(contobj)`.
         pub fn set_active_continuation<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
             contobj: ir::Value,
         ) {
-            let base_addr = self.address;
+            let chain = StackChain::from_continuation(builder, contobj, self.pointer_type);
+            self.store_stack_chain(env, builder, &chain)
+        }
+    }
 
+    impl StackChain {
+        /// Creates a `Self` corressponding to `StackChain::Continuation(contobj)`.
+        pub fn from_continuation(
+            builder: &mut FunctionBuilder,
+            contobj: ir::Value,
+            pointer_type: ir::Type,
+        ) -> StackChain {
+            debug_assert_eq!(STACK_CHAIN_POINTER_COUNT, 2);
+            let discriminant = wasmtime_continuations::StackChain::CONTINUATION_DISCRIMINANT;
+            let discriminant = builder.ins().iconst(pointer_type, discriminant as i64);
+            StackChain {
+                discriminant,
+                payload: contobj,
+                pointer_type,
+            }
+        }
+
+        /// Creates a `Self` corressponding to `StackChain::Absent`.
+        pub fn absent(builder: &mut FunctionBuilder, pointer_type: ir::Type) -> StackChain {
+            debug_assert_eq!(STACK_CHAIN_POINTER_COUNT, 2);
+            let discriminant = wasmtime_continuations::StackChain::ABSENT_DISCRIMINANT;
+            let discriminant = builder.ins().iconst(pointer_type, discriminant as i64);
+            let zero_filler = builder.ins().iconst(pointer_type, 0i64);
+            StackChain {
+                discriminant,
+                payload: zero_filler,
+                pointer_type,
+            }
+        }
+
+        /// For debugging purposes. Emits an assertion that `self` does not correspond to
+        /// `StackChain::Absent`.
+        pub fn assert_not_absent<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) {
+            let discriminant = wasmtime_continuations::StackChain::ABSENT_DISCRIMINANT;
+            let discriminant = builder.ins().iconst(self.pointer_type, discriminant as i64);
+            emit_debug_assert_ne!(env, builder, self.discriminant, discriminant);
+        }
+
+        /// Return the two raw `ir::Value`s that represent this StackChain.
+        pub fn to_raw_parts(&self) -> [ir::Value; STACK_CHAIN_POINTER_COUNT] {
+            [self.discriminant, self.payload]
+        }
+
+        /// Construct a `Self` from two raw `ir::Value`s.
+        pub fn from_raw_parts(
+            raw_data: [ir::Value; STACK_CHAIN_POINTER_COUNT],
+            pointer_type: ir::Type,
+        ) -> StackChain {
+            StackChain {
+                discriminant: raw_data[0],
+                payload: raw_data[1],
+                pointer_type,
+            }
+        }
+
+        /// Load a `StackChain` object from the given address.
+        pub fn load<'a>(
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            pointer: ir::Value,
+            initial_offset: i32,
+            pointer_type: ir::Type,
+        ) -> StackChain {
             let memflags = ir::MemFlags::trusted();
-            let offset = i32::try_from(env.offsets.vmctx_typed_continuations_store()).unwrap();
-            builder.ins().store(memflags, contobj, base_addr, offset);
+            let mut offset = initial_offset;
+            let mut data = vec![];
+            for _ in 0..STACK_CHAIN_POINTER_COUNT {
+                data.push(builder.ins().load(pointer_type, memflags, pointer, offset));
+                offset += pointer_type.bytes() as i32;
+            }
+            let data = <[ir::Value; STACK_CHAIN_POINTER_COUNT]>::try_from(data).unwrap();
+            Self::from_raw_parts(data, pointer_type)
+        }
+
+        /// Store this `StackChain` object at the given address.
+        pub fn store<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            target_pointer: ir::Value,
+            initial_offset: i32,
+        ) {
+            let memflags = ir::MemFlags::trusted();
+            let mut offset = initial_offset;
+            let data = self.to_raw_parts();
+
+            for value in data {
+                debug_assert_eq!(
+                    builder.func.dfg.value_type(value),
+                    Type::int_with_byte_size(self.pointer_type.bytes() as u16).unwrap()
+                );
+                builder.ins().store(memflags, value, target_pointer, offset);
+                offset += self.pointer_type.bytes() as i32;
+            }
+        }
+
+        /// If `self` corresponds to a `StackChain::Continuation`, return the
+        /// pointer to the continuation object stored in the variant.
+        /// If `self` corresponds to `StackChain::MainStack`, trap with the
+        /// given `trap_code`.
+        /// Calling this if `self` corresponds to `StackChain::Absent` indicates
+        /// an internal bug.
+        pub fn unwrap_continuation_or_trap<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            trap_code: ir::TrapCode,
+        ) -> ir::Value {
+            if cfg!(debug_assertions) {
+                let absent_discriminant = wasmtime_continuations::StackChain::ABSENT_DISCRIMINANT;
+                let is_initialized = builder.ins().icmp_imm(
+                    IntCC::NotEqual,
+                    self.discriminant,
+                    absent_discriminant as i64,
+                );
+                emit_debug_assert!(env, builder, is_initialized);
+            }
+
+            let continuation_discriminant =
+                wasmtime_continuations::StackChain::CONTINUATION_DISCRIMINANT;
+            let is_continuation = builder.ins().icmp_imm(
+                IntCC::Equal,
+                self.discriminant,
+                continuation_discriminant as i64,
+            );
+            builder.ins().trapz(is_continuation, trap_code);
+
+            // The representation of StackChain::Continuation stores
+            // the pointer right after the discriminant.
+            self.payload
         }
     }
 }
@@ -779,31 +958,6 @@ fn typed_continuations_load_return_values<'a>(
         }
     }
     return values;
-}
-
-fn typed_continuations_load_parent<'a>(
-    env: &mut crate::func_environ::FuncEnvironment<'a>,
-    builder: &mut FunctionBuilder,
-    contobj: ir::Value,
-) -> ir::Value {
-    let offset = wasmtime_continuations::offsets::continuation_object::PARENT;
-    let memflags = ir::MemFlags::trusted();
-
-    builder
-        .ins()
-        .load(env.pointer_type(), memflags, contobj, offset)
-}
-
-fn typed_continuations_store_parent<'a>(
-    _env: &mut crate::func_environ::FuncEnvironment<'a>,
-    builder: &mut FunctionBuilder,
-    contobj: ir::Value,
-    new_parent: ir::Value,
-) {
-    let offset = wasmtime_continuations::offsets::continuation_object::PARENT;
-    let memflags = ir::MemFlags::trusted();
-
-    builder.ins().store(memflags, new_parent, contobj, offset);
 }
 
 fn typed_continuations_forward_tag_return_values<'a>(
@@ -974,13 +1128,15 @@ pub(crate) fn typed_continuations_load_continuation_object<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
 ) -> ir::Value {
-    let pointer_type = env.pointer_type();
     let vmctx = env.vmctx(builder.cursor().func);
-    let base_addr = builder.ins().global_value(pointer_type, vmctx);
-
-    let vmctx = tc::VMContext::new(base_addr, pointer_type);
-
-    vmctx.get_active_continuation(env, builder)
+    let vmctx = builder.ins().global_value(env.pointer_type(), vmctx);
+    let vmctx = tc::VMContext::new(vmctx, env.pointer_type());
+    let active_stack_chain = vmctx.load_stack_chain(env, builder);
+    active_stack_chain.unwrap_continuation_or_trap(
+        env,
+        builder,
+        ir::TrapCode::User(crate::DEBUG_ASSERT_TRAP_CODE),
+    )
 }
 
 pub(crate) fn translate_cont_new<'a>(
@@ -1014,29 +1170,34 @@ pub(crate) fn translate_resume<'a>(
     let switch_block = builder.create_block();
     let forwarding_block = builder.create_block();
 
+    let vmctx = env.vmctx(builder.func);
+    let vmctx = builder.ins().global_value(env.pointer_type(), vmctx);
+
     // Preamble: Part of previously active block
-    {
-        let original_contobj =
+
+    let (resume_contobj, parent_stack_chain) = {
+        let resume_contobj =
             shared::typed_continuations_cont_ref_get_cont_obj(env, builder, contref);
 
         if resume_args.len() > 0 {
             // We store the arguments in the continuation object to be resumed.
             let count = builder.ins().iconst(I64, resume_args.len() as i64);
-            typed_continuations_store_resume_args(
-                env,
-                builder,
-                resume_args,
-                count,
-                original_contobj,
-            );
+            typed_continuations_store_resume_args(env, builder, resume_args, count, resume_contobj);
         }
 
-        // Make the currently running continuation the parent of the one we are about to resume.
-        let original_running_contobj = typed_continuations_load_continuation_object(env, builder);
-        typed_continuations_store_parent(env, builder, original_contobj, original_running_contobj);
+        // Make the currently running continuation (if any) the parent of the one we are about to resume.
+        let original_stack_chain =
+            tc::VMContext::new(vmctx, env.pointer_type()).load_stack_chain(env, builder);
+        original_stack_chain.assert_not_absent(env, builder);
+        tc::ContinuationObject::new(resume_contobj, env.pointer_type()).set_parent_stack_chain(
+            env,
+            builder,
+            &original_stack_chain,
+        );
 
-        builder.ins().jump(resume_block, &[original_contobj]);
-    }
+        builder.ins().jump(resume_block, &[]);
+        (resume_contobj, original_stack_chain)
+    };
 
     // Resume block: actually resume the fiber corresponding to the
     // continuation object given as a parameter to the block. This
@@ -1044,15 +1205,8 @@ pub(crate) fn translate_resume<'a>(
     // to resume objects other than `original_contobj`.
     // We make the continuation object that was actually resumed available via
     // `resumed_contobj`, so that subsequent blocks can refer to it.
-    let (tag, resumed_contobj) = {
+    let tag = {
         builder.switch_to_block(resume_block);
-        builder.append_block_param(resume_block, env.pointer_type());
-
-        // The continuation object to actually call resume on.
-        let resume_contobj = builder.block_params(resume_block)[0];
-
-        let vmctx = env.vmctx(builder.func);
-        let vmctx = builder.ins().global_value(env.pointer_type(), vmctx);
 
         // We mark `resume_contobj` as the currently running one
         let vmctx = tc::VMContext::new(vmctx, env.pointer_type());
@@ -1065,9 +1219,8 @@ pub(crate) fn translate_resume<'a>(
         let (_vmctx, result) =
             shared::generate_builtin_call!(env, builder, tc_resume, [resume_contobj]);
 
-        // Now the parent contobj is active
-        let parent_contobj = typed_continuations_load_parent(env, builder, resume_contobj);
-        vmctx.set_active_continuation(env, builder, parent_contobj);
+        // Now the parent contobj (or main stack) is active again
+        vmctx.store_stack_chain(env, builder, &parent_stack_chain);
 
         // The result encodes whether the return happens via ordinary
         // means or via a suspend. If the high bit is set, then it is
@@ -1097,7 +1250,7 @@ pub(crate) fn translate_resume<'a>(
             .brif(is_zero, return_block, &[], suspend_block, &[]);
 
         // We do not seal this block, yet, because the effect forwarding block has a back edge to it
-        (tag, resume_contobj)
+        tag
     };
 
     // Suspend block.
@@ -1147,15 +1300,17 @@ pub(crate) fn translate_resume<'a>(
             .collect();
         let mut args = typed_continuations_load_payloads(env, builder, &param_types);
 
-        // We have an actual handling block for this tag, rather than just forwarding.
-        // Detatch the continuation object by setting its parent to NULL.
+        // We have an actual handling block for this tag, rather than just
+        // forwarding. Detatch the continuation object by setting its parent
+        // link to `StackChain::Absent`.
         let pointer_type = env.pointer_type();
-        let null = builder.ins().iconst(pointer_type, 0);
-        typed_continuations_store_parent(env, builder, resumed_contobj, null);
+        let chain = tc::StackChain::absent(builder, pointer_type);
+        tc::ContinuationObject::new(resume_contobj, pointer_type)
+            .set_parent_stack_chain(env, builder, &chain);
 
         // Create and push the continuation reference. We only create
         // them here because we don't need them when forwarding.
-        let contref = env.typed_continuations_new_cont_ref(builder, resumed_contobj);
+        let contref = env.typed_continuations_new_cont_ref(builder, resume_contobj);
 
         args.push(contref);
 
@@ -1166,7 +1321,7 @@ pub(crate) fn translate_resume<'a>(
     }
 
     // Note that at this point we haven't actually emitted any
-    // code for the switching logic itenv, but only filled
+    // code for the switching logic itself, but only filled
     // the Switch structure and created the blocks it jumps
     // to.
 
@@ -1176,11 +1331,11 @@ pub(crate) fn translate_resume<'a>(
     {
         builder.switch_to_block(forwarding_block);
 
-        let parent_contobj = typed_continuations_load_parent(env, builder, resumed_contobj);
-
-        builder
-            .ins()
-            .trapz(parent_contobj, ir::TrapCode::UnhandledTag);
+        let parent_contobj = parent_stack_chain.unwrap_continuation_or_trap(
+            env,
+            builder,
+            ir::TrapCode::UnhandledTag,
+        );
 
         // We suspend, thus deferring handling to the parent.
         // We do nothing about tag *parameters*, these remain unchanged within the
@@ -1192,14 +1347,15 @@ pub(crate) fn translate_resume<'a>(
         // continuation objects, and we need to move them down the chain
         // back to the continuation object where we originally
         // suspended.
-        typed_continuations_forward_tag_return_values(
-            env,
-            builder,
-            parent_contobj,
-            resumed_contobj,
-        );
+        typed_continuations_forward_tag_return_values(env, builder, parent_contobj, resume_contobj);
 
-        builder.ins().jump(resume_block, &[resumed_contobj]);
+        // We create a back edge to the resume block.
+        // Note that both `resume_cotobj` and `parent_stack_chain` remain unchanged:
+        // In the current design, where forwarding is implemented by suspending
+        // up the chain of parent continuations and subsequently resume-ing back
+        // down the chain, both the continuation being resumed and its parent
+        // stay the same.
+        builder.ins().jump(resume_block, &[]);
         builder.seal_block(resume_block);
     }
 
@@ -1222,18 +1378,17 @@ pub(crate) fn translate_resume<'a>(
         builder.switch_to_block(return_block);
         builder.seal_block(return_block);
 
-        let co = tc::ContinuationObject::new(resumed_contobj, env.pointer_type());
+        let co = tc::ContinuationObject::new(resume_contobj, env.pointer_type());
         co.set_state(builder, wasmtime_continuations::State::Returned);
 
         // Load and push the results.
         let returns = env.continuation_returns(type_index).to_vec();
-        let values =
-            typed_continuations_load_return_values(env, builder, &returns, resumed_contobj);
+        let values = typed_continuations_load_return_values(env, builder, &returns, resume_contobj);
 
         // The continuation has returned and all `ContinuationReferences`
         // to it should have been be invalidated. We may safely deallocate
         // it.
-        shared::typed_continuations_drop_cont_obj(env, builder, resumed_contobj);
+        shared::typed_continuations_drop_cont_obj(env, builder, resume_contobj);
 
         return values;
     }

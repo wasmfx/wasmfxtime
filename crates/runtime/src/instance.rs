@@ -1133,8 +1133,12 @@ impl Instance {
         *self.vmctx_plus_offset_mut(offsets.vmctx_builtin_functions()) =
             &VMBuiltinFunctionsArray::INIT;
 
-        *self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_store()) =
-            std::ptr::null_mut::<crate::continuation::ContinuationObject>();
+        let main_stack_limits_ptr =
+            self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_main_stack_limits());
+        *main_stack_limits_ptr = wasmtime_continuations::StackLimits::default();
+
+        *self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_stack_chain()) =
+            wasmtime_continuations::StackChain::MainStack(main_stack_limits_ptr);
 
         // Initialize the Payloads object to be empty
         let vmctx_payloads: *mut wasmtime_continuations::Payloads =
@@ -1279,20 +1283,32 @@ impl Instance {
         fault
     }
 
-    pub(crate) fn typed_continuations_store(
+    #[allow(dead_code)]
+    pub(crate) fn typed_continuations_main_stack_limits(
         &mut self,
-    ) -> *mut crate::continuation::ContinuationObject {
-        unsafe { *self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store()) }
+    ) -> *mut wasmtime_continuations::StackLimits {
+        unsafe {
+            self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_main_stack_limits())
+        }
+    }
+
+    pub(crate) fn typed_continuations_stack_chain(
+        &mut self,
+    ) -> *mut wasmtime_continuations::StackChain {
+        unsafe {
+            self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_stack_chain())
+        }
     }
 
     #[allow(dead_code)]
-    pub(crate) fn set_typed_continuations_store(
+    pub(crate) fn set_typed_continuations_stack_chain(
         &mut self,
-        contobj: *mut crate::continuation::ContinuationObject,
+        chain: *mut wasmtime_continuations::StackChain,
     ) {
         unsafe {
-            let ptr = self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_store());
-            *ptr = contobj;
+            let ptr =
+                self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_stack_chain());
+            *ptr = chain;
         }
     }
 
