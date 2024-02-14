@@ -183,6 +183,9 @@ pub fn resume(
 
     if ENABLE_DEBUG_PRINTING {
         let chain = instance.typed_continuations_stack_chain();
+        // SAFETY: We maintain as an invariant that the stack chain field in the
+        // VMContext is non-null and contains a chain of zero or more
+        // StackChain::Continuation values followed by StackChain::Main.
         match unsafe { &*chain } {
             StackChain::Continuation(running_contobj) => {
                 debug_assert_eq!(contobj, *running_contobj);
@@ -219,6 +222,9 @@ pub fn resume(
             // calling trampoline to execute it.
 
             if cfg!(debug_assertions) {
+                // SAFETY: We maintain as an invariant that the stack chain field in the
+                // VMContext is non-null and contains a chain of zero or more
+                // StackChain::Continuation values followed by StackChain::Main.
                 let _parent_chain = unsafe { &(*contobj).parent_chain };
                 debug_println!(
                 "Continuation @ {:p} returned normally, setting running continuation in VMContext to {:?}",
@@ -247,6 +253,9 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason
     let chain_ptr = instance.typed_continuations_stack_chain();
 
     // TODO(dhil): This should be handled in generated code.
+    // SAFETY: We maintain as an invariant that the stack chain field in the
+    // VMContext is non-null and contains a chain of zero or more
+    // StackChain::Continuation values followed by StackChain::Main.
     let chain = unsafe { &*chain_ptr };
     let running = match chain {
         StackChain::Absent => Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
@@ -255,10 +264,14 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason
         StackChain::MainStack { .. } => Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
             "Calling suspend outside of a continuation"
         ))),
-        StackChain::Continuation(running) => Ok(unsafe { &**running }),
+        StackChain::Continuation(running) => {
+            // SAFETY: See above.
+            Ok(unsafe { &**running })
+        }
     }?;
 
     let fiber = unsafe {
+        // SAFETY: See above.
         (*running).fiber.as_ref().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
                 "Attempt to dereference null fiber!"
