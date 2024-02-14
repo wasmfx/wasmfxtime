@@ -221,6 +221,30 @@ WASMTIME_CONFIG_PROP(void, wasm_multi_memory, bool)
 WASMTIME_CONFIG_PROP(void, wasm_memory64, bool)
 
 /**
+ * \brief Configures whether the WebAssembly exception-handling
+ * proposal is enabled.
+ *
+ * This setting is `false` by default.
+ */
+WASMTIME_CONFIG_PROP(void, wasm_exceptions, bool)
+
+/**
+ * \brief Configures whether the WebAssembly function references
+ * proposal is enabled.
+ *
+ * This setting is `false` by default.
+ */
+WASMTIME_CONFIG_PROP(void, wasm_function_references, bool)
+
+/**
+ * \brief Configures whether the WebAssembly typed continuations
+ * proposal is enabled.
+ *
+ * This setting is `false` by default.
+ */
+WASMTIME_CONFIG_PROP(void, wasm_typed_continuations, bool)
+
+/**
  * \brief Configures how JIT code will be compiled.
  *
  * This setting is #WASMTIME_STRATEGY_AUTO by default.
