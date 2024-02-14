@@ -32,6 +32,9 @@ wasmtime-cranelift = { workspace = true, optional = true }
 wasmtime-environ = { workspace = true }
 wasmtime-explorer = { workspace = true, optional = true }
 wasmtime-wast = { workspace = true, optional = true }
+wasi-common = { workspace = true, default-features = true, features = [
+  "exit",
+] }
 wasmtime-wasi = { workspace = true, default-features = true, features = [
   "exit",
 ] }
@@ -56,13 +59,14 @@ humantime = { workspace = true }
 
 async-trait = { workspace = true }
 bytes = { workspace = true }
+cfg-if = { workspace = true }
 tokio = { workspace = true, optional = true, features = [ "signal", "macros" ] }
 hyper = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["mm", "param"] }
+rustix = { workspace = true, features = ["mm", "param", "process"] }
 
 [dev-dependencies]
 # depend again on wasmtime to activate its default features for tests
@@ -185,8 +189,6 @@ wiggle = { path = "crates/wiggle", version = "=19.0.0", default-features = false
 wiggle-macro = { path = "crates/wiggle/macro", version = "=19.0.0" }
 wiggle-generate = { path = "crates/wiggle/generate", version = "=19.0.0" }
 wasi-common = { path = "crates/wasi-common", version = "=19.0.0", default-features = false }
-wasi-tokio = { path = "crates/wasi-common/tokio", version = "=19.0.0" }
-wasi-cap-std-sync = { path = "crates/wasi-common/cap-std-sync", version = "=19.0.0" }
 wasmtime-fuzzing = { path = "crates/fuzzing" }
 wasmtime-jit-icache-coherence = { path = "crates/jit-icache-coherence", version = "=19.0.0" }
 wasmtime-wit-bindgen = { path = "crates/wit-bindgen", version = "=19.0.0" }
@@ -220,19 +222,18 @@ byte-array-literals = { path = "crates/wasi-preview1-component-adapter/byte-arra
 regalloc2 = "0.9.3"
 
 # cap-std family:
-target-lexicon = { version = "0.12.12", default-features = false, features = ["std"] }
-cap-std = "2.0.0"
-cap-rand = { version = "2.0.0", features = ["small_rng"] }
-cap-fs-ext = "2.0.0"
-cap-net-ext = "2.0.0"
-cap-time-ext = "2.0.0"
-cap-tempfile = "2.0.0"
-fs-set-times = "0.20.0"
-system-interface = { version = "0.26.0", features = ["cap_std_impls"] }
-io-lifetimes = { version = "2.0.2", default-features = false }
-io-extras = "0.18.0"
-rustix = "0.38.21"
-is-terminal = "0.4.0"
+target-lexicon = { version = "0.12.13", default-features = false, features = ["std"] }
+cap-std = "3.0.0"
+cap-rand = { version = "3.0.0", features = ["small_rng"] }
+cap-fs-ext = "3.0.0"
+cap-net-ext = "3.0.0"
+cap-time-ext = "3.0.0"
+cap-tempfile = "3.0.0"
+fs-set-times = "0.20.1"
+system-interface = { version = "0.27.1", features = ["cap_std_impls"] }
+io-lifetimes = { version = "2.0.3", default-features = false }
+io-extras = "0.18.1"
+rustix = "0.38.31"
 # wit-bindgen:
 wit-bindgen = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "wit-bindgenfx-cli-0.17.0", default-features = false }
 
@@ -362,7 +363,7 @@ disable-logging = ["log/max_level_off", "tracing/max_level_off"]
 # the internal mapping for what they enable in Wasmtime itself.
 wasi-nn = ["dep:wasmtime-wasi-nn"]
 wasi-threads = ["dep:wasmtime-wasi-threads"]
-wasi-http = ["component-model", "dep:wasmtime-wasi-http", "dep:tokio", "dep:hyper", "wasmtime-wasi-http?/sync"]
+wasi-http = ["component-model", "dep:wasmtime-wasi-http", "dep:tokio", "dep:hyper"]
 pooling-allocator = ["wasmtime/pooling-allocator", "wasmtime-cli-flags/pooling-allocator"]
 component-model = [
   "wasmtime/component-model",
