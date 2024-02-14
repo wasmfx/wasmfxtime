@@ -812,7 +812,7 @@ pub(crate) mod typed_continuation_helpers {
             pointer_type: ir::Type,
         ) -> StackChain {
             debug_assert_eq!(STACK_CHAIN_POINTER_COUNT, 2);
-            let discriminant = wasmtime_continuations::StackChain::continuation_discriminant();
+            let discriminant = wasmtime_continuations::StackChain::CONTINUATION_DISCRIMINANT;
             let discriminant = builder.ins().iconst(pointer_type, discriminant as i64);
             StackChain {
                 discriminant,
@@ -824,7 +824,7 @@ pub(crate) mod typed_continuation_helpers {
         /// Creates a `Self` corressponding to `StackChain::Absent`.
         pub fn absent(builder: &mut FunctionBuilder, pointer_type: ir::Type) -> StackChain {
             debug_assert_eq!(STACK_CHAIN_POINTER_COUNT, 2);
-            let discriminant = wasmtime_continuations::StackChain::absent_discriminant();
+            let discriminant = wasmtime_continuations::StackChain::ABSENT_DISCRIMINANT;
             let discriminant = builder.ins().iconst(pointer_type, discriminant as i64);
             let zero_filler = builder.ins().iconst(pointer_type, 0i64);
             StackChain {
@@ -841,7 +841,7 @@ pub(crate) mod typed_continuation_helpers {
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
         ) {
-            let discriminant = wasmtime_continuations::StackChain::absent_discriminant();
+            let discriminant = wasmtime_continuations::StackChain::ABSENT_DISCRIMINANT;
             let discriminant = builder.ins().iconst(self.pointer_type, discriminant as i64);
             emit_debug_assert_ne!(env, builder, self.discriminant, discriminant);
         }
@@ -917,7 +917,7 @@ pub(crate) mod typed_continuation_helpers {
             trap_code: ir::TrapCode,
         ) -> ir::Value {
             if cfg!(debug_assertions) {
-                let absent_discriminant = wasmtime_continuations::StackChain::absent_discriminant();
+                let absent_discriminant = wasmtime_continuations::StackChain::ABSENT_DISCRIMINANT;
                 let is_initialized = builder.ins().icmp_imm(
                     IntCC::NotEqual,
                     self.discriminant,
@@ -927,7 +927,7 @@ pub(crate) mod typed_continuation_helpers {
             }
 
             let continuation_discriminant =
-                wasmtime_continuations::StackChain::continuation_discriminant();
+                wasmtime_continuations::StackChain::CONTINUATION_DISCRIMINANT;
             let is_continuation = builder.ins().icmp_imm(
                 IntCC::Equal,
                 self.discriminant,

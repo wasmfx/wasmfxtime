@@ -65,6 +65,10 @@ impl StackLimits {
     }
 }
 
+const STACK_CHAIN_ABSENT_DISCRIMINANT: usize = 0;
+const STACK_CHAIN_MAIN_STACK_DISCRIMINANT: usize = 1;
+const STACK_CHAIN_CONTINUATION_DISCRIMINANT: usize = 2;
+
 /// This type represents a linked lists of stacks, additionally associating a
 /// `StackLimits` object with each element of the list. Here, a "stack" is
 /// either a continuation or the main stack. Note that the linked list character
@@ -100,26 +104,15 @@ pub enum StackChain {
     /// If stored in the VMContext, used to indicate that the MainStack entry
     /// has not been set, yet. If stored in a ContinuationObject's parent_chain
     /// field, means that there is currently no parent.
-    Absent = 0,
-    MainStack(*mut StackLimits) = 1,
-    Continuation(*mut ContinuationObject) = 2,
+    Absent = STACK_CHAIN_ABSENT_DISCRIMINANT,
+    MainStack(*mut StackLimits) = STACK_CHAIN_MAIN_STACK_DISCRIMINANT,
+    Continuation(*mut ContinuationObject) = STACK_CHAIN_CONTINUATION_DISCRIMINANT,
 }
 
 impl StackChain {
-    pub fn absent_discriminant() -> usize {
-        // Keep this in sync with the explicit discriminant given to StackChain::Absent
-        0
-    }
-
-    pub fn main_stack_discriminant() -> usize {
-        // Keep this in sync with the explicit discriminant given to StackChain::MainStack
-        1
-    }
-
-    pub fn continuation_discriminant() -> usize {
-        // Keep this in sync with the explicit discriminant given to StackChain::Continuation
-        2
-    }
+    pub const ABSENT_DISCRIMINANT: usize = STACK_CHAIN_ABSENT_DISCRIMINANT;
+    pub const MAIN_STACK_DISCRIMINANT: usize = STACK_CHAIN_MAIN_STACK_DISCRIMINANT;
+    pub const CONTINUATION_DISCRIMINANT: usize = STACK_CHAIN_CONTINUATION_DISCRIMINANT;
 }
 
 pub struct Payloads {
