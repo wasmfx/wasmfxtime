@@ -208,6 +208,8 @@ pub fn resume(
         }
     }
 
+    // See the comment on `wasmtime_continuations::StackChain` for a description
+    // of the invariants that we maintain for the various stack limits.
     unsafe {
         let runtime_limits = &**instance.runtime_limits();
 

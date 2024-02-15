@@ -1321,6 +1321,10 @@ pub(crate) fn translate_resume<'a>(
         //
         // 2. Copy `stack_limit` and `last_wasm_entry_sp` in the
         // `StackLimits` of `resume_contobj` into the `VMRuntimeLimits`.
+        //
+        // See the comment on `wasmtime_continuations::StackChain` for a
+        // description of the invariants that we maintain for the various stack
+        // limits.
         let parent_stacks_limit_pointer = parent_stack_chain.get_stack_limits_ptr(env, builder);
 
         // We mark `resume_contobj` to be invoked
