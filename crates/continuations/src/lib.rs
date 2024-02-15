@@ -92,8 +92,40 @@ const STACK_CHAIN_CONTINUATION_DISCRIMINANT: usize = 2;
 /// fields of the corresponding `ContinuationObject`. For the main stack, the
 /// `MainStack` variant contains a pointer to the
 /// `typed_continuations_main_stack_limits` field of the VMContext.
-// FIXME(frank-emrich) Note that the data within the StackLimits objects is
-// currently not used or updated in any way.
+///
+/// The following invariants hold for these `StackLimits` objects, and the data
+/// in `VMRuntimeLimits`.
+///
+/// Currently executing stack:
+/// For the currently executing stack (i.e., the stack that is at the head of
+/// the VMContext's `typed_continuations_chain` list), the associated
+/// `StackLimits` object contains stale/undefined data. Instead, the live data
+/// describing the limits for the currently executing stack is always maintained
+/// in `VMRuntimeLimits`. Note that as a general rule independently from any
+/// execution of continuations, the `last_wasm_exit*` fields in the
+/// `VMRuntimeLimits` contain undefined values while executing wasm.
+///
+/// Parents of currently executing stack:
+/// For stacks that appear in the tail of the VMContext's
+/// `typed_continuations_chain` list (i.e., stacks that are not currently
+/// executing themselves, but are a parent of the currently executing stack), we
+/// have the following: All the fields in the stack's StackLimits are valid,
+/// describing the stack's stack limit, and pointers where executing for that
+/// stack entered and exited WASM.
+///
+/// Suspended continuations:
+/// For suspended continuations (including their parents), we have the
+/// following. Note that the main stack can never be in this state. The
+/// `stack_limit` and `last_enter_wasm_sp` fields of the corresponding
+/// `StackLimits` object contain valid data, while the `last_exit_wasm_*` fields
+/// contain arbitrary values.
+/// There is only one exception to this: Note that a continuation that has been
+/// created with cont.new, but never been resumed so far, is considered
+/// "suspended". However, its `last_enter_wasm_sp` field contains undefined
+/// data. This is justified, because when resume-ing a continuation for the
+/// first time, a native-to-wasm trampoline is called, which sets up the
+/// `last_wasm_entry_sp` in the `VMRuntimeLimits` with the correct value, thus
+/// restoring the necessary invariant.
 #[derive(Debug, Clone, PartialEq)]
 #[repr(usize, C)]
 pub enum StackChain {
