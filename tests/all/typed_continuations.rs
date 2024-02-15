@@ -182,3 +182,72 @@ async fn sched_yield_test_async() -> Result<()> {
     assert_eq!(run_wasi_test_async(SCHED_YIELD_WAT).await?, 0);
     Ok(())
 }
+
+#[test]
+fn inter_instance_suspend() -> Result<()> {
+    let mut config = Config::default();
+    config.wasm_function_references(true);
+    config.wasm_exceptions(true);
+    config.wasm_typed_continuations(true);
+
+    let engine = Engine::new(&config)?;
+
+    let mut store = Store::<()>::new(&engine, ());
+
+    let wat_other = r#"
+        (module
+
+          (type $ft (func))
+          (type $ct (cont $ft))
+          (tag $tag)
+
+
+          (func $suspend (export "suspend")
+            (suspend $tag)
+          )
+
+          (func $resume (export "resume") (param $f (ref $ct))
+            (block $handler (result (ref $ct))
+              (resume $ct (tag $tag $handler) (local.get $f))
+              (unreachable)
+            )
+            (drop)
+          )
+        )
+    "#;
+
+    let wat_main = r#"
+        (module
+
+          (type $ft (func))
+          (type $ct (cont $ft))
+
+          (import "other" "suspend" (func $suspend))
+          (import "other" "resume" (func $resume (param (ref $ct))))
+
+          (elem declare func $suspend)
+
+
+          (func $entry (export "entry")
+            (call $resume (cont.new $ct (ref.func $suspend)))
+          )
+        )
+    "#;
+
+    let module_other = Module::new(&engine, wat_other)?;
+
+    let other_inst1 = Instance::new(&mut store, &module_other, &[])?;
+    let other_inst2 = Instance::new(&mut store, &module_other, &[])?;
+
+    // Crucially, suspend and resume are from two instances of the same module.
+    let suspend = other_inst1.get_func(&mut store, "suspend").unwrap();
+    let resume = other_inst2.get_func(&mut store, "resume").unwrap();
+
+    let module_main = Module::new(&engine, wat_main)?;
+    let main_instance = Instance::new(&mut store, &module_main, &[suspend.into(), resume.into()])?;
+    let entry_func = main_instance.get_func(&mut store, "entry").unwrap();
+
+    entry_func.call(&mut store, &[], &mut [])?;
+
+    Ok(())
+}
