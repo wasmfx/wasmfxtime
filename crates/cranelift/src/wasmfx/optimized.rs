@@ -762,7 +762,16 @@ pub(crate) mod typed_continuation_helpers {
 
             let offset =
                 i32::try_from(env.offsets.vmctx_typed_continuations_stack_chain()).unwrap();
-            StackChain::load(env, builder, base_addr, offset, self.pointer_type)
+
+            // The `typed_continuations_stack_chain` field of the VMContext only
+            // contains a pointer to the `StackChainCell` in the `Store`.
+            let memflags = ir::MemFlags::trusted();
+            let stack_chain_ptr =
+                builder
+                    .ins()
+                    .load(self.pointer_type, memflags, base_addr, offset);
+
+            StackChain::load(env, builder, stack_chain_ptr, 0, self.pointer_type)
         }
 
         /// Stores the given stack chain saved in this `VMContext`, overwriting
@@ -777,7 +786,16 @@ pub(crate) mod typed_continuation_helpers {
 
             let offset =
                 i32::try_from(env.offsets.vmctx_typed_continuations_stack_chain()).unwrap();
-            stack_chain.store(env, builder, base_addr, offset)
+
+            // The `typed_continuations_stack_chain` field of the VMContext only
+            // contains a pointer to the `StackChainCell` in the `Store`.
+            let memflags = ir::MemFlags::trusted();
+            let stack_chain_ptr =
+                builder
+                    .ins()
+                    .load(self.pointer_type, memflags, base_addr, offset);
+
+            stack_chain.store(env, builder, stack_chain_ptr, 0)
         }
 
         /// Similar to `store_stack_chain`, but instead of storing an arbitrary

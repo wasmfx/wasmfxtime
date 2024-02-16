@@ -7,7 +7,7 @@ use std::mem;
 use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
 pub use wasmtime_continuations::{
     ContinuationFiber, ContinuationObject, ContinuationReference, Payloads, StackChain,
-    StackLimits, State,
+    StackChainCell, StackLimits, State,
 };
 use wasmtime_fibre::{Fiber, FiberStack, Suspend};
 
@@ -187,7 +187,7 @@ pub fn resume(
         // SAFETY: We maintain as an invariant that the stack chain field in the
         // VMContext is non-null and contains a chain of zero or more
         // StackChain::Continuation values followed by StackChain::Main.
-        match unsafe { &*chain } {
+        match unsafe { (**chain).0.get_mut() } {
             StackChain::Continuation(running_contobj) => {
                 debug_assert_eq!(contobj, *running_contobj);
                 debug_println!(
@@ -273,7 +273,7 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason
     // SAFETY: We maintain as an invariant that the stack chain field in the
     // VMContext is non-null and contains a chain of zero or more
     // StackChain::Continuation values followed by StackChain::Main.
-    let chain = unsafe { &*chain_ptr };
+    let chain = unsafe { (**chain_ptr).0.get_mut() };
     let running = match chain {
         StackChain::Absent => Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
             "Internal error: StackChain not initialised"

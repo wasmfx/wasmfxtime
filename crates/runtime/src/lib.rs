@@ -8,6 +8,7 @@ use std::fmt;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use wasmtime_continuations::{StackChain, StackChainCell};
 use wasmtime_environ::{DefinedFuncIndex, DefinedMemoryIndex, HostPtr, VMOffsets};
 
 mod arch;
@@ -96,6 +97,10 @@ pub unsafe trait Store {
     /// Used to configure `VMContext` initialization and store the right pointer
     /// in the `VMContext`.
     fn vmruntime_limits(&self) -> *mut VMRuntimeLimits;
+
+    /// Used to configure `VMContext` initialization and store the right pointer
+    /// in the `VMContext`.
+    fn stack_chain(&self) -> *mut StackChainCell;
 
     /// Returns a pointer to the global epoch counter.
     ///

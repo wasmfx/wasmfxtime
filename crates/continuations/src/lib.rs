@@ -1,4 +1,4 @@
-use std::ptr;
+use std::{cell::UnsafeCell, ptr};
 use wasmtime_fibre::Fiber;
 
 /// TODO
@@ -131,6 +131,25 @@ impl StackChain {
     pub const MAIN_STACK_DISCRIMINANT: usize = STACK_CHAIN_MAIN_STACK_DISCRIMINANT;
     pub const CONTINUATION_DISCRIMINANT: usize = STACK_CHAIN_CONTINUATION_DISCRIMINANT;
 }
+
+#[repr(transparent)]
+pub struct StackChainCell(pub UnsafeCell<StackChain>);
+
+impl StackChainCell {
+    pub fn absent() -> Self {
+        StackChainCell(UnsafeCell::new(StackChain::Absent))
+    }
+}
+
+// Since `StackChain` and `StackLimits` objects appear in the `StoreOpaque`,
+// they need to be `Send` and `Sync`.
+// This is safe for the same reason it is for `VMRuntimeLimits` (see comment
+// there): Both types are pod-type with no destructor, and we don't access any
+// of their fields from other threads.
+unsafe impl Send for StackLimits {}
+unsafe impl Sync for StackLimits {}
+unsafe impl Send for StackChainCell {}
+unsafe impl Sync for StackChainCell {}
 
 pub struct Payloads {
     /// Number of currently occupied slots.
