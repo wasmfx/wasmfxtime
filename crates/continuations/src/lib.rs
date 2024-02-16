@@ -33,23 +33,12 @@ pub type ContinuationFiber = Fiber<'static, (), u32, ()>;
 /// This type is used to save (and subsequently restore) a subset of the data in
 /// `VMRuntimeLimits`. See documentation of `StackChain` for the exact uses.
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct StackLimits {
     pub stack_limit: usize,
     pub last_wasm_exit_fp: usize,
     pub last_wasm_exit_pc: usize,
     pub last_wasm_entry_sp: usize,
-}
-
-impl Default for StackLimits {
-    fn default() -> Self {
-        Self {
-            stack_limit: 0,
-            last_wasm_exit_fp: 0,
-            last_wasm_exit_pc: 0,
-            last_wasm_entry_sp: 0,
-        }
-    }
 }
 
 impl StackLimits {
