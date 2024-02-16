@@ -95,6 +95,7 @@ use std::ptr;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use wasmtime_runtime::continuation::{StackChain, StackChainCell, StackLimits};
 use wasmtime_runtime::mpk::{self, ProtectionKey, ProtectionMask};
 use wasmtime_runtime::{
     ExportGlobal, InstanceAllocationRequest, InstanceAllocator, InstanceHandle, ModuleInfo,
@@ -303,6 +304,21 @@ pub struct StoreOpaque {
 
     engine: Engine,
     runtime_limits: VMRuntimeLimits,
+
+    // Stack information used by typed continuations instructions. See
+    // documentation on `wasmtime_continuations::StackChain` for details.
+    //
+    // Note that in terms of (interior) mutability, we generally follow the same
+    // pattern as the `VMRuntimeLimits` object above: In the case of
+    // `StackLimits`, all of its fields are `UnsafeCell`s. For the stack chain,
+    // we wrap the entire `StackChainObject` in an `UnsafeCell`.
+    //
+    // Finally, observe that the stack chain adds more internal self references:
+    // The stack chain always contains a `MainStack` element at the ends which
+    // has a pointer to the `main_stack_limits` field of the same `StoreOpaque`.
+    main_stack_limits: StackLimits,
+    stack_chain: StackChainCell,
+
     instances: Vec<StoreInstance>,
     #[cfg(feature = "component-model")]
     num_component_instances: usize,
@@ -492,6 +508,8 @@ impl<T> Store<T> {
                 _marker: marker::PhantomPinned,
                 engine: engine.clone(),
                 runtime_limits: Default::default(),
+                main_stack_limits: Default::default(),
+                stack_chain: StackChainCell::absent(),
                 instances: Vec::new(),
                 #[cfg(feature = "component-model")]
                 num_component_instances: 0,
@@ -572,6 +590,15 @@ impl<T> Store<T> {
             }
             instance
         };
+
+        unsafe {
+            // NOTE(frank-emrich) The setup code for `default_caller` above
+            // together with the comment on the `PhantomPinned` marker inside
+            // `Store` indicates that `inner` is supposed to be at a stable
+            // location at this point, without explicitly being `Pin`-ed.
+            let stack_chain = inner.stack_chain.0.get();
+            *stack_chain = StackChain::MainStack(inner.main_stack_limits());
+        }
 
         Self {
             inner: ManuallyDrop::new(inner),
@@ -1513,6 +1540,20 @@ impl StoreOpaque {
         &self.runtime_limits as *const VMRuntimeLimits as *mut VMRuntimeLimits
     }
 
+    #[inline]
+    pub fn main_stack_limits(&self) -> *mut StackLimits {
+        // NOTE(frank-emrich) This looks dogdy, but follows the same pattern as
+        // `vmruntime_limits()` above.
+        &self.main_stack_limits as *const StackLimits as *mut StackLimits
+    }
+
+    #[inline]
+    pub fn stack_chain(&self) -> *mut StackChainCell {
+        // NOTE(frank-emrich) This looks dogdy, but follows the same pattern as
+        // `vmruntime_limits()` above.
+        &self.stack_chain as *const StackChainCell as *mut StackChainCell
+    }
+
     pub unsafe fn insert_vmexternref_without_gc(&mut self, r: VMExternRef) {
         self.externref_activations_table.insert_without_gc(r);
     }
@@ -2023,6 +2064,10 @@ impl AsyncCx {
 unsafe impl<T> wasmtime_runtime::Store for StoreInner<T> {
     fn vmruntime_limits(&self) -> *mut VMRuntimeLimits {
         <StoreOpaque>::vmruntime_limits(self)
+    }
+
+    fn stack_chain(&self) -> *mut StackChainCell {
+        <StoreOpaque>::stack_chain(self)
     }
 
     fn epoch_ptr(&self) -> *const AtomicU64 {

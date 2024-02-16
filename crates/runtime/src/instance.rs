@@ -26,6 +26,7 @@ use std::ptr::NonNull;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::{mem, ptr};
+use wasmtime_continuations::StackChainCell;
 use wasmtime_environ::ModuleInternedTypeIndex;
 use wasmtime_environ::{
     packed_option::ReservedValue, DataIndex, DefinedGlobalIndex, DefinedMemoryIndex,
@@ -432,6 +433,14 @@ impl Instance {
         unsafe { self.vmctx_plus_offset_mut(self.offsets().vmctx_runtime_limits()) }
     }
 
+    /// Return a pointer to the stack chain
+    #[inline]
+    pub fn stack_chain(&mut self) -> *mut *mut StackChainCell {
+        unsafe {
+            self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_stack_chain())
+        }
+    }
+
     /// Return a pointer to the global epoch counter used by this instance.
     pub fn epoch_ptr(&mut self) -> *mut *const AtomicU64 {
         unsafe { self.vmctx_plus_offset_mut(self.offsets().vmctx_epoch_ptr()) }
@@ -464,6 +473,7 @@ impl Instance {
         if let Some(store) = store {
             *self.vmctx_plus_offset_mut(self.offsets().vmctx_store()) = store;
             *self.runtime_limits() = (*store).vmruntime_limits();
+            *self.stack_chain() = (*store).stack_chain();
             *self.epoch_ptr() = (*store).epoch_ptr();
             *self.externref_activations_table() = (*store).externref_activations_table().0;
         } else {
@@ -1133,13 +1143,6 @@ impl Instance {
         *self.vmctx_plus_offset_mut(offsets.vmctx_builtin_functions()) =
             &VMBuiltinFunctionsArray::INIT;
 
-        let main_stack_limits_ptr =
-            self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_main_stack_limits());
-        *main_stack_limits_ptr = wasmtime_continuations::StackLimits::default();
-
-        *self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_stack_chain()) =
-            wasmtime_continuations::StackChain::MainStack(main_stack_limits_ptr);
-
         // Initialize the Payloads object to be empty
         let vmctx_payloads: *mut wasmtime_continuations::Payloads =
             self.vmctx_plus_offset_mut(offsets.vmctx_typed_continuations_payloads());
@@ -1283,18 +1286,9 @@ impl Instance {
         fault
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn typed_continuations_main_stack_limits(
-        &mut self,
-    ) -> *mut wasmtime_continuations::StackLimits {
-        unsafe {
-            self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_main_stack_limits())
-        }
-    }
-
     pub(crate) fn typed_continuations_stack_chain(
         &mut self,
-    ) -> *mut wasmtime_continuations::StackChain {
+    ) -> *mut *mut wasmtime_continuations::StackChainCell {
         unsafe {
             self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_stack_chain())
         }
@@ -1303,7 +1297,7 @@ impl Instance {
     #[allow(dead_code)]
     pub(crate) fn set_typed_continuations_stack_chain(
         &mut self,
-        chain: *mut wasmtime_continuations::StackChain,
+        chain: *mut *mut wasmtime_continuations::StackChainCell,
     ) {
         unsafe {
             let ptr =
