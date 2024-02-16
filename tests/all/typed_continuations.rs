@@ -183,6 +183,10 @@ async fn sched_yield_test_async() -> Result<()> {
     Ok(())
 }
 
+/// Test that we can handle a `suspend` from another instance. Note that this
+/// test is working around the fact that wasmtime does not support exporting
+/// tags at the moment. Thus, instead of sharing a tag between two modules, we
+/// instantiate the same module twice to share a tag.
 #[test]
 fn inter_instance_suspend() -> Result<()> {
     let mut config = Config::default();
