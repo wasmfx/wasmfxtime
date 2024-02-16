@@ -765,7 +765,11 @@ pub(crate) mod typed_continuation_helpers {
 
             // The `typed_continuations_stack_chain` field of the VMContext only
             // contains a pointer to the `StackChainCell` in the `Store`.
-            let memflags = ir::MemFlags::trusted();
+            // The pointer never changes through the liftime of a `VMContext`,
+            // which is why this load is `readonly`.
+            // TODO(frank-emrich) Consider turning this pointer into a global
+            // variable, similar to `env.vmruntime_limits_ptr`.
+            let memflags = ir::MemFlags::trusted().with_readonly();
             let stack_chain_ptr =
                 builder
                     .ins()
@@ -787,9 +791,9 @@ pub(crate) mod typed_continuation_helpers {
             let offset =
                 i32::try_from(env.offsets.vmctx_typed_continuations_stack_chain()).unwrap();
 
-            // The `typed_continuations_stack_chain` field of the VMContext only
-            // contains a pointer to the `StackChainCell` in the `Store`.
-            let memflags = ir::MemFlags::trusted();
+            // Same situation as in `load_stack_chain` regarding pointer
+            // indirection and it being `readonly`.
+            let memflags = ir::MemFlags::trusted().with_readonly();
             let stack_chain_ptr =
                 builder
                     .ins()

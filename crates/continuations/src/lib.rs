@@ -141,7 +141,7 @@ impl StackChainCell {
     }
 }
 
-// Since `StackChain` and `StackLimits` objects appear in the `StoreOpaque`,
+// Since `StackChainCell` and `StackLimits` objects appear in the `StoreOpaque`,
 // they need to be `Send` and `Sync`.
 // This is safe for the same reason it is for `VMRuntimeLimits` (see comment
 // there): Both types are pod-type with no destructor, and we don't access any

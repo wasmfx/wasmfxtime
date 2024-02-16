@@ -8,7 +8,7 @@ use std::fmt;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use wasmtime_continuations::{StackChain, StackChainCell};
+use wasmtime_continuations::StackChainCell;
 use wasmtime_environ::{DefinedFuncIndex, DefinedMemoryIndex, HostPtr, VMOffsets};
 
 mod arch;

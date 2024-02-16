@@ -307,6 +307,15 @@ pub struct StoreOpaque {
 
     // Stack information used by typed continuations instructions. See
     // documentation on `wasmtime_continuations::StackChain` for details.
+    //
+    // Note that in terms of (interior) mutability, we generally follow the same
+    // pattern as the `VMRuntimeLimits` object above: In the case of
+    // `StackLimits`, all of its fields are `UnsafeCell`s. For the stack chain,
+    // we wrap the entire `StackChainObject` in an `UnsafeCell`.
+    //
+    // Finally, observe that the stack chain adds more internal self references:
+    // The stack chain always contains a `MainStack` element at the ends which
+    // has a pointer to the `main_stack_limits` field of the same `StoreOpaque`.
     main_stack_limits: StackLimits,
     stack_chain: StackChainCell,
 
