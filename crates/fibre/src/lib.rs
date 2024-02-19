@@ -39,18 +39,20 @@ impl SwitchReasonEnum {
 /// are switching. A nicer way of representing this type would be the following
 /// enum:
 ///
-///   #[repr(C)]
-///   pub enum SwitchReason {
-///       // Used to indicate that the contination has returned normally.
-///       Return = 0,
+///```
+///  #[repr(C, u32)]
+///  pub enum SwitchReason {
+///      // Used to indicate that the contination has returned normally.
+///      Return = 0,
 ///
-///       // Indicates that we are suspendinga continuation due to invoking suspend.
-///       // The payload is the tag to suspend with
-///       Suspend(u32) = 1,
+///      // Indicates that we are suspendinga continuation due to invoking suspend.
+///      // The payload is the tag to suspend with
+///      Suspend(u32) = 1,
 ///
-///       // Indicates that we are resuming a continuation via resume.
-///       Resume = 2,
-///   }
+///      // Indicates that we are resuming a continuation via resume.
+///      Resume = 2,
+///  }
+///```
 ///
 /// However, we want to convert values of type `SwitchReason` to and from u64
 /// easily, which is why we need to ensure that it contains no uninitialised
