@@ -1328,7 +1328,7 @@ pub(crate) fn translate_resume<'a>(
     // to resume objects other than `original_contobj`.
     // We make the continuation object that was actually resumed available via
     // `resumed_contobj`, so that subsequent blocks can refer to it.
-    let tag = {
+    let resume_result = {
         builder.switch_to_block(resume_block);
 
         // We mark `resume_contobj` as the currently running one
@@ -1360,42 +1360,52 @@ pub(crate) fn translate_resume<'a>(
             [resume_contobj, parent_stacks_limit_pointer]
         );
 
+        emit_debug_println!(
+            env,
+            builder,
+            "[resume] libcall finished, result is {:p}",
+            result
+        );
+
         // Now the parent contobj (or main stack) is active again
         vmctx.store_stack_chain(env, builder, &parent_stack_chain);
 
-        // The result encodes whether the return happens via ordinary
-        // means or via a suspend. If the high bit is set, then it is
-        // interpreted as the return happened via a suspend, and the
-        // remainder of the integer is to be interpreted as the index
-        // of the control tag that was supplied to the suspend.
-        let signal_mask = 0xf000_0000;
-        let inverse_signal_mask = 0x0fff_ffff;
-        let signal = builder.ins().band_imm(result, signal_mask);
-        let tag = builder.ins().band_imm(result, inverse_signal_mask);
+        // The `result` is a value of type wasmtime_fibre::SwitchReason,
+        // using the encoding described at its definition.
+        // Thus, the first 32 bit encode the discriminant, and the
+        // subsequent 32 bit encode the tag if suspending, or 0 otherwise.
+        // Thus, when returning, the overall u64 should be zero.
+        let return_discriminant =
+            wasmtime_continuations::SwitchReasonEnum::Return.discriminant_val();
+        debug_assert_eq!(return_discriminant, 0);
 
-        // Description of results:
-        // * The `base_addr` is the base address of VM context.
-        // * The `signal` is an encoded boolean indicating whether
-        // the `resume` returned ordinarily or via a suspend
-        // instruction.
-        // * The `tag` is the index of the control tag supplied to
-        // suspend (only valid if `signal` is 1).
+        // If these two assumptions don't hold anymore, the code here becomes invalid.
+        debug_assert_eq!(
+            std::mem::size_of::<wasmtime_continuations::types::switch_reason::Discriminant>(),
+            4
+        );
+        debug_assert_eq!(
+            std::mem::size_of::<wasmtime_continuations::types::switch_reason::Data>(),
+            4
+        );
 
-        // Test the signal bit.
-        let is_zero = builder.ins().icmp_imm(IntCC::Equal, signal, 0);
+        if cfg!(debug_assertions) {
+            let discriminant = builder.ins().ireduce(I32, result);
+            emit_debug_println!(env, builder, "[resume] discriminant is {}", discriminant);
+        }
 
-        // Jump to the return block if the signal is 0, otherwise
-        // jump to the suspend block.
+        // Jump to the return block if the result is 0, otherwise jump to
+        // the suspend block.
         builder
             .ins()
-            .brif(is_zero, return_block, &[], suspend_block, &[]);
+            .brif(result, suspend_block, &[], return_block, &[]);
 
         // We do not seal this block, yet, because the effect forwarding block has a back edge to it
-        tag
+        result
     };
 
     // Suspend block.
-    {
+    let tag = {
         builder.switch_to_block(suspend_block);
         builder.seal_block(suspend_block);
 
@@ -1408,8 +1418,28 @@ pub(crate) fn translate_resume<'a>(
         // parent of the suspended continuation (which is now active).
         parent_stack_chain.write_limits_to_vmcontext(env, builder, env.vmruntime_limits_ptr);
 
+        let discriminant = builder.ins().ireduce(I32, resume_result);
+        let discriminant_size_bytes =
+            std::mem::size_of::<wasmtime_continuations::types::switch_reason::Discriminant>();
+
+        if cfg!(debug_assertions) {
+            let suspend_discriminant =
+                wasmtime_continuations::SwitchReasonEnum::Suspend.discriminant_val();
+            let suspend_discriminant = builder.ins().iconst(I32, suspend_discriminant as i64);
+            emit_debug_assert_eq!(env, builder, discriminant, suspend_discriminant);
+        }
+
+        let tag = builder
+            .ins()
+            .ushr_imm(resume_result, discriminant_size_bytes as i64 * 8);
+        let tag = builder.ins().ireduce(I32, tag);
+
+        emit_debug_println!(env, builder, "[resume] in suspend block, tag is {}", tag);
+
         // We need to terminate this block before being allowed to switch to another one
         builder.ins().jump(switch_block, &[]);
+
+        tag
     };
 
     // Now, construct blocks for the three continuations:
