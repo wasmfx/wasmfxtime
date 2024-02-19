@@ -230,7 +230,7 @@ pub fn resume(
             .get_mut()) = 0
     };
 
-    unsafe { fiber.as_mut().unwrap().resume() }
+    Ok(fiber.resume())
 }
 
 /// TODO
@@ -276,7 +276,7 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason
 
     let suspend = wasmtime_fibre::unix::Suspend::from_top_ptr(stack_ptr);
     let payload = SwitchReason::suspend(tag_index);
-    suspend.switch(payload)
+    Ok(suspend.switch(payload))
 }
 
 #[allow(missing_docs)]

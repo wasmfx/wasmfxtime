@@ -805,7 +805,7 @@ fn tc_resume(
         contobj.cast::<crate::continuation::ContinuationObject>(),
         parent_stack_limits.cast::<crate::continuation::StackLimits>(),
     )
-    .into()
+    .map(|reason| reason.into())
 }
 
 fn tc_suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {
