@@ -54,7 +54,7 @@ macro_rules! foreach_builtin_function {
 
             /// Creates a new continuation from a funcref.
             tc_cont_new(vmctx: vmctx, r: pointer, param_count: i64, result_count: i64) -> pointer;
-            /// Resumes a continuation. The result value is of type wasmtime_fibre::SwitchReason.
+            /// Resumes a continuation. The result value is of type wasmtime_fibre::SwitchDirection.
             tc_resume(vmctx: vmctx, contobj: pointer, parent_stack_limits: pointer) -> i64;
             /// Suspends a continuation.
             tc_suspend(vmctx: vmctx, tag: i32);

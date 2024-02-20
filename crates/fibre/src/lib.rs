@@ -14,9 +14,9 @@ cfg_if::cfg_if! {
 
 pub type TagId = u32;
 
-/// See SwitchReason for overall use of this type.
+/// See SwitchDirection for overall use of this type.
 #[repr(u32)]
-pub enum SwitchReasonEnum {
+pub enum SwitchDirectionEnum {
     // Used to indicate that the contination has returned normally.
     Return = 0,
 
@@ -28,10 +28,10 @@ pub enum SwitchReasonEnum {
     Resume = 2,
 }
 
-impl SwitchReasonEnum {
+impl SwitchDirectionEnum {
     pub fn discriminant_val(&self) -> u32 {
         // This is well-defined for an enum with repr(u32).
-        unsafe { *(self as *const SwitchReasonEnum as *const u32) }
+        unsafe { *(self as *const SwitchDirectionEnum as *const u32) }
     }
 }
 
@@ -41,7 +41,7 @@ impl SwitchReasonEnum {
 ///
 ///```
 ///  #[repr(C, u32)]
-///  pub enum SwitchReason {
+///  pub enum SwitchDirection {
 ///      // Used to indicate that the contination has returned normally.
 ///      Return = 0,
 ///
@@ -54,7 +54,7 @@ impl SwitchReasonEnum {
 ///  }
 ///```
 ///
-/// However, we want to convert values of type `SwitchReason` to and from u64
+/// However, we want to convert values of type `SwitchDirection` to and from u64
 /// easily, which is why we need to ensure that it contains no uninitialised
 /// memory, to avoid undefined behavior.
 ///
@@ -62,58 +62,58 @@ impl SwitchReasonEnum {
 /// In that representation, bits 0 to 31 (where 0 is the LSB) contain the
 /// discriminant (as u32), while bits 32 to 63 contain the `data`.
 #[repr(C)]
-pub struct SwitchReason {
-    discriminant: SwitchReasonEnum,
+pub struct SwitchDirection {
+    discriminant: SwitchDirectionEnum,
 
     // Stores tag value if `discriminant` is `suspend`, 0 otherwise.
     data: u32,
 }
 
-impl SwitchReason {
-    pub fn return_() -> SwitchReason {
-        SwitchReason {
-            discriminant: SwitchReasonEnum::Return,
+impl SwitchDirection {
+    pub fn return_() -> SwitchDirection {
+        SwitchDirection {
+            discriminant: SwitchDirectionEnum::Return,
             data: 0,
         }
     }
 
-    pub fn resume() -> SwitchReason {
-        SwitchReason {
-            discriminant: SwitchReasonEnum::Resume,
+    pub fn resume() -> SwitchDirection {
+        SwitchDirection {
+            discriminant: SwitchDirectionEnum::Resume,
             data: 0,
         }
     }
 
-    pub fn suspend(tag: u32) -> SwitchReason {
-        SwitchReason {
-            discriminant: SwitchReasonEnum::Suspend,
+    pub fn suspend(tag: u32) -> SwitchDirection {
+        SwitchDirection {
+            discriminant: SwitchDirectionEnum::Suspend,
             data: tag,
         }
     }
 }
 
-impl Into<u64> for SwitchReason {
+impl Into<u64> for SwitchDirection {
     fn into(self) -> u64 {
         // TODO(frank-emrich) This assumes little endian data layout. Should
         // make this more explicit.
-        unsafe { std::mem::transmute::<SwitchReason, u64>(self) }
+        unsafe { std::mem::transmute::<SwitchDirection, u64>(self) }
     }
 }
 
-impl From<u64> for SwitchReason {
-    fn from(val: u64) -> SwitchReason {
+impl From<u64> for SwitchDirection {
+    fn from(val: u64) -> SwitchDirection {
         #[cfg(debug_assertions)]
         {
             let discriminant = val as u32;
             debug_assert!(discriminant <= 2);
-            if discriminant != SwitchReasonEnum::Suspend.discriminant_val() {
+            if discriminant != SwitchDirectionEnum::Suspend.discriminant_val() {
                 let data = val >> 32;
                 debug_assert_eq!(data, 0);
             }
         }
         // TODO(frank-emrich) This assumes little endian data layout. Should
         // make this more explicit.
-        unsafe { std::mem::transmute::<u64, SwitchReason>(val) }
+        unsafe { std::mem::transmute::<u64, SwitchDirection>(val) }
     }
 }
 
@@ -207,12 +207,12 @@ impl Fiber {
     ///
     /// Note that if the fiber itself panics during execution then the panic
     /// will be propagated to this caller.
-    pub fn resume(&self) -> SwitchReason {
+    pub fn resume(&self) -> SwitchDirection {
         assert!(!self.done.replace(true), "cannot resume a finished fiber");
         let reason = self.inner.resume(&self.stack.0);
         match reason {
-            SwitchReason {
-                discriminant: SwitchReasonEnum::Suspend,
+            SwitchDirection {
+                discriminant: SwitchDirectionEnum::Suspend,
                 data: _,
             } => self.done.set(false),
             _ => (),
@@ -242,7 +242,7 @@ impl Suspend {
     ///
     /// Panics if the current thread is not executing a fiber from this library.
     pub fn suspend(&self, tag: TagId) {
-        let reason = SwitchReason::suspend(tag);
+        let reason = SwitchDirection::suspend(tag);
         self.inner.switch(reason);
     }
 
@@ -256,7 +256,7 @@ impl Suspend {
         // instead just reporting parent. We eschew this, doing nothing special
         // about panics.
         (func)((), &suspend);
-        let reason = SwitchReason::return_();
+        let reason = SwitchDirection::return_();
         suspend.inner.switch(reason);
     }
 }

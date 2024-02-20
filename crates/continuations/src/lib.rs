@@ -1,7 +1,7 @@
 use std::{cell::UnsafeCell, ptr};
 use wasmtime_fibre::Fiber;
 
-pub use wasmtime_fibre::{SwitchReason, SwitchReasonEnum, TagId};
+pub use wasmtime_fibre::{SwitchDirection, SwitchDirectionEnum, TagId};
 
 /// TODO
 #[allow(dead_code)]
@@ -29,7 +29,7 @@ pub mod types {
         pub type DataEntries = u128;
     }
 
-    /// Types used by `wasmtime_fibre::SwitchReason` struct
+    /// Types used by `wasmtime_fibre::SwitchDirection` struct
     pub mod switch_reason {
         /// Type of `discriminant` field
         pub type Discriminant = u32;

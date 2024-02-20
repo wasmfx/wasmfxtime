@@ -31,7 +31,7 @@
 
 #![allow(unused_macros)]
 
-use crate::SwitchReason;
+use crate::SwitchDirection;
 use std::alloc::{alloc, dealloc, Layout};
 use std::io;
 use std::ops::Range;
@@ -162,16 +162,16 @@ impl Fiber {
         Ok(Self)
     }
 
-    pub(crate) fn resume(&self, stack: &FiberStack) -> SwitchReason {
+    pub(crate) fn resume(&self, stack: &FiberStack) -> SwitchDirection {
         unsafe {
-            let reason = SwitchReason::resume().into();
-            SwitchReason::from(wasmtime_fibre_switch(stack.top, reason))
+            let reason = SwitchDirection::resume().into();
+            SwitchDirection::from(wasmtime_fibre_switch(stack.top, reason))
         }
     }
 }
 
 impl Suspend {
-    pub fn switch(&self, payload: SwitchReason) {
+    pub fn switch(&self, payload: SwitchDirection) {
         unsafe {
             let arg = payload.into();
             wasmtime_fibre_switch(self.0, arg);

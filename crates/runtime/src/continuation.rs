@@ -9,7 +9,7 @@ pub use wasmtime_continuations::{
     ContinuationFiber, ContinuationObject, ContinuationReference, Payloads, StackChain,
     StackChainCell, StackLimits, State,
 };
-use wasmtime_fibre::{Fiber, FiberStack, Suspend, SwitchReason};
+use wasmtime_fibre::{Fiber, FiberStack, Suspend, SwitchDirection};
 
 type Yield = Suspend;
 
@@ -165,7 +165,7 @@ pub fn resume(
     instance: &mut Instance,
     contobj: *mut ContinuationObject,
     parent_stack_limits: *mut StackLimits,
-) -> Result<SwitchReason, TrapReason> {
+) -> Result<SwitchDirection, TrapReason> {
     let cont = unsafe {
         contobj.as_ref().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
@@ -275,7 +275,7 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason
     );
 
     let suspend = wasmtime_fibre::unix::Suspend::from_top_ptr(stack_ptr);
-    let payload = SwitchReason::suspend(tag_index);
+    let payload = SwitchDirection::suspend(tag_index);
     Ok(suspend.switch(payload))
 }
 

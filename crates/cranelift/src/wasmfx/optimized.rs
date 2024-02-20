@@ -1370,13 +1370,13 @@ pub(crate) fn translate_resume<'a>(
         // Now the parent contobj (or main stack) is active again
         vmctx.store_stack_chain(env, builder, &parent_stack_chain);
 
-        // The `result` is a value of type wasmtime_fibre::SwitchReason,
+        // The `result` is a value of type wasmtime_fibre::SwitchDirection,
         // using the encoding described at its definition.
         // Thus, the first 32 bit encode the discriminant, and the
         // subsequent 32 bit encode the tag if suspending, or 0 otherwise.
         // Thus, when returning, the overall u64 should be zero.
         let return_discriminant =
-            wasmtime_continuations::SwitchReasonEnum::Return.discriminant_val();
+            wasmtime_continuations::SwitchDirectionEnum::Return.discriminant_val();
         debug_assert_eq!(return_discriminant, 0);
 
         // If these two assumptions don't hold anymore, the code here becomes invalid.
@@ -1424,7 +1424,7 @@ pub(crate) fn translate_resume<'a>(
 
         if cfg!(debug_assertions) {
             let suspend_discriminant =
-                wasmtime_continuations::SwitchReasonEnum::Suspend.discriminant_val();
+                wasmtime_continuations::SwitchDirectionEnum::Suspend.discriminant_val();
             let suspend_discriminant = builder.ins().iconst(I32, suspend_discriminant as i64);
             emit_debug_assert_eq!(env, builder, discriminant, suspend_discriminant);
         }
