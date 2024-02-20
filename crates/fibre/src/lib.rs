@@ -254,7 +254,10 @@ impl Suspend {
         // Note that the original wasmtime-fiber crate runs `func` wrapped in
         // `panic::catch_unwind`, to stop panics from being propagated onward,
         // instead just reporting parent. We eschew this, doing nothing special
-        // about panics.
+        // about panics. This is justified because we only ever call this
+        // function such that `func` is a closure around a call to a
+        // `VMArrayCallFunction`, namely a host-to-wasm trampoline. It is thus
+        // guaranteed not to panic.
         (func)((), &suspend);
         let reason = SwitchDirection::return_();
         suspend.inner.switch(reason);
