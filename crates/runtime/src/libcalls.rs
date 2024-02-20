@@ -190,13 +190,6 @@ pub mod trampolines {
             self
         }
     }
-
-    impl LibcallResult for u64 {
-        type Abi = u64;
-        unsafe fn convert(self) -> u64 {
-            self
-        }
-    }
 }
 
 fn memory32_grow(
