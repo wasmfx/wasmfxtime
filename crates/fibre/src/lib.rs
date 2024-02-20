@@ -1,6 +1,5 @@
 use std::cell::Cell;
 use std::io;
-use std::marker::PhantomData;
 use std::ops::Range;
 
 cfg_if::cfg_if! {
@@ -167,12 +166,10 @@ pub struct Fiber {
     stack: FiberStack,
     inner: imp::Fiber,
     done: Cell<bool>,
-    _phantom: PhantomData<()>,
 }
 
 pub struct Suspend {
     inner: imp::Suspend,
-    _phantom: PhantomData<()>,
 }
 
 impl Fiber {
@@ -188,7 +185,6 @@ impl Fiber {
             stack,
             inner,
             done: Cell::new(false),
-            _phantom: PhantomData,
         })
     }
 
@@ -247,10 +243,7 @@ impl Suspend {
     }
 
     fn execute(inner: imp::Suspend, func: impl FnOnce((), &Suspend) -> ()) {
-        let suspend = Suspend {
-            inner,
-            _phantom: PhantomData,
-        };
+        let suspend = Suspend { inner };
         // Note that the original wasmtime-fiber crate runs `func` wrapped in
         // `panic::catch_unwind`, to stop panics from being propagated onward,
         // instead just reporting parent. We eschew this, doing nothing special
