@@ -1370,7 +1370,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     ) -> WasmResult<ir::Value> {
         let (func_idx, func_sig) =
             match self.module.table_plans[table_index].table.wasm_ty.heap_type {
-                WasmHeapType::Func | WasmHeapType::Concrete(_) => (
+                WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => (
                     BuiltinFunctionIndex::table_grow_func_ref(),
                     self.builtin_function_signatures
                         .table_grow_func_ref(&mut pos.func),
@@ -1406,7 +1406,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
         let plan = &self.module.table_plans[table_index];
         match plan.table.wasm_ty.heap_type {
-            WasmHeapType::Func | WasmHeapType::Concrete(_) => match plan.style {
+            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => match plan
+                .style
+            {
                 TableStyle::CallerChecksSignature => {
                     Ok(self.get_or_init_func_ref_table_elem(builder, table_index, table, index))
                 }
@@ -1542,7 +1544,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let pointer_type = self.pointer_type();
         let plan = &self.module.table_plans[table_index];
         match plan.table.wasm_ty.heap_type {
-            WasmHeapType::Func | WasmHeapType::Concrete(_) => match plan.style {
+            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => match plan
+                .style
+            {
                 TableStyle::CallerChecksSignature => {
                     let table_entry_addr = builder.ins().table_addr(pointer_type, table, index, 0);
                     // Set the "initialized bit". See doc-comment on
@@ -1704,7 +1708,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     ) -> WasmResult<()> {
         let (builtin_idx, builtin_sig) =
             match self.module.table_plans[table_index].table.wasm_ty.heap_type {
-                WasmHeapType::Func | WasmHeapType::Concrete(_) => (
+                WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => (
                     BuiltinFunctionIndex::table_fill_func_ref(),
                     self.builtin_function_signatures
                         .table_fill_func_ref(&mut pos.func),
@@ -1736,7 +1740,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         ht: WasmHeapType,
     ) -> WasmResult<ir::Value> {
         Ok(match ht {
-            WasmHeapType::Func | WasmHeapType::Concrete(_) => {
+            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => {
                 pos.ins().iconst(self.pointer_type(), 0)
             }
             WasmHeapType::Cont | WasmHeapType::NoCont => {
@@ -2091,7 +2095,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             // entire lifetime of the `Store` so there's no need for barriers.
             // This means that they can fall through to memory as well.
             WasmValType::Ref(WasmRefType {
-                heap_type: WasmHeapType::Func | WasmHeapType::Concrete(_),
+                heap_type: WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc,
                 ..
             }) => {}
 
