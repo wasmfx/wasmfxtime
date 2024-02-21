@@ -174,13 +174,16 @@ pub enum Table {
 
 pub type TableValue = Option<SendSyncPtr<u8>>;
 
-fn wasm_to_table_type(ty: WasmRefType) -> Result<TableElementType> {
+fn wasm_to_table_type(ty: WasmRefType) -> TableElementType {
     match ty.heap_type {
-        WasmHeapType::Func => Ok(TableElementType::Func),
-        WasmHeapType::Extern => Ok(TableElementType::Extern),
-        WasmHeapType::Concrete(_) => Ok(TableElementType::Func),
-        WasmHeapType::Cont => todo!(), // TODO(dhil): revisit this later.
-        WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
+        WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => {
+            TableElementType::Func
+        }
+        WasmHeapType::Cont | WasmHeapType::NoCont => {
+            TableElementType::Func // TODO(dhil): Maybe we should have
+                                   // a designated table element type for continuations.
+        }
+        WasmHeapType::Extern => TableElementType::Extern,
     }
 }
 
@@ -189,7 +192,7 @@ impl Table {
     pub fn new_dynamic(plan: &TablePlan, store: &mut dyn Store) -> Result<Self> {
         Self::limit_new(plan, store)?;
         let elements = vec![None; plan.table.minimum as usize];
-        let ty = wasm_to_table_type(plan.table.wasm_ty)?;
+        let ty = wasm_to_table_type(plan.table.wasm_ty);
         let maximum = plan.table.maximum;
 
         Ok(Table::Dynamic {
@@ -207,7 +210,7 @@ impl Table {
     ) -> Result<Self> {
         Self::limit_new(plan, store)?;
         let size = plan.table.minimum;
-        let ty = wasm_to_table_type(plan.table.wasm_ty)?;
+        let ty = wasm_to_table_type(plan.table.wasm_ty);
         if data.len() < (plan.table.minimum as usize) {
             bail!(
                 "initial table size of {} exceeds the pooling allocator's \

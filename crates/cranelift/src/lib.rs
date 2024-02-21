@@ -175,12 +175,11 @@ fn wasm_call_signature(
 /// Returns the reference type to use for the provided wasm type.
 fn reference_type(wasm_ht: cranelift_wasm::WasmHeapType, pointer_type: ir::Type) -> ir::Type {
     match wasm_ht {
-        cranelift_wasm::WasmHeapType::Func | cranelift_wasm::WasmHeapType::Concrete(_) => {
-            pointer_type
-        }
-        cranelift_wasm::WasmHeapType::Cont | cranelift_wasm::WasmHeapType::NoCont => {
-            todo!() // TODO(dhil): revisit this later.
-        }
+        cranelift_wasm::WasmHeapType::Func
+        | cranelift_wasm::WasmHeapType::Concrete(_)
+        | cranelift_wasm::WasmHeapType::NoFunc
+        | cranelift_wasm::WasmHeapType::Cont
+        | cranelift_wasm::WasmHeapType::NoCont => pointer_type,
         cranelift_wasm::WasmHeapType::Extern => match pointer_type {
             ir::types::I32 => ir::types::R32,
             ir::types::I64 => ir::types::R64,

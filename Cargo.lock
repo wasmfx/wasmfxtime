@@ -3318,7 +3318,6 @@ dependencies = [
  "wasi-common",
  "wasmtime",
  "wasmtime-c-api-macros",
- "wasmtime-wasi",
  "wat",
 ]
 
@@ -3711,12 +3710,10 @@ dependencies = [
  "cap-rand",
  "cap-std",
  "cap-time-ext",
- "cfg-if",
  "fs-set-times",
  "futures",
  "io-extras",
  "io-lifetimes",
- "log",
  "once_cell",
  "rustix",
  "system-interface",
@@ -3728,7 +3725,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
- "wasi-common",
  "wasmtime",
  "wiggle",
  "windows-sys 0.52.0",

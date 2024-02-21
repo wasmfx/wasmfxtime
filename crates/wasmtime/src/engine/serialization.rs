@@ -192,6 +192,7 @@ struct WasmFeatures {
     extended_const: bool,
     function_references: bool,
     typed_continuations: bool,
+    gc: bool,
 }
 
 impl Metadata<'_> {
@@ -225,7 +226,6 @@ impl Metadata<'_> {
         } = engine.config().features;
 
         assert!(!memory_control);
-        assert!(!gc);
         assert!(!component_model_values);
         assert!(!component_model_nested_names);
 
@@ -249,6 +249,7 @@ impl Metadata<'_> {
                 extended_const,
                 function_references,
                 typed_continuations,
+                gc,
             },
         }
     }
@@ -424,6 +425,7 @@ impl Metadata<'_> {
             extended_const,
             function_references,
             typed_continuations,
+            gc,
         } = self.features;
 
         Self::check_bool(
@@ -484,6 +486,7 @@ impl Metadata<'_> {
             other.typed_continuations,
             "WebAssembly typed-continuations support",
         )?;
+        Self::check_bool(gc, other.gc, "WebAssembly garbage collection support")?;
 
         Ok(())
     }
