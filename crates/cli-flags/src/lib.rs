@@ -185,6 +185,8 @@ wasmtime_option_group! {
         pub trap_on_grow_failure: Option<bool>,
         /// Maximum execution time of wasm code before timing out (1, 2s, 100ms, etc)
         pub timeout: Option<Duration>,
+        /// Size of stacks created with cont.new instructions
+        pub wasmfx_stack_size: Option<usize>,
         /// Configures support for all WebAssembly proposals implemented.
         pub all_proposals: Option<bool>,
         /// Configure support for the bulk memory proposal.
@@ -512,6 +514,10 @@ impl CommonOptions {
         }
         if let Some(enable) = self.opts.memory_init_cow {
             config.memory_init_cow(enable);
+        }
+
+        if let Some(wasmfx_stack_size) = self.wasm.wasmfx_stack_size {
+            config.wasmfx_stack_size(wasmfx_stack_size);
         }
 
         match_feature! {

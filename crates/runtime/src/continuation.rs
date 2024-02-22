@@ -13,7 +13,8 @@ use wasmtime_fibre::{Fiber, FiberStack, Suspend, SwitchDirection};
 
 type Yield = Suspend;
 
-const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
+/// Default size for continuation stacks
+pub const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
 
 /// TODO
 #[inline(always)]
@@ -131,8 +132,11 @@ pub fn cont_new(
     let capacity = cmp::max(param_count, result_count);
     let payload = Payloads::new(capacity);
 
+    let wasmfx_config = unsafe { &*(*instance.store()).wasmfx_config() };
+    let fiber_size = wasmfx_config.stack_size;
+
     let fiber = {
-        let stack = FiberStack::malloc(DEFAULT_FIBER_SIZE)
+        let stack = FiberStack::malloc(fiber_size)
             .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
         let args_ptr = payload.data;
         let fiber = Fiber::new(stack, move |_first_val: (), _suspend: &Yield| unsafe {

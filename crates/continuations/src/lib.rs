@@ -39,6 +39,15 @@ pub mod types {
     }
 }
 
+/// Runtime configuration options for WasmFX that can be set via the command
+/// line.
+///
+/// Part of wasmtime::config::Config type (which is not in scope in this crate).
+#[derive(Clone)]
+pub struct WasmFxConfig {
+    pub stack_size: usize,
+}
+
 pub type ContinuationFiber = Fiber;
 
 /// This type is used to save (and subsequently restore) a subset of the data in
