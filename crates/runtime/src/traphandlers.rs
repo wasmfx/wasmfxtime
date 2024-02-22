@@ -5,13 +5,14 @@ mod backtrace;
 mod coredump;
 
 use crate::sys::traphandlers;
-use crate::{Instance, VMContext, VMRuntimeLimits};
+use crate::{Instance, VMContext, VMOpaqueContext, VMRuntimeLimits};
 use anyhow::Error;
 use std::any::Any;
 use std::cell::{Cell, UnsafeCell};
 use std::mem::MaybeUninit;
 use std::ptr;
 use std::sync::Once;
+use wasmtime_continuations::StackChainCell;
 
 pub use self::backtrace::{Backtrace, Frame};
 pub use self::coredump::CoreDumpStack;
@@ -207,22 +208,31 @@ pub unsafe fn catch_traps<'a, F>(
     capture_backtrace: bool,
     capture_coredump: bool,
     caller: *mut VMContext,
+    callee: *mut VMOpaqueContext,
     mut closure: F,
 ) -> Result<(), Box<Trap>>
 where
     F: FnMut(*mut VMContext),
 {
     let limits = Instance::from_vmctx(caller, |i| i.runtime_limits());
+    let callee_stack_cain = VMContext::try_from_opaque(callee)
+        .map(|vmctx| Instance::from_vmctx(vmctx, |i| *i.stack_chain() as *const StackChainCell));
 
-    let result = CallThreadState::new(signal_handler, capture_backtrace, capture_coredump, *limits)
-        .with(|cx| {
-            traphandlers::wasmtime_setjmp(
-                cx.jmp_buf.as_ptr(),
-                call_closure::<F>,
-                &mut closure as *mut F as *mut u8,
-                caller,
-            )
-        });
+    let result = CallThreadState::new(
+        signal_handler,
+        capture_backtrace,
+        capture_coredump,
+        *limits,
+        callee_stack_cain,
+    )
+    .with(|cx| {
+        traphandlers::wasmtime_setjmp(
+            cx.jmp_buf.as_ptr(),
+            call_closure::<F>,
+            &mut closure as *mut F as *mut u8,
+            caller,
+        )
+    });
 
     return match result {
         Ok(x) => Ok(x),
@@ -242,6 +252,30 @@ where
     }
 }
 
+/// Returns true if the first `CallThreadState` in this thread's chain that
+/// actually executes wasm is doing so inside a continuation. Returns false
+/// if there is no `CallThreadState` executing wasm.
+pub fn first_wasm_state_on_fiber_stack() -> bool {
+    tls::with(|head_state| {
+        // Iterate this threads' CallThreadState chain starting at `head_state` (if chain is non-empty), skipping
+        // those CTSs whose `callee_stack_chain` is None. This means that if
+        // `first_wasm_state` is Some, it is the first entry in the call thread
+        // state chain actually executin wasm.
+        let first_wasm_state = head_state
+            .iter()
+            .flat_map(|head| head.iter())
+            .skip_while(|state| state.callee_stack_chain.is_none())
+            .next();
+
+        first_wasm_state.map_or(false, |state| unsafe {
+            let stack_chain = &*state
+                .callee_stack_chain
+                .expect("must be Some according to filtering above");
+            !(*stack_chain.0.get()).is_main_stack()
+        })
+    })
+}
+
 // Module to hide visibility of the `CallThreadState::prev` field and force
 // usage of its accessor methods.
 mod call_thread_state {
@@ -258,6 +292,10 @@ mod call_thread_state {
         pub(super) capture_coredump: bool,
 
         pub(crate) limits: *const VMRuntimeLimits,
+
+        /// `Some(ptr)` iff this CallThreadState is for the execution of wasm.
+        /// In that case, `ptr` is the executing `Store`'s stack chain.
+        pub(crate) callee_stack_chain: Option<*const StackChainCell>,
 
         pub(super) prev: Cell<tls::Ptr>,
 
@@ -291,6 +329,7 @@ mod call_thread_state {
             capture_backtrace: bool,
             capture_coredump: bool,
             limits: *const VMRuntimeLimits,
+            callee_stack_chain: Option<*const StackChainCell>,
         ) -> CallThreadState {
             CallThreadState {
                 unwind: UnsafeCell::new(MaybeUninit::uninit()),
@@ -299,6 +338,7 @@ mod call_thread_state {
                 capture_backtrace,
                 capture_coredump,
                 limits,
+                callee_stack_chain,
                 prev: Cell::new(ptr::null()),
                 old_last_wasm_exit_fp: Cell::new(unsafe { *(*limits).last_wasm_exit_fp.get() }),
                 old_last_wasm_exit_pc: Cell::new(unsafe { *(*limits).last_wasm_exit_pc.get() }),

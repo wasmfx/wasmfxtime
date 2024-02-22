@@ -184,16 +184,25 @@ where
         // efficient to move in memory. This closure is actually invoked on the
         // other side of a C++ shim, so it can never be inlined enough to make
         // the memory go away, so the size matters here for performance.
+        let vmctx = unsafe { func.as_ref().vmctx };
         let mut captures = (func, MaybeUninit::uninit(), params, false);
 
-        let result = invoke_wasm_and_catch_traps(store, |caller| {
-            let (func_ref, ret, params, returned) = &mut captures;
-            let func_ref = func_ref.as_ref();
-            let result =
-                Params::invoke::<Results>(func_ref.native_call, func_ref.vmctx, caller, *params);
-            ptr::write(ret.as_mut_ptr(), result);
-            *returned = true
-        });
+        let result = invoke_wasm_and_catch_traps(
+            store,
+            |caller| {
+                let (func_ref, ret, params, returned) = &mut captures;
+                let func_ref = func_ref.as_ref();
+                let result = Params::invoke::<Results>(
+                    func_ref.native_call,
+                    func_ref.vmctx,
+                    caller,
+                    *params,
+                );
+                ptr::write(ret.as_mut_ptr(), result);
+                *returned = true
+            },
+            vmctx,
+        );
         let (_, ret, _, returned) = captures;
         debug_assert_eq!(result.is_ok(), returned);
         result?;
