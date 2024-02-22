@@ -2,7 +2,7 @@ use crate::component::matching::InstanceType;
 use crate::component::resources::{HostResourceData, HostResourceIndex, HostResourceTables};
 use crate::component::ResourceType;
 use crate::store::{StoreId, StoreOpaque};
-use crate::StoreContextMut;
+use crate::{FuncType, StoreContextMut};
 use anyhow::{bail, Result};
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -78,6 +78,7 @@ impl Options {
     fn realloc<'a, T>(
         &self,
         store: &'a mut StoreContextMut<'_, T>,
+        realloc_ty: &FuncType,
         old: usize,
         old_size: usize,
         old_align: u32,
@@ -92,6 +93,7 @@ impl Options {
         let result = unsafe {
             crate::TypedFunc::<(u32, u32, u32, u32), u32>::call_raw(
                 store,
+                realloc_ty,
                 realloc,
                 (
                     u32::try_from(old)?,
@@ -243,8 +245,17 @@ impl<'a, T> LowerContext<'a, T> {
         old_align: u32,
         new_size: usize,
     ) -> Result<usize> {
+        let realloc_func_ty = Arc::clone(unsafe { (*self.instance).realloc_func_ty() });
+        let realloc_func_ty = realloc_func_ty.downcast_ref::<FuncType>().unwrap();
         self.options
-            .realloc(&mut self.store, old, old_size, old_align, new_size)
+            .realloc(
+                &mut self.store,
+                &realloc_func_ty,
+                old,
+                old_size,
+                old_align,
+                new_size,
+            )
             .map(|(_, ptr)| ptr)
     }
 
