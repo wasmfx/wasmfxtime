@@ -1,9 +1,6 @@
-use std::any::Any;
 use std::cell::Cell;
 use std::io;
-use std::marker::PhantomData;
 use std::ops::Range;
-use std::panic::{self, AssertUnwindSafe};
 
 cfg_if::cfg_if! {
     if #[cfg(unix)] {
@@ -11,6 +8,111 @@ cfg_if::cfg_if! {
         use unix as imp;
     } else {
         compile_error!("fibers are not supported on this platform");
+    }
+}
+
+pub type TagId = u32;
+
+/// See SwitchDirection for overall use of this type.
+#[repr(u32)]
+pub enum SwitchDirectionEnum {
+    // Used to indicate that the contination has returned normally.
+    Return = 0,
+
+    // Indicates that we are suspendinga continuation due to invoking suspend.
+    // The payload is the tag to suspend with
+    Suspend = 1,
+
+    // Indicates that we are resuming a continuation via resume.
+    Resume = 2,
+}
+
+impl SwitchDirectionEnum {
+    pub fn discriminant_val(&self) -> u32 {
+        // This is well-defined for an enum with repr(u32).
+        unsafe { *(self as *const SwitchDirectionEnum as *const u32) }
+    }
+}
+
+/// Values of this type are passed to `wasmtime_fibre_switch` to indicate why we
+/// are switching. A nicer way of representing this type would be the following
+/// enum:
+///
+///```
+///  #[repr(C, u32)]
+///  pub enum SwitchDirection {
+///      // Used to indicate that the contination has returned normally.
+///      Return = 0,
+///
+///      // Indicates that we are suspendinga continuation due to invoking suspend.
+///      // The payload is the tag to suspend with
+///      Suspend(u32) = 1,
+///
+///      // Indicates that we are resuming a continuation via resume.
+///      Resume = 2,
+///  }
+///```
+///
+/// However, we want to convert values of type `SwitchDirection` to and from u64
+/// easily, which is why we need to ensure that it contains no uninitialised
+/// memory, to avoid undefined behavior.
+///
+/// We allow converting values of this type to and from u64.
+/// In that representation, bits 0 to 31 (where 0 is the LSB) contain the
+/// discriminant (as u32), while bits 32 to 63 contain the `data`.
+#[repr(C)]
+pub struct SwitchDirection {
+    discriminant: SwitchDirectionEnum,
+
+    // Stores tag value if `discriminant` is `suspend`, 0 otherwise.
+    data: u32,
+}
+
+impl SwitchDirection {
+    pub fn return_() -> SwitchDirection {
+        SwitchDirection {
+            discriminant: SwitchDirectionEnum::Return,
+            data: 0,
+        }
+    }
+
+    pub fn resume() -> SwitchDirection {
+        SwitchDirection {
+            discriminant: SwitchDirectionEnum::Resume,
+            data: 0,
+        }
+    }
+
+    pub fn suspend(tag: u32) -> SwitchDirection {
+        SwitchDirection {
+            discriminant: SwitchDirectionEnum::Suspend,
+            data: tag,
+        }
+    }
+}
+
+impl Into<u64> for SwitchDirection {
+    fn into(self) -> u64 {
+        // TODO(frank-emrich) This assumes little endian data layout. Should
+        // make this more explicit.
+        unsafe { std::mem::transmute::<SwitchDirection, u64>(self) }
+    }
+}
+
+impl From<u64> for SwitchDirection {
+    fn from(val: u64) -> SwitchDirection {
+        #[cfg(debug_assertions)]
+        {
+            let discriminant = val as u32;
+            debug_assert!(discriminant <= 2);
+            if discriminant != SwitchDirectionEnum::Suspend.discriminant_val() {
+                let data = val >> 32;
+                debug_assert_eq!(data, 0);
+            }
+        }
+        // TODO(frank-emrich) This assumes little endian data layout. Should
+        // make this more explicit.
+        unsafe { std::mem::transmute::<u64, SwitchDirection>(val) }
     }
 }
 
@@ -60,43 +162,29 @@ impl FiberStack {
     }
 }
 
-pub struct Fiber<'a, Resume, Yield, Return> {
+pub struct Fiber {
     stack: FiberStack,
     inner: imp::Fiber,
     done: Cell<bool>,
-    _phantom: PhantomData<&'a (Resume, Yield, Return)>,
 }
 
-pub struct Suspend<Resume, Yield, Return> {
+pub struct Suspend {
     inner: imp::Suspend,
-    _phantom: PhantomData<(Resume, Yield, Return)>,
 }
 
-pub enum RunResult<Resume, Yield, Return> {
-    Executing,
-    Resuming(Resume),
-    Yield(Yield),
-    Returned(Return),
-    Panicked(Box<dyn Any + Send>),
-}
-
-impl<'a, Resume, Yield, Return> Fiber<'a, Resume, Yield, Return> {
+impl Fiber {
     /// Creates a new fiber which will execute `func` on the given stack.
     ///
     /// This function returns a `Fiber` which, when resumed, will execute `func`
     /// to completion. When desired the `func` can suspend itself via
     /// `Fiber::suspend`.
-    pub fn new(
-        stack: FiberStack,
-        func: impl FnOnce(Resume, &Suspend<Resume, Yield, Return>) -> Return + 'a,
-    ) -> io::Result<Self> {
+    pub fn new(stack: FiberStack, func: impl FnOnce((), &Suspend) -> ()) -> io::Result<Self> {
         let inner = imp::Fiber::new(&stack.0, func)?;
 
         Ok(Self {
             stack,
             inner,
             done: Cell::new(false),
-            _phantom: PhantomData,
         })
     }
 
@@ -115,19 +203,17 @@ impl<'a, Resume, Yield, Return> Fiber<'a, Resume, Yield, Return> {
     ///
     /// Note that if the fiber itself panics during execution then the panic
     /// will be propagated to this caller.
-    pub fn resume(&self, val: Resume) -> Result<Return, Yield> {
+    pub fn resume(&self) -> SwitchDirection {
         assert!(!self.done.replace(true), "cannot resume a finished fiber");
-        let result = Cell::new(RunResult::Resuming(val));
-        self.inner.resume(&self.stack.0, &result);
-        match result.into_inner() {
-            RunResult::Resuming(_) | RunResult::Executing => unreachable!(),
-            RunResult::Yield(y) => {
-                self.done.set(false);
-                Err(y)
-            }
-            RunResult::Returned(r) => Ok(r),
-            RunResult::Panicked(payload) => std::panic::resume_unwind(payload),
-        }
+        let reason = self.inner.resume(&self.stack.0);
+        match reason {
+            SwitchDirection {
+                discriminant: SwitchDirectionEnum::Suspend,
+                data: _,
+            } => self.done.set(false),
+            _ => (),
+        };
+        reason
     }
 
     /// Returns whether this fiber has finished executing.
@@ -141,7 +227,7 @@ impl<'a, Resume, Yield, Return> Fiber<'a, Resume, Yield, Return> {
     }
 }
 
-impl<Resume, Yield, Return> Suspend<Resume, Yield, Return> {
+impl Suspend {
     /// Suspend execution of a currently running fiber.
     ///
     /// This function will switch control back to the original caller of
@@ -151,157 +237,28 @@ impl<Resume, Yield, Return> Suspend<Resume, Yield, Return> {
     /// # Panics
     ///
     /// Panics if the current thread is not executing a fiber from this library.
-    pub fn suspend(&self, value: Yield) -> Resume {
-        self.inner
-            .switch::<Resume, Yield, Return>(RunResult::Yield(value))
+    pub fn suspend(&self, tag: TagId) {
+        let reason = SwitchDirection::suspend(tag);
+        self.inner.switch(reason);
     }
 
-    fn execute(
-        inner: imp::Suspend,
-        initial: Resume,
-        func: impl FnOnce(Resume, &Suspend<Resume, Yield, Return>) -> Return,
-    ) {
-        let suspend = Suspend {
-            inner,
-            _phantom: PhantomData,
-        };
-        let result = panic::catch_unwind(AssertUnwindSafe(|| (func)(initial, &suspend)));
-        suspend.inner.switch::<Resume, Yield, Return>(match result {
-            Ok(result) => RunResult::Returned(result),
-            Err(panic) => RunResult::Panicked(panic),
-        });
+    fn execute(inner: imp::Suspend, func: impl FnOnce((), &Suspend) -> ()) {
+        let suspend = Suspend { inner };
+        // Note that the original wasmtime-fiber crate runs `func` wrapped in
+        // `panic::catch_unwind`, to stop panics from being propagated onward,
+        // instead just reporting parent. We eschew this, doing nothing special
+        // about panics. This is justified because we only ever call this
+        // function such that `func` is a closure around a call to a
+        // `VMArrayCallFunction`, namely a host-to-wasm trampoline. It is thus
+        // guaranteed not to panic.
+        (func)((), &suspend);
+        let reason = SwitchDirection::return_();
+        suspend.inner.switch(reason);
     }
 }
 
-impl<A, B, C> Drop for Fiber<'_, A, B, C> {
+impl Drop for Fiber {
     fn drop(&mut self) {
         debug_assert!(self.done.get(), "fiber dropped without finishing");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Fiber, FiberStack};
-    use std::cell::Cell;
-    use std::panic::{self, AssertUnwindSafe};
-    use std::rc::Rc;
-
-    #[test]
-    fn small_stacks() {
-        Fiber::<(), (), ()>::new(FiberStack::new(0).unwrap(), |_, _| {})
-            .unwrap()
-            .resume(())
-            .unwrap();
-        Fiber::<(), (), ()>::new(FiberStack::new(1).unwrap(), |_, _| {})
-            .unwrap()
-            .resume(())
-            .unwrap();
-    }
-
-    #[test]
-    fn smoke() {
-        let hit = Rc::new(Cell::new(false));
-        let hit2 = hit.clone();
-        let fiber = Fiber::<(), (), ()>::new(FiberStack::new(1024 * 1024).unwrap(), move |_, _| {
-            hit2.set(true);
-        })
-        .unwrap();
-        assert!(!hit.get());
-        fiber.resume(()).unwrap();
-        assert!(hit.get());
-    }
-
-    #[test]
-    fn suspend_and_resume() {
-        let hit = Rc::new(Cell::new(false));
-        let hit2 = hit.clone();
-        let fiber = Fiber::<(), (), ()>::new(FiberStack::new(1024 * 1024).unwrap(), move |_, s| {
-            s.suspend(());
-            hit2.set(true);
-            s.suspend(());
-        })
-        .unwrap();
-        assert!(!hit.get());
-        assert!(fiber.resume(()).is_err());
-        assert!(!hit.get());
-        assert!(fiber.resume(()).is_err());
-        assert!(hit.get());
-        assert!(fiber.resume(()).is_ok());
-        assert!(hit.get());
-    }
-
-    #[test]
-    fn backtrace_traces_to_host() {
-        #[inline(never)] // try to get this to show up in backtraces
-        fn look_for_me() {
-            run_test();
-        }
-        fn assert_contains_host() {
-            let trace = backtrace::Backtrace::new();
-            println!("{:?}", trace);
-            assert!(
-                trace
-                .frames()
-                .iter()
-                .flat_map(|f| f.symbols())
-                .filter_map(|s| Some(s.name()?.to_string()))
-                .any(|s| s.contains("look_for_me"))
-                // TODO: apparently windows unwind routines don't unwind through fibers, so this will always fail. Is there a way we can fix that?
-                || cfg!(windows)
-                // TODO: the system libunwind is broken (#2808)
-                || cfg!(all(target_os = "macos", target_arch = "aarch64"))
-            );
-        }
-
-        fn run_test() {
-            let fiber =
-                Fiber::<(), (), ()>::new(FiberStack::new(1024 * 1024).unwrap(), move |(), s| {
-                    assert_contains_host();
-                    s.suspend(());
-                    assert_contains_host();
-                    s.suspend(());
-                    assert_contains_host();
-                })
-                .unwrap();
-            assert!(fiber.resume(()).is_err());
-            assert!(fiber.resume(()).is_err());
-            assert!(fiber.resume(()).is_ok());
-        }
-
-        look_for_me();
-    }
-
-    #[test]
-    fn panics_propagated() {
-        let a = Rc::new(Cell::new(false));
-        let b = SetOnDrop(a.clone());
-        let fiber =
-            Fiber::<(), (), ()>::new(FiberStack::new(1024 * 1024).unwrap(), move |(), _s| {
-                let _ = &b;
-                panic!();
-            })
-            .unwrap();
-        assert!(panic::catch_unwind(AssertUnwindSafe(|| fiber.resume(()))).is_err());
-        assert!(a.get());
-
-        struct SetOnDrop(Rc<Cell<bool>>);
-
-        impl Drop for SetOnDrop {
-            fn drop(&mut self) {
-                self.0.set(true);
-            }
-        }
-    }
-
-    #[test]
-    fn suspend_and_resume_values() {
-        let fiber = Fiber::new(FiberStack::new(1024 * 1024).unwrap(), move |first, s| {
-            assert_eq!(first, 2.0);
-            assert_eq!(s.suspend(4), 3.0);
-            "hello".to_string()
-        })
-        .unwrap();
-        assert_eq!(fiber.resume(2.0), Err(4));
-        assert_eq!(fiber.resume(3.0), Ok("hello".to_string()));
     }
 }

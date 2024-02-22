@@ -9,9 +9,9 @@ pub use wasmtime_continuations::{
     ContinuationFiber, ContinuationObject, ContinuationReference, Payloads, StackChain,
     StackChainCell, StackLimits, State,
 };
-use wasmtime_fibre::{Fiber, FiberStack, Suspend};
+use wasmtime_fibre::{Fiber, FiberStack, Suspend, SwitchDirection};
 
-type Yield = Suspend<(), u32, ()>;
+type Yield = Suspend;
 
 const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
 
@@ -165,7 +165,7 @@ pub fn resume(
     instance: &mut Instance,
     contobj: *mut ContinuationObject,
     parent_stack_limits: *mut StackLimits,
-) -> Result<u32, TrapReason> {
+) -> Result<SwitchDirection, TrapReason> {
     let cont = unsafe {
         contobj.as_ref().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
@@ -230,38 +230,7 @@ pub fn resume(
             .get_mut()) = 0
     };
 
-    // TODO(dhil): We need to think carefully about how resume
-    // interacts with traps.
-    match fiber.resume(()) {
-        Ok(()) => {
-            // The result of the continuation was written to the first
-            // entry of the payload store by virtue of using the array
-            // calling trampoline to execute it.
-
-            if cfg!(debug_assertions) {
-                // SAFETY: We maintain as an invariant that the stack chain field in the
-                // VMContext is non-null and contains a chain of zero or more
-                // StackChain::Continuation values followed by StackChain::Main.
-                let _parent_chain = unsafe { &(*contobj).parent_chain };
-                debug_println!(
-                "Continuation @ {:p} returned normally, setting running continuation in VMContext to {:?}",
-                contobj,
-                _parent_chain
-            );
-            }
-            Ok(0) // zero value = return normally.
-        }
-        Err(tag) => {
-            debug_println!("Continuation {:p} suspended", contobj);
-
-            // We set the high bit to signal a return via suspend. We
-            // encode the tag into the remainder of the integer.
-            let signal_mask = 0xf000_0000;
-            debug_assert_eq!(tag & signal_mask, 0);
-
-            Ok(tag | signal_mask)
-        }
-    }
+    Ok(fiber.resume())
 }
 
 /// TODO
@@ -306,8 +275,8 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason
     );
 
     let suspend = wasmtime_fibre::unix::Suspend::from_top_ptr(stack_ptr);
-    suspend.switch::<(), u32, ()>(wasmtime_fibre::RunResult::Yield(tag_index));
-    Ok(())
+    let payload = SwitchDirection::suspend(tag_index);
+    Ok(suspend.switch(payload))
 }
 
 #[allow(missing_docs)]

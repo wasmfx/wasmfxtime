@@ -7,7 +7,14 @@
 
 use wasmtime_asm_macros::asm_func;
 
-// fn(top_of_stack(rdi): *mut u8)
+// fn(
+//    top_of_stack(rdi): *mut u8
+//    payload(rsi) : u64
+// )
+//
+// The payload (i.e., second argument) is return unchanged, allowing data to be
+// passed from the continuation that calls `wasmtime_fibre_switch` to the one
+// that subsequently runs.
 asm_func!(
     "wasmtime_fibre_switch",
     "
@@ -30,6 +37,8 @@ asm_func!(
         mov rax, -0x10[rdi]
         mov -0x10[rdi], rsp
 
+
+
         // Swap stacks and restore all our callee-saved registers
         mov rsp, rax
         pop r15
@@ -38,6 +47,10 @@ asm_func!(
         pop r12
         pop rbx
         pop rbp
+
+        // We return the payload (i.e., the second argument to this function)
+        mov rax, rsi
+
         ret
     ",
 );
@@ -140,7 +153,7 @@ asm_func!(
 //  Offset from   |
 //       TOS      | Contents
 //  --------------|---------------------------------
-//         -0x08   &Cell<RunSesult<A,B,C>>
+//         -0x08   undefined
 //
 //         -0x10   stack pointer stored by wasmtime_fibre_switch
 //                 thus pointing into stack of caller of Fiber::resume,

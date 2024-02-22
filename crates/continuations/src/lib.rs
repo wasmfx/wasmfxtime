@@ -1,6 +1,8 @@
 use std::{cell::UnsafeCell, ptr};
 use wasmtime_fibre::Fiber;
 
+pub use wasmtime_fibre::{SwitchDirection, SwitchDirectionEnum, TagId};
+
 /// TODO
 #[allow(dead_code)]
 pub const ENABLE_DEBUG_PRINTING: bool = false;
@@ -26,9 +28,18 @@ pub mod types {
         /// Type of the entries in the actual buffer
         pub type DataEntries = u128;
     }
+
+    /// Types used by `wasmtime_fibre::SwitchDirection` struct
+    pub mod switch_reason {
+        /// Type of `discriminant` field
+        pub type Discriminant = u32;
+
+        /// Type of `data` field
+        pub type Data = u32;
+    }
 }
 
-pub type ContinuationFiber = Fiber<'static, (), u32, ()>;
+pub type ContinuationFiber = Fiber;
 
 /// This type is used to save (and subsequently restore) a subset of the data in
 /// `VMRuntimeLimits`. See documentation of `StackChain` for the exact uses.
