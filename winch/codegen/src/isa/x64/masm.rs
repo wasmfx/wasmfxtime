@@ -10,14 +10,14 @@ use crate::masm::{
     RegImm, RemKind, RoundingMode, ShiftKind, TrapCode, TruncKind, TRUSTED_FLAGS, UNTRUSTED_FLAGS,
 };
 use crate::{
-    abi::ABI,
-    masm::{SPOffset, StackSlot},
-    stack::TypedReg,
-};
-use crate::{
     abi::{self, align_to, calculate_frame_adjustment, LocalSlot},
     codegen::{ptr_type_from_ptr_size, CodeGenContext, FuncEnv, HeapData, TableData},
     stack::Val,
+};
+use crate::{
+    abi::{vmctx, ABI},
+    masm::{SPOffset, StackSlot},
+    stack::TypedReg,
 };
 use crate::{
     isa::reg::{Reg, RegClass},
@@ -61,7 +61,7 @@ impl Masm for MacroAssembler {
     type Ptr = u8;
     type ABI = X64ABI;
 
-    fn prologue(&mut self) {
+    fn frame_setup(&mut self) {
         let frame_pointer = rbp();
         let stack_pointer = rsp();
 
@@ -77,12 +77,12 @@ impl Masm for MacroAssembler {
             .mov_rr(stack_pointer, frame_pointer, OperandSize::S64);
     }
 
-    fn check_stack(&mut self) {
+    fn check_stack(&mut self, vmctx: Reg) {
         let ptr_size: u8 = self.ptr_size.bytes().try_into().unwrap();
         let scratch = regs::scratch();
 
         self.load_ptr(
-            self.address_at_vmctx(ptr_size.vmcontext_runtime_limits().into()),
+            self.address_at_reg(vmctx, ptr_size.vmcontext_runtime_limits().into()),
             scratch,
         );
 
@@ -110,7 +110,7 @@ impl Masm for MacroAssembler {
                     RegClass::Float => align_to(total, float_bytes) + float_bytes,
                     RegClass::Vector => unimplemented!(),
                 }),
-            16,
+            float_bytes,
         );
 
         // Emit unwind info.
@@ -148,6 +148,9 @@ impl Masm for MacroAssembler {
     }
 
     fn restore_clobbers(&mut self, clobbers: &[(Reg, OperandSize)]) {
+        let int_bytes: u32 = Self::ABI::word_bytes().try_into().unwrap();
+        let float_bytes = int_bytes * 2;
+
         let mut off = 0;
         for &(reg, size) in clobbers {
             // Align the current offset
@@ -161,7 +164,7 @@ impl Masm for MacroAssembler {
             off += size.bytes();
         }
 
-        self.free_stack(align_to(off, 16));
+        self.free_stack(align_to(off, float_bytes));
     }
 
     fn push(&mut self, reg: Reg, size: OperandSize) -> StackSlot {
@@ -240,7 +243,6 @@ impl Masm for MacroAssembler {
         table_data: &TableData,
         context: &mut CodeGenContext,
     ) -> Self::Address {
-        let vmctx = <Self::ABI as ABI>::vmctx_reg();
         let scratch = regs::scratch();
         let bound = context.any_gpr(self);
         let tmp = context.any_gpr(self);
@@ -258,7 +260,7 @@ impl Masm for MacroAssembler {
         } else {
             // Else, simply move the vmctx register into the addr register as
             // the base to calculate the table address.
-            self.asm.mov_rr(vmctx, ptr_base, self.ptr_size);
+            self.asm.mov_rr(vmctx!(Self), ptr_base, self.ptr_size);
         };
 
         // OOB check.
@@ -302,7 +304,6 @@ impl Masm for MacroAssembler {
     }
 
     fn table_size(&mut self, table_data: &TableData, context: &mut CodeGenContext) {
-        let vmctx = <Self::ABI as ABI>::vmctx_reg();
         let scratch = regs::scratch();
         let size = context.any_gpr(self);
 
@@ -314,7 +315,7 @@ impl Masm for MacroAssembler {
                 TRUSTED_FLAGS,
             );
         } else {
-            self.asm.mov_rr(vmctx, scratch, self.ptr_size);
+            self.asm.mov_rr(vmctx!(Self), scratch, self.ptr_size);
         };
 
         let size_addr = Address::offset(scratch, table_data.current_elems_offset);
@@ -331,7 +332,6 @@ impl Masm for MacroAssembler {
     fn memory_size(&mut self, heap_data: &HeapData, context: &mut CodeGenContext) {
         let size_reg = context.any_gpr(self);
         let scratch = regs::scratch();
-        let vmctx = <Self::ABI as ABI>::vmctx_reg();
 
         let base = if let Some(offset) = heap_data.import_from {
             self.asm.movzx_mr(
@@ -342,7 +342,7 @@ impl Masm for MacroAssembler {
             );
             scratch
         } else {
-            vmctx
+            vmctx!(Self)
         };
 
         let size_addr = Address::offset(base, heap_data.current_length_offset);
@@ -380,7 +380,7 @@ impl Masm for MacroAssembler {
     }
 
     fn address_at_vmctx(&self, offset: u32) -> Self::Address {
-        Address::offset(<Self::ABI as ABI>::vmctx_reg(), offset)
+        Address::offset(vmctx!(Self), offset)
     }
 
     fn store_ptr(&mut self, src: Reg, dst: Self::Address) {
@@ -801,12 +801,8 @@ impl Masm for MacroAssembler {
         context.stack.push(Val::reg(rdx, divisor.ty));
     }
 
-    fn epilogue(&mut self, locals_size: u32) {
-        assert_eq!(self.sp_offset, locals_size);
-
-        if locals_size > 0 {
-            self.free_stack(locals_size);
-        }
+    fn frame_restore(&mut self) {
+        assert_eq!(self.sp_offset, 0);
         self.asm.pop_r(rbp());
         self.asm.ret();
     }
