@@ -91,11 +91,11 @@ impl SwitchDirection {
     }
 }
 
-impl Into<u64> for SwitchDirection {
-    fn into(self) -> u64 {
+impl From<SwitchDirection> for u64 {
+    fn from(val: SwitchDirection) -> u64 {
         // TODO(frank-emrich) This assumes little endian data layout. Should
         // make this more explicit.
-        unsafe { std::mem::transmute::<SwitchDirection, u64>(self) }
+        unsafe { std::mem::transmute::<SwitchDirection, u64>(val) }
     }
 }
 
@@ -178,7 +178,7 @@ impl Fiber {
     /// This function returns a `Fiber` which, when resumed, will execute `func`
     /// to completion. When desired the `func` can suspend itself via
     /// `Fiber::suspend`.
-    pub fn new(stack: FiberStack, func: impl FnOnce((), &Suspend) -> ()) -> io::Result<Self> {
+    pub fn new(stack: FiberStack, func: impl FnOnce((), &Suspend)) -> io::Result<Self> {
         let inner = imp::Fiber::new(&stack.0, func)?;
 
         Ok(Self {
@@ -206,12 +206,12 @@ impl Fiber {
     pub fn resume(&self) -> SwitchDirection {
         assert!(!self.done.replace(true), "cannot resume a finished fiber");
         let reason = self.inner.resume(&self.stack.0);
-        match reason {
-            SwitchDirection {
-                discriminant: SwitchDirectionEnum::Suspend,
-                data: _,
-            } => self.done.set(false),
-            _ => (),
+        if let SwitchDirection {
+            discriminant: SwitchDirectionEnum::Suspend,
+            data: _,
+        } = reason
+        {
+            self.done.set(false)
         };
         reason
     }
@@ -242,7 +242,7 @@ impl Suspend {
         self.inner.switch(reason);
     }
 
-    fn execute(inner: imp::Suspend, func: impl FnOnce((), &Suspend) -> ()) {
+    fn execute(inner: imp::Suspend, func: impl FnOnce((), &Suspend)) {
         let suspend = Suspend { inner };
         // Note that the original wasmtime-fiber crate runs `func` wrapped in
         // `panic::catch_unwind`, to stop panics from being propagated onward,

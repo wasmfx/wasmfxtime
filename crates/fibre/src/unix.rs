@@ -141,7 +141,7 @@ extern "C" {
 
 extern "C" fn fiber_start<F>(arg0: *mut u8, top_of_stack: *mut u8)
 where
-    F: FnOnce((), &super::Suspend) -> (),
+    F: FnOnce((), &super::Suspend),
 {
     unsafe {
         let inner = Suspend(top_of_stack);
@@ -152,7 +152,7 @@ where
 impl Fiber {
     pub fn new<F>(stack: &FiberStack, func: F) -> io::Result<Self>
     where
-        F: FnOnce((), &super::Suspend) -> (),
+        F: FnOnce((), &super::Suspend),
     {
         unsafe {
             let data = Box::into_raw(Box::new(func)).cast();
