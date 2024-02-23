@@ -6,8 +6,7 @@ use cranelift_codegen::ir::types::*;
 use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::{FunctionBuilder, Switch};
 use cranelift_wasm::FuncEnvironment;
-use cranelift_wasm::{self, FuncTranslationState, WasmResult, WasmValType};
-use std::vec::Vec;
+use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
 use wasmtime_environ::{BuiltinFunctionIndex, PtrSize};
 
 #[allow(unused_imports)]

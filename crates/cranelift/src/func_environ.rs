@@ -18,7 +18,6 @@ use cranelift_wasm::{
     WasmResult, WasmValType,
 };
 use std::mem;
-use std::vec::Vec;
 use wasmparser::Operator;
 use wasmtime_environ::{
     BuiltinFunctionIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation, ModuleTypesBuilder,
