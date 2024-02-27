@@ -98,9 +98,9 @@ use std::task::{Context, Poll};
 use wasmtime_runtime::continuation::{StackChain, StackChainCell, StackLimits};
 use wasmtime_runtime::mpk::{self, ProtectionKey, ProtectionMask};
 use wasmtime_runtime::{
-    ExportGlobal, InstanceAllocationRequest, InstanceAllocator, InstanceHandle, ModuleInfo,
-    OnDemandInstanceAllocator, SignalHandler, StoreBox, StorePtr, VMContext, VMExternRef,
-    VMExternRefActivationsTable, VMFuncRef, VMRuntimeLimits, WasmFault,
+    ExportGlobal, InstanceAllocationRequest, InstanceAllocator, InstanceHandle,
+    OnDemandInstanceAllocator, SignalHandler, StoreBox, StorePtr, VMContext, VMFuncRef,
+    VMRuntimeLimits, WasmFault,
 };
 
 mod context;
@@ -323,7 +323,7 @@ pub struct StoreOpaque {
     #[cfg(feature = "component-model")]
     num_component_instances: usize,
     signal_handler: Option<Box<SignalHandler<'static>>>,
-    externref_activations_table: VMExternRefActivationsTable,
+    externref_activations_table: wasmtime_runtime::VMExternRefActivationsTable,
     modules: ModuleRegistry,
     func_refs: FuncRefs,
     host_globals: Vec<StoreBox<VMHostGlobalContext>>,
@@ -408,7 +408,7 @@ pub(crate) struct AutoAssertNoGc<T>
 where
     T: std::ops::DerefMut<Target = StoreOpaque>,
 {
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, feature = "gc"))]
     prev_okay: bool,
     store: T,
 }
@@ -420,12 +420,12 @@ where
     #[inline]
     pub fn new(mut store: T) -> Self {
         let _ = &mut store;
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, feature = "gc"))]
         {
             let prev_okay = store.externref_activations_table.set_gc_okay(false);
             return AutoAssertNoGc { store, prev_okay };
         }
-        #[cfg(not(debug_assertions))]
+        #[cfg(not(all(debug_assertions, feature = "gc")))]
         {
             return AutoAssertNoGc { store };
         }
@@ -457,7 +457,7 @@ where
     T: std::ops::DerefMut<Target = StoreOpaque>,
 {
     fn drop(&mut self) {
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, feature = "gc"))]
         {
             self.store
                 .externref_activations_table
@@ -515,7 +515,7 @@ impl<T> Store<T> {
                 #[cfg(feature = "component-model")]
                 num_component_instances: 0,
                 signal_handler: None,
-                externref_activations_table: VMExternRefActivationsTable::new(),
+                externref_activations_table: wasmtime_runtime::VMExternRefActivationsTable::new(),
                 modules: ModuleRegistry::default(),
                 func_refs: FuncRefs::default(),
                 host_globals: Vec::new(),
@@ -821,6 +821,9 @@ impl<T> Store<T> {
     /// Note that it is not required to actively call this function. GC will
     /// automatically happen when internal buffers fill up. This is provided if
     /// fine-grained control over the GC is desired.
+    ///
+    /// This method is only available when the `gc` Cargo feature is enabled.
+    #[cfg(feature = "gc")]
     pub fn gc(&mut self) {
         self.inner.gc()
     }
@@ -1063,6 +1066,9 @@ impl<'a, T> StoreContextMut<'a, T> {
     /// Perform garbage collection of `ExternRef`s.
     ///
     /// Same as [`Store::gc`].
+    ///
+    /// This method is only available when the `gc` Cargo feature is enabled.
+    #[cfg(feature = "gc")]
     pub fn gc(&mut self) {
         self.0.gc()
     }
@@ -1401,7 +1407,9 @@ impl StoreOpaque {
     }
 
     #[inline]
-    pub fn externref_activations_table(&mut self) -> &mut VMExternRefActivationsTable {
+    pub fn externref_activations_table(
+        &mut self,
+    ) -> &mut wasmtime_runtime::VMExternRefActivationsTable {
         &mut self.externref_activations_table
     }
 
@@ -1564,7 +1572,7 @@ impl StoreOpaque {
         &self.stack_chain as *const StackChainCell as *mut StackChainCell
     }
 
-    pub unsafe fn insert_vmexternref_without_gc(&mut self, r: VMExternRef) {
+    pub unsafe fn insert_vmexternref_without_gc(&mut self, r: wasmtime_runtime::VMExternRef) {
         self.externref_activations_table.insert_without_gc(r);
     }
 
@@ -2087,7 +2095,7 @@ unsafe impl<T> wasmtime_runtime::Store for StoreInner<T> {
     fn externref_activations_table(
         &mut self,
     ) -> (
-        &mut VMExternRefActivationsTable,
+        &mut wasmtime_runtime::VMExternRefActivationsTable,
         &dyn wasmtime_runtime::ModuleInfoLookup,
     ) {
         let inner = &mut self.inner;
@@ -2344,7 +2352,7 @@ impl Drop for StoreOpaque {
 }
 
 impl wasmtime_runtime::ModuleInfoLookup for ModuleRegistry {
-    fn lookup(&self, pc: usize) -> Option<&dyn ModuleInfo> {
+    fn lookup(&self, pc: usize) -> Option<&dyn wasmtime_runtime::ModuleInfo> {
         self.lookup_module_info(pc)
     }
 }
