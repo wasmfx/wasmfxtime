@@ -10,6 +10,7 @@ use target_lexicon::{Architecture, PointerWidth};
 use wasmparser::WasmFeatures;
 #[cfg(feature = "cache")]
 use wasmtime_cache::CacheConfig;
+use wasmtime_continuations::WasmFXConfig;
 use wasmtime_environ::Tunables;
 
 #[cfg(feature = "runtime")]
@@ -106,6 +107,13 @@ pub struct Config {
     compiler_config: CompilerConfig,
     profiling_strategy: ProfilingStrategy,
     tunables: ConfigTunables,
+
+    /// Runtime configuration for WasmFX.
+    /// The type `WasmFxConfig` is defined in the `wasmtime_continuations` crate,
+    /// so that we can hand out the `wasmfx_config` object in the interface of
+    /// `wasmtime_runtime::Store` trait, where the full `Config` type is not in
+    /// scope.
+    pub wasmfx_config: WasmFXConfig,
 
     #[cfg(feature = "cache")]
     pub(crate) cache_config: CacheConfig,
@@ -213,6 +221,9 @@ impl Config {
             tunables: ConfigTunables::default(),
             #[cfg(any(feature = "cranelift", feature = "winch"))]
             compiler_config: CompilerConfig::default(),
+            wasmfx_config: WasmFXConfig {
+                stack_size: wasmtime_runtime::continuation::DEFAULT_FIBER_SIZE,
+            },
             #[cfg(feature = "cache")]
             cache_config: CacheConfig::new_cache_disabled(),
             profiling_strategy: ProfilingStrategy::None,
@@ -679,6 +690,12 @@ impl Config {
     #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     pub fn async_stack_size(&mut self, size: usize) -> &mut Self {
         self.async_stack_size = size;
+        self
+    }
+
+    /// Configures the size of the stacks created with cont.new instructions.
+    pub fn wasmfx_stack_size(&mut self, size: usize) -> &mut Self {
+        self.wasmfx_config.stack_size = size;
         self
     }
 

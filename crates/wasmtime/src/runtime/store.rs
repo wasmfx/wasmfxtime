@@ -95,6 +95,7 @@ use std::ptr;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use wasmtime_continuations::WasmFXConfig;
 use wasmtime_runtime::continuation::{StackChain, StackChainCell, StackLimits};
 use wasmtime_runtime::mpk::{self, ProtectionKey, ProtectionMask};
 use wasmtime_runtime::{
@@ -2086,6 +2087,10 @@ unsafe impl<T> wasmtime_runtime::Store for StoreInner<T> {
 
     fn stack_chain(&self) -> *mut StackChainCell {
         <StoreOpaque>::stack_chain(self)
+    }
+
+    fn wasmfx_config(&self) -> *const WasmFXConfig {
+        &<StoreOpaque>::engine(&self).config().wasmfx_config
     }
 
     fn epoch_ptr(&self) -> *const AtomicU64 {
