@@ -10,7 +10,7 @@ use target_lexicon::{Architecture, PointerWidth};
 use wasmparser::WasmFeatures;
 #[cfg(feature = "cache")]
 use wasmtime_cache::CacheConfig;
-use wasmtime_continuations::WasmFxConfig;
+use wasmtime_continuations::WasmFXConfig;
 use wasmtime_environ::Tunables;
 
 #[cfg(feature = "runtime")]
@@ -113,7 +113,7 @@ pub struct Config {
     /// so that we can hand out the `wasmfx_config` object in the interface of
     /// `wasmtime_runtime::Store` trait, where the full `Config` type is not in
     /// scope.
-    pub wasmfx_config: WasmFxConfig,
+    pub wasmfx_config: WasmFXConfig,
 
     #[cfg(feature = "cache")]
     pub(crate) cache_config: CacheConfig,
@@ -221,7 +221,7 @@ impl Config {
             tunables: ConfigTunables::default(),
             #[cfg(any(feature = "cranelift", feature = "winch"))]
             compiler_config: CompilerConfig::default(),
-            wasmfx_config: WasmFxConfig {
+            wasmfx_config: WasmFXConfig {
                 stack_size: wasmtime_runtime::continuation::DEFAULT_FIBER_SIZE,
             },
             #[cfg(feature = "cache")]

@@ -132,11 +132,9 @@ pub fn cont_new(
     let capacity = cmp::max(param_count, result_count);
     let payload = Payloads::new(capacity);
 
-    let wasmfx_config = unsafe { &*(*instance.store()).wasmfx_config() };
-    let fiber_size = wasmfx_config.stack_size;
-
     let fiber = {
-        let stack = FiberStack::malloc(fiber_size)
+        let wasmfx_config = unsafe { &*(*instance.store()).wasmfx_config() };
+        let stack = FiberStack::malloc(wasmfx_config.stack_size)
             .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
         let args_ptr = payload.data;
         let fiber = Fiber::new(stack, move |_first_val: (), _suspend: &Yield| unsafe {

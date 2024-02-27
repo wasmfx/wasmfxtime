@@ -2081,7 +2081,7 @@ unsafe impl<T> wasmtime_runtime::Store for StoreInner<T> {
         <StoreOpaque>::stack_chain(self)
     }
 
-    fn wasmfx_config(&self) -> *const WasmFxConfig {
+    fn wasmfx_config(&self) -> *const WasmFXConfig {
         &<StoreOpaque>::engine(&self).config().wasmfx_config
     }
 

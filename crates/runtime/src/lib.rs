@@ -8,7 +8,7 @@ use std::fmt;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use wasmtime_continuations::{StackChainCell, WasmFxConfig};
+use wasmtime_continuations::{StackChainCell, WasmFXConfig};
 use wasmtime_environ::{DefinedFuncIndex, DefinedMemoryIndex, HostPtr, VMOffsets};
 
 mod arch;
@@ -107,7 +107,7 @@ pub unsafe trait Store {
     /// `wasmtime::config::Config` object of the `Engine` associated with the
     /// `Store`. However, the whole point of this trait is so that we don't
     /// depend on the entire `wasmtime` crate in the current crate.
-    fn wasmfx_config(&self) -> *const WasmFxConfig;
+    fn wasmfx_config(&self) -> *const WasmFXConfig;
 
     /// Returns a pointer to the global epoch counter.
     ///

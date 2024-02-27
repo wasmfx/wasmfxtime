@@ -44,7 +44,7 @@ pub mod types {
 ///
 /// Part of wasmtime::config::Config type (which is not in scope in this crate).
 #[derive(Clone)]
-pub struct WasmFxConfig {
+pub struct WasmFXConfig {
     pub stack_size: usize,
 }
 
