@@ -20,7 +20,6 @@ impl Drop for VMHostGlobalContext {
                 // Nothing to drop.
             }
             crate::ValType::Ref(r) => match r.heap_type() {
-                HeapType::Extern => unsafe { ptr::drop_in_place(self.global.as_externref_mut()) },
                 HeapType::Func | HeapType::Concrete(_) | HeapType::NoFunc => {
                     // Nothing to drop.
                 }
@@ -28,6 +27,7 @@ impl Drop for VMHostGlobalContext {
                     // We may have to drop the dynamic continuation reference here.
                     todo!("Drop for VMHostGlobalContext with content of type HeapType::Cont and HeapType::NoCont not yet implemented")
                 }
+                HeapType::Extern => unsafe { ptr::drop_in_place(self.global.as_externref_mut()) },
             },
         }
     }
@@ -63,7 +63,7 @@ pub fn generate_global_export(
                     f.map_or(ptr::null_mut(), |f| f.vm_func_ref(store).as_ptr());
             }
             Val::ExternRef(x) => {
-                *global.as_externref_mut() = x.map(|x| x.inner);
+                *global.as_externref_mut() = x.map(|x| x.into_vm_extern_ref());
             }
         }
         global
