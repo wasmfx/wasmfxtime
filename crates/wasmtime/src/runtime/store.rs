@@ -95,7 +95,7 @@ use std::ptr;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use wasmtime_continuations::WasmFxConfig;
+use wasmtime_continuations::WasmFXConfig;
 use wasmtime_runtime::continuation::{StackChain, StackChainCell, StackLimits};
 use wasmtime_runtime::mpk::{self, ProtectionKey, ProtectionMask};
 use wasmtime_runtime::{
