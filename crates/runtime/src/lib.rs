@@ -8,7 +8,7 @@ use std::fmt;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use wasmtime_continuations::StackChainCell;
+use wasmtime_continuations::{StackChainCell, WasmFXConfig};
 use wasmtime_environ::{DefinedFuncIndex, DefinedMemoryIndex, HostPtr, VMOffsets};
 
 mod arch;
@@ -101,6 +101,13 @@ pub unsafe trait Store {
     /// Used to configure `VMContext` initialization and store the right pointer
     /// in the `VMContext`.
     fn stack_chain(&self) -> *mut StackChainCell;
+
+    /// Returns the `WasmFxConfig` associated with this store.
+    /// NOTE(frank-emrich) Currently, this is part of the
+    /// `wasmtime::config::Config` object of the `Engine` associated with the
+    /// `Store`. However, the whole point of this trait is so that we don't
+    /// depend on the entire `wasmtime` crate in the current crate.
+    fn wasmfx_config(&self) -> *const WasmFXConfig;
 
     /// Returns a pointer to the global epoch counter.
     ///

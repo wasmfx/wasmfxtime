@@ -3229,6 +3229,7 @@ dependencies = [
  "wasmtime-cache",
  "wasmtime-component-macro",
  "wasmtime-component-util",
+ "wasmtime-continuations",
  "wasmtime-cranelift",
  "wasmtime-environ",
  "wasmtime-fiber",
