@@ -257,10 +257,11 @@ where
 /// if there is no `CallThreadState` executing wasm.
 pub fn first_wasm_state_on_fiber_stack() -> bool {
     tls::with(|head_state| {
-        // Iterate this threads' CallThreadState chain starting at `head_state` (if chain is non-empty), skipping
-        // those CTSs whose `callee_stack_chain` is None. This means that if
-        // `first_wasm_state` is Some, it is the first entry in the call thread
-        // state chain actually executin wasm.
+        // Iterate this threads' CallThreadState chain starting at `head_state`
+        // (if chain is non-empty), skipping those CTSs whose
+        // `callee_stack_chain` is None. This means that if `first_wasm_state`
+        // is Some, it is the first entry in the call thread state chain
+        // actually executin wasm.
         let first_wasm_state = head_state
             .iter()
             .flat_map(|head| head.iter())
