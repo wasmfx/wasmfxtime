@@ -481,6 +481,7 @@ mod host {
         Ok(())
     }
 
+    #[cfg_attr(feature = "typed_continuations_baseline_implementation", ignore)]
     #[test]
     /// We re-enter wasm from a host function while we were already on a continuation stack.
     /// This is currently forbidden (see wasmfx/wasmfxtime#109), but may be
@@ -524,6 +525,7 @@ mod host {
         Ok(())
     }
 
+    #[cfg_attr(feature = "typed_continuations_baseline_implementation", ignore)]
     #[test]
     /// After crossing from the host back into wasm, we suspend to a tag that is
     /// handled by the surrounding function (i.e., without needing to cross the
@@ -581,6 +583,7 @@ mod host {
         Ok(())
     }
 
+    #[cfg_attr(feature = "typed_continuations_baseline_implementation", ignore)]
     #[test]
     /// Similar to `call_host_from_continuation_nested_suspend_ok`. However,
     /// we suspend to a tag that is only handled if we were to cross a host function
