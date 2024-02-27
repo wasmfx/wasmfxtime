@@ -263,7 +263,15 @@ impl Config {
             ret.cranelift_opt_level(OptLevel::Speed);
         }
 
+        #[cfg(feature = "gc")]
         ret.wasm_reference_types(true);
+        #[cfg(not(feature = "gc"))]
+        {
+            ret.features.reference_types = false;
+            ret.features.function_references = false;
+            ret.features.gc = false;
+        }
+
         ret.wasm_multi_value(true);
         ret.wasm_bulk_memory(true);
         ret.wasm_simd(true);
@@ -746,6 +754,8 @@ impl Config {
     /// and thus may cause `Engine::new` fail if the `bulk_memory` feature is disabled.
     ///
     /// [proposal]: https://github.com/webassembly/reference-types
+    #[cfg(feature = "gc")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "gc")))]
     pub fn wasm_reference_types(&mut self, enable: bool) -> &mut Self {
         self.features.reference_types = enable;
         self
@@ -764,6 +774,8 @@ impl Config {
     /// This feature is `false` by default.
     ///
     /// [proposal]: https://github.com/WebAssembly/function-references
+    #[cfg(feature = "gc")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "gc")))]
     pub fn wasm_function_references(&mut self, enable: bool) -> &mut Self {
         self.features.function_references = enable;
         self
@@ -784,6 +796,8 @@ impl Config {
     /// progress and generally not ready for primetime.**
     ///
     /// [proposal]: https://github.com/WebAssembly/gc
+    #[cfg(feature = "gc")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "gc")))]
     pub fn wasm_gc(&mut self, enable: bool) -> &mut Self {
         self.features.gc = enable;
         self
