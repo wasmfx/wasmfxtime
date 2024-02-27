@@ -178,8 +178,8 @@ impl Val {
             Val::V128(b) => ValRaw::v128(b.as_u128()),
             Val::ExternRef(e) => {
                 let externref = match e {
-                    Some(e) => e.to_raw(store),
                     None => ptr::null_mut(),
+                    Some(e) => e.to_raw(store),
                 };
                 ValRaw::externref(externref)
             }
@@ -209,12 +209,12 @@ impl Val {
             ValType::V128 => Val::V128(raw.get_v128().into()),
             ValType::Ref(ref_ty) => {
                 let ref_ = match ref_ty.heap_type() {
-                    HeapType::Extern => ExternRef::from_raw(raw.get_externref()).into(),
                     HeapType::Func | HeapType::Concrete(_) => {
                         Func::from_raw(store, raw.get_funcref()).into()
                     }
                     HeapType::NoFunc => Ref::Func(None),
                     HeapType::NoCont | HeapType::Cont => unimplemented!(), // TODO(dhil): Need to do this for the embedder API.
+                    HeapType::Extern => ExternRef::from_raw(raw.get_externref()).into(),
                 };
                 assert!(
                     ref_ty.is_nullable() || !ref_.is_null(),
@@ -690,13 +690,15 @@ impl Ref {
                 );
                 Ok(TableElement::FuncRef(f.vm_func_ref(store).as_ptr()))
             }
+
             (Ref::Extern(e), HeapType::Extern) => match e {
                 None => {
                     assert!(ty.is_nullable());
                     Ok(TableElement::ExternRef(None))
                 }
-                Some(e) => Ok(TableElement::ExternRef(Some(e.inner))),
+                Some(e) => Ok(TableElement::ExternRef(Some(e.into_vm_extern_ref()))),
             },
+
             _ => unreachable!("checked that the value matches the type above"),
         }
     }
