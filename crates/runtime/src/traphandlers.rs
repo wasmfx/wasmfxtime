@@ -215,7 +215,7 @@ where
     F: FnMut(*mut VMContext),
 {
     let limits = Instance::from_vmctx(caller, |i| i.runtime_limits());
-    let callee_stack_cain = VMContext::try_from_opaque(callee)
+    let callee_stack_chain = VMContext::try_from_opaque(callee)
         .map(|vmctx| Instance::from_vmctx(vmctx, |i| *i.stack_chain() as *const StackChainCell));
 
     let result = CallThreadState::new(
@@ -223,7 +223,7 @@ where
         capture_backtrace,
         capture_coredump,
         *limits,
-        callee_stack_cain,
+        callee_stack_chain,
     )
     .with(|cx| {
         traphandlers::wasmtime_setjmp(
