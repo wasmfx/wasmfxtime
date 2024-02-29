@@ -1559,6 +1559,14 @@ pub(crate) fn invoke_wasm_and_catch_traps<T>(
             // wasm (i.e., we do not need to walk the entire `CallTheadState`
             // chain, but only walk to the first such state corresponding to an
             // execution of wasm).
+            //
+            // As a result, the call below is O(n), where n is the number of
+            // `CallThreadState`s at the beginning in this thread's CTS chain before
+            // the first such state that corresponds to wasm execution.
+            // In other words, n is the nesting level of calls to wrapped host
+            // functions from within a host function (e.g., calling `f.call()`
+            // while within a host call, where `f` is the result from wrapping a
+            // Rust function inside a `Func`).
             if wasmtime_runtime::first_wasm_state_on_fiber_stack() {
                 return Err(anyhow::anyhow!(
                     "Re-entering wasm while already executing on a continuation stack"
