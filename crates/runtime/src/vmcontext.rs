@@ -953,6 +953,16 @@ impl VMContext {
         debug_assert_eq!((*opaque).magic, VMCONTEXT_MAGIC);
         opaque.cast()
     }
+
+    /// Alternative to `from_opaque` that returns `None` if the given opaque
+    /// context is not actually a `VMContext`.
+    pub unsafe fn try_from_opaque(opaque: *mut VMOpaqueContext) -> Option<*mut VMContext> {
+        if (*opaque).magic == VMCONTEXT_MAGIC {
+            Some(Self::from_opaque(opaque))
+        } else {
+            None
+        }
+    }
 }
 
 /// A "raw" and unsafe representation of a WebAssembly value.

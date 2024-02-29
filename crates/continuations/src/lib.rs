@@ -150,6 +150,13 @@ impl StackChain {
     pub const ABSENT_DISCRIMINANT: usize = STACK_CHAIN_ABSENT_DISCRIMINANT;
     pub const MAIN_STACK_DISCRIMINANT: usize = STACK_CHAIN_MAIN_STACK_DISCRIMINANT;
     pub const CONTINUATION_DISCRIMINANT: usize = STACK_CHAIN_CONTINUATION_DISCRIMINANT;
+
+    pub fn is_main_stack(&self) -> bool {
+        match self {
+            StackChain::MainStack(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[repr(transparent)]
