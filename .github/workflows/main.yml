@@ -624,8 +624,6 @@ jobs:
 
   build-wasmtime-target-wasm32:
     name: Build wasmtime-target-wasm32
-    if: needs.determine.outputs.run-full
-    needs: determine
     # TODO(dhil): This platform is unsupported.
     if: false
     runs-on: ubuntu-latest
