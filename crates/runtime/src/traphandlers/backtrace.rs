@@ -104,8 +104,10 @@ impl Backtrace {
         mut f: impl FnMut(Frame) -> ControlFlow<()>,
     ) {
         if cfg!(feature = "typed_continuations_baseline_implementation") {
-            log::info!("Backtrace generation not supported in baseline implementation");
-            return;
+            if crate::continuation::baseline::has_ever_run_continuation() {
+                log::info!("Backtrace generation not supported in baseline implementation once a continuation was invoked");
+                return;
+            }
         }
 
         log::trace!("====== Capturing Backtrace ======");

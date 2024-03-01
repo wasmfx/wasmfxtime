@@ -313,6 +313,10 @@ pub mod baseline {
         // A buffer to help propagate tag payloads across
         // continuations.
         static SUSPEND_PAYLOADS: RefCell<Vec<u128>> = RefCell::new(vec![]);
+
+        // This acts like a fuse that is set to true if this thread has ever
+        // executed a continuation (e.g., run `resume`).
+        static HAS_EVER_RUN_CONTINUATION: Cell<bool> = Cell::new(false);
     }
 
     /// Allocates a new continuation in suspended mode.
@@ -382,6 +386,9 @@ pub mod baseline {
     /// Continues a given continuation.
     #[inline(always)]
     pub fn resume(instance: &mut Instance, contref: &mut VMContRef) -> Result<u32, TrapReason> {
+        // Trigger fuse
+        HAS_EVER_RUN_CONTINUATION.set(true);
+
         // Attach parent.
         debug_assert!(contref.parent.is_null());
         contref.parent = get_current_continuation();
@@ -551,6 +558,10 @@ pub mod baseline {
     fn set_current_continuation(cont: *mut VMContRef) {
         CC.set(cont)
     }
+
+    pub fn has_ever_run_continuation() -> bool {
+        HAS_EVER_RUN_CONTINUATION.get()
+    }
 }
 
 #[allow(missing_docs)]
@@ -639,5 +650,11 @@ pub mod baseline {
     #[allow(missing_docs)]
     pub fn get_current_continuation() -> *mut VMContRef {
         panic!("attempt to execute continuation::baseline::get_current_continuation without `typed_continuation_baseline_implementation` toggled!")
+    }
+
+    #[inline(always)]
+    #[allow(missing_docs)]
+    pub fn has_ever_run_continuation() -> bool {
+        panic!("attempt to execute continuation::baseline::has_ever_run_continuation without `typed_continuation_baseline_implementation` toggled!")
     }
 }
