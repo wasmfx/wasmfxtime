@@ -155,10 +155,7 @@ impl StackChain {
     pub const CONTINUATION_DISCRIMINANT: usize = STACK_CHAIN_CONTINUATION_DISCRIMINANT;
 
     pub fn is_main_stack(&self) -> bool {
-        match self {
-            StackChain::MainStack(_) => true,
-            _ => false,
-        }
+        matches!(self, StackChain::MainStack(_))
     }
 }
 
