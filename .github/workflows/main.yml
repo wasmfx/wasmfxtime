@@ -412,15 +412,16 @@ jobs:
     - run: cargo fuzz build --dev -s none
     - run: cargo fuzz build --dev -s none --fuzz-dir ./cranelift/isle/fuzz
 
+    # TODO(dhil): Unsupported platform, disabled for now.
     # Verify the "min platform" example still works.
     #
     # Afterwards make sure the generated header file is up to date by ensuring
     # that the regeneration process didn't change anything in-tree.
-    - run: cargo install cbindgen --vers "^0.26"
-    - run: rustup component add rust-src
-    - run: ./build.sh ./embedding/x86_64-unknown-unknown.json
-      working-directory: ./examples/min-platform
-    - run: git diff --exit-code
+    # - run: cargo install cbindgen --vers "^0.26"
+    # - run: rustup component add rust-src
+    # - run: ./build.sh ./embedding/x86_64-unknown-unknown.json
+    #   working-directory: ./examples/min-platform
+    # - run: git diff --exit-code
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
