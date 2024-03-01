@@ -81,6 +81,14 @@ audited_as = "17.0.1"
 version = "19.0.0"
 audited_as = "17.0.1"
 
+[[unpublished.wasmtime-c-api-impl]]
+version = "19.0.0"
+audited_as = "18.0.1"
+
+[[unpublished.wasmtime-c-api-macros]]
+version = "19.0.0"
+audited_as = "18.0.1"
+
 [[unpublished.wasmtime-cache]]
 version = "19.0.0"
 audited_as = "17.0.1"
@@ -466,6 +474,13 @@ user-id = 696
 user-login = "fitzgen"
 user-name = "Nick Fitzgerald"
 
+[[publisher.dlmalloc]]
+version = "0.2.4"
+when = "2022-08-17"
+user-id = 1
+user-login = "alexcrichton"
+user-name = "Alex Crichton"
+
 [[publisher.equivalent]]
 version = "1.0.1"
 when = "2023-07-10"
@@ -848,6 +863,12 @@ when = "2024-02-15"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wasm-encoder]]
+version = "0.201.0"
+when = "2024-02-27"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wasm-metadata]]
 version = "0.10.20"
 when = "2024-02-12"
@@ -858,6 +879,12 @@ user-name = "Alex Crichton"
 [[publisher.wasm-metadata]]
 version = "0.200.0"
 when = "2024-02-15"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wasm-metadata]]
+version = "0.201.0"
+when = "2024-02-27"
 user-id = 73222
 user-login = "wasmtime-publish"
 
@@ -874,6 +901,12 @@ when = "2024-02-15"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wasm-mutate]]
+version = "0.201.0"
+when = "2024-02-27"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wasm-smith]]
 version = "0.16.1"
 when = "2024-02-12"
@@ -884,6 +917,12 @@ user-name = "Alex Crichton"
 [[publisher.wasm-smith]]
 version = "0.200.0"
 when = "2024-02-15"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wasm-smith]]
+version = "0.201.0"
+when = "2024-02-27"
 user-id = 73222
 user-login = "wasmtime-publish"
 
@@ -900,6 +939,12 @@ when = "2024-02-15"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wasmparser]]
+version = "0.201.0"
+when = "2024-02-27"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wasmprinter]]
 version = "0.2.80"
 when = "2024-02-12"
@@ -910,6 +955,12 @@ user-name = "Alex Crichton"
 [[publisher.wasmprinter]]
 version = "0.200.0"
 when = "2024-02-15"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wasmprinter]]
+version = "0.201.0"
+when = "2024-02-27"
 user-id = 73222
 user-login = "wasmtime-publish"
 
@@ -1070,6 +1121,12 @@ when = "2024-02-15"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wast]]
+version = "201.0.0"
+when = "2024-02-27"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wat]]
 version = "1.0.88"
 when = "2024-02-12"
@@ -1080,6 +1137,12 @@ user-name = "Alex Crichton"
 [[publisher.wat]]
 version = "1.200.0"
 when = "2024-02-15"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wat]]
+version = "1.201.0"
+when = "2024-02-27"
 user-id = 73222
 user-login = "wasmtime-publish"
 
@@ -1121,6 +1184,20 @@ when = "2024-02-07"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.windows]]
+version = "0.52.0"
+when = "2023-11-15"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-core]]
+version = "0.51.1"
+when = "2023-08-17"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
 [[publisher.windows-core]]
 version = "0.52.0"
 when = "2023-11-15"
@@ -1150,6 +1227,13 @@ user-login = "kennykerr"
 user-name = "Kenny Kerr"
 
 [[publisher.windows-targets]]
+version = "0.48.5"
+when = "2023-08-18"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-targets]]
 version = "0.52.0"
 when = "2023-11-15"
 user-id = 64539
@@ -1159,6 +1243,13 @@ user-name = "Kenny Kerr"
 [[publisher.windows_aarch64_gnullvm]]
 version = "0.48.0"
 when = "2023-03-31"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_aarch64_gnullvm]]
+version = "0.48.5"
+when = "2023-08-18"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -1173,6 +1264,13 @@ user-name = "Kenny Kerr"
 [[publisher.windows_aarch64_msvc]]
 version = "0.48.0"
 when = "2023-03-31"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_aarch64_msvc]]
+version = "0.48.5"
+when = "2023-08-18"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -1187,6 +1285,13 @@ user-name = "Kenny Kerr"
 [[publisher.windows_i686_gnu]]
 version = "0.48.0"
 when = "2023-03-31"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_i686_gnu]]
+version = "0.48.5"
+when = "2023-08-18"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -1201,6 +1306,13 @@ user-name = "Kenny Kerr"
 [[publisher.windows_i686_msvc]]
 version = "0.48.0"
 when = "2023-03-31"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_i686_msvc]]
+version = "0.48.5"
+when = "2023-08-18"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -1215,6 +1327,13 @@ user-name = "Kenny Kerr"
 [[publisher.windows_x86_64_gnu]]
 version = "0.48.0"
 when = "2023-03-31"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_gnu]]
+version = "0.48.5"
+when = "2023-08-18"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -1229,6 +1348,13 @@ user-name = "Kenny Kerr"
 [[publisher.windows_x86_64_gnullvm]]
 version = "0.48.0"
 when = "2023-03-31"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_gnullvm]]
+version = "0.48.5"
+when = "2023-08-18"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -1243,6 +1369,13 @@ user-name = "Kenny Kerr"
 [[publisher.windows_x86_64_msvc]]
 version = "0.48.0"
 when = "2023-03-31"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_msvc]]
+version = "0.48.5"
+when = "2023-08-18"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -1281,6 +1414,18 @@ when = "2024-02-23"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wit-bindgen]]
+version = "0.19.2"
+when = "2024-02-26"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wit-bindgen]]
+version = "0.20.0"
+when = "2024-02-29"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wit-bindgen-core]]
 version = "0.17.0"
 when = "2024-02-05"
@@ -1291,6 +1436,18 @@ user-name = "Alex Crichton"
 [[publisher.wit-bindgen-core]]
 version = "0.19.1"
 when = "2024-02-23"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wit-bindgen-core]]
+version = "0.19.2"
+when = "2024-02-26"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wit-bindgen-core]]
+version = "0.20.0"
+when = "2024-02-29"
 user-id = 73222
 user-login = "wasmtime-publish"
 
@@ -1307,6 +1464,18 @@ when = "2024-02-23"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wit-bindgen-rust]]
+version = "0.19.2"
+when = "2024-02-26"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wit-bindgen-rust]]
+version = "0.20.0"
+when = "2024-02-29"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wit-bindgen-rust-macro]]
 version = "0.17.0"
 when = "2024-02-05"
@@ -1317,6 +1486,18 @@ user-name = "Alex Crichton"
 [[publisher.wit-bindgen-rust-macro]]
 version = "0.19.1"
 when = "2024-02-23"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wit-bindgen-rust-macro]]
+version = "0.19.2"
+when = "2024-02-26"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wit-bindgen-rust-macro]]
+version = "0.20.0"
+when = "2024-02-29"
 user-id = 73222
 user-login = "wasmtime-publish"
 
@@ -1340,6 +1521,12 @@ when = "2024-02-15"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wit-component]]
+version = "0.201.0"
+when = "2024-02-27"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wit-parser]]
 version = "0.13.1"
 when = "2024-01-09"
@@ -1357,6 +1544,12 @@ user-name = "Alex Crichton"
 [[publisher.wit-parser]]
 version = "0.200.0"
 when = "2024-02-15"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wit-parser]]
+version = "0.201.0"
+when = "2024-02-27"
 user-id = 73222
 user-login = "wasmtime-publish"
 

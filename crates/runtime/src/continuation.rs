@@ -7,14 +7,11 @@ use std::mem;
 use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
 pub use wasmtime_continuations::{
     ContinuationFiber, ContinuationObject, ContinuationReference, Payloads, StackChain,
-    StackChainCell, StackLimits, State,
+    StackChainCell, StackLimits, State, DEFAULT_FIBER_SIZE,
 };
 use wasmtime_fibre::{Fiber, FiberStack, Suspend, SwitchDirection};
 
 type Yield = Suspend;
-
-/// Default size for continuation stacks
-pub const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
 
 /// TODO
 #[inline(always)]

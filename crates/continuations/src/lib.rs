@@ -3,6 +3,9 @@ use wasmtime_fibre::Fiber;
 
 pub use wasmtime_fibre::{SwitchDirection, SwitchDirectionEnum, TagId};
 
+/// Default size for continuation stacks
+pub const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
+
 /// TODO
 #[allow(dead_code)]
 pub const ENABLE_DEBUG_PRINTING: bool = false;
@@ -152,10 +155,7 @@ impl StackChain {
     pub const CONTINUATION_DISCRIMINANT: usize = STACK_CHAIN_CONTINUATION_DISCRIMINANT;
 
     pub fn is_main_stack(&self) -> bool {
-        match self {
-            StackChain::MainStack(_) => true,
-            _ => false,
-        }
+        matches!(self, StackChain::MainStack(_))
     }
 }
 
