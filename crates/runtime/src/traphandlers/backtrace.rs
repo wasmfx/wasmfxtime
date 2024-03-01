@@ -147,7 +147,6 @@ impl Backtrace {
             .map(|state| state.callee_stack_chain.map(|cell| &*(*cell).0.get()))
             .flatten();
 
-
         // The first value in `activations` is for the most recently running
         // wasm. We thus provide the stack chain of `first_wasm_state` to
         // traverse the potential continuation stacks. For the subsequent

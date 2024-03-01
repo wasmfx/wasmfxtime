@@ -311,7 +311,6 @@ mod call_thread_state {
         old_last_wasm_exit_fp: Cell<usize>,
         old_last_wasm_exit_pc: Cell<usize>,
         old_last_wasm_entry_sp: Cell<usize>,
-
         // Note that there is no need for saving a `old_callee_stack_chain`
         // value: Due to the invariant that only the "innermost`
         // `CallThreadState` executing wasm may do so off the main stack (see
