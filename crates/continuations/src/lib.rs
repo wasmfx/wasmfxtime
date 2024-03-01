@@ -3,6 +3,9 @@ use wasmtime_fibre::Fiber;
 
 pub use wasmtime_fibre::{SwitchDirection, SwitchDirectionEnum, TagId};
 
+/// Default size for continuation stacks
+pub const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
+
 /// TODO
 #[allow(dead_code)]
 pub const ENABLE_DEBUG_PRINTING: bool = false;

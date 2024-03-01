@@ -222,7 +222,7 @@ impl Config {
             #[cfg(any(feature = "cranelift", feature = "winch"))]
             compiler_config: CompilerConfig::default(),
             wasmfx_config: WasmFXConfig {
-                stack_size: wasmtime_runtime::continuation::DEFAULT_FIBER_SIZE,
+                stack_size: wasmtime_continuations::DEFAULT_FIBER_SIZE,
             },
             #[cfg(feature = "cache")]
             cache_config: CacheConfig::new_cache_disabled(),
