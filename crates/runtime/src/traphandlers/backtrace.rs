@@ -105,7 +105,7 @@ impl Backtrace {
     ) {
         if cfg!(feature = "typed_continuations_baseline_implementation") {
             if crate::continuation::baseline::has_ever_run_continuation() {
-                log::info!("Backtrace generation not supported in baseline implementation once a continuation was invoked");
+                log::info!("Backtrace generation not supported in baseline implementation once a continuation has been invoked");
                 return;
             }
         }
