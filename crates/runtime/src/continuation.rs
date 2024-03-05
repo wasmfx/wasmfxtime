@@ -387,7 +387,9 @@ pub mod baseline {
     #[inline(always)]
     pub fn resume(instance: &mut Instance, contref: &mut VMContRef) -> Result<u32, TrapReason> {
         // Trigger fuse
-        HAS_EVER_RUN_CONTINUATION.set(true);
+        if HAS_EVER_RUN_CONTINUATION.get() {
+            HAS_EVER_RUN_CONTINUATION.set(true);
+        }
 
         // Attach parent.
         debug_assert!(contref.parent.is_null());
