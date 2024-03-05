@@ -227,15 +227,17 @@ impl Backtrace {
                 let limits = limits.as_ref().unwrap();
                 match continuation_opt {
                     Some(continuation) => {
-                        let cont = unsafe { &*continuation };
-                        let stack_range = (*cont.fiber).stack().range().unwrap();
-                        debug_assert!(stack_range.contains(&limits.last_wasm_exit_fp));
-                        debug_assert!(stack_range.contains(&limits.last_wasm_entry_sp));
-                        // TODO(frank-emrich) Enable this assertion one we stop
-                        // zero-ing the stack limit in
-                        // `wasmtime_runtime::continuation::resume`
-                        //
-                        // debug_assert_eq!(stack_range.end, limits.stack_limit);
+                        unsafe {
+                            let cont = &*continuation;
+                            let stack_range = (*cont.fiber).stack().range().unwrap();
+                            debug_assert!(stack_range.contains(&limits.last_wasm_exit_fp));
+                            debug_assert!(stack_range.contains(&limits.last_wasm_entry_sp));
+                            // TODO(frank-emrich) Enable this assertion once we stop
+                            // zero-ing the stack limit in
+                            // `wasmtime_runtime::continuation::resume`
+                            //
+                            // debug_assert_eq!(stack_range.end, limits.stack_limit);
+                        }
                     }
                     None => {
                         // reached stack information for main stack
