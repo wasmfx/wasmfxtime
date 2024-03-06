@@ -3,6 +3,8 @@ use wasmtime::*;
 
 mod test_utils {
     use anyhow::{bail, Result};
+    use std::any::*;
+    use std::panic::AssertUnwindSafe;
     use wasmtime::*;
 
     pub struct Runner {
@@ -42,15 +44,38 @@ mod test_utils {
 
         /// Uses this `Runner` to run the module defined in `wat`, satisfying
         /// its imports using `imports`. The module must export a function
-        /// `entry`, taking no parameters and returning `Results`. Execution of
-        /// `entry` is expected to yield a runtime `Error` with a &str payload
-        /// (such as an error raised with anyhow::anyhow!("Something is wrong")
+        /// `entry`, taking no parameters and without return values . Execution
+        /// of `entry` is expected to yield a runtime `Error` with a `&str`
+        /// payload (such as an error raised with anyhow::anyhow!("Something is
+        /// wrong")
         pub fn run_test_expect_str_error(self, wat: &str, imports: &[Extern], error_message: &str) {
             let result = self.run_test::<()>(wat, imports);
 
             let err = result.expect_err("Was expecting wasm execution to yield error");
 
             assert_eq!(err.downcast_ref::<&'static str>(), Some(&error_message));
+        }
+
+        /// Uses this `Runner` to run the module defined in `wat`, satisfying
+        /// its imports using `imports`. The module must export a function
+        /// `entry`, taking no parameters and without return values. Execution
+        /// of `entry` is expected to cause a panic (and that this is panic is
+        /// not handled by wasmtime previously).
+        /// Returns the `Error` payload.
+        pub fn run_test_expect_panic(
+            mut self,
+            wat: &str,
+            imports: &[Extern],
+        ) -> Box<dyn Any + Send + 'static> {
+            let module = Module::new(&self.engine, wat).unwrap();
+
+            let instance = Instance::new(&mut self.store, &module, imports).unwrap();
+            let entry = instance.get_func(&mut self.store, "entry").unwrap();
+
+            std::panic::catch_unwind(AssertUnwindSafe(|| {
+                drop(entry.call(&mut self.store, &mut [], &mut []))
+            }))
+            .unwrap_err()
         }
     }
 
@@ -95,6 +120,10 @@ mod test_utils {
                 Ok(())
             },
         )
+    }
+
+    pub fn make_panicking_host_func(store: &mut Store<()>, msg: &'static str) -> Func {
+        Func::wrap(store, move || std::panic::panic_any(msg))
     }
 }
 
@@ -357,7 +386,8 @@ fn inter_instance_suspend() -> Result<()> {
     Ok(())
 }
 
-/// Tests interaction with host functions.
+/// Tests interaction with host functions. Note that the interaction with host
+/// functions and traps is covered by the module `traps` further down.
 mod host {
     use super::test_utils::*;
     use wasmtime::*;
@@ -641,6 +671,449 @@ mod host {
             &[host_func_a.into()],
             RE_ENTER_ON_CONTINUATION_ERROR,
         );
+        Ok(())
+    }
+}
+
+mod traps {
+    use super::test_utils::*;
+    use wasmtime::*;
+
+    /// Runs the module given as `wat`. We expect execution to cause the
+    /// `expected_trap` and a backtrace containing exactly the function names
+    /// given by `expected_backtrace`.
+    fn run_test_expect_trap_backtrace(wat: &str, expected_trap: Trap, expected_backtrace: &[&str]) {
+        let runner = Runner::new();
+        let result = runner.run_test::<()>(wat, &[]);
+
+        let err = result.expect_err("Was expecting wasm execution to yield error");
+
+        assert!(err.root_cause().is::<Trap>());
+        assert_eq!(*err.downcast_ref::<Trap>().unwrap(), expected_trap);
+
+        // In the baseline implementation, the stack trace will always be empty
+        if !cfg!(feature = "typed_continuations_baseline_implementation") {
+            let trace = err.downcast_ref::<WasmBacktrace>().unwrap();
+
+            let actual_func_name_it = trace
+                .frames()
+                .iter()
+                .map(|frame| {
+                    frame
+                        .func_name()
+                        .expect("Expecting all functions in actual backtrace to have names")
+                })
+                .rev();
+
+            let expected_func_name_it = expected_backtrace.iter().map(|name| *name);
+
+            assert!(actual_func_name_it.eq(expected_func_name_it));
+        }
+    }
+
+    #[test]
+    /// Tests that we get correct backtraces if we trap deep inside multiple continuations.
+    /// Call chain:
+    /// $entry -call-> $a -resume-> $b -call-> $c -resume-> $d -call-> $e -resume-> $f
+    /// Here, $f traps.
+    fn trap_in_continuation_nested() -> Result<()> {
+        let wat = r#"
+        (module
+            (type $ft (func))
+            (type $ct (cont $ft))
+
+            (func $entry (export "entry")
+                (call $a)
+            )
+
+            (func $a (export "a")
+                (resume $ct (cont.new $ct (ref.func $b)))
+            )
+
+            (func $b (export "b")
+                (call $c)
+            )
+
+            (func $c (export "c")
+                (resume $ct (cont.new $ct (ref.func $d)))
+            )
+
+            (func $d (export "d")
+              (call $e)
+            )
+
+            (func $e (export "e")
+                (resume $ct (cont.new $ct (ref.func $f)))
+            )
+
+            (func $f (export "f")
+                (unreachable)
+            )
+        )
+        "#;
+
+        run_test_expect_trap_backtrace(
+            wat,
+            Trap::UnreachableCodeReached,
+            &["entry", "a", "b", "c", "d", "e", "f"],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    /// Tests that we get correct backtraces if we trap after returning from one
+    /// continuation to its parent.
+    fn trap_in_continuation_back_to_parent() -> Result<()> {
+        let wat = r#"
+        (module
+            (type $ft (func))
+            (type $ct (cont $ft))
+
+            (func $entry (export "entry")
+                (call $a)
+            )
+
+            (func $a (export "a")
+                (resume $ct (cont.new $ct (ref.func $b)))
+            )
+
+            (func $b (export "b")
+                (call $c)
+            )
+
+            (func $c (export "c")
+                (resume $ct (cont.new $ct (ref.func $d)))
+                (unreachable)
+            )
+
+            (func $d (export "d")
+                (call $e)
+            )
+
+            (func $e (export "e"))
+
+        )
+        "#;
+
+        run_test_expect_trap_backtrace(
+            wat,
+            Trap::UnreachableCodeReached,
+            &["entry", "a", "b", "c"],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    /// Tests that we get correct backtraces if we trap after returning from
+    /// several continuations back to the main stack.
+    fn trap_in_continuation_back_to_main() -> Result<()> {
+        let wat = r#"
+        (module
+            (type $ft (func))
+            (type $ct (cont $ft))
+
+            (func $entry (export "entry")
+                (call $a)
+            )
+
+            (func $a (export "a")
+                (resume $ct (cont.new $ct (ref.func $b)))
+                (unreachable)
+            )
+
+            (func $b (export "b")
+                (call $c)
+            )
+
+            (func $c (export "c")
+                (resume $ct (cont.new $ct (ref.func $d)))
+            )
+
+            (func $d (export "d")
+              (call $e)
+            )
+
+            (func $e (export "e"))
+
+        )
+        "#;
+
+        run_test_expect_trap_backtrace(wat, Trap::UnreachableCodeReached, &["entry", "a"]);
+
+        Ok(())
+    }
+
+    #[test]
+    /// Tests that we get correct backtraces after suspending a continuation.
+    fn trap_in_continuation_suspend() -> Result<()> {
+        let wat = r#"
+        (module
+            (type $ft (func))
+            (type $ct (cont $ft))
+
+            (tag $t)
+
+            (func $entry (export "entry")
+                (call $a)
+            )
+
+            (func $a (export "a")
+                (resume $ct (cont.new $ct (ref.func $b)))
+                (unreachable)
+            )
+
+            (func $b (export "b")
+                (call $c)
+            )
+
+            (func $c (export "c")
+                (block $handler (result  (ref $ct))
+                    (resume $ct (tag $t $handler) (cont.new $ct (ref.func $d)))
+                    (return)
+                )
+                (unreachable)
+            )
+
+            (func $d (export "d")
+                (call $e)
+            )
+
+            (func $e (export "e")
+                (suspend $t)
+            )
+
+        )
+    "#;
+
+        run_test_expect_trap_backtrace(
+            wat,
+            Trap::UnreachableCodeReached,
+            &["entry", "a", "b", "c"],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    /// Tests that we get correct backtraces after suspending a continuation and
+    /// then resuming it from a different stack frame.
+    fn trap_in_continuation_suspend_resume() -> Result<()> {
+        let wat = r#"
+        (module
+            (type $ft (func))
+            (type $ct (cont $ft))
+
+            (tag $t)
+
+            (func $entry (export "entry")
+                (call $a)
+            )
+
+            (func $a (export "a")
+                (resume $ct (cont.new $ct (ref.func $b)))
+            )
+
+            (func $b (export "b")
+                (resume $ct (call $c))
+            )
+
+            (func $c (export "c") (result (ref $ct))
+                (block $handler (result  (ref $ct))
+                    (resume $ct (tag $t $handler) (cont.new $ct (ref.func $d)))
+
+                    ;; We never want to get here, but also don't want to use
+                    ;; (unreachable), which is the trap we deliberately use in
+                    ;; this test. Instead, we call a null function ref here,
+                    ;; which is guaranteed to trap.
+                    (call_ref $ft (ref.null $ft))
+
+                    (return (cont.new $ct (ref.func $d)))
+                )
+                ;; implicitly returning the continuation here
+            )
+
+            (func $d (export "d")
+                (call $e)
+                (unreachable)
+            )
+
+            (func $e (export "e")
+                (suspend $t)
+            )
+
+        )
+    "#;
+
+        // Note that c does not appear in the stack trace:
+        // In $b, we resume the suspended computation, which started in $d,
+        // suspended in $e, and traps in $d
+        run_test_expect_trap_backtrace(
+            wat,
+            Trap::UnreachableCodeReached,
+            &["entry", "a", "b", "d"],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    /// Tests that we get correct backtraces after suspending a continuation
+    /// where we need to forward to an outer handler.
+    fn trap_in_continuation_forward() -> Result<()> {
+        let wat = r#"
+        (module
+            (type $ft (func))
+            (type $ct (cont $ft))
+            (tag $t)
+
+            (func $entry (export "entry")
+                (call $a)
+            )
+
+            (func $a (export "a")
+                (block $handler (result  (ref $ct))
+                    (resume $ct (tag $t $handler) (cont.new $ct (ref.func $b)))
+                    ;; We don't actually want to get here
+                    (return)
+                )
+                (unreachable)
+            )
+
+            (func $b (export "b")
+                (call $c)
+            )
+
+            (func $c (export "c")
+                (resume $ct (cont.new $ct (ref.func $d)))
+            )
+
+            (func $d (export "d")
+                (call $e)
+            )
+
+            (func $e (export "e")
+                (suspend $t)
+            )
+
+        )
+    "#;
+
+        // Note that c does not appear in the stack trace:
+        // In $b, we resume the suspended computation, which started in $d,
+        // suspended in $e, and traps in $d
+        run_test_expect_trap_backtrace(wat, Trap::UnreachableCodeReached, &["entry", "a"]);
+
+        Ok(())
+    }
+
+    #[test]
+    /// Tests that we get correct backtraces after suspending a continuation
+    /// where we need to forward to an outer handler. We then resume the
+    /// continuation from within another continuation.
+    fn trap_in_continuation_forward_resume() -> Result<()> {
+        let wat = r#"
+        (module
+            (type $ft (func))
+            (type $ct (cont $ft))
+            (tag $t)
+
+            (global $k (mut (ref null $ct)) (ref.null $ct))
+
+            (func $entry (export "entry")
+                (call $a)
+            )
+
+            (func $a (export "a")
+                (resume $ct (cont.new $ct (ref.func $b)))
+            )
+
+            (func $b (export "b")
+                (block $handler (result  (ref $ct))
+                    (resume $ct (tag $t $handler) (cont.new $ct (ref.func $c)))
+                    ;; We don't actually want to get here
+                    (return)
+                )
+                (global.set $k)
+                ;; $f will resume $k
+                (resume $ct (cont.new $ct (ref.func $f)))
+            )
+
+            (func $c (export "c")
+                (resume $ct (cont.new $ct (ref.func $d)))
+            )
+
+            (func $d (export "d")
+                (call $e)
+            )
+
+            (func $e (export "e")
+                (suspend $t)
+                (unreachable)
+            )
+
+           (func $f  (export "f")
+               (resume $ct (global.get $k))
+           )
+        )
+       "#;
+
+        run_test_expect_trap_backtrace(
+            wat,
+            Trap::UnreachableCodeReached,
+            &["entry", "a", "b", "f", "c", "d", "e"],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    /// Tests that we get correct panic payloads  if we panic deep inside multiple
+    /// continuations. Note that wasmtime does not create its own backtraces for panics.
+    fn panic_in_continuation() -> Result<()> {
+        let wat = r#"
+        (module
+            (type $ft (func))
+            (type $ct (cont $ft))
+
+            (import "" "" (func $f))
+
+            (func $entry (export "entry")
+                (call $a)
+            )
+
+            (func $a (export "a")
+                (resume $ct (cont.new $ct (ref.func $b)))
+            )
+
+            (func $b (export "b")
+                (call $c)
+            )
+
+            (func $c (export "c")
+                (resume $ct (cont.new $ct (ref.func $d)))
+            )
+
+            (func $d (export "d")
+                (call $e)
+            )
+
+            (func $e (export "e")
+                (call $f)
+            )
+
+        )
+        "#;
+
+        let mut runner = Runner::new();
+
+        let msg = "Host function f panics";
+
+        let f = make_panicking_host_func(&mut runner.store, msg);
+        let error = runner.run_test_expect_panic(wat, &[f.into()]);
+        assert_eq!(error.downcast_ref::<&'static str>(), Some(&msg));
+
         Ok(())
     }
 }
