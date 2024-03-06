@@ -157,6 +157,36 @@ impl StackChain {
     pub fn is_main_stack(&self) -> bool {
         matches!(self, StackChain::MainStack(_))
     }
+
+    // We don't implement IntoIterator because our iterator is unsafe, so at
+    // least this gives us some way of indicating this, even though the actual
+    // unsafety lies in the `next` function.
+    pub unsafe fn into_iter(self) -> ContinuationChainIterator {
+        ContinuationChainIterator(self)
+    }
+}
+
+pub struct ContinuationChainIterator(StackChain);
+
+impl Iterator for ContinuationChainIterator {
+    type Item = (Option<*mut ContinuationObject>, *mut StackLimits);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.0 {
+            StackChain::Absent => None,
+            StackChain::MainStack(ms) => {
+                let next = (None, ms);
+                self.0 = StackChain::Absent;
+                Some(next)
+            }
+            StackChain::Continuation(ptr) => {
+                let continuation = unsafe { ptr.as_mut().unwrap() };
+                let next = (Some(ptr), (&mut continuation.limits) as *mut StackLimits);
+                self.0 = continuation.parent_chain.clone();
+                Some(next)
+            }
+        }
+    }
 }
 
 #[repr(transparent)]
