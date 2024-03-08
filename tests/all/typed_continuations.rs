@@ -170,7 +170,7 @@ mod wasi {
         // Add the WASI preview1 API to the linker (will be implemented in terms of
         // the preview2 API)
         let mut linker: Linker<WasiHostCtx> = Linker::new(&engine);
-        preview1::add_to_linker_sync(&mut linker)?;
+        preview1::add_to_linker_sync(&mut linker, |t| t)?;
 
         // Add capabilities (e.g. filesystem access) to the WASI preview2 context here.
         let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().build();
@@ -206,7 +206,7 @@ mod wasi {
         // Add the WASI preview1 API to the linker (will be implemented in terms of
         // the preview2 API)
         let mut linker: Linker<WasiHostCtx> = Linker::new(&engine);
-        preview1::add_to_linker_async(&mut linker)?;
+        preview1::add_to_linker_async(&mut linker, |t| t)?;
 
         // Add capabilities (e.g. filesystem access) to the WASI preview2 context here.
         let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().build();
