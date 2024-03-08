@@ -4,6 +4,7 @@
 mod backtrace;
 mod coredump;
 
+use crate::continuation::StackChainCell;
 use crate::sys::traphandlers;
 use crate::{Instance, VMContext, VMOpaqueContext, VMRuntimeLimits};
 use anyhow::Error;
@@ -12,7 +13,6 @@ use std::cell::{Cell, UnsafeCell};
 use std::mem::MaybeUninit;
 use std::ptr;
 use std::sync::Once;
-use wasmtime_continuations::StackChainCell;
 
 pub use self::backtrace::{Backtrace, Frame};
 pub use self::coredump::CoreDumpStack;

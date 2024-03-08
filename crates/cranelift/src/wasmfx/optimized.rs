@@ -321,7 +321,7 @@ pub(crate) mod typed_continuation_helpers {
     /// Size of `wasmtime_continuations::StackChain` in machine words.
     /// Used to verify that we have not changed its representation.
     const STACK_CHAIN_POINTER_COUNT: usize =
-        std::mem::size_of::<wasmtime_continuations::StackChain>() / std::mem::size_of::<usize>();
+        wasmtime_continuations::offsets::STACK_CHAIN_SIZE / std::mem::size_of::<usize>();
 
     /// Compile-time representation of wasmtime_continuations::StackChain,
     /// consisting of two `ir::Value`s.
@@ -341,19 +341,19 @@ pub(crate) mod typed_continuation_helpers {
 
         pub fn args(&self) -> Payloads {
             let offset = wasmtime_continuations::offsets::continuation_object::ARGS;
-            Payloads::new(self.address, offset, self.pointer_type)
+            Payloads::new(self.address, offset as i32, self.pointer_type)
         }
 
         pub fn tag_return_values(&self) -> Payloads {
             let offset = wasmtime_continuations::offsets::continuation_object::TAG_RETURN_VALUES;
-            Payloads::new(self.address, offset, self.pointer_type)
+            Payloads::new(self.address, offset as i32, self.pointer_type)
         }
 
         /// Loads the value of the `state` field of the continuation object,
         /// which is represented using the `State` enum.
         fn load_state(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let mem_flags = ir::MemFlags::trusted();
-            let offset = wasmtime_continuations::offsets::continuation_object::STATE;
+            let offset = wasmtime_continuations::offsets::continuation_object::STATE as i32;
 
             // Let's make sure that we still represent the State enum as i32.
             debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
@@ -368,7 +368,7 @@ pub(crate) mod typed_continuation_helpers {
             state: wasmtime_continuations::State,
         ) {
             let mem_flags = ir::MemFlags::trusted();
-            let offset = wasmtime_continuations::offsets::continuation_object::STATE;
+            let offset = wasmtime_continuations::offsets::continuation_object::STATE as i32;
 
             // Let's make sure that we still represent the State enum as i32.
             debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
@@ -426,7 +426,7 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
             new_stack_chain: &StackChain,
         ) {
-            let offset = wasmtime_continuations::offsets::continuation_object::PARENT_CHAIN;
+            let offset = wasmtime_continuations::offsets::continuation_object::PARENT_CHAIN as i32;
             new_stack_chain.store(env, builder, self.address, offset)
         }
     }
@@ -462,7 +462,7 @@ pub(crate) mod typed_continuation_helpers {
             self.get(
                 builder,
                 self.pointer_type,
-                wasmtime_continuations::offsets::payloads::DATA,
+                wasmtime_continuations::offsets::payloads::DATA as i32,
             )
         }
 
@@ -474,7 +474,7 @@ pub(crate) mod typed_continuation_helpers {
             self.get(
                 builder,
                 ty,
-                wasmtime_continuations::offsets::payloads::CAPACITY,
+                wasmtime_continuations::offsets::payloads::CAPACITY as i32,
             )
         }
 
@@ -486,14 +486,14 @@ pub(crate) mod typed_continuation_helpers {
             self.get(
                 builder,
                 ty,
-                wasmtime_continuations::offsets::payloads::LENGTH,
+                wasmtime_continuations::offsets::payloads::LENGTH as i32,
             )
         }
 
         fn set_length(&self, builder: &mut FunctionBuilder, length: ir::Value) {
             self.set::<wasmtime_continuations::types::payloads::Length>(
                 builder,
-                wasmtime_continuations::offsets::payloads::LENGTH,
+                wasmtime_continuations::offsets::payloads::LENGTH as i32,
                 length,
             );
         }
@@ -501,7 +501,7 @@ pub(crate) mod typed_continuation_helpers {
         fn set_capacity(&self, builder: &mut FunctionBuilder, capacity: ir::Value) {
             self.set::<wasmtime_continuations::types::payloads::Capacity>(
                 builder,
-                wasmtime_continuations::offsets::payloads::CAPACITY,
+                wasmtime_continuations::offsets::payloads::CAPACITY as i32,
                 capacity,
             );
         }
@@ -509,7 +509,7 @@ pub(crate) mod typed_continuation_helpers {
         fn set_data(&self, builder: &mut FunctionBuilder, data: ir::Value) {
             self.set::<*mut u8>(
                 builder,
-                wasmtime_continuations::offsets::payloads::DATA,
+                wasmtime_continuations::offsets::payloads::DATA as i32,
                 data,
             );
         }
@@ -822,7 +822,7 @@ pub(crate) mod typed_continuation_helpers {
             pointer_type: ir::Type,
         ) -> StackChain {
             debug_assert_eq!(STACK_CHAIN_POINTER_COUNT, 2);
-            let discriminant = wasmtime_continuations::StackChain::CONTINUATION_DISCRIMINANT;
+            let discriminant = wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT;
             let discriminant = builder.ins().iconst(pointer_type, discriminant as i64);
             StackChain {
                 discriminant,
@@ -834,7 +834,7 @@ pub(crate) mod typed_continuation_helpers {
         /// Creates a `Self` corressponding to `StackChain::Absent`.
         pub fn absent(builder: &mut FunctionBuilder, pointer_type: ir::Type) -> StackChain {
             debug_assert_eq!(STACK_CHAIN_POINTER_COUNT, 2);
-            let discriminant = wasmtime_continuations::StackChain::ABSENT_DISCRIMINANT;
+            let discriminant = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT;
             let discriminant = builder.ins().iconst(pointer_type, discriminant as i64);
             let zero_filler = builder.ins().iconst(pointer_type, 0i64);
             StackChain {
@@ -851,7 +851,7 @@ pub(crate) mod typed_continuation_helpers {
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
         ) {
-            let discriminant = wasmtime_continuations::StackChain::ABSENT_DISCRIMINANT;
+            let discriminant = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT;
             let discriminant = builder.ins().iconst(self.pointer_type, discriminant as i64);
             emit_debug_assert_ne!(env, builder, self.discriminant, discriminant);
         }
@@ -927,7 +927,7 @@ pub(crate) mod typed_continuation_helpers {
             trap_code: ir::TrapCode,
         ) -> ir::Value {
             if cfg!(debug_assertions) {
-                let absent_discriminant = wasmtime_continuations::StackChain::ABSENT_DISCRIMINANT;
+                let absent_discriminant = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT;
                 let is_initialized = builder.ins().icmp_imm(
                     IntCC::NotEqual,
                     self.discriminant,
@@ -937,7 +937,7 @@ pub(crate) mod typed_continuation_helpers {
             }
 
             let continuation_discriminant =
-                wasmtime_continuations::StackChain::CONTINUATION_DISCRIMINANT;
+                wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT;
             let is_continuation = builder.ins().icmp_imm(
                 IntCC::Equal,
                 self.discriminant,
@@ -1002,10 +1002,10 @@ pub(crate) mod typed_continuation_helpers {
                 let our_value =
                     builder
                         .ins()
-                        .load(self.pointer_type, memflags, stack_limits_ptr, our_offset);
+                        .load(self.pointer_type, memflags, stack_limits_ptr, our_offset as i32);
                 builder
                     .ins()
-                    .store(memflags, our_value, vmruntime_limits_ptr, their_offset);
+                    .store(memflags, our_value, vmruntime_limits_ptr, their_offset as i32);
             };
 
             let pointer_size = self.pointer_type.bytes() as u8;
@@ -1046,7 +1046,7 @@ pub(crate) mod typed_continuation_helpers {
                 memflags,
                 last_wasm_entry_sp,
                 stack_limits_ptr,
-                o::stack_limits::LAST_WASM_ENTRY_SP,
+                o::stack_limits::LAST_WASM_ENTRY_SP as i32,
             );
         }
     }

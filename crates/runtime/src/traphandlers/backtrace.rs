@@ -20,9 +20,8 @@
 //! exit FP and stopping once we reach the entry SP (meaning that the next older
 //! frame is a host frame).
 
-use wasmtime_continuations::StackChain;
-
 use crate::arch;
+use crate::continuation::StackChain;
 use crate::{
     traphandlers::{tls, CallThreadState},
     VMRuntimeLimits,

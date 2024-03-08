@@ -4,11 +4,12 @@
 #![warn(clippy::cast_sign_loss)]
 
 use anyhow::{Error, Result};
+use continuation::StackChainCell;
 use std::fmt;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use wasmtime_continuations::{StackChainCell, WasmFXConfig};
+use wasmtime_continuations::WasmFXConfig;
 use wasmtime_environ::{DefinedFuncIndex, DefinedMemoryIndex, HostPtr, VMOffsets};
 
 mod arch;
@@ -67,6 +68,7 @@ pub use crate::vmcontext::{
     VMRuntimeLimits, VMSharedTypeIndex, VMTableDefinition, VMTableImport, VMWasmCallFunction,
     ValRaw,
 };
+
 pub use send_sync_ptr::SendSyncPtr;
 
 mod module_id;
