@@ -81,33 +81,32 @@ pub enum StackChain {
     /// has not been set, yet. If stored in a ContinuationObject's parent_chain
     /// field, means that there is currently no parent.
     Absent = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT,
-    /// TODO
+    /// Represents the main stack.
     MainStack(*mut StackLimits) = wasmtime_continuations::STACK_CHAIN_MAIN_STACK_DISCRIMINANT,
-    /// TODO
+    /// Represents a continuation's stack.
     Continuation(*mut ContinuationObject) =
         wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT,
 }
 
 impl StackChain {
-    // pub const ABSENT_DISCRIMINANT: usize = STACK_CHAIN_ABSENT_DISCRIMINANT;
-    // pub const MAIN_STACK_DISCRIMINANT: usize = STACK_CHAIN_MAIN_STACK_DISCRIMINANT;
-    // pub const CONTINUATION_DISCRIMINANT: usize = STACK_CHAIN_CONTINUATION_DISCRIMINANT;
-
-    /// TODO
+    /// Indicates if `self` is a `MainStack` variant.
     pub fn is_main_stack(&self) -> bool {
         matches!(self, StackChain::MainStack(_))
     }
 
-    /// TODO
-    // We don't implement IntoIterator because our iterator is unsafe, so at
-    // least this gives us some way of indicating this, even though the actual
-    // unsafety lies in the `next` function.
+    /// Returns an iterator over the stacks in this chain.
+    /// We don't implement `IntoIterator` because our iterator is unsafe, so at
+    /// least this gives us some way of indicating this, even though the actual
+    /// unsafety lies in the `next` function.
     pub unsafe fn into_iter(self) -> ContinuationChainIterator {
         ContinuationChainIterator(self)
     }
 }
 
-/// TODO
+/// Iterator for stacks in a stack chain.
+/// Each stack is represented by a tuple `(co_opt, sl)`, where sl is a pointer
+/// to the stack's `StackLimits` object and `co_opt` is a pointer to the
+/// corresponding `ContinuationObject`, or None for the main stack.
 pub struct ContinuationChainIterator(StackChain);
 
 impl Iterator for ContinuationChainIterator {
@@ -132,11 +131,12 @@ impl Iterator for ContinuationChainIterator {
 }
 
 #[repr(transparent)]
-/// TODO
+/// Wraps a `StackChain` in an `UnsafeCell`, in order to store it in a
+/// `StoreOpaque`.
 pub struct StackChainCell(pub UnsafeCell<StackChain>);
 
 impl StackChainCell {
-    /// TODO
+    /// Indicates if the underlying `StackChain` object has value `Absent`.
     pub fn absent() -> Self {
         StackChainCell(UnsafeCell::new(StackChain::Absent))
     }
@@ -153,13 +153,14 @@ unsafe impl Sync for StackChainCell {}
 /// TODO
 #[repr(C)]
 pub struct ContinuationObject {
-    /// TODO
+    /// The limits of this continuation's stack.
     pub limits: StackLimits,
 
-    /// TODO
+    /// The parent of this continuation, which may be another continuation, the
+    /// main stack, or absent (in case of a suspended continuation).
     pub parent_chain: StackChain,
 
-    /// TODO
+    /// The underlying `Fiber`.
     pub fiber: *mut ContinuationFiber,
 
     /// Used to store
@@ -168,13 +169,12 @@ pub struct ContinuationObject {
     /// Note that this is *not* used for tag payloads.
     pub args: Payloads,
 
-    /// TODO
-    // Once a continuation is suspended, this buffer is used to hold payloads
-    // provided by cont.bind and resume and received at the suspend site.
-    // In particular, this may only be Some when `state` is `Invoked`.
+    /// Once a continuation is suspended, this buffer is used to hold payloads
+    /// provided by cont.bind and resume and received at the suspend site.
+    /// In particular, this may only be Some when `state` is `Invoked`.
     pub tag_return_values: Payloads,
 
-    /// TODO
+    /// Indicates the state of this continuation.
     pub state: State,
 }
 

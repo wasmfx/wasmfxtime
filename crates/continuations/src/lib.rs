@@ -110,9 +110,14 @@ impl Payloads {
     }
 }
 
-
+/// Discriminant of variant `Absent` in
+/// `wasmtime_runtime::continuation::StackChain`.
 pub const STACK_CHAIN_ABSENT_DISCRIMINANT: usize = 0;
+/// Discriminant of variant `MainStack` in
+/// `wasmtime_runtime::continuation::StackChain`.
 pub const STACK_CHAIN_MAIN_STACK_DISCRIMINANT: usize = 1;
+/// Discriminant of variant `Continiation` in
+/// `wasmtime_runtime::continuation::StackChain`.
 pub const STACK_CHAIN_CONTINUATION_DISCRIMINANT: usize = 2;
 
 /// Encodes the life cycle of a `ContinuationObject`.
@@ -147,7 +152,7 @@ impl From<State> for i32 {
 }
 
 
-/// Defines offsets of the fields in the types defined earlier
+/// Defines offsets of the fields in the continuation-related types
 pub mod offsets {
     /// Offsets of fields in `Payloads`
     pub mod payloads {
@@ -162,7 +167,8 @@ pub mod offsets {
         pub const LENGTH: usize = offset_of!(Payloads, length);
     }
 
-    /// Offsets of fields in `ContinuationObject`
+    /// Offsets of fields in `wasmtime_runtime::continuation::ContinuationObject`.
+    /// We uses tests there to ensure these values are correct.
     pub mod continuation_object {
         use crate::Payloads;
 
@@ -191,5 +197,7 @@ pub mod offsets {
         pub const LAST_WASM_ENTRY_SP: usize = offset_of!(StackLimits, last_wasm_entry_sp);
     }
 
+    /// Size of type `wasmtime_runtime::continuation::StackChain`.
+    /// We test there that this value is correct.
     pub const STACK_CHAIN_SIZE : usize = 2 * std::mem::size_of::<usize>() ;
 }
