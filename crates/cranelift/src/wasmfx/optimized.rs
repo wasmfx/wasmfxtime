@@ -999,13 +999,18 @@ pub(crate) mod typed_continuation_helpers {
             let memflags = ir::MemFlags::trusted();
 
             let mut copy_to_vm_runtime_limits = |our_offset, their_offset| {
-                let our_value =
-                    builder
-                        .ins()
-                        .load(self.pointer_type, memflags, stack_limits_ptr, our_offset as i32);
-                builder
-                    .ins()
-                    .store(memflags, our_value, vmruntime_limits_ptr, their_offset as i32);
+                let our_value = builder.ins().load(
+                    self.pointer_type,
+                    memflags,
+                    stack_limits_ptr,
+                    our_offset as i32,
+                );
+                builder.ins().store(
+                    memflags,
+                    our_value,
+                    vmruntime_limits_ptr,
+                    their_offset as i32,
+                );
             };
 
             let pointer_size = self.pointer_type.bytes() as u8;

@@ -81,7 +81,6 @@ impl StackLimits {
 unsafe impl Send for StackLimits {}
 unsafe impl Sync for StackLimits {}
 
-
 pub struct Payloads {
     /// Number of currently occupied slots.
     pub length: types::payloads::Length,
@@ -151,7 +150,6 @@ impl From<State> for i32 {
     }
 }
 
-
 /// Defines offsets of the fields in the continuation-related types
 pub mod offsets {
     /// Offsets of fields in `Payloads`
@@ -184,7 +182,6 @@ pub mod offsets {
         pub const TAG_RETURN_VALUES: usize = ARGS + std::mem::size_of::<Payloads>();
         /// Offset of `state` field
         pub const STATE: usize = TAG_RETURN_VALUES + std::mem::size_of::<Payloads>();
-
     }
 
     pub mod stack_limits {
@@ -192,12 +189,12 @@ pub mod offsets {
         use memoffset::offset_of;
 
         pub const STACK_LIMIT: usize = offset_of!(StackLimits, stack_limit);
-        pub const LAST_WASM_EXIT_FP: usize= offset_of!(StackLimits, last_wasm_exit_fp);
+        pub const LAST_WASM_EXIT_FP: usize = offset_of!(StackLimits, last_wasm_exit_fp);
         pub const LAST_WASM_EXIT_PC: usize = offset_of!(StackLimits, last_wasm_exit_pc);
         pub const LAST_WASM_ENTRY_SP: usize = offset_of!(StackLimits, last_wasm_entry_sp);
     }
 
     /// Size of type `wasmtime_runtime::continuation::StackChain`.
     /// We test there that this value is correct.
-    pub const STACK_CHAIN_SIZE : usize = 2 * std::mem::size_of::<usize>() ;
+    pub const STACK_CHAIN_SIZE: usize = 2 * std::mem::size_of::<usize>();
 }
