@@ -57,11 +57,11 @@ pub use self::func::{
     ComponentNamedList, ComponentType, Func, Lift, Lower, TypedFunc, WasmList, WasmStr,
 };
 pub use self::instance::{ExportInstance, Exports, Instance, InstancePre};
-pub use self::linker::{Linker, LinkerInstance, ResourceImportIndex};
+pub use self::linker::{Linker, LinkerInstance};
 pub use self::resource_table::{ResourceTable, ResourceTableError};
 pub use self::resources::{Resource, ResourceAny};
 pub use self::types::{ResourceType, Type};
-pub use self::values::{Enum, Flags, List, OptionVal, Record, ResultVal, Tuple, Val, Variant};
+pub use self::values::Val;
 
 pub(crate) use self::resources::HostResourceData;
 

@@ -98,6 +98,11 @@ impl StackChain {
     /// We don't implement `IntoIterator` because our iterator is unsafe, so at
     /// least this gives us some way of indicating this, even though the actual
     /// unsafety lies in the `next` function.
+    ///
+    /// # Safety
+    ///
+    /// This function is not unsafe per see, but it returns an object
+    /// whose usage is unsafe.
     pub unsafe fn into_iter(self) -> ContinuationChainIterator {
         ContinuationChainIterator(self)
     }
