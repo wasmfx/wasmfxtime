@@ -31,11 +31,11 @@
 
 #![allow(unused_macros)]
 
-use crate::SwitchDirection;
 use std::alloc::{alloc, dealloc, Layout};
 use std::io;
 use std::ops::Range;
 use std::ptr;
+use wasmtime_continuations::SwitchDirection;
 
 #[derive(Debug)]
 pub struct FiberStack {

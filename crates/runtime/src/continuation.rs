@@ -1,5 +1,6 @@
 //! Continuations TODO
 
+use crate::fibre::{Fiber, FiberStack, Suspend};
 use crate::vmcontext::{VMFuncRef, VMOpaqueContext, ValRaw};
 use crate::{Instance, TrapReason};
 use std::cell::UnsafeCell;
@@ -7,11 +8,13 @@ use std::cmp;
 use std::mem;
 use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
 pub use wasmtime_continuations::{
-    ContinuationFiber, Payloads, StackLimits, State, DEFAULT_FIBER_SIZE,
+    Payloads, StackLimits, State, SwitchDirection, DEFAULT_FIBER_SIZE,
 };
-use wasmtime_fibre::{Fiber, FiberStack, Suspend, SwitchDirection};
 
 type Yield = Suspend;
+
+/// Fibers used for continuations
+pub type ContinuationFiber = Fiber;
 
 /// This type represents a linked lists of stacks, additionally associating a
 /// `StackLimits` object with each element of the list. Here, a "stack" is
@@ -450,7 +453,7 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason
         running.parent_chain
     );
 
-    let suspend = wasmtime_fibre::unix::Suspend::from_top_ptr(stack_ptr);
+    let suspend = crate::fibre::unix::Suspend::from_top_ptr(stack_ptr);
     let payload = SwitchDirection::suspend(tag_index);
     Ok(suspend.switch(payload))
 }
