@@ -1,5 +1,5 @@
 use std::ptr;
-use wasmtime_fibre::Fiber;
+
 
 pub use wasmtime_fibre::{SwitchDirection, SwitchDirectionEnum, TagId};
 
@@ -51,7 +51,6 @@ pub struct WasmFXConfig {
     pub stack_size: usize,
 }
 
-pub type ContinuationFiber = Fiber;
 
 /// This type is used to save (and subsequently restore) a subset of the data in
 /// `VMRuntimeLimits`. See documentation of `StackChain` for the exact uses.

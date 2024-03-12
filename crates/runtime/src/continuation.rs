@@ -6,12 +6,13 @@ use std::cell::UnsafeCell;
 use std::cmp;
 use std::mem;
 use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
-pub use wasmtime_continuations::{
-    ContinuationFiber, Payloads, StackLimits, State, DEFAULT_FIBER_SIZE,
-};
+pub use wasmtime_continuations::{Payloads, StackLimits, State, DEFAULT_FIBER_SIZE};
 use wasmtime_fibre::{Fiber, FiberStack, Suspend, SwitchDirection};
 
 type Yield = Suspend;
+
+/// Fibers used for continuations
+pub type ContinuationFiber = Fiber;
 
 /// This type represents a linked lists of stacks, additionally associating a
 /// `StackLimits` object with each element of the list. Here, a "stack" is
