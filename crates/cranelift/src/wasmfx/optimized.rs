@@ -1374,7 +1374,7 @@ pub(crate) fn translate_resume<'a>(
         // Now the parent contobj (or main stack) is active again
         vmctx.store_stack_chain(env, builder, &parent_stack_chain);
 
-        // The `result` is a value of type wasmtime_fibre::SwitchDirection,
+        // The `result` is a value of type wasmtime_continuations::SwitchDirection,
         // using the encoding described at its definition.
         // Thus, the first 32 bit encode the discriminant, and the
         // subsequent 32 bit encode the tag if suspending, or 0 otherwise.
