@@ -31,7 +31,7 @@
 
 #![allow(unused_macros)]
 
-use crate::SwitchDirection;
+use wasmtime_continuations::SwitchDirection;
 use std::alloc::{alloc, dealloc, Layout};
 use std::io;
 use std::ops::Range;

@@ -18,7 +18,6 @@ wasmtime-wmemcheck = { workspace = true }
 wasmtime-asm-macros = { workspace = true }
 wasmtime-environ = { workspace = true }
 wasmtime-fiber = { workspace = true, optional = true }
-wasmtime-fibre = { workspace = true }
 wasmtime-continuations = { workspace = true }
 wasmtime-jit-debug = { workspace = true, features = ["gdb_jit_int"], optional = true }
 wasmtime-versioned-export-macros = { workspace = true }

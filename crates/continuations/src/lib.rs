@@ -1,8 +1,5 @@
 use std::ptr;
 
-
-pub use wasmtime_fibre::{SwitchDirection, SwitchDirectionEnum, TagId};
-
 /// Default size for continuation stacks
 pub const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
 
@@ -50,7 +47,6 @@ pub mod types {
 pub struct WasmFXConfig {
     pub stack_size: usize,
 }
-
 
 /// This type is used to save (and subsequently restore) a subset of the data in
 /// `VMRuntimeLimits`. See documentation of `StackChain` for the exact uses.
@@ -146,6 +142,112 @@ impl State {
 impl From<State> for i32 {
     fn from(st: State) -> Self {
         st.discriminant()
+    }
+}
+
+// Runtime representation of tags
+pub type TagId = u32;
+
+/// See SwitchDirection below for overall use of this type.
+#[repr(u32)]
+pub enum SwitchDirectionEnum {
+    // Used to indicate that the contination has returned normally.
+    Return = 0,
+
+    // Indicates that we are suspendinga continuation due to invoking suspend.
+    // The payload is the tag to suspend with
+    Suspend = 1,
+
+    // Indicates that we are resuming a continuation via resume.
+    Resume = 2,
+}
+
+impl SwitchDirectionEnum {
+    pub fn discriminant_val(&self) -> u32 {
+        // This is well-defined for an enum with repr(u32).
+        unsafe { *(self as *const SwitchDirectionEnum as *const u32) }
+    }
+}
+
+/// Values of this type are passed to `wasmtime_fibre_switch` to indicate why we
+/// are switching. A nicer way of representing this type would be the following
+/// enum:
+///
+///```
+///  #[repr(C, u32)]
+///  pub enum SwitchDirection {
+///      // Used to indicate that the contination has returned normally.
+///      Return = 0,
+///
+///      // Indicates that we are suspendinga continuation due to invoking suspend.
+///      // The payload is the tag to suspend with
+///      Suspend(u32) = 1,
+///
+///      // Indicates that we are resuming a continuation via resume.
+///      Resume = 2,
+///  }
+///```
+///
+/// However, we want to convert values of type `SwitchDirection` to and from u64
+/// easily, which is why we need to ensure that it contains no uninitialised
+/// memory, to avoid undefined behavior.
+///
+/// We allow converting values of this type to and from u64.
+/// In that representation, bits 0 to 31 (where 0 is the LSB) contain the
+/// discriminant (as u32), while bits 32 to 63 contain the `data`.
+#[repr(C)]
+pub struct SwitchDirection {
+    pub discriminant: SwitchDirectionEnum,
+
+    // Stores tag value if `discriminant` is `suspend`, 0 otherwise.
+    pub data: u32,
+}
+
+impl SwitchDirection {
+    pub fn return_() -> SwitchDirection {
+        SwitchDirection {
+            discriminant: SwitchDirectionEnum::Return,
+            data: 0,
+        }
+    }
+
+    pub fn resume() -> SwitchDirection {
+        SwitchDirection {
+            discriminant: SwitchDirectionEnum::Resume,
+            data: 0,
+        }
+    }
+
+    pub fn suspend(tag: u32) -> SwitchDirection {
+        SwitchDirection {
+            discriminant: SwitchDirectionEnum::Suspend,
+            data: tag,
+        }
+    }
+}
+
+impl From<SwitchDirection> for u64 {
+    fn from(val: SwitchDirection) -> u64 {
+        // TODO(frank-emrich) This assumes little endian data layout. Should
+        // make this more explicit.
+        unsafe { std::mem::transmute::<SwitchDirection, u64>(val) }
+    }
+}
+
+impl From<u64> for SwitchDirection {
+    fn from(val: u64) -> SwitchDirection {
+        #[cfg(debug_assertions)]
+        {
+            let discriminant = val as u32;
+            debug_assert!(discriminant <= 2);
+            if discriminant != SwitchDirectionEnum::Suspend.discriminant_val() {
+                let data = val >> 32;
+                debug_assert_eq!(data, 0);
+            }
+        }
+        // TODO(frank-emrich) This assumes little endian data layout. Should
+        // make this more explicit.
+        unsafe { std::mem::transmute::<u64, SwitchDirection>(val) }
     }
 }
 

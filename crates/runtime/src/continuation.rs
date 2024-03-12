@@ -6,8 +6,8 @@ use std::cell::UnsafeCell;
 use std::cmp;
 use std::mem;
 use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
-pub use wasmtime_continuations::{Payloads, StackLimits, State, DEFAULT_FIBER_SIZE};
-use wasmtime_fibre::{Fiber, FiberStack, Suspend, SwitchDirection};
+pub use wasmtime_continuations::{Payloads, StackLimits, State, DEFAULT_FIBER_SIZE, SwitchDirection};
+use crate::fibre::{Fiber, FiberStack, Suspend, };
 
 type Yield = Suspend;
 
@@ -451,7 +451,7 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason
         running.parent_chain
     );
 
-    let suspend = wasmtime_fibre::unix::Suspend::from_top_ptr(stack_ptr);
+    let suspend = crate::fibre::unix::Suspend::from_top_ptr(stack_ptr);
     let payload = SwitchDirection::suspend(tag_index);
     Ok(suspend.switch(payload))
 }

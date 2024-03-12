@@ -29,7 +29,6 @@ wasmtime-jit-debug = { workspace = true, features = [
 wasmtime-jit-icache-coherence = { workspace = true, optional = true }
 wasmtime-cache = { workspace = true, optional = true }
 wasmtime-fiber = { workspace = true, optional = true }
-wasmtime-fibre = { workspace = true }
 wasmtime-cranelift = { workspace = true, optional = true }
 wasmtime-winch = { workspace = true, optional = true }
 wasmtime-component-macro = { workspace = true, optional = true }

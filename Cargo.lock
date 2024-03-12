@@ -3279,7 +3279,6 @@ dependencies = [
  "wasmtime-cranelift",
  "wasmtime-environ",
  "wasmtime-fiber",
- "wasmtime-fibre",
  "wasmtime-jit-debug",
  "wasmtime-jit-icache-coherence",
  "wasmtime-runtime",
@@ -3463,7 +3462,6 @@ name = "wasmtime-continuations"
 version = "20.0.0"
 dependencies = [
  "memoffset",
- "wasmtime-fibre",
 ]
 
 [[package]]
@@ -3575,17 +3573,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasmtime-fibre"
-version = "20.0.0"
-dependencies = [
- "backtrace",
- "cc",
- "cfg-if",
- "rustix",
- "wasmtime-asm-macros",
-]
-
-[[package]]
 name = "wasmtime-fuzz"
 version = "0.0.0"
 dependencies = [
@@ -3685,7 +3672,6 @@ dependencies = [
  "wasmtime-continuations",
  "wasmtime-environ",
  "wasmtime-fiber",
- "wasmtime-fibre",
  "wasmtime-jit-debug",
  "wasmtime-versioned-export-macros",
  "wasmtime-wmemcheck",
