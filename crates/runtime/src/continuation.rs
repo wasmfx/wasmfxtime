@@ -2,16 +2,193 @@
 
 use crate::vmcontext::{VMFuncRef, VMOpaqueContext, ValRaw};
 use crate::{Instance, TrapReason};
+use std::cell::UnsafeCell;
 use std::cmp;
 use std::mem;
 use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
 pub use wasmtime_continuations::{
-    ContinuationFiber, ContinuationObject, ContinuationReference, Payloads, StackChain,
-    StackChainCell, StackLimits, State, DEFAULT_FIBER_SIZE,
+    ContinuationFiber, Payloads, StackLimits, State, DEFAULT_FIBER_SIZE,
 };
 use wasmtime_fibre::{Fiber, FiberStack, Suspend, SwitchDirection};
 
 type Yield = Suspend;
+
+/// This type represents a linked lists of stacks, additionally associating a
+/// `StackLimits` object with each element of the list. Here, a "stack" is
+/// either a continuation or the main stack. Note that the linked list character
+/// arises from the fact that `StackChain::Continuation` variants have a pointer
+/// to have `ContinuationObject`, which in turn has a `parent_chain` value of
+/// type `StackChain`.
+///
+/// There are generally two uses of such chains:
+///
+/// 1. The `typed_continuations_chain` field in the VMContext contains such a
+/// chain of stacks, where the head of the list denotes the stack that is
+/// currently executing (either a continuation or the main stack), as well as
+/// the parent stacks, in case of a continuation currently running. Note that in
+/// this case, the linked list must contains 0 or more `Continuation` elements,
+/// followed by a final `MainStack` element. In particular, this list always
+/// ends with `MainStack` and never contains an `Absent` variant.
+///
+/// 2. When a continuation is suspended, its chain of parents eventually ends
+/// with an `Absent` variant in its `parent_chain` field. Note that a suspended
+/// continuation never appears in the stack chain in the VMContext!
+///
+///
+/// As mentioned before, each stack in a `StackChain` has a corresponding
+/// `StackLimits` object. For continuations, this is stored in the `limits`
+/// fields of the corresponding `ContinuationObject`. For the main stack, the
+/// `MainStack` variant contains a pointer to the
+/// `typed_continuations_main_stack_limits` field of the VMContext.
+///
+/// The following invariants hold for these `StackLimits` objects, and the data
+/// in `VMRuntimeLimits`.
+///
+/// Currently executing stack:
+/// For the currently executing stack (i.e., the stack that is at the head of
+/// the VMContext's `typed_continuations_chain` list), the associated
+/// `StackLimits` object contains stale/undefined data. Instead, the live data
+/// describing the limits for the currently executing stack is always maintained
+/// in `VMRuntimeLimits`. Note that as a general rule independently from any
+/// execution of continuations, the `last_wasm_exit*` fields in the
+/// `VMRuntimeLimits` contain undefined values while executing wasm.
+///
+/// Parents of currently executing stack:
+/// For stacks that appear in the tail of the VMContext's
+/// `typed_continuations_chain` list (i.e., stacks that are not currently
+/// executing themselves, but are a parent of the currently executing stack), we
+/// have the following: All the fields in the stack's StackLimits are valid,
+/// describing the stack's stack limit, and pointers where executing for that
+/// stack entered and exited WASM.
+///
+/// Suspended continuations:
+/// For suspended continuations (including their parents), we have the
+/// following. Note that the main stack can never be in this state. The
+/// `stack_limit` and `last_enter_wasm_sp` fields of the corresponding
+/// `StackLimits` object contain valid data, while the `last_exit_wasm_*` fields
+/// contain arbitrary values.
+/// There is only one exception to this: Note that a continuation that has been
+/// created with cont.new, but never been resumed so far, is considered
+/// "suspended". However, its `last_enter_wasm_sp` field contains undefined
+/// data. This is justified, because when resume-ing a continuation for the
+/// first time, a native-to-wasm trampoline is called, which sets up the
+/// `last_wasm_entry_sp` in the `VMRuntimeLimits` with the correct value, thus
+/// restoring the necessary invariant.
+#[derive(Debug, Clone, PartialEq)]
+#[repr(usize, C)]
+pub enum StackChain {
+    /// If stored in the VMContext, used to indicate that the MainStack entry
+    /// has not been set, yet. If stored in a ContinuationObject's parent_chain
+    /// field, means that there is currently no parent.
+    Absent = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT,
+    /// Represents the main stack.
+    MainStack(*mut StackLimits) = wasmtime_continuations::STACK_CHAIN_MAIN_STACK_DISCRIMINANT,
+    /// Represents a continuation's stack.
+    Continuation(*mut ContinuationObject) =
+        wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT,
+}
+
+impl StackChain {
+    /// Indicates if `self` is a `MainStack` variant.
+    pub fn is_main_stack(&self) -> bool {
+        matches!(self, StackChain::MainStack(_))
+    }
+
+    /// Returns an iterator over the stacks in this chain.
+    /// We don't implement `IntoIterator` because our iterator is unsafe, so at
+    /// least this gives us some way of indicating this, even though the actual
+    /// unsafety lies in the `next` function.
+    ///
+    /// # Safety
+    ///
+    /// This function is not unsafe per see, but it returns an object
+    /// whose usage is unsafe.
+    pub unsafe fn into_iter(self) -> ContinuationChainIterator {
+        ContinuationChainIterator(self)
+    }
+}
+
+/// Iterator for stacks in a stack chain.
+/// Each stack is represented by a tuple `(co_opt, sl)`, where sl is a pointer
+/// to the stack's `StackLimits` object and `co_opt` is a pointer to the
+/// corresponding `ContinuationObject`, or None for the main stack.
+pub struct ContinuationChainIterator(StackChain);
+
+impl Iterator for ContinuationChainIterator {
+    type Item = (Option<*mut ContinuationObject>, *mut StackLimits);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.0 {
+            StackChain::Absent => None,
+            StackChain::MainStack(ms) => {
+                let next = (None, ms);
+                self.0 = StackChain::Absent;
+                Some(next)
+            }
+            StackChain::Continuation(ptr) => {
+                let continuation = unsafe { ptr.as_mut().unwrap() };
+                let next = (Some(ptr), (&mut continuation.limits) as *mut StackLimits);
+                self.0 = continuation.parent_chain.clone();
+                Some(next)
+            }
+        }
+    }
+}
+
+#[repr(transparent)]
+/// Wraps a `StackChain` in an `UnsafeCell`, in order to store it in a
+/// `StoreOpaque`.
+pub struct StackChainCell(pub UnsafeCell<StackChain>);
+
+impl StackChainCell {
+    /// Indicates if the underlying `StackChain` object has value `Absent`.
+    pub fn absent() -> Self {
+        StackChainCell(UnsafeCell::new(StackChain::Absent))
+    }
+}
+
+// Since `StackChainCell` objects appear in the `StoreOpaque`,
+// they need to be `Send` and `Sync`.
+// This is safe for the same reason it is for `VMRuntimeLimits` (see comment
+// there): Both types are pod-type with no destructor, and we don't access any
+// of their fields from other threads.
+unsafe impl Send for StackChainCell {}
+unsafe impl Sync for StackChainCell {}
+
+/// TODO
+#[repr(C)]
+pub struct ContinuationObject {
+    /// The limits of this continuation's stack.
+    pub limits: StackLimits,
+
+    /// The parent of this continuation, which may be another continuation, the
+    /// main stack, or absent (in case of a suspended continuation).
+    pub parent_chain: StackChain,
+
+    /// The underlying `Fiber`.
+    pub fiber: *mut ContinuationFiber,
+
+    /// Used to store
+    /// 1. The arguments to the function passed to cont.new
+    /// 2. The return values of that function
+    /// Note that this is *not* used for tag payloads.
+    pub args: Payloads,
+
+    /// Once a continuation is suspended, this buffer is used to hold payloads
+    /// provided by cont.bind and resume and received at the suspend site.
+    /// In particular, this may only be Some when `state` is `Invoked`.
+    pub tag_return_values: Payloads,
+
+    /// Indicates the state of this continuation.
+    pub state: State,
+}
+
+/// M:1 Many-to-one mapping. A single ContinuationObject may be
+/// referenced by multiple ContinuationReference, though, only one
+/// ContinuationReference may hold a non-null reference to the object
+/// at a given time.
+#[repr(C)]
+pub struct ContinuationReference(pub Option<*mut ContinuationObject>);
 
 /// TODO
 #[inline(always)]
@@ -659,4 +836,37 @@ pub mod baseline {
     pub fn has_ever_run_continuation() -> bool {
         panic!("attempt to execute continuation::baseline::has_ever_run_continuation without `typed_continuation_baseline_implementation` toggled!")
     }
+}
+
+#[test]
+fn offset_and_size_constants() {
+    use memoffset;
+    use wasmtime_continuations::offsets::*;
+
+    assert_eq!(
+        memoffset::offset_of!(ContinuationObject, limits),
+        continuation_object::LIMITS
+    );
+    assert_eq!(
+        memoffset::offset_of!(ContinuationObject, parent_chain),
+        continuation_object::PARENT_CHAIN
+    );
+    assert_eq!(
+        memoffset::offset_of!(ContinuationObject, fiber),
+        continuation_object::FIBER
+    );
+    assert_eq!(
+        memoffset::offset_of!(ContinuationObject, args),
+        continuation_object::ARGS
+    );
+    assert_eq!(
+        memoffset::offset_of!(ContinuationObject, tag_return_values),
+        continuation_object::TAG_RETURN_VALUES
+    );
+    assert_eq!(
+        memoffset::offset_of!(ContinuationObject, state),
+        continuation_object::STATE
+    );
+
+    assert_eq!(std::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
 }

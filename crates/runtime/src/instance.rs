@@ -2,6 +2,7 @@
 //! wasm module (except its callstack and register state). An
 //! `InstanceHandle` is a reference-counting handle for an `Instance`.
 
+use crate::continuation::StackChainCell;
 use crate::export::Export;
 use crate::gc::VMExternRefActivationsTable;
 use crate::memory::{Memory, RuntimeMemoryCreator};
@@ -25,7 +26,6 @@ use std::ptr::NonNull;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::{mem, ptr};
-use wasmtime_continuations::StackChainCell;
 use wasmtime_environ::ModuleInternedTypeIndex;
 use wasmtime_environ::{
     packed_option::ReservedValue, DataIndex, DefinedGlobalIndex, DefinedMemoryIndex,
@@ -1323,19 +1323,14 @@ impl Instance {
         fault
     }
 
-    pub(crate) fn typed_continuations_stack_chain(
-        &mut self,
-    ) -> *mut *mut wasmtime_continuations::StackChainCell {
+    pub(crate) fn typed_continuations_stack_chain(&mut self) -> *mut *mut StackChainCell {
         unsafe {
             self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_stack_chain())
         }
     }
 
     #[allow(dead_code)]
-    pub(crate) fn set_typed_continuations_stack_chain(
-        &mut self,
-        chain: *mut *mut wasmtime_continuations::StackChainCell,
-    ) {
+    pub(crate) fn set_typed_continuations_stack_chain(&mut self, chain: *mut *mut StackChainCell) {
         unsafe {
             let ptr =
                 self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_stack_chain());
