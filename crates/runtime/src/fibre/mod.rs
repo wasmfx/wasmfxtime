@@ -1,12 +1,12 @@
-//! This is a modified version of wasmtime_fiber, specialized for executing
-//! wasmfx continuations.
+//! This module contains a modified version of the `wasmtime_fiber` crate,
+//! specialized for executing WasmFX continuations.
 
 #![allow(missing_docs)]
 
 use std::cell::Cell;
 use std::io;
 use std::ops::Range;
-use wasmtime_continuations::{SwitchDirection,SwitchDirectionEnum, TagId};
+use wasmtime_continuations::{SwitchDirection, SwitchDirectionEnum, TagId};
 
 cfg_if::cfg_if! {
     if #[cfg(unix)] {
@@ -16,7 +16,6 @@ cfg_if::cfg_if! {
         compile_error!("fibers are not supported on this platform");
     }
 }
-
 
 /// Represents an execution stack to use for a fiber.
 #[derive(Debug)]

@@ -30,10 +30,10 @@ mod table;
 mod traphandlers;
 mod vmcontext;
 
-pub mod fibre;
 pub mod continuation;
 #[cfg(feature = "debug-builtins")]
 pub mod debug_builtins;
+pub mod fibre;
 pub mod libcalls;
 pub mod mpk;
 

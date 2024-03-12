@@ -1,13 +1,15 @@
 //! Continuations TODO
 
+use crate::fibre::{Fiber, FiberStack, Suspend};
 use crate::vmcontext::{VMFuncRef, VMOpaqueContext, ValRaw};
 use crate::{Instance, TrapReason};
 use std::cell::UnsafeCell;
 use std::cmp;
 use std::mem;
 use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
-pub use wasmtime_continuations::{Payloads, StackLimits, State, DEFAULT_FIBER_SIZE, SwitchDirection};
-use crate::fibre::{Fiber, FiberStack, Suspend, };
+pub use wasmtime_continuations::{
+    Payloads, StackLimits, State, SwitchDirection, DEFAULT_FIBER_SIZE,
+};
 
 type Yield = Suspend;
 
