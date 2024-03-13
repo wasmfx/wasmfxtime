@@ -3809,6 +3809,7 @@ dependencies = [
  "object 0.33.0",
  "target-lexicon",
  "wasmparser",
+ "wasmtime-cranelift",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
  "winch-codegen",
@@ -4205,26 +4206,32 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.20.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.20.0#5a338f5e948260df4effa13a1805ab7c19778ddd"
+version = "0.22.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.22.0#28a4c283fc9792e5164b00fb8817b40ccc84c043"
 dependencies = [
  "bitflags 2.4.1",
+ "wit-bindgen-rt",
  "wit-bindgen-rust-macro",
 ]
 
 [[package]]
 name = "wit-bindgen-core"
-version = "0.20.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.20.0#5a338f5e948260df4effa13a1805ab7c19778ddd"
+version = "0.22.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.22.0#28a4c283fc9792e5164b00fb8817b40ccc84c043"
 dependencies = [
  "anyhow",
  "wit-parser",
 ]
 
 [[package]]
+name = "wit-bindgen-rt"
+version = "0.22.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.22.0#28a4c283fc9792e5164b00fb8817b40ccc84c043"
+
+[[package]]
 name = "wit-bindgen-rust"
-version = "0.20.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.20.0#5a338f5e948260df4effa13a1805ab7c19778ddd"
+version = "0.22.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.22.0#28a4c283fc9792e5164b00fb8817b40ccc84c043"
 dependencies = [
  "anyhow",
  "heck",
@@ -4236,8 +4243,8 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen-rust-macro"
-version = "0.20.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.20.0#5a338f5e948260df4effa13a1805ab7c19778ddd"
+version = "0.22.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=wit-bindgenfx-cli-0.22.0#28a4c283fc9792e5164b00fb8817b40ccc84c043"
 dependencies = [
  "anyhow",
  "proc-macro2",
