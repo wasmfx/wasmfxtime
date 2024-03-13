@@ -39,7 +39,8 @@ memfd = "0.6.2"
 mach2 = "0.4.1"
 
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["mm"] }
+rustix = { workspace = true, features = ["mm", "param"] }
+wasmtime-asm-macros = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies.windows-sys]
 workspace = true
