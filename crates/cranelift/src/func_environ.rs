@@ -14,8 +14,8 @@ use cranelift_frontend::FunctionBuilder;
 use cranelift_frontend::Variable;
 use cranelift_wasm::{
     FuncIndex, FuncTranslationState, GlobalIndex, GlobalVariable, Heap, HeapData, HeapStyle,
-    MemoryIndex, TableData, TableIndex, TableSize, TagIndex, TargetEnvironment, TypeIndex, WasmHeapType,
-    WasmRefType, WasmResult, WasmValType,
+    MemoryIndex, TableData, TableIndex, TableSize, TagIndex, TargetEnvironment, TypeIndex,
+    WasmHeapType, WasmRefType, WasmResult, WasmValType,
 };
 use std::mem;
 use wasmparser::Operator;
@@ -1450,7 +1450,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                         Ok(self.get_or_init_func_ref_table_elem(builder, table_index, index))
                     }
                 }
-            },
+            }
             WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
 
             #[cfg(feature = "gc")]
