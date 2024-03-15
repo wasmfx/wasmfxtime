@@ -8,14 +8,14 @@
 use crate::environ::{FuncEnvironment, GlobalVariable, ModuleEnvironment, TargetEnvironment};
 use crate::func_translator::FuncTranslator;
 use crate::state::FuncTranslationState;
-use crate::WasmValType;
 use crate::{
     DataIndex, DefinedFuncIndex, ElemIndex, FuncIndex, Global, GlobalIndex, GlobalInit, Heap,
-    HeapData, HeapStyle, Memory, MemoryIndex, Table, TableIndex, TypeConvert, TypeIndex,
+    HeapData, HeapStyle, Memory, MemoryIndex, Table, TableIndex, TableSize, TypeConvert, TypeIndex,
     WasmContType, WasmFuncType, WasmHeapType, WasmResult,
 };
+use crate::{TableData, WasmValType};
 use cranelift_codegen::cursor::FuncCursor;
-use cranelift_codegen::ir::immediates::{Offset32, Uimm64};
+use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder};
 use cranelift_codegen::ir::{types::*, UserFuncName};
 use cranelift_codegen::isa::{CallConv, TargetFrontendConfig};
@@ -211,6 +211,9 @@ pub struct DummyFuncEnvironment<'dummy_environment> {
 
     /// Heaps we have created to implement Wasm linear memories.
     pub heaps: PrimaryMap<Heap, HeapData>,
+
+    /// Cranelift tables we have created to implement Wasm tables.
+    tables: SecondaryMap<TableIndex, Option<TableData>>,
 }
 
 impl<'dummy_environment> DummyFuncEnvironment<'dummy_environment> {
@@ -223,6 +226,7 @@ impl<'dummy_environment> DummyFuncEnvironment<'dummy_environment> {
             mod_info,
             expected_reachability,
             heaps: Default::default(),
+            tables: Default::default(),
         }
     }
 
@@ -243,6 +247,45 @@ impl<'dummy_environment> DummyFuncEnvironment<'dummy_environment> {
             ir::types::I64 => ir::types::R64,
             _ => panic!("unsupported pointer type"),
         }
+    }
+
+    fn ensure_table_exists(&mut self, func: &mut ir::Function, index: TableIndex) {
+        if self.tables[index].is_some() {
+            return;
+        }
+
+        // Create a table whose base address is stored at `vmctx+0`.
+        let vmctx = func.create_global_value(ir::GlobalValueData::VMContext);
+        let base_gv = func.create_global_value(ir::GlobalValueData::Load {
+            base: vmctx,
+            offset: Offset32::new(0),
+            global_type: self.pointer_type(),
+            // When tables in wasm become "growable", revisit whether this can be readonly or not.
+            flags: ir::MemFlags::trusted().with_readonly(),
+        });
+
+        let table = &self.mod_info.tables[index].entity;
+
+        let bound = if Some(table.minimum) == table.maximum {
+            TableSize::Static {
+                bound: table.minimum,
+            }
+        } else {
+            TableSize::Dynamic {
+                bound_gv: func.create_global_value(ir::GlobalValueData::Load {
+                    base: vmctx,
+                    offset: Offset32::new(0),
+                    global_type: I32,
+                    flags: ir::MemFlags::trusted().with_readonly(),
+                }),
+            }
+        };
+
+        self.tables[index] = Some(TableData {
+            base_gv,
+            bound,
+            element_size: u32::from(self.pointer_bytes()) * 2,
+        });
     }
 }
 
@@ -316,32 +359,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         }))
     }
 
-    fn make_table(&mut self, func: &mut ir::Function, _index: TableIndex) -> WasmResult<ir::Table> {
-        // Create a table whose base address is stored at `vmctx+0`.
-        let vmctx = func.create_global_value(ir::GlobalValueData::VMContext);
-        let base_gv = func.create_global_value(ir::GlobalValueData::Load {
-            base: vmctx,
-            offset: Offset32::new(0),
-            global_type: self.pointer_type(),
-            // When tables in wasm become "growable", revisit whether this can be readonly or not.
-            flags: ir::MemFlags::trusted().with_readonly(),
-        });
-        let bound_gv = func.create_global_value(ir::GlobalValueData::Load {
-            base: vmctx,
-            offset: Offset32::new(0),
-            global_type: I32,
-            flags: ir::MemFlags::trusted().with_readonly(),
-        });
-
-        Ok(func.create_table(ir::TableData {
-            base_gv,
-            min_size: Uimm64::new(0),
-            bound_gv,
-            element_size: Uimm64::from(u64::from(self.pointer_bytes()) * 2),
-            index_type: I32,
-        }))
-    }
-
     fn make_indirect_sig(
         &mut self,
         func: &mut ir::Function,
@@ -412,7 +429,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         &mut self,
         builder: &mut FunctionBuilder,
         _table_index: TableIndex,
-        _table: ir::Table,
         _sig_index: TypeIndex,
         sig_ref: ir::SigRef,
         callee: ir::Value,
@@ -454,7 +470,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         &mut self,
         _builder: &mut FunctionBuilder,
         _table_index: TableIndex,
-        _table: ir::Table,
         _sig_index: TypeIndex,
         _sig_ref: ir::SigRef,
         _callee: ir::Value,
@@ -574,7 +589,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         &mut self,
         mut pos: FuncCursor,
         _index: TableIndex,
-        _table: ir::Table,
     ) -> WasmResult<ir::Value> {
         Ok(pos.ins().iconst(I32, -1i32 as u32 as i64))
     }
@@ -583,7 +597,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         &mut self,
         mut pos: FuncCursor,
         _table_index: TableIndex,
-        _table: ir::Table,
         _delta: ir::Value,
         _init_value: ir::Value,
     ) -> WasmResult<ir::Value> {
@@ -593,12 +606,13 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
     fn translate_table_get(
         &mut self,
         builder: &mut FunctionBuilder,
-        _table_index: TableIndex,
-        table: ir::Table,
+        table_index: TableIndex,
         index: ir::Value,
     ) -> WasmResult<ir::Value> {
         let pointer_type = self.pointer_type();
-        let table_entry_addr = builder.ins().table_addr(pointer_type, table, index, 0);
+        self.ensure_table_exists(builder.func, table_index);
+        let table = self.tables[table_index].as_ref().unwrap();
+        let table_entry_addr = table.prepare_table_addr(builder, index, pointer_type, true);
         let flags = ir::MemFlags::trusted().with_table();
         let value = builder
             .ins()
@@ -609,13 +623,14 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
     fn translate_table_set(
         &mut self,
         builder: &mut FunctionBuilder,
-        _table_index: TableIndex,
-        table: ir::Table,
+        table_index: TableIndex,
         value: ir::Value,
         index: ir::Value,
     ) -> WasmResult<()> {
         let pointer_type = self.pointer_type();
-        let table_entry_addr = builder.ins().table_addr(pointer_type, table, index, 0);
+        self.ensure_table_exists(builder.func, table_index);
+        let table = self.tables[table_index].as_ref().unwrap();
+        let table_entry_addr = table.prepare_table_addr(builder, index, pointer_type, true);
         let flags = ir::MemFlags::trusted().with_table();
         builder.ins().store(flags, value, table_entry_addr, 0);
         Ok(())
@@ -625,9 +640,7 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         &mut self,
         _pos: FuncCursor,
         _dst_index: TableIndex,
-        _dst_table: ir::Table,
         _src_index: TableIndex,
-        _src_table: ir::Table,
         _dst: ir::Value,
         _src: ir::Value,
         _len: ir::Value,
@@ -651,7 +664,6 @@ impl<'dummy_environment> FuncEnvironment for DummyFuncEnvironment<'dummy_environ
         _pos: FuncCursor,
         _seg_index: u32,
         _table_index: TableIndex,
-        _table: ir::Table,
         _dst: ir::Value,
         _src: ir::Value,
         _len: ir::Value,

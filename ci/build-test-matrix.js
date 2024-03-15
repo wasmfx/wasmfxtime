@@ -39,7 +39,8 @@ const array = [
     "os": "ubuntu-latest",
     "name": "Test Linux x86_64",
     "filter": "linux-x64",
-    "isa": "x64"
+    "isa": "x64",
+    "extra_features": "--features wasmtime-wasi-nn/onnx"
   },
   {
     "os": "ubuntu-latest",
@@ -57,7 +58,8 @@ const array = [
   {
     "os": "macos-latest",
     "name": "Test macOS x86_64",
-    "filter": "macos-x64"
+    "filter": "macos-x64",
+    "extra_features": "--features wasmtime-wasi-nn/onnx"
   },
   // TODO(dhil): Disabled as long as we don't support other platforms
   // than x86_64 Linux.
@@ -65,12 +67,14 @@ const array = [
   //   "os": "macos-14",
   //   "name": "Test macOS arm64",
   //   "filter": "macos-arm64",
-  //   "target": "aarch64-apple-darwin"
+  //   "target": "aarch64-apple-darwin",
+  //   "extra_features": "--features wasmtime-wasi-nn/onnx"
   // },
   // {
   //   "os": "windows-latest",
   //   "name": "Test Windows MSVC x86_64",
-  //   "filter": "windows-x64"
+  //   "filter": "windows-x64",
+  //   "extra_features": "--features wasmtime-wasi-nn/onnx"
   // },
   // {
   //   "os": "windows-latest",
@@ -87,7 +91,7 @@ const array = [
   //   "qemu_target": "aarch64-linux-user",
   //   "name": "Test Linux arm64",
   //   "filter": "linux-arm64",
-  //   "isa": "aarch64"
+  //   "isa": "aarch64",
   // },
   // {
   //   "os": "ubuntu-latest",
