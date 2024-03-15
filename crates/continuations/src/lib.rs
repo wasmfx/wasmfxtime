@@ -76,6 +76,7 @@ impl StackLimits {
 unsafe impl Send for StackLimits {}
 unsafe impl Sync for StackLimits {}
 
+#[repr(C)]
 pub struct Payloads {
     /// Number of currently occupied slots.
     pub length: types::payloads::Length,
