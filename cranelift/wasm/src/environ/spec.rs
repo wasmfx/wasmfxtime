@@ -136,12 +136,6 @@ pub trait FuncEnvironment: TargetEnvironment {
     /// The index space covers both imported and locally declared memories.
     fn make_heap(&mut self, func: &mut ir::Function, index: MemoryIndex) -> WasmResult<Heap>;
 
-    /// Set up the necessary preamble definitions in `func` to access the table identified
-    /// by `index`.
-    ///
-    /// The index space covers both imported and locally declared tables.
-    fn make_table(&mut self, func: &mut ir::Function, index: TableIndex) -> WasmResult<ir::Table>;
-
     /// Set up a signature definition in the preamble of `func` that can be used for an indirect
     /// call with signature `index`.
     ///
@@ -204,7 +198,6 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
         table_index: TableIndex,
-        table: ir::Table,
         sig_index: TypeIndex,
         sig_ref: ir::SigRef,
         callee: ir::Value,
@@ -244,7 +237,6 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
         table_index: TableIndex,
-        table: ir::Table,
         sig_index: TypeIndex,
         sig_ref: ir::SigRef,
         callee: ir::Value,
@@ -366,19 +358,14 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn translate_data_drop(&mut self, pos: FuncCursor, seg_index: u32) -> WasmResult<()>;
 
     /// Translate a `table.size` WebAssembly instruction.
-    fn translate_table_size(
-        &mut self,
-        pos: FuncCursor,
-        index: TableIndex,
-        table: ir::Table,
-    ) -> WasmResult<ir::Value>;
+    fn translate_table_size(&mut self, pos: FuncCursor, index: TableIndex)
+        -> WasmResult<ir::Value>;
 
     /// Translate a `table.grow` WebAssembly instruction.
     fn translate_table_grow(
         &mut self,
         pos: FuncCursor,
         table_index: TableIndex,
-        table: ir::Table,
         delta: ir::Value,
         init_value: ir::Value,
     ) -> WasmResult<ir::Value>;
@@ -388,7 +375,6 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
         table_index: TableIndex,
-        table: ir::Table,
         index: ir::Value,
     ) -> WasmResult<ir::Value>;
 
@@ -397,7 +383,6 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
         table_index: TableIndex,
-        table: ir::Table,
         value: ir::Value,
         index: ir::Value,
     ) -> WasmResult<()>;
@@ -407,9 +392,7 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         pos: FuncCursor,
         dst_table_index: TableIndex,
-        dst_table: ir::Table,
         src_table_index: TableIndex,
-        src_table: ir::Table,
         dst: ir::Value,
         src: ir::Value,
         len: ir::Value,
@@ -431,7 +414,6 @@ pub trait FuncEnvironment: TargetEnvironment {
         pos: FuncCursor,
         seg_index: u32,
         table_index: TableIndex,
-        table: ir::Table,
         dst: ir::Value,
         src: ir::Value,
         len: ir::Value,

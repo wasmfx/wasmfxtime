@@ -2,20 +2,20 @@ use cfg_if::cfg_if;
 use cranelift_codegen::cursor::FuncCursor;
 use cranelift_codegen::ir;
 use cranelift_codegen::ir::condcodes::*;
-use cranelift_codegen::ir::immediates::{Imm64, Offset32, Uimm64};
+use cranelift_codegen::ir::immediates::{Imm64, Offset32};
 use cranelift_codegen::ir::pcc::Fact;
 use cranelift_codegen::ir::types::*;
 use cranelift_codegen::ir::{
     AbiParam, ArgumentPurpose, Function, InstBuilder, MemFlags, Signature, UserFuncName, Value,
 };
 use cranelift_codegen::isa::{self, CallConv, TargetFrontendConfig, TargetIsa};
-use cranelift_entity::{EntityRef, PrimaryMap};
+use cranelift_entity::{EntityRef, PrimaryMap, SecondaryMap};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_frontend::Variable;
 use cranelift_wasm::{
     FuncIndex, FuncTranslationState, GlobalIndex, GlobalVariable, Heap, HeapData, HeapStyle,
-    MemoryIndex, TableIndex, TagIndex, TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType,
-    WasmResult, WasmValType,
+    MemoryIndex, TableData, TableIndex, TableSize, TagIndex, TargetEnvironment, TypeIndex,
+    WasmHeapType, WasmRefType, WasmResult, WasmValType,
 };
 use std::mem;
 use wasmparser::Operator;
@@ -146,6 +146,9 @@ pub struct FuncEnvironment<'module_environment> {
     /// Heaps implementing WebAssembly linear memories.
     heaps: PrimaryMap<Heap, HeapData>,
 
+    /// Cranelift tables we have created to implement Wasm tables.
+    tables: SecondaryMap<TableIndex, Option<TableData>>,
+
     /// The Cranelift global holding the vmctx address.
     vmctx: Option<ir::GlobalValue>,
 
@@ -221,6 +224,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             module: &translation.module,
             types,
             heaps: PrimaryMap::default(),
+            tables: SecondaryMap::default(),
             vmctx: None,
             pcc_vmctx_memtype: None,
             builtin_function_signatures,
@@ -881,20 +885,98 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         }
     }
 
+    /// Set up the necessary preamble definitions in `func` to access the table identified
+    /// by `index`.
+    ///
+    /// The index space covers both imported and locally declared tables.
+    fn ensure_table_exists(&mut self, func: &mut ir::Function, index: TableIndex) {
+        if self.tables[index].is_some() {
+            return;
+        }
+
+        let pointer_type = self.pointer_type();
+
+        let (ptr, base_offset, current_elements_offset) = {
+            let vmctx = self.vmctx(func);
+            if let Some(def_index) = self.module.defined_table_index(index) {
+                let base_offset =
+                    i32::try_from(self.offsets.vmctx_vmtable_definition_base(def_index)).unwrap();
+                let current_elements_offset = i32::try_from(
+                    self.offsets
+                        .vmctx_vmtable_definition_current_elements(def_index),
+                )
+                .unwrap();
+                (vmctx, base_offset, current_elements_offset)
+            } else {
+                let from_offset = self.offsets.vmctx_vmtable_import_from(index);
+                let table = func.create_global_value(ir::GlobalValueData::Load {
+                    base: vmctx,
+                    offset: Offset32::new(i32::try_from(from_offset).unwrap()),
+                    global_type: pointer_type,
+                    flags: MemFlags::trusted().with_readonly(),
+                });
+                let base_offset = i32::from(self.offsets.vmtable_definition_base());
+                let current_elements_offset =
+                    i32::from(self.offsets.vmtable_definition_current_elements());
+                (table, base_offset, current_elements_offset)
+            }
+        };
+
+        let base_gv = func.create_global_value(ir::GlobalValueData::Load {
+            base: ptr,
+            offset: Offset32::new(base_offset),
+            global_type: pointer_type,
+            flags: MemFlags::trusted(),
+        });
+
+        let table = &self.module.table_plans[index].table;
+        let element_size = self.reference_type(table.wasm_ty.heap_type).bytes();
+
+        let bound = if Some(table.minimum) == table.maximum {
+            TableSize::Static {
+                bound: table.minimum,
+            }
+        } else {
+            TableSize::Dynamic {
+                bound_gv: func.create_global_value(ir::GlobalValueData::Load {
+                    base: ptr,
+                    offset: Offset32::new(current_elements_offset),
+                    global_type: ir::Type::int(
+                        u16::from(self.offsets.size_of_vmtable_definition_current_elements()) * 8,
+                    )
+                    .unwrap(),
+                    flags: MemFlags::trusted(),
+                }),
+            }
+        };
+
+        self.tables[index] = Some(TableData {
+            base_gv,
+            bound,
+            element_size,
+        });
+    }
+
     fn get_or_init_func_ref_table_elem(
         &mut self,
         builder: &mut FunctionBuilder,
         table_index: TableIndex,
-        table: ir::Table,
         index: ir::Value,
     ) -> ir::Value {
         let pointer_type = self.pointer_type();
+        self.ensure_table_exists(builder.func, table_index);
+        let table_data = self.tables[table_index].as_ref().unwrap();
 
         // To support lazy initialization of table
         // contents, we check for a null entry here, and
         // if null, we take a slow-path that invokes a
         // libcall.
-        let table_entry_addr = builder.ins().table_addr(pointer_type, table, index, 0);
+        let table_entry_addr = table_data.prepare_table_addr(
+            builder,
+            index,
+            pointer_type,
+            self.isa.flags().enable_table_access_spectre_mitigation(),
+        );
         let flags = ir::MemFlags::trusted().with_table();
         let value = builder.ins().load(pointer_type, flags, table_entry_addr, 0);
         // Mask off the "initialized bit". See documentation on
@@ -1109,7 +1191,6 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
     pub fn indirect_call(
         mut self,
         table_index: TableIndex,
-        table: ir::Table,
         ty_index: TypeIndex,
         sig_ref: ir::SigRef,
         callee: ir::Value,
@@ -1120,7 +1201,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         // Get the funcref pointer from the table.
         let funcref_ptr =
             self.env
-                .get_or_init_func_ref_table_elem(self.builder, table_index, table, callee);
+                .get_or_init_func_ref_table_elem(self.builder, table_index, callee);
 
         // Check for whether the table element is null, and trap if so.
         self.builder
@@ -1312,70 +1393,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         self.epoch_ptr_var = Variable::new(num_locals + 3);
     }
 
-    fn make_table(&mut self, func: &mut ir::Function, index: TableIndex) -> WasmResult<ir::Table> {
-        let pointer_type = self.pointer_type();
-
-        let (ptr, base_offset, current_elements_offset) = {
-            let vmctx = self.vmctx(func);
-            if let Some(def_index) = self.module.defined_table_index(index) {
-                let base_offset =
-                    i32::try_from(self.offsets.vmctx_vmtable_definition_base(def_index)).unwrap();
-                let current_elements_offset = i32::try_from(
-                    self.offsets
-                        .vmctx_vmtable_definition_current_elements(def_index),
-                )
-                .unwrap();
-                (vmctx, base_offset, current_elements_offset)
-            } else {
-                let from_offset = self.offsets.vmctx_vmtable_import_from(index);
-                let table = func.create_global_value(ir::GlobalValueData::Load {
-                    base: vmctx,
-                    offset: Offset32::new(i32::try_from(from_offset).unwrap()),
-                    global_type: pointer_type,
-                    flags: MemFlags::trusted().with_readonly(),
-                });
-                let base_offset = i32::from(self.offsets.vmtable_definition_base());
-                let current_elements_offset =
-                    i32::from(self.offsets.vmtable_definition_current_elements());
-                (table, base_offset, current_elements_offset)
-            }
-        };
-
-        let base_gv = func.create_global_value(ir::GlobalValueData::Load {
-            base: ptr,
-            offset: Offset32::new(base_offset),
-            global_type: pointer_type,
-            flags: MemFlags::trusted(),
-        });
-        let bound_gv = func.create_global_value(ir::GlobalValueData::Load {
-            base: ptr,
-            offset: Offset32::new(current_elements_offset),
-            global_type: ir::Type::int(
-                u16::from(self.offsets.size_of_vmtable_definition_current_elements()) * 8,
-            )
-            .unwrap(),
-            flags: MemFlags::trusted(),
-        });
-
-        let element_size = u64::from(
-            self.reference_type(self.module.table_plans[index].table.wasm_ty.heap_type)
-                .bytes(),
-        );
-
-        Ok(func.create_table(ir::TableData {
-            base_gv,
-            min_size: Uimm64::new(0),
-            bound_gv,
-            element_size: Uimm64::new(element_size),
-            index_type: I32,
-        }))
-    }
-
     fn translate_table_grow(
         &mut self,
         mut pos: cranelift_codegen::cursor::FuncCursor<'_>,
         table_index: TableIndex,
-        _table: ir::Table,
         delta: ir::Value,
         init_value: ir::Value,
     ) -> WasmResult<ir::Value> {
@@ -1419,18 +1440,17 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         table_index: TableIndex,
-        table: ir::Table,
         index: ir::Value,
     ) -> WasmResult<ir::Value> {
         let plan = &self.module.table_plans[table_index];
         match plan.table.wasm_ty.heap_type {
-            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => match plan
-                .style
-            {
-                TableStyle::CallerChecksSignature => {
-                    Ok(self.get_or_init_func_ref_table_elem(builder, table_index, table, index))
+            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => {
+                match plan.style {
+                    TableStyle::CallerChecksSignature => {
+                        Ok(self.get_or_init_func_ref_table_elem(builder, table_index, index))
+                    }
                 }
-            },
+            }
             WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
 
             #[cfg(feature = "gc")]
@@ -1470,7 +1490,14 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 builder.insert_block_after(continue_block, gc_block);
 
                 // Load the table element.
-                let elem_addr = builder.ins().table_addr(pointer_type, table, index, 0);
+                self.ensure_table_exists(builder.func, table_index);
+                let table_data = self.tables[table_index].as_ref().unwrap();
+                let elem_addr = table_data.prepare_table_addr(
+                    builder,
+                    index,
+                    pointer_type,
+                    self.isa.flags().enable_table_access_spectre_mitigation(),
+                );
                 let flags = ir::MemFlags::trusted().with_table();
                 let elem = builder.ins().load(reference_type, flags, elem_addr, 0);
 
@@ -1565,31 +1592,37 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         table_index: TableIndex,
-        table: ir::Table,
         value: ir::Value,
         index: ir::Value,
     ) -> WasmResult<()> {
         let pointer_type = self.pointer_type();
         let plan = &self.module.table_plans[table_index];
+        self.ensure_table_exists(builder.func, table_index);
+        let table_data = self.tables[table_index].as_ref().unwrap();
         match plan.table.wasm_ty.heap_type {
-            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => match plan
-                .style
-            {
-                TableStyle::CallerChecksSignature => {
-                    let table_entry_addr = builder.ins().table_addr(pointer_type, table, index, 0);
-                    // Set the "initialized bit". See doc-comment on
-                    // `FUNCREF_INIT_BIT` in
-                    // crates/environ/src/ref_bits.rs for details.
-                    let value_with_init_bit = builder
-                        .ins()
-                        .bor_imm(value, Imm64::from(FUNCREF_INIT_BIT as i64));
-                    let flags = ir::MemFlags::trusted().with_table();
-                    builder
-                        .ins()
-                        .store(flags, value_with_init_bit, table_entry_addr, 0);
-                    Ok(())
+            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => {
+                match plan.style {
+                    TableStyle::CallerChecksSignature => {
+                        let table_entry_addr = table_data.prepare_table_addr(
+                            builder,
+                            index,
+                            pointer_type,
+                            self.isa.flags().enable_table_access_spectre_mitigation(),
+                        );
+                        // Set the "initialized bit". See doc-comment on
+                        // `FUNCREF_INIT_BIT` in
+                        // crates/environ/src/ref_bits.rs for details.
+                        let value_with_init_bit = builder
+                            .ins()
+                            .bor_imm(value, Imm64::from(FUNCREF_INIT_BIT as i64));
+                        let flags = ir::MemFlags::trusted().with_table();
+                        builder
+                            .ins()
+                            .store(flags, value_with_init_bit, table_entry_addr, 0);
+                        Ok(())
+                    }
                 }
-            },
+            }
 
             WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
 
@@ -1600,10 +1633,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 // pseudocode:
                 //
                 // ```
-                // if value != null:
-                //     value.ref_count += 1
                 // let current_elem = table[index]
                 // table[index] = value
+                // if value != null:
+                //     value.ref_count += 1
                 // if current_elem != null:
                 //     current_elem.ref_count -= 1
                 //     if current_elem.ref_count == 0:
@@ -1636,11 +1669,27 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 let continue_block = builder.create_block();
                 builder.insert_block_after(continue_block, drop_block);
 
-                // Calculate the table address of the current element and do
-                // bounds checks. This is the first thing we do, because we
-                // don't want to modify any ref counts if this `table.set` is
-                // going to trap.
-                let table_entry_addr = builder.ins().table_addr(pointer_type, table, index, 0);
+                // Grab the current element from the table if it's in-bounds,
+                // and store the new `value` into the table. This is the first
+                // thing we do, because we don't want to modify the ref count
+                // on `value` if this `table.set` is going to trap due to an
+                // out-of-bounds index.
+                //
+                // Note that we load the current element as a pointer, not a
+                // reference. This is so that if we call out-of-line to run its
+                // destructor, and its destructor triggers GC, this reference is
+                // not recorded in the stack map (which would lead to the GC
+                // saving a reference to a deallocated object, and then using it
+                // after its been freed).
+                let table_entry_addr = table_data.prepare_table_addr(
+                    builder,
+                    index,
+                    pointer_type,
+                    self.isa.flags().enable_table_access_spectre_mitigation(),
+                );
+                let flags = ir::MemFlags::trusted().with_table();
+                let current_elem = builder.ins().load(pointer_type, flags, table_entry_addr, 0);
+                builder.ins().store(flags, value, table_entry_addr, 0);
 
                 // If value is not null, increment `value`'s ref count.
                 //
@@ -1663,23 +1712,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 self.mutate_externref_ref_count(builder, value, 1);
                 builder.ins().jump(check_current_elem_block, &[]);
 
-                // Grab the current element from the table, and store the new
-                // `value` into the table.
-                //
-                // Note that we load the current element as a pointer, not a
-                // reference. This is so that if we call out-of-line to run its
-                // destructor, and its destructor triggers GC, this reference is
-                // not recorded in the stack map (which would lead to the GC
-                // saving a reference to a deallocated object, and then using it
-                // after its been freed).
-                builder.switch_to_block(check_current_elem_block);
-                let flags = ir::MemFlags::trusted().with_table();
-                let current_elem = builder.ins().load(pointer_type, flags, table_entry_addr, 0);
-                builder.ins().store(flags, value, table_entry_addr, 0);
-
                 // If the current element is non-null, decrement its reference
                 // count. And if its reference count has reached zero, then make
                 // an out-of-line call to deallocate it.
+                builder.switch_to_block(check_current_elem_block);
                 let current_elem_is_null =
                     builder
                         .ins()
@@ -2251,20 +2287,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         table_index: TableIndex,
-        table: ir::Table,
         ty_index: TypeIndex,
         sig_ref: ir::SigRef,
         callee: ir::Value,
         call_args: &[ir::Value],
     ) -> WasmResult<ir::Inst> {
-        Call::new(builder, self).indirect_call(
-            table_index,
-            table,
-            ty_index,
-            sig_ref,
-            callee,
-            call_args,
-        )
+        Call::new(builder, self).indirect_call(table_index, ty_index, sig_ref, callee, call_args)
     }
 
     fn translate_call(
@@ -2302,7 +2330,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         table_index: TableIndex,
-        table: ir::Table,
         ty_index: TypeIndex,
         sig_ref: ir::SigRef,
         callee: ir::Value,
@@ -2310,7 +2337,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     ) -> WasmResult<()> {
         Call::new_tail(builder, self).indirect_call(
             table_index,
-            table,
             ty_index,
             sig_ref,
             callee,
@@ -2537,21 +2563,19 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
     fn translate_table_size(
         &mut self,
-        mut pos: FuncCursor,
-        _table_index: TableIndex,
-        table: ir::Table,
+        pos: FuncCursor,
+        table_index: TableIndex,
     ) -> WasmResult<ir::Value> {
-        let size_gv = pos.func.tables[table].bound_gv;
-        Ok(pos.ins().global_value(ir::types::I32, size_gv))
+        self.ensure_table_exists(pos.func, table_index);
+        let table_data = self.tables[table_index].as_ref().unwrap();
+        Ok(table_data.bound.bound(pos, ir::types::I32))
     }
 
     fn translate_table_copy(
         &mut self,
         mut pos: FuncCursor,
         dst_table_index: TableIndex,
-        _dst_table: ir::Table,
         src_table_index: TableIndex,
-        _src_table: ir::Table,
         dst: ir::Value,
         src: ir::Value,
         len: ir::Value,
@@ -2585,7 +2609,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         mut pos: FuncCursor,
         seg_index: u32,
         table_index: TableIndex,
-        _table: ir::Table,
         dst: ir::Value,
         src: ir::Value,
         len: ir::Value,
