@@ -534,6 +534,7 @@ pub(crate) mod typed_continuation_helpers {
 
             let value_size =
                 mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>() as i64;
+            let original_length = builder.ins().uextend(I64, original_length);
             let byte_offset = builder.ins().imul_imm(original_length, value_size);
             builder.ins().iadd(data, byte_offset)
         }
@@ -544,9 +545,10 @@ pub(crate) mod typed_continuation_helpers {
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
         ) {
-            let zero = builder.ins().iconst(ir::types::I64, 0);
+            let zero32 = builder.ins().iconst(ir::types::I32, 0);
+            let zero64 = builder.ins().iconst(ir::types::I64, 0);
             let capacity = self.get_capacity(builder);
-            emit_debug_assert_ne!(env, builder, capacity, zero);
+            emit_debug_assert_ne!(env, builder, capacity, zero32);
 
             let align = builder.ins().iconst(
                 I64,
@@ -562,9 +564,9 @@ pub(crate) mod typed_continuation_helpers {
             let ptr = self.get_data(builder);
             env.generate_builtin_call_no_return_val(builder, index, sig, vec![ptr, size, align]);
 
-            self.set_capacity(builder, zero);
-            self.set_length(builder, zero);
-            self.set_data(builder, zero);
+            self.set_capacity(builder, zero32);
+            self.set_length(builder, zero32);
+            self.set_data(builder, zero64);
         }
 
         pub fn ensure_capacity<'a>(
@@ -573,7 +575,7 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
             required_capacity: ir::Value,
         ) {
-            let zero = builder.ins().iconst(ir::types::I64, 0);
+            let zero = builder.ins().iconst(ir::types::I32, 0);
             emit_debug_assert_ne!(env, builder, required_capacity, zero);
 
             if cfg!(debug_assertions) {
@@ -633,6 +635,11 @@ pub(crate) mod typed_continuation_helpers {
                 let old_size = builder.ins().imul_imm(capacity, entry_size as i64);
                 let new_size = builder.ins().imul_imm(required_capacity, entry_size as i64);
 
+                // The `tc_reallocate` libcalll takes the old and new size as
+                // u64, but `old_size` and `new_size` are currently just u32.
+                let old_size = builder.ins().uextend(I64, old_size);
+                let new_size = builder.ins().uextend(I64, new_size);
+
                 let index = BuiltinFunctionIndex::tc_reallocate();
                 let sig = env.builtin_function_signatures.tc_reallocate(builder.func);
 
@@ -665,7 +672,7 @@ pub(crate) mod typed_continuation_helpers {
         ) -> Vec<ir::Value> {
             if cfg!(debug_assertions) {
                 let length = self.get_length(builder);
-                let load_count = builder.ins().iconst(I64, load_types.len() as i64);
+                let load_count = builder.ins().iconst(I32, load_types.len() as i64);
                 emit_debug_assert_ule!(env, builder, load_count, length);
             }
 
@@ -696,12 +703,12 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
             values: &[ir::Value],
         ) {
-            let store_count = builder.ins().iconst(I64, values.len() as i64);
+            let store_count = builder.ins().iconst(I32, values.len() as i64);
 
             if cfg!(debug_assertions) {
                 let capacity = self.get_capacity(builder);
                 let length = self.get_length(builder);
-                let zero = builder.ins().iconst(I64, 0);
+                let zero = builder.ins().iconst(I32, 0);
                 emit_debug_assert_ule!(env, builder, store_count, capacity);
                 emit_debug_assert_eq!(env, builder, length, zero);
             }
@@ -724,7 +731,7 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         pub fn clear(&self, builder: &mut FunctionBuilder) {
-            let zero = builder.ins().iconst(I64, 0);
+            let zero = builder.ins().iconst(I32, 0);
             self.set_length(builder, zero);
         }
 
@@ -1244,7 +1251,7 @@ pub(crate) fn typed_continuations_store_payloads<'a>(
             env.pointer_type(),
         );
 
-        let nargs = builder.ins().iconst(I64, values.len() as i64);
+        let nargs = builder.ins().iconst(I32, values.len() as i64);
         payloads.ensure_capacity(env, builder, nargs);
 
         payloads.store_data_entries(env, builder, values);
@@ -1274,8 +1281,8 @@ pub(crate) fn translate_cont_new<'a>(
     arg_types: &[WasmValType],
     return_types: &[WasmValType],
 ) -> WasmResult<ir::Value> {
-    let nargs = builder.ins().iconst(I64, arg_types.len() as i64);
-    let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
+    let nargs = builder.ins().iconst(I32, arg_types.len() as i64);
+    let nreturns = builder.ins().iconst(I32, return_types.len() as i64);
 
     let (_vmctx, contobj) =
         shared::generate_builtin_call!(env, builder, tc_cont_new, [func, nargs, nreturns]);
@@ -1308,7 +1315,7 @@ pub(crate) fn translate_resume<'a>(
 
         if resume_args.len() > 0 {
             // We store the arguments in the continuation object to be resumed.
-            let count = builder.ins().iconst(I64, resume_args.len() as i64);
+            let count = builder.ins().iconst(I32, resume_args.len() as i64);
             typed_continuations_store_resume_args(env, builder, resume_args, count, resume_contobj);
         }
 

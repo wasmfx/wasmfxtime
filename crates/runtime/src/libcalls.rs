@@ -782,11 +782,10 @@ pub mod relocs {
 fn tc_cont_new(
     instance: &mut Instance,
     func: *mut u8,
-    param_count: u64,
-    result_count: u64,
+    param_count: u32,
+    result_count: u32,
 ) -> Result<*mut u8, TrapReason> {
-    let ans =
-        crate::continuation::cont_new(instance, func, param_count as usize, result_count as usize)?;
+    let ans = crate::continuation::cont_new(instance, func, param_count, result_count)?;
     Ok(ans.cast::<u8>())
 }
 
