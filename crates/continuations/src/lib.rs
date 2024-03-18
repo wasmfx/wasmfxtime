@@ -22,9 +22,9 @@ pub mod types {
     /// Types used by `Payloads` struct
     pub mod payloads {
         /// type of length
-        pub type Length = usize;
+        pub type Length = u32;
         /// type of capacity
-        pub type Capacity = usize;
+        pub type Capacity = u32;
         /// Type of the entries in the actual buffer
         pub type DataEntries = u128;
     }
@@ -76,6 +76,7 @@ impl StackLimits {
 unsafe impl Send for StackLimits {}
 unsafe impl Sync for StackLimits {}
 
+#[repr(C)]
 pub struct Payloads {
     /// Number of currently occupied slots.
     pub length: types::payloads::Length,
@@ -87,11 +88,11 @@ pub struct Payloads {
 }
 
 impl Payloads {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: u32) -> Self {
         let data = if capacity == 0 {
             ptr::null_mut()
         } else {
-            let mut args = Vec::with_capacity(capacity);
+            let mut args = Vec::with_capacity(capacity as usize);
             let args_ptr = args.as_mut_ptr();
             args.leak();
             args_ptr

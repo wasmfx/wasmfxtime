@@ -279,13 +279,18 @@ pub fn drop_cont_obj(contobj: *mut ContinuationObject) {
     unsafe {
         let _: Vec<u128> = Vec::from_raw_parts(
             contobj.args.data,
-            contobj.args.length,
-            contobj.args.capacity,
+            contobj.args.length as usize,
+            contobj.args.capacity as usize,
         );
     };
     let payloads = &contobj.tag_return_values;
-    let _: Vec<u128> =
-        unsafe { Vec::from_raw_parts(payloads.data, payloads.length, payloads.capacity) };
+    let _: Vec<u128> = unsafe {
+        Vec::from_raw_parts(
+            payloads.data,
+            payloads.length as usize,
+            payloads.capacity as usize,
+        )
+    };
 }
 
 /// TODO
@@ -293,8 +298,8 @@ pub fn drop_cont_obj(contobj: *mut ContinuationObject) {
 pub fn cont_new(
     instance: &mut Instance,
     func: *mut u8,
-    param_count: usize,
-    result_count: usize,
+    param_count: u32,
+    result_count: u32,
 ) -> Result<*mut ContinuationObject, TrapReason> {
     let func_ref = unsafe {
         func.cast::<VMFuncRef>().as_ref().ok_or_else(|| {
@@ -315,7 +320,12 @@ pub fn cont_new(
             .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
         let args_ptr = payload.data;
         let fiber = Fiber::new(stack, move |_first_val: (), _suspend: &Yield| unsafe {
-            (func_ref.array_call)(callee_ctx, caller_ctx, args_ptr.cast::<ValRaw>(), capacity)
+            (func_ref.array_call)(
+                callee_ctx,
+                caller_ctx,
+                args_ptr.cast::<ValRaw>(),
+                capacity as usize,
+            )
         })
         .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
         Box::new(fiber)
