@@ -21,12 +21,10 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i64):
-;; @002d                               v4 = global_value.i64 gv3
-;; @002d                               v5 = load.i64 notrap aligned v4+8
-;; @0032                               v6 = uextend.i64 v2
-;; @0032                               v7 = global_value.i64 gv4
-;; @0032                               v8 = iadd v7, v6
-;; @0032                               istore8 little heap v3, v8
+;; @0032                               v4 = uextend.i64 v2
+;; @0032                               v5 = global_value.i64 gv4
+;; @0032                               v6 = iadd v5, v4
+;; @0032                               istore8 little heap v3, v6
 ;; @0035                               jump block1
 ;;
 ;;                                 block1:

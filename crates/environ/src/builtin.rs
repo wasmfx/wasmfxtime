@@ -39,6 +39,49 @@ macro_rules! foreach_builtin_function {
             /// Invoked when we reach a new epoch.
             new_epoch(vmctx: vmctx) -> i64;
 
+            /// Invoked before malloc returns.
+            check_malloc(vmctx: vmctx, addr: i32, len: i32) -> i32;
+            /// Invoked before the free returns.
+            check_free(vmctx: vmctx, addr: i32) -> i32;
+            /// Invoked before a load is executed.
+            check_load(vmctx: vmctx, num_bytes: i32, addr: i32, offset: i32) -> i32;
+            /// Invoked before a store is executed.
+            check_store(vmctx: vmctx, num_bytes: i32, addr: i32, offset: i32) -> i32;
+            /// Invoked after malloc is called.
+            malloc_start(vmctx: vmctx);
+            /// Invoked after free is called.
+            free_start(vmctx: vmctx);
+            /// Invoked when wasm stack pointer is updated.
+            update_stack_pointer(vmctx: vmctx, value: i32);
+            /// Invoked before memory.grow is called.
+            update_mem_size(vmctx: vmctx, num_bytes: i32);
+
+            /// Returns an index to drop a `VMExternRef`.
+            #[cfg(feature = "gc")]
+            drop_externref(vmctx: vmctx, val: pointer);
+
+            /// Returns an index to do a GC and then insert a `VMExternRef` into the
+            /// `VMExternRefActivationsTable`.
+            #[cfg(feature = "gc")]
+            activations_table_insert_with_gc(vmctx: vmctx, val: reference);
+
+            /// Returns an index for Wasm's `global.get` instruction for `externref`s.
+            #[cfg(feature = "gc")]
+            externref_global_get(vmctx: vmctx, global: i32) -> reference;
+
+            /// Returns an index for Wasm's `global.get` instruction for `externref`s.
+            #[cfg(feature = "gc")]
+            externref_global_set(vmctx: vmctx, global: i32, val: reference);
+
+            /// Returns an index for Wasm's `table.grow` instruction for `externref`s.
+            #[cfg(feature = "gc")]
+            table_grow_externref(vmctx: vmctx, table: i32, delta: i32, init: reference) -> i32;
+
+            /// Returns an index for Wasm's `table.fill` instruction for `externref`s.
+            #[cfg(feature = "gc")]
+            table_fill_externref(vmctx: vmctx, table: i32, dst: i32, val: reference, len: i32);
+
+
             /// Creates a new continuation from a funcref.
             tc_cont_new(vmctx: vmctx, r: pointer, param_count: i32, result_count: i32) -> pointer;
             /// Resumes a continuation. The result value is of type
@@ -109,48 +152,6 @@ macro_rules! foreach_builtin_function {
             tc_print_int(vmctx: vmctx, arg : i64);
             /// TODO
             tc_print_pointer(vmctx: vmctx, arg : pointer);
-
-            /// Invoked before malloc returns.
-            check_malloc(vmctx: vmctx, addr: i32, len: i32) -> i32;
-            /// Invoked before the free returns.
-            check_free(vmctx: vmctx, addr: i32) -> i32;
-            /// Invoked before a load is executed.
-            check_load(vmctx: vmctx, num_bytes: i32, addr: i32, offset: i32) -> i32;
-            /// Invoked before a store is executed.
-            check_store(vmctx: vmctx, num_bytes: i32, addr: i32, offset: i32) -> i32;
-            /// Invoked after malloc is called.
-            malloc_start(vmctx: vmctx);
-            /// Invoked after free is called.
-            free_start(vmctx: vmctx);
-            /// Invoked when wasm stack pointer is updated.
-            update_stack_pointer(vmctx: vmctx, value: i32);
-            /// Invoked before memory.grow is called.
-            update_mem_size(vmctx: vmctx, num_bytes: i32);
-
-            /// Returns an index to drop a `VMExternRef`.
-            #[cfg(feature = "gc")]
-            drop_externref(vmctx: vmctx, val: pointer);
-
-            /// Returns an index to do a GC and then insert a `VMExternRef` into the
-            /// `VMExternRefActivationsTable`.
-            #[cfg(feature = "gc")]
-            activations_table_insert_with_gc(vmctx: vmctx, val: reference);
-
-            /// Returns an index for Wasm's `global.get` instruction for `externref`s.
-            #[cfg(feature = "gc")]
-            externref_global_get(vmctx: vmctx, global: i32) -> reference;
-
-            /// Returns an index for Wasm's `global.get` instruction for `externref`s.
-            #[cfg(feature = "gc")]
-            externref_global_set(vmctx: vmctx, global: i32, val: reference);
-
-            /// Returns an index for Wasm's `table.grow` instruction for `externref`s.
-            #[cfg(feature = "gc")]
-            table_grow_externref(vmctx: vmctx, table: i32, delta: i32, init: reference) -> i32;
-
-            /// Returns an index for Wasm's `table.fill` instruction for `externref`s.
-            #[cfg(feature = "gc")]
-            table_fill_externref(vmctx: vmctx, table: i32, dst: i32, val: reference, len: i32);
         }
     };
 }

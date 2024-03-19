@@ -24,14 +24,11 @@
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
 ;;     sig1 = (i64 vmctx, i32 uext) -> i32 uext system_v
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i64):
-;; @003b                               v5 = global_value.i64 gv3
-;; @003b                               v6 = load.i64 notrap aligned v5+8
 ;; @0040                               jump block1(v2, v2)
 ;;
 ;;                                 block1(v3: i64, v4: i64):
@@ -42,14 +39,11 @@
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
 ;;     sig1 = (i64 vmctx, i32 uext) -> i32 uext system_v
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i64, v3: i64):
-;; @0042                               v7 = global_value.i64 gv3
-;; @0042                               v8 = load.i64 notrap aligned v7+8
 ;; @0049                               jump block1(v2, v3, v2)
 ;;
 ;;                                 block1(v4: i64, v5: i64, v6: i64):
@@ -60,7 +54,6 @@
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i64, i64, i64) -> i64, i64, i64 fast
 ;;     sig1 = (i64 vmctx, i64, i64) -> i64, i64 fast
 ;;     sig2 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
@@ -70,24 +63,22 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i64):
-;; @004b                               v4 = global_value.i64 gv3
-;; @004b                               v5 = load.i64 notrap aligned v4+8
-;; @004c                               v6 = iconst.i64 1
-;; @0050                               jump block2(v6, v2)  ; v6 = 1
+;; @004c                               v4 = iconst.i64 1
+;; @0050                               jump block2(v4, v2)  ; v4 = 1
 ;;
-;;                                 block2(v7: i64, v8: i64):
-;; @0052                               v10, v11, v12 = call fn0(v0, v0, v7, v8)
-;; @0054                               v13, v14, v15 = call fn0(v0, v0, v11, v12)
-;; @0056                               v16 = imul v14, v15
-;; @0057                               v17, v18, v19 = call fn0(v0, v0, v13, v16)
-;; @0059                               v20 = iconst.i64 1
-;; @005b                               v21 = isub v19, v20  ; v20 = 1
-;; @005c                               v22, v23 = call fn1(v0, v0, v21)
-;; @005e                               v24 = iconst.i64 0
-;; @0060                               v25 = icmp ugt v23, v24  ; v24 = 0
-;; @0060                               v26 = uextend.i32 v25
-;; @0061                               brif v26, block2(v18, v22), block4
+;;                                 block2(v5: i64, v6: i64):
+;; @0052                               v8, v9, v10 = call fn0(v0, v0, v5, v6)
+;; @0054                               v11, v12, v13 = call fn0(v0, v0, v9, v10)
+;; @0056                               v14 = imul v12, v13
+;; @0057                               v15, v16, v17 = call fn0(v0, v0, v11, v14)
+;; @0059                               v18 = iconst.i64 1
+;; @005b                               v19 = isub v17, v18  ; v18 = 1
+;; @005c                               v20, v21 = call fn1(v0, v0, v19)
+;; @005e                               v22 = iconst.i64 0
+;; @0060                               v23 = icmp ugt v21, v22  ; v22 = 0
+;; @0060                               v24 = uextend.i32 v23
+;; @0061                               brif v24, block2(v16, v20), block4
 ;;
 ;;                                 block4:
-;; @0064                               return v18
+;; @0064                               return v16
 ;; }

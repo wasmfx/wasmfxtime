@@ -27,14 +27,11 @@
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
 ;;     sig1 = (i64 vmctx, i32 uext) -> i32 uext system_v
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32):
-;; @0078                               v9 = global_value.i64 gv3
-;; @0078                               v10 = load.i64 notrap aligned v9+8
 ;; @007b                               jump block1(v5)
 ;;
 ;;                                 block1(v8: i32):
@@ -45,14 +42,11 @@
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
 ;;     sig1 = (i64 vmctx, i32 uext) -> i32 uext system_v
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32):
-;; @007d                               v9 = global_value.i64 gv3
-;; @007d                               v10 = load.i64 notrap aligned v9+8
 ;; @0080                               jump block1(v6)
 ;;
 ;;                                 block1(v8: i32):
@@ -63,14 +57,11 @@
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
 ;;     sig1 = (i64 vmctx, i32 uext) -> i32 uext system_v
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32):
-;; @0082                               v9 = global_value.i64 gv3
-;; @0082                               v10 = load.i64 notrap aligned v9+8
 ;; @0085                               jump block1(v7)
 ;;
 ;;                                 block1(v8: i32):
@@ -88,14 +79,12 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;; @0087                               v7 = global_value.i64 gv3
-;; @0087                               v8 = load.i64 notrap aligned v7+8
-;; @0090                               v9 = iconst.i32 0
-;; @0090                               v10 = iconst.i32 1
-;; @0090                               v11 = global_value.i64 gv3
-;; @0090                               v12 = load.i64 notrap aligned readonly v11+56
-;; @0090                               v13 = load.i64 notrap aligned readonly v12+8
-;; @0090                               call_indirect sig0, v13(v11, v9, v10, v3, v4, v5)  ; v9 = 0, v10 = 1
+;; @0090                               v7 = iconst.i32 0
+;; @0090                               v8 = iconst.i32 1
+;; @0090                               v9 = global_value.i64 gv3
+;; @0090                               v10 = load.i64 notrap aligned readonly v9+56
+;; @0090                               v11 = load.i64 notrap aligned readonly v10+8
+;; @0090                               call_indirect sig0, v11(v9, v7, v8, v3, v4, v5)  ; v7 = 0, v8 = 1
 ;; @0094                               jump block1(v2)
 ;;
 ;;                                 block1(v6: i32):
@@ -113,14 +102,12 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;; @0096                               v7 = global_value.i64 gv3
-;; @0096                               v8 = load.i64 notrap aligned v7+8
-;; @009f                               v9 = iconst.i32 1
-;; @009f                               v10 = iconst.i32 0
-;; @009f                               v11 = global_value.i64 gv3
-;; @009f                               v12 = load.i64 notrap aligned readonly v11+56
-;; @009f                               v13 = load.i64 notrap aligned readonly v12+8
-;; @009f                               call_indirect sig0, v13(v11, v9, v10, v3, v4, v5)  ; v9 = 1, v10 = 0
+;; @009f                               v7 = iconst.i32 1
+;; @009f                               v8 = iconst.i32 0
+;; @009f                               v9 = global_value.i64 gv3
+;; @009f                               v10 = load.i64 notrap aligned readonly v9+56
+;; @009f                               v11 = load.i64 notrap aligned readonly v10+8
+;; @009f                               call_indirect sig0, v11(v9, v7, v8, v3, v4, v5)  ; v7 = 1, v8 = 0
 ;; @00a3                               jump block1(v2)
 ;;
 ;;                                 block1(v6: i32):

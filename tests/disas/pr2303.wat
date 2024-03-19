@@ -29,53 +29,51 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
-;; @0035                               v3 = global_value.i64 gv3
-;; @0035                               v4 = load.i64 notrap aligned v3+8
-;; @0036                               v5 = iconst.i32 48
-;; @0038                               v6 = iconst.i32 0
-;; @003a                               v7 = uextend.i64 v6  ; v6 = 0
-;; @003a                               v8 = global_value.i64 gv4
-;; @003a                               v9 = iadd v8, v7
-;; @003a                               v10 = load.i8x16 little heap v9
-;; @003e                               v11 = iconst.i32 16
-;; @0040                               v12 = uextend.i64 v11  ; v11 = 16
-;; @0040                               v13 = global_value.i64 gv4
-;; @0040                               v14 = iadd v13, v12
-;; @0040                               v15 = load.i8x16 little heap v14
-;; @0046                               brif v2, block2, block4(v10, v15)
+;; @0036                               v3 = iconst.i32 48
+;; @0038                               v4 = iconst.i32 0
+;; @003a                               v5 = uextend.i64 v4  ; v4 = 0
+;; @003a                               v6 = global_value.i64 gv4
+;; @003a                               v7 = iadd v6, v5
+;; @003a                               v8 = load.i8x16 little heap v7
+;; @003e                               v9 = iconst.i32 16
+;; @0040                               v10 = uextend.i64 v9  ; v9 = 16
+;; @0040                               v11 = global_value.i64 gv4
+;; @0040                               v12 = iadd v11, v10
+;; @0040                               v13 = load.i8x16 little heap v12
+;; @0046                               brif v2, block2, block4(v8, v13)
 ;;
 ;;                                 block2:
-;; @0048                               v18 = bitcast.i64x2 little v10
-;; @0048                               v19 = bitcast.i64x2 little v15
-;; @0048                               v20 = iadd v18, v19
-;; @004b                               v21 = iconst.i32 32
-;; @004d                               v22 = uextend.i64 v21  ; v21 = 32
-;; @004d                               v23 = global_value.i64 gv4
-;; @004d                               v24 = iadd v23, v22
-;; @004d                               v25 = load.i8x16 little heap v24
-;; @0051                               v28 = bitcast.i8x16 little v20
-;; @0051                               jump block3(v28, v25)
+;; @0048                               v16 = bitcast.i64x2 little v8
+;; @0048                               v17 = bitcast.i64x2 little v13
+;; @0048                               v18 = iadd v16, v17
+;; @004b                               v19 = iconst.i32 32
+;; @004d                               v20 = uextend.i64 v19  ; v19 = 32
+;; @004d                               v21 = global_value.i64 gv4
+;; @004d                               v22 = iadd v21, v20
+;; @004d                               v23 = load.i8x16 little heap v22
+;; @0051                               v26 = bitcast.i8x16 little v18
+;; @0051                               jump block3(v26, v23)
 ;;
-;;                                 block4(v26: i8x16, v27: i8x16):
-;; @0052                               v29 = bitcast.i32x4 little v10
-;; @0052                               v30 = bitcast.i32x4 little v15
-;; @0052                               v31 = isub v29, v30
-;; @0055                               v32 = iconst.i32 0
-;; @0057                               v33 = uextend.i64 v32  ; v32 = 0
-;; @0057                               v34 = global_value.i64 gv4
-;; @0057                               v35 = iadd v34, v33
-;; @0057                               v36 = load.i8x16 little heap v35
-;; @005b                               v37 = bitcast.i8x16 little v31
-;; @005b                               jump block3(v37, v36)
+;;                                 block4(v24: i8x16, v25: i8x16):
+;; @0052                               v27 = bitcast.i32x4 little v8
+;; @0052                               v28 = bitcast.i32x4 little v13
+;; @0052                               v29 = isub v27, v28
+;; @0055                               v30 = iconst.i32 0
+;; @0057                               v31 = uextend.i64 v30  ; v30 = 0
+;; @0057                               v32 = global_value.i64 gv4
+;; @0057                               v33 = iadd v32, v31
+;; @0057                               v34 = load.i8x16 little heap v33
+;; @005b                               v35 = bitcast.i8x16 little v29
+;; @005b                               jump block3(v35, v34)
 ;;
-;;                                 block3(v16: i8x16, v17: i8x16):
-;; @005c                               v38 = bitcast.i16x8 little v16
-;; @005c                               v39 = bitcast.i16x8 little v17
-;; @005c                               v40 = imul v38, v39
-;; @005f                               v41 = uextend.i64 v5  ; v5 = 48
-;; @005f                               v42 = global_value.i64 gv4
-;; @005f                               v43 = iadd v42, v41
-;; @005f                               store little heap v40, v43
+;;                                 block3(v14: i8x16, v15: i8x16):
+;; @005c                               v36 = bitcast.i16x8 little v14
+;; @005c                               v37 = bitcast.i16x8 little v15
+;; @005c                               v38 = imul v36, v37
+;; @005f                               v39 = uextend.i64 v3  ; v3 = 48
+;; @005f                               v40 = global_value.i64 gv4
+;; @005f                               v41 = iadd v40, v39
+;; @005f                               store little heap v38, v41
 ;; @0063                               jump block1
 ;;
 ;;                                 block1:
