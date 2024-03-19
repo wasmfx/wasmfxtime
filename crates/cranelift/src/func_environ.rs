@@ -14,8 +14,8 @@ use cranelift_frontend::FunctionBuilder;
 use cranelift_frontend::Variable;
 use cranelift_wasm::{
     EngineOrModuleTypeIndex, FuncIndex, FuncTranslationState, GlobalIndex, GlobalVariable, Heap,
-    HeapData, HeapStyle, MemoryIndex, TableData, TableIndex, TableSize, TagIndex, TargetEnvironment,
-    TypeIndex, WasmHeapType, WasmRefType, WasmResult, WasmValType,
+    HeapData, HeapStyle, MemoryIndex, TableData, TableIndex, TableSize, TagIndex,
+    TargetEnvironment, TypeIndex, WasmHeapType, WasmRefType, WasmResult, WasmValType,
 };
 use std::mem;
 use wasmparser::Operator;
