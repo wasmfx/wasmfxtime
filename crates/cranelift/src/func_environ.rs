@@ -13,15 +13,15 @@ use cranelift_entity::{EntityRef, PrimaryMap, SecondaryMap};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_frontend::Variable;
 use cranelift_wasm::{
-    FuncIndex, FuncTranslationState, GlobalIndex, GlobalVariable, Heap, HeapData, HeapStyle,
-    MemoryIndex, TableData, TableIndex, TableSize, TagIndex, TargetEnvironment, TypeIndex,
-    WasmHeapType, WasmRefType, WasmResult, WasmValType,
+    EngineOrModuleTypeIndex, FuncIndex, FuncTranslationState, GlobalIndex, GlobalVariable, Heap,
+    HeapData, HeapStyle, MemoryIndex, TableData, TableIndex, TableSize, TagIndex, TargetEnvironment,
+    TypeIndex, WasmHeapType, WasmRefType, WasmResult, WasmValType,
 };
 use std::mem;
 use wasmparser::Operator;
 use wasmtime_environ::{
-    BuiltinFunctionIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation, ModuleTypesBuilder,
-    PtrSize, TableStyle, Tunables, TypeConvert, VMOffsets, WASM_PAGE_SIZE,
+    BuiltinFunctionIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation, ModuleType,
+    ModuleTypesBuilder, PtrSize, TableStyle, Tunables, TypeConvert, VMOffsets, WASM_PAGE_SIZE,
 };
 use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
@@ -971,13 +971,12 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         // contents, we check for a null entry here, and
         // if null, we take a slow-path that invokes a
         // libcall.
-        let table_entry_addr = table_data.prepare_table_addr(
+        let (table_entry_addr, flags) = table_data.prepare_table_addr(
             builder,
             index,
             pointer_type,
             self.isa.flags().enable_table_access_spectre_mitigation(),
         );
-        let flags = ir::MemFlags::trusted().with_table();
         let value = builder.ins().load(pointer_type, flags, table_entry_addr, 0);
         // Mask off the "initialized bit". See documentation on
         // FUNCREF_INIT_BIT in crates/environ/src/ref_bits.rs for more
@@ -1094,6 +1093,16 @@ struct Call<'a, 'func, 'module_env> {
     tail: bool,
 }
 
+enum CheckIndirectCallTypeSignature {
+    Runtime,
+    StaticMatch {
+        /// Whether or not the funcref may be null or if it's statically known
+        /// to not be null.
+        may_be_null: bool,
+    },
+    StaticTrap,
+}
+
 impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
     /// Create a new `Call` site that will do regular, non-tail calls.
     pub fn new(
@@ -1195,65 +1204,167 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         sig_ref: ir::SigRef,
         callee: ir::Value,
         call_args: &[ir::Value],
-    ) -> WasmResult<ir::Inst> {
-        let pointer_type = self.env.pointer_type();
-
+    ) -> WasmResult<Option<ir::Inst>> {
         // Get the funcref pointer from the table.
         let funcref_ptr =
             self.env
                 .get_or_init_func_ref_table_elem(self.builder, table_index, callee);
 
-        // Check for whether the table element is null, and trap if so.
-        self.builder
-            .ins()
-            .trapz(funcref_ptr, ir::TrapCode::IndirectCallToNull);
-
         // If necessary, check the signature.
-        match self.env.module.table_plans[table_index].style {
-            TableStyle::CallerChecksSignature => {
-                let sig_id_size = self.env.offsets.size_of_vmshared_type_index();
-                let sig_id_type = Type::int(u16::from(sig_id_size) * 8).unwrap();
-                let vmctx = self.env.vmctx(self.builder.func);
-                let base = self.builder.ins().global_value(pointer_type, vmctx);
+        let check = self.check_indirect_call_type_signature(table_index, ty_index, funcref_ptr);
 
-                // Load the caller ID. This requires loading the `*mut
-                // VMFuncRef` base pointer from `VMContext` and then loading,
-                // based on `SignatureIndex`, the corresponding entry.
-                let mem_flags = ir::MemFlags::trusted().with_readonly();
-                let signatures = self.builder.ins().load(
-                    pointer_type,
-                    mem_flags,
-                    base,
-                    i32::try_from(self.env.offsets.vmctx_type_ids_array()).unwrap(),
-                );
-                let sig_index = self.env.module.types[ty_index].unwrap_function();
-                let offset =
-                    i32::try_from(sig_index.as_u32().checked_mul(sig_id_type.bytes()).unwrap())
-                        .unwrap();
-                let caller_sig_id =
-                    self.builder
-                        .ins()
-                        .load(sig_id_type, mem_flags, signatures, offset);
+        let trap_code = match check {
+            // `funcref_ptr` is checked at runtime that its type matches,
+            // meaning that if code gets this far it's guaranteed to not be
+            // null. That means nothing in `unchecked_call` can fail.
+            CheckIndirectCallTypeSignature::Runtime => None,
 
-                // Load the callee ID.
-                let mem_flags = ir::MemFlags::trusted().with_readonly();
-                let callee_sig_id = self.builder.ins().load(
-                    sig_id_type,
-                    mem_flags,
-                    funcref_ptr,
-                    i32::from(self.env.offsets.ptr.vm_func_ref_type_index()),
-                );
-
-                // Check that they match.
-                let cmp = self
-                    .builder
-                    .ins()
-                    .icmp(IntCC::Equal, callee_sig_id, caller_sig_id);
-                self.builder.ins().trapz(cmp, ir::TrapCode::BadSignature);
+            // No type check was performed on `funcref_ptr` because it's
+            // statically known to have the right type. Note that whether or
+            // not the function is null is not necessarily tested so far since
+            // no type information was inspected.
+            //
+            // If the table may hold null functions, then further loads in
+            // `unchecked_call` may fail. If the table only holds non-null
+            // functions, though, then there's no possibility of a trap.
+            CheckIndirectCallTypeSignature::StaticMatch { may_be_null } => {
+                if may_be_null {
+                    Some(ir::TrapCode::IndirectCallToNull)
+                } else {
+                    None
+                }
             }
+
+            // Code has already trapped, so return nothing indicating that this
+            // is now unreachable code.
+            CheckIndirectCallTypeSignature::StaticTrap => return Ok(None),
+        };
+        self.unchecked_call(sig_ref, funcref_ptr, trap_code, call_args)
+            .map(Some)
+    }
+
+    fn check_indirect_call_type_signature(
+        &mut self,
+        table_index: TableIndex,
+        ty_index: TypeIndex,
+        funcref_ptr: ir::Value,
+    ) -> CheckIndirectCallTypeSignature {
+        let pointer_type = self.env.pointer_type();
+        let table = &self.env.module.table_plans[table_index];
+        let sig_id_size = self.env.offsets.size_of_vmshared_type_index();
+        let sig_id_type = Type::int(u16::from(sig_id_size) * 8).unwrap();
+
+        // Generate a rustc compile error here if more styles are added in
+        // the future as the following code is tailored to just this style.
+        let TableStyle::CallerChecksSignature = table.style;
+
+        // Test if a type check is necessary for this table. If this table is a
+        // table of typed functions and that type matches `ty_index`, then
+        // there's no need to perform a typecheck.
+        match table.table.wasm_ty.heap_type {
+            // Functions do not have a statically known type in the table, a
+            // typecheck is required. Fall through to below to perform the
+            // actual typecheck.
+            WasmHeapType::Func => {}
+
+            // Functions that have a statically known type are either going to
+            // always succeed or always fail. Figure out by inspecting the types
+            // further.
+            WasmHeapType::Concrete(EngineOrModuleTypeIndex::Module(table_ty)) => {
+                // If `ty_index` matches `table_ty`, then this call is
+                // statically known to have the right type, so no checks are
+                // necessary.
+                match self.env.module.types[ty_index] {
+                    ModuleType::Function(specified_ty) => {
+                        if specified_ty == table_ty {
+                            return CheckIndirectCallTypeSignature::StaticMatch {
+                                may_be_null: table.table.wasm_ty.nullable,
+                            };
+                        }
+                    }
+                    ModuleType::Continuation(_) => todo!(),
+                }
+
+                // Otherwise if the types don't match then either (a) this is a
+                // null pointer or (b) it's a pointer with the wrong type.
+                // Figure out which and trap here.
+                //
+                // If it's possible to have a null here then try to load the
+                // type information. If that fails due to the function being a
+                // null pointer, then this was a call to null. Otherwise if it
+                // succeeds then we know it won't match, so trap anyway.
+                if table.table.wasm_ty.nullable {
+                    let mem_flags = ir::MemFlags::trusted().with_readonly();
+                    self.builder.ins().load(
+                        sig_id_type,
+                        mem_flags.with_trap_code(Some(ir::TrapCode::IndirectCallToNull)),
+                        funcref_ptr,
+                        i32::from(self.env.offsets.ptr.vm_func_ref_type_index()),
+                    );
+                }
+                self.builder.ins().trap(ir::TrapCode::BadSignature);
+                return CheckIndirectCallTypeSignature::StaticTrap;
+            }
+
+            // Tables of `nofunc` can only be inhabited by null, so go ahead and
+            // trap with that.
+            WasmHeapType::NoFunc => {
+                assert!(table.table.wasm_ty.nullable);
+                self.builder.ins().trap(ir::TrapCode::IndirectCallToNull);
+                return CheckIndirectCallTypeSignature::StaticTrap;
+            }
+
+            // Engine-indexed types don't show up until runtime and it's a wasm
+            // validation error to perform a call through an `externref` table,
+            // so these cases are dynamically not reachable.
+            WasmHeapType::Concrete(EngineOrModuleTypeIndex::Engine(_)) | WasmHeapType::Extern => {
+                unreachable!()
+            }
+
+            WasmHeapType::NoCont => todo!(),
+            WasmHeapType::Cont => todo!(),
         }
 
-        self.unchecked_call(sig_ref, funcref_ptr, call_args)
+        let vmctx = self.env.vmctx(self.builder.func);
+        let base = self.builder.ins().global_value(pointer_type, vmctx);
+
+        // Load the caller ID. This requires loading the `*mut VMFuncRef` base
+        // pointer from `VMContext` and then loading, based on `SignatureIndex`,
+        // the corresponding entry.
+        let mem_flags = ir::MemFlags::trusted().with_readonly();
+        let signatures = self.builder.ins().load(
+            pointer_type,
+            mem_flags,
+            base,
+            i32::try_from(self.env.offsets.vmctx_type_ids_array()).unwrap(),
+        );
+        let sig_index = self.env.module.types[ty_index].unwrap_function();
+        let offset =
+            i32::try_from(sig_index.as_u32().checked_mul(sig_id_type.bytes()).unwrap()).unwrap();
+        let caller_sig_id = self
+            .builder
+            .ins()
+            .load(sig_id_type, mem_flags, signatures, offset);
+
+        // Load the callee ID.
+        //
+        // Note that the callee may be null in which case this load may
+        // trap. If so use the `IndirectCallToNull` trap code.
+        let mem_flags = ir::MemFlags::trusted().with_readonly();
+        let callee_sig_id = self.builder.ins().load(
+            sig_id_type,
+            mem_flags.with_trap_code(Some(ir::TrapCode::IndirectCallToNull)),
+            funcref_ptr,
+            i32::from(self.env.offsets.ptr.vm_func_ref_type_index()),
+        );
+
+        // Check that they match.
+        let cmp = self
+            .builder
+            .ins()
+            .icmp(IntCC::Equal, callee_sig_id, caller_sig_id);
+        self.builder.ins().trapz(cmp, ir::TrapCode::BadSignature);
+        CheckIndirectCallTypeSignature::Runtime
     }
 
     /// Call a typed function reference.
@@ -1263,19 +1374,15 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         callee: ir::Value,
         args: &[ir::Value],
     ) -> WasmResult<ir::Inst> {
-        // Check for whether the callee is null, and trap if so.
-        //
         // FIXME: the wasm type system tracks enough information to know whether
         // `callee` is a null reference or not. In some situations it can be
         // statically known here that `callee` cannot be null in which case this
-        // null check can be elided. This requires feeding type information from
+        // can be `None` instead. This requires feeding type information from
         // wasmparser's validator into this function, however, which is not
         // easily done at this time.
-        self.builder
-            .ins()
-            .trapz(callee, ir::TrapCode::NullReference);
+        let callee_load_trap_code = Some(ir::TrapCode::NullReference);
 
-        self.unchecked_call(sig_ref, callee, args)
+        self.unchecked_call(sig_ref, callee, callee_load_trap_code, args)
     }
 
     /// This calls a function by reference without checking the signature.
@@ -1287,15 +1394,22 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         &mut self,
         sig_ref: ir::SigRef,
         callee: ir::Value,
+        callee_load_trap_code: Option<ir::TrapCode>,
         call_args: &[ir::Value],
     ) -> WasmResult<ir::Inst> {
         let pointer_type = self.env.pointer_type();
 
         // Dereference callee pointer to get the function address.
+        //
+        // Note that this may trap if `callee` hasn't previously been verified
+        // to be non-null. This means that this load is annotated with an
+        // optional trap code provided by the caller of `unchecked_call` which
+        // will handle the case where this is either already known to be
+        // non-null or may trap.
         let mem_flags = ir::MemFlags::trusted().with_readonly();
         let func_addr = self.builder.ins().load(
             pointer_type,
-            mem_flags,
+            mem_flags.with_trap_code(callee_load_trap_code),
             callee,
             i32::from(self.env.offsets.ptr.vm_func_ref_wasm_call()),
         );
@@ -1492,13 +1606,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 // Load the table element.
                 self.ensure_table_exists(builder.func, table_index);
                 let table_data = self.tables[table_index].as_ref().unwrap();
-                let elem_addr = table_data.prepare_table_addr(
+                let (elem_addr, flags) = table_data.prepare_table_addr(
                     builder,
                     index,
                     pointer_type,
                     self.isa.flags().enable_table_access_spectre_mitigation(),
                 );
-                let flags = ir::MemFlags::trusted().with_table();
                 let elem = builder.ins().load(reference_type, flags, elem_addr, 0);
 
                 let elem_is_null = builder.ins().is_null(elem);
@@ -1603,7 +1716,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => {
                 match plan.style {
                     TableStyle::CallerChecksSignature => {
-                        let table_entry_addr = table_data.prepare_table_addr(
+                        let (table_entry_addr, flags) = table_data.prepare_table_addr(
                             builder,
                             index,
                             pointer_type,
@@ -1615,7 +1728,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                         let value_with_init_bit = builder
                             .ins()
                             .bor_imm(value, Imm64::from(FUNCREF_INIT_BIT as i64));
-                        let flags = ir::MemFlags::trusted().with_table();
                         builder
                             .ins()
                             .store(flags, value_with_init_bit, table_entry_addr, 0);
@@ -1681,14 +1793,16 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 // not recorded in the stack map (which would lead to the GC
                 // saving a reference to a deallocated object, and then using it
                 // after its been freed).
-                let table_entry_addr = table_data.prepare_table_addr(
+                let (table_entry_addr, flags) = table_data.prepare_table_addr(
                     builder,
                     index,
                     pointer_type,
                     self.isa.flags().enable_table_access_spectre_mitigation(),
                 );
-                let flags = ir::MemFlags::trusted().with_table();
                 let current_elem = builder.ins().load(pointer_type, flags, table_entry_addr, 0);
+
+                // After the load, a store to the same address can't trap.
+                let flags = ir::MemFlags::trusted().with_alias_region(Some(ir::AliasRegion::Table));
                 builder.ins().store(flags, value, table_entry_addr, 0);
 
                 // If value is not null, increment `value`'s ref count.
@@ -2291,7 +2405,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         sig_ref: ir::SigRef,
         callee: ir::Value,
         call_args: &[ir::Value],
-    ) -> WasmResult<ir::Inst> {
+    ) -> WasmResult<Option<ir::Inst>> {
         Call::new(builder, self).indirect_call(table_index, ty_index, sig_ref, callee, call_args)
     }
 

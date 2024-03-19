@@ -25,14 +25,13 @@
 ;; @002e                               v6 = load.i64 notrap aligned v5+8
 ;; @0033                               v7 = iconst.i32 23
 ;; @0033                               v8 = icmp uge v2, v7  ; v7 = 23
-;; @0033                               trapnz v8, table_oob
 ;; @0033                               v9 = uextend.i64 v2
 ;; @0033                               v10 = global_value.i64 gv4
 ;; @0033                               v11 = ishl_imm v9, 3
 ;; @0033                               v12 = iadd v10, v11
-;; @0033                               v13 = icmp uge v2, v7  ; v7 = 23
-;; @0033                               v14 = select_spectre_guard v13, v10, v12
-;; @0033                               v15 = load.i64 notrap aligned table v14
+;; @0033                               v13 = iconst.i64 0
+;; @0033                               v14 = select_spectre_guard v8, v13, v12  ; v13 = 0
+;; @0033                               v15 = load.i64 table_oob aligned table v14
 ;; @0033                               v16 = band_imm v15, -2
 ;; @0033                               brif v15, block3(v16), block2
 ;;
@@ -45,11 +44,10 @@
 ;; @0033                               jump block3(v22)
 ;;
 ;;                                 block3(v17: i64):
-;; @0033                               trapz v17, icall_null
 ;; @0033                               v23 = global_value.i64 gv3
 ;; @0033                               v24 = load.i64 notrap aligned readonly v23+64
 ;; @0033                               v25 = load.i32 notrap aligned readonly v24
-;; @0033                               v26 = load.i32 notrap aligned readonly v17+24
+;; @0033                               v26 = load.i32 icall_null aligned readonly v17+24
 ;; @0033                               v27 = icmp eq v26, v25
 ;; @0033                               trapz v27, bad_sig
 ;; @0033                               v28 = load.i64 notrap aligned readonly v17+16
