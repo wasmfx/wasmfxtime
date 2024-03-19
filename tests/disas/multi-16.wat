@@ -14,29 +14,26 @@
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
 ;;     sig1 = (i64 vmctx, i32 uext) -> i32 uext system_v
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
-;; @0023                               v4 = global_value.i64 gv3
-;; @0023                               v5 = load.i64 notrap aligned v4+8
-;; @0024                               v6 = iconst.i32 1
-;; @0028                               brif v2, block2, block4(v6)  ; v6 = 1
+;; @0024                               v4 = iconst.i32 1
+;; @0028                               brif v2, block2, block4(v4)  ; v4 = 1
 ;;
 ;;                                 block2:
-;; @002a                               v8 = iconst.i32 2
-;; @002c                               v9 = iadd.i32 v6, v8  ; v6 = 1, v8 = 2
-;; @002d                               jump block3(v9)
+;; @002a                               v6 = iconst.i32 2
+;; @002c                               v7 = iadd.i32 v4, v6  ; v4 = 1, v6 = 2
+;; @002d                               jump block3(v7)
 ;;
-;;                                 block4(v10: i32):
-;; @002e                               v11 = iconst.i32 0xffff_fffe
-;; @0030                               v12 = iadd.i32 v6, v11  ; v6 = 1, v11 = 0xffff_fffe
-;; @0031                               jump block3(v12)
+;;                                 block4(v8: i32):
+;; @002e                               v9 = iconst.i32 0xffff_fffe
+;; @0030                               v10 = iadd.i32 v4, v9  ; v4 = 1, v9 = 0xffff_fffe
+;; @0031                               jump block3(v10)
 ;;
-;;                                 block3(v7: i32):
-;; @0032                               jump block1(v7)
+;;                                 block3(v5: i32):
+;; @0032                               jump block1(v5)
 ;;
 ;;                                 block1(v3: i32):
 ;; @0032                               return v3

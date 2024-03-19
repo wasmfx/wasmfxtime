@@ -75,34 +75,30 @@
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
 ;;     sig1 = (i64 vmctx, i32 uext) -> i32 uext system_v
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
-;;                                     v4 -> v0
 ;; @0057                               jump block1
 ;;
 ;;                                 block1:
-;;                                     v21 = bswap.i32 v2
-;; @0057                               return v21
+;;                                     v19 = bswap.i32 v2
+;; @0057                               return v19
 ;; }
 ;;
 ;; function u0:1(i64 vmctx, i64, i64) -> i64 fast {
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
 ;;     sig1 = (i64 vmctx, i32 uext) -> i32 uext system_v
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i64):
-;;                                     v4 -> v0
 ;; @00ad                               jump block1
 ;;
 ;;                                 block1:
-;;                                     v41 = bswap.i64 v2
-;; @00ad                               return v41
+;;                                     v39 = bswap.i64 v2
+;; @00ad                               return v39
 ;; }

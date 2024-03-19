@@ -36,32 +36,30 @@
 ;;
 ;;                                 block0(v0: i64, v1: i64):
 ;; @001f                               v2 = iconst.i32 0
-;; @001f                               v3 = global_value.i64 gv3
-;; @001f                               v4 = load.i64 notrap aligned v3+8
-;; @0021                               v5 = iconst.i32 0
-;; @0025                               v6 = iconst.i32 1
-;; @0029                               v7 = iconst.i32 1
-;; @002d                               v8 = iconst.i32 0
-;; @0033                               jump block3(v5, v7, v6)  ; v5 = 0, v7 = 1, v6 = 1
+;; @0021                               v3 = iconst.i32 0
+;; @0025                               v4 = iconst.i32 1
+;; @0029                               v5 = iconst.i32 1
+;; @002d                               v6 = iconst.i32 0
+;; @0033                               jump block3(v3, v5, v4)  ; v3 = 0, v5 = 1, v4 = 1
 ;;
-;;                                 block3(v9: i32, v13: i32, v14: i32):
-;; @0037                               v10 = iconst.i32 5
-;; @0039                               v11 = icmp sgt v9, v10  ; v10 = 5
-;; @0039                               v12 = uextend.i32 v11
-;; @003a                               brif v12, block2, block5
+;;                                 block3(v7: i32, v11: i32, v12: i32):
+;; @0037                               v8 = iconst.i32 5
+;; @0039                               v9 = icmp sgt v7, v8  ; v8 = 5
+;; @0039                               v10 = uextend.i32 v9
+;; @003a                               brif v10, block2, block5
 ;;
 ;;                                 block5:
-;; @0044                               v15 = iadd.i32 v13, v14
-;; @004d                               v16 = iconst.i32 1
-;; @004f                               v17 = iadd.i32 v9, v16  ; v16 = 1
-;; @0052                               jump block3(v17, v15, v13)
+;; @0044                               v13 = iadd.i32 v11, v12
+;; @004d                               v14 = iconst.i32 1
+;; @004f                               v15 = iadd.i32 v7, v14  ; v14 = 1
+;; @0052                               jump block3(v15, v13, v11)
 ;;
 ;;                                 block2:
-;; @0056                               v18 = iconst.i32 0
-;; @005a                               v19 = uextend.i64 v18  ; v18 = 0
-;; @005a                               v20 = global_value.i64 gv4
-;; @005a                               v21 = iadd v20, v19
-;; @005a                               store.i32 little heap v13, v21
+;; @0056                               v16 = iconst.i32 0
+;; @005a                               v17 = uextend.i64 v16  ; v16 = 0
+;; @005a                               v18 = global_value.i64 gv4
+;; @005a                               v19 = iadd v18, v17
+;; @005a                               store.i32 little heap v11, v19
 ;; @005d                               jump block1
 ;;
 ;;                                 block1:

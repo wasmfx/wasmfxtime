@@ -12,17 +12,14 @@
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
 ;;     sig1 = (i64 vmctx, i32 uext) -> i32 uext system_v
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i64):
-;; @0028                               v5 = global_value.i64 gv3
-;; @0028                               v6 = load.i64 notrap aligned v5+8
 ;; @002b                               jump block2(v2)
 ;;
-;;                                 block2(v7: i64):
-;; @002d                               v10 = iconst.i64 42
-;; @002f                               return v7, v10  ; v10 = 42
+;;                                 block2(v5: i64):
+;; @002d                               v8 = iconst.i64 42
+;; @002f                               return v5, v8  ; v8 = 42
 ;; }

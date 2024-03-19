@@ -56,7 +56,6 @@
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i64) -> i8x16, i8x16, i8x16 fast
 ;;     sig1 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
 ;;     sig2 = (i64 vmctx, i32 uext) -> i32 uext system_v
@@ -64,33 +63,31 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @002d                               v5 = global_value.i64 gv3
-;; @002d                               v6 = load.i64 notrap aligned v5+8
-;; @002e                               v7, v8, v9 = call fn0(v0, v0)
-;; @0030                               v10 = iadd v8, v9
-;; @0032                               v11, v12, v13 = call fn0(v0, v0)
-;; @0034                               v14 = icmp uge v12, v13
-;; @0036                               v15 = bitcast.i16x8 little v11
-;; @0036                               v16 = bitcast.i16x8 little v14
-;; @0036                               v17 = icmp ne v15, v16
-;; @0038                               v18 = iconst.i32 13
-;; @003a                               v19 = bitcast.i8x16 little v17
-;; @003a                               brif v18, block1(v7, v10, v19), block2  ; v18 = 13
+;; @002e                               v5, v6, v7 = call fn0(v0, v0)
+;; @0030                               v8 = iadd v6, v7
+;; @0032                               v9, v10, v11 = call fn0(v0, v0)
+;; @0034                               v12 = icmp uge v10, v11
+;; @0036                               v13 = bitcast.i16x8 little v9
+;; @0036                               v14 = bitcast.i16x8 little v12
+;; @0036                               v15 = icmp ne v13, v14
+;; @0038                               v16 = iconst.i32 13
+;; @003a                               v17 = bitcast.i8x16 little v15
+;; @003a                               brif v16, block1(v5, v8, v17), block2  ; v16 = 13
 ;;
 ;;                                 block2:
-;; @003c                               v20 = iconst.i32 43
-;; @003e                               v21 = bitcast.i8x16 little v17
-;; @003e                               brif v20, block1(v7, v10, v21), block3  ; v20 = 43
+;; @003c                               v18 = iconst.i32 43
+;; @003e                               v19 = bitcast.i8x16 little v15
+;; @003e                               brif v18, block1(v5, v8, v19), block3  ; v18 = 43
 ;;
 ;;                                 block3:
-;; @0040                               v22 = iconst.i32 13
-;; @0042                               v23 = bitcast.i8x16 little v17
-;; @0042                               brif v22, block1(v7, v10, v23), block4  ; v22 = 13
+;; @0040                               v20 = iconst.i32 13
+;; @0042                               v21 = bitcast.i8x16 little v15
+;; @0042                               brif v20, block1(v5, v8, v21), block4  ; v20 = 13
 ;;
 ;;                                 block4:
-;; @0044                               v24 = iconst.i32 87
-;; @0047                               v25 = bitcast.i8x16 little v17
-;; @0047                               v26 = select.i8x16 v24, v10, v25  ; v24 = 87
+;; @0044                               v22 = iconst.i32 87
+;; @0047                               v23 = bitcast.i8x16 little v15
+;; @0047                               v24 = select.i8x16 v22, v8, v23  ; v22 = 87
 ;; @0048                               trap unreachable
 ;;
 ;;                                 block1(v2: i8x16, v3: i8x16, v4: i8x16):
@@ -101,7 +98,6 @@
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
-;;     gv3 = vmctx
 ;;     sig0 = (i64 vmctx, i64) -> i8x16, i8x16, i8x16 fast
 ;;     sig1 = (i64 vmctx, i32 uext, i32 uext) -> i32 uext system_v
 ;;     sig2 = (i64 vmctx, i32 uext) -> i32 uext system_v
@@ -109,33 +105,31 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0057                               v5 = global_value.i64 gv3
-;; @0057                               v6 = load.i64 notrap aligned v5+8
-;; @0058                               v7, v8, v9 = call fn0(v0, v0)
-;; @005a                               v10 = iadd v8, v9
-;; @005c                               v11, v12, v13 = call fn0(v0, v0)
-;; @005e                               v14 = icmp uge v12, v13
-;; @0060                               v15 = bitcast.i16x8 little v11
-;; @0060                               v16 = bitcast.i16x8 little v14
-;; @0060                               v17 = icmp ne v15, v16
-;; @0062                               v18 = iconst.i32 13
-;; @0064                               v19 = bitcast.i8x16 little v17
-;; @0064                               brif v18, block1(v7, v10, v19), block2  ; v18 = 13
+;; @0058                               v5, v6, v7 = call fn0(v0, v0)
+;; @005a                               v8 = iadd v6, v7
+;; @005c                               v9, v10, v11 = call fn0(v0, v0)
+;; @005e                               v12 = icmp uge v10, v11
+;; @0060                               v13 = bitcast.i16x8 little v9
+;; @0060                               v14 = bitcast.i16x8 little v12
+;; @0060                               v15 = icmp ne v13, v14
+;; @0062                               v16 = iconst.i32 13
+;; @0064                               v17 = bitcast.i8x16 little v15
+;; @0064                               brif v16, block1(v5, v8, v17), block2  ; v16 = 13
 ;;
 ;;                                 block2:
-;; @0066                               v20 = iconst.i32 43
-;; @0068                               v21 = bitcast.i8x16 little v17
-;; @0068                               brif v20, block1(v7, v10, v21), block3  ; v20 = 43
+;; @0066                               v18 = iconst.i32 43
+;; @0068                               v19 = bitcast.i8x16 little v15
+;; @0068                               brif v18, block1(v5, v8, v19), block3  ; v18 = 43
 ;;
 ;;                                 block3:
-;; @006a                               v22 = iconst.i32 13
-;; @006c                               v23 = bitcast.i8x16 little v17
-;; @006c                               brif v22, block1(v7, v10, v23), block4  ; v22 = 13
+;; @006a                               v20 = iconst.i32 13
+;; @006c                               v21 = bitcast.i8x16 little v15
+;; @006c                               brif v20, block1(v5, v8, v21), block4  ; v20 = 13
 ;;
 ;;                                 block4:
-;; @006e                               v24 = iconst.i32 87
-;; @0071                               v25 = bitcast.i8x16 little v17
-;; @0071                               v26 = select.i8x16 v24, v10, v25  ; v24 = 87
+;; @006e                               v22 = iconst.i32 87
+;; @0071                               v23 = bitcast.i8x16 little v15
+;; @0071                               v24 = select.i8x16 v22, v8, v23  ; v22 = 87
 ;; @0074                               trap unreachable
 ;;
 ;;                                 block1(v2: i8x16, v3: i8x16, v4: i8x16):
