@@ -177,7 +177,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                     let addr = builder.ins().global_value(environ.pointer_type(), gv);
                     let mut flags = ir::MemFlags::trusted();
                     // Put globals in the "table" abstract heap category as well.
-                    flags.set_table();
+                    flags.set_alias_region(Some(ir::AliasRegion::Table));
                     builder.ins().load(ty, flags, addr, offset)
                 }
                 GlobalVariable::Custom => environ.translate_custom_global_get(
@@ -194,7 +194,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                     let addr = builder.ins().global_value(environ.pointer_type(), gv);
                     let mut flags = ir::MemFlags::trusted();
                     // Put globals in the "table" abstract heap category as well.
-                    flags.set_table();
+                    flags.set_alias_region(Some(ir::AliasRegion::Table));
                     let mut val = state.pop1();
                     // Ensure SIMD values are cast to their default Cranelift type, I8x16.
                     if ty.is_vector() {
@@ -659,6 +659,13 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 callee,
                 state.peekn(num_args),
             )?;
+            let call = match call {
+                Some(call) => call,
+                None => {
+                    state.reachable = false;
+                    return Ok(());
+                }
+            };
             let inst_results = builder.inst_results(call);
             debug_assert_eq!(
                 inst_results.len(),
@@ -2921,7 +2928,7 @@ where
     // state. This may allow alias analysis to merge redundant loads,
     // etc. when heap accesses occur interleaved with other (table,
     // vmctx, stack) accesses.
-    flags.set_heap();
+    flags.set_alias_region(Some(ir::AliasRegion::Heap));
 
     Ok(Reachability::Reachable((flags, index, addr)))
 }

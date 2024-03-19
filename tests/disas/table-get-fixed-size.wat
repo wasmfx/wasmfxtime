@@ -35,20 +35,14 @@
 ;; @0052                               v5 = iconst.i32 0
 ;; @0054                               v6 = iconst.i32 7
 ;; @0054                               v7 = icmp uge v5, v6  ; v5 = 0, v6 = 7
-;; @0054                               brif v7, block6, block7
-;;
-;;                                 block6 cold:
-;; @0054                               trap table_oob
-;;
-;;                                 block7:
 ;; @0054                               v8 = uextend.i64 v5  ; v5 = 0
 ;; @0054                               v9 = load.i64 notrap aligned v27+72
 ;;                                     v28 = iconst.i64 3
 ;; @0054                               v10 = ishl v8, v28  ; v28 = 3
 ;; @0054                               v11 = iadd v9, v10
-;; @0054                               v12 = icmp.i32 uge v5, v6  ; v5 = 0, v6 = 7
-;; @0054                               v13 = select_spectre_guard v12, v9, v11
-;; @0054                               v14 = load.r64 notrap aligned table v13
+;; @0054                               v12 = iconst.i64 0
+;; @0054                               v13 = select_spectre_guard v7, v12, v11  ; v12 = 0
+;; @0054                               v14 = load.r64 table_oob aligned table v13
 ;;                                     v2 -> v14
 ;; @0054                               v15 = is_null v14
 ;; @0054                               brif v15, block2, block3
@@ -103,20 +97,14 @@
 ;; @0058                               v5 = load.i64 notrap aligned v4+8
 ;; @005b                               v6 = iconst.i32 7
 ;; @005b                               v7 = icmp uge v2, v6  ; v6 = 7
-;; @005b                               brif v7, block6, block7
-;;
-;;                                 block6 cold:
-;; @005b                               trap table_oob
-;;
-;;                                 block7:
 ;; @005b                               v8 = uextend.i64 v2
 ;; @005b                               v9 = load.i64 notrap aligned v27+72
 ;;                                     v28 = iconst.i64 3
 ;; @005b                               v10 = ishl v8, v28  ; v28 = 3
 ;; @005b                               v11 = iadd v9, v10
-;; @005b                               v12 = icmp.i32 uge v2, v6  ; v6 = 7
-;; @005b                               v13 = select_spectre_guard v12, v9, v11
-;; @005b                               v14 = load.r64 notrap aligned table v13
+;; @005b                               v12 = iconst.i64 0
+;; @005b                               v13 = select_spectre_guard v7, v12, v11  ; v12 = 0
+;; @005b                               v14 = load.r64 table_oob aligned table v13
 ;;                                     v3 -> v14
 ;; @005b                               v15 = is_null v14
 ;; @005b                               brif v15, block2, block3
