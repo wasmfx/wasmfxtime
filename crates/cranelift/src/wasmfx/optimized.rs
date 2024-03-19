@@ -819,6 +819,23 @@ pub(crate) mod typed_continuation_helpers {
             let chain = StackChain::from_continuation(builder, contobj, self.pointer_type);
             self.store_stack_chain(env, builder, &chain)
         }
+
+        pub fn load_vm_runtime_limits_ptr<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            let pointer_type = env.pointer_type();
+            let vmctx = env.vmctx(builder.func);
+            let base = builder.ins().global_value(pointer_type, vmctx);
+            let offset = i32::try_from(env.offsets.vmctx_runtime_limits()).unwrap();
+
+            // The *pointer* to the VMRuntimeLimits does not change within the
+            // same function, allowing us to set the `read_only` flag.
+            let flags = ir::MemFlags::trusted().with_readonly();
+
+            builder.ins().load(pointer_type, flags, base, offset)
+        }
     }
 
     impl StackChain {
@@ -996,12 +1013,11 @@ pub(crate) mod typed_continuation_helpers {
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
-            vmruntime_limits: cranelift_frontend::Variable,
+            vmruntime_limits_ptr: ir::Value,
         ) {
             use wasmtime_continuations::offsets as o;
 
             let stack_limits_ptr = self.get_stack_limits_ptr(env, builder);
-            let vmruntime_limits_ptr = builder.use_var(vmruntime_limits);
 
             let memflags = ir::MemFlags::trusted();
 
@@ -1038,12 +1054,11 @@ pub(crate) mod typed_continuation_helpers {
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
-            vmruntime_limits: cranelift_frontend::Variable,
+            vmruntime_limits_ptr: ir::Value,
         ) {
             use wasmtime_continuations::offsets as o;
 
             let stack_limits_ptr = self.get_stack_limits_ptr(env, builder);
-            let vmruntime_limits_ptr = builder.use_var(vmruntime_limits);
 
             let memflags = ir::MemFlags::trusted();
             let pointer_size = self.pointer_type.bytes() as u8;
@@ -1339,7 +1354,7 @@ pub(crate) fn translate_resume<'a>(
     // to resume objects other than `original_contobj`.
     // We make the continuation object that was actually resumed available via
     // `resumed_contobj`, so that subsequent blocks can refer to it.
-    let resume_result = {
+    let (resume_result, vm_runtime_limits_ptr) = {
         builder.switch_to_block(resume_block);
 
         // We mark `resume_contobj` as the currently running one
@@ -1405,6 +1420,8 @@ pub(crate) fn translate_resume<'a>(
             emit_debug_println!(env, builder, "[resume] discriminant is {}", discriminant);
         }
 
+        let vm_runtime_limits_ptr = vmctx.load_vm_runtime_limits_ptr(env, builder);
+
         // Jump to the return block if the result is 0, otherwise jump to
         // the suspend block.
         builder
@@ -1412,7 +1429,7 @@ pub(crate) fn translate_resume<'a>(
             .brif(result, suspend_block, &[], return_block, &[]);
 
         // We do not seal this block, yet, because the effect forwarding block has a back edge to it
-        result
+        (result, vm_runtime_limits_ptr)
     };
 
     // Suspend block.
@@ -1423,11 +1440,11 @@ pub(crate) fn translate_resume<'a>(
         // We store parts of the VMRuntimeLimits into the continuation that just suspended.
         let suspended_chain =
             tc::StackChain::from_continuation(builder, resume_contobj, env.pointer_type());
-        suspended_chain.load_limits_from_vmcontext(env, builder, env.vmruntime_limits_ptr);
+        suspended_chain.load_limits_from_vmcontext(env, builder, vm_runtime_limits_ptr);
 
         // Afterwards (!), restore parts of the VMRuntimeLimits from the
         // parent of the suspended continuation (which is now active).
-        parent_stack_chain.write_limits_to_vmcontext(env, builder, env.vmruntime_limits_ptr);
+        parent_stack_chain.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
         let discriminant = builder.ins().ireduce(I32, resume_result);
         let discriminant_size_bytes =
@@ -1571,7 +1588,7 @@ pub(crate) fn translate_resume<'a>(
 
         // Restore parts of the VMRuntimeLimits from the
         // parent of the returned continuation (which is now active).
-        parent_stack_chain.write_limits_to_vmcontext(env, builder, env.vmruntime_limits_ptr);
+        parent_stack_chain.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
         let co = tc::ContinuationObject::new(resume_contobj, env.pointer_type());
         co.set_state(builder, wasmtime_continuations::State::Returned);
