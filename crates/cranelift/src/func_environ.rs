@@ -2869,20 +2869,15 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     ) -> WasmResult<()> {
         // If the `vmruntime_limits_ptr` variable will get used then we initialize
         // it here.
-        if true || self.tunables.consume_fuel || self.tunables.epoch_interruption {
-            // TODO(frank-emrich) This is now done unconditionally because we
-            // need the `vmruntime_limits_ptr` variable when translating resume.
-            // This has no runtime overhead: We are adding a load to every
-            // function, but if it is not actually used, cranelift's DCE pass
-            // will remove it. However, it would be nicer to check if the
-            // function actually contains resume instructions, and only run
-            // `declare_vmruntime_limits_ptr` then.
-            //
-            // TODO(dhil): FIXME emission of the vmruntime_limits_ptr
-            // affects codegen of non-wasmfx programs, causing CLIF
-            // output expectation tests (disas) to diverge from
-            // upstream. We should come up with a design that let us
-            // emit this pointer only when necessary.
+        if self.tunables.consume_fuel || self.tunables.epoch_interruption {
+            // TODO(frank-emrich) Ideally, we would like to use this global
+            // variable in the translation of `resume` instructions. However, in
+            // order to decide whether to declare the variable or not we would
+            // have to know if the function body contains a `resume` instruction
+            // before actually translating it. If we instead called
+            // `declare_vmruntime_limits_ptr` unconditionally, we would change
+            // the CLIF output of functions using no wasmfx instructions, which
+            // is undesirable.
             self.declare_vmruntime_limits_ptr(builder);
         }
         // Additionally we initialize `fuel_var` if it will get used.
