@@ -2877,6 +2877,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             // will remove it. However, it would be nicer to check if the
             // function actually contains resume instructions, and only run
             // `declare_vmruntime_limits_ptr` then.
+            //
+            // TODO(dhil): FIXME emission of the vmruntime_limits_ptr
+            // affects codegen of non-wasmfx programs, causing CLIF
+            // output expectation tests (disas) to diverge from
+            // upstream. We should come up with a design that let us
+            // emit this pointer only when necessary.
             self.declare_vmruntime_limits_ptr(builder);
         }
         // Additionally we initialize `fuel_var` if it will get used.
