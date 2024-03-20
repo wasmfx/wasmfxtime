@@ -559,8 +559,6 @@ impl CommonOptions {
             config.wasmfx_red_zone_size(wasmfx_red_zone_size);
         }
 
-
-
         match_feature! {
             ["pooling-allocator" : self.opts.pooling_allocator]
             enable => {
