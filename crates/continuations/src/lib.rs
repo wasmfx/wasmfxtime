@@ -4,7 +4,7 @@ use std::ptr;
 pub const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
 
 /// Default size of the red zone at the bottom of a fiber stack. This means that
-/// whenever we are executing on a Fiber stack and starting (!) execution of a
+/// whenever we are executing on a fiber stack and starting (!) execution of a
 /// wasm (!) function, the stack pointer must be at least this many bytes away
 /// from the bottom of the fiber stack.
 pub const DEFAULT_RED_ZONE_SIZE: usize = 32768; // 32K = 8 pages of 4k size
