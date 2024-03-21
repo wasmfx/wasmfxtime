@@ -55,6 +55,7 @@ pub struct WasmFXConfig {
 
     /// Space that must be left on stack when starting execution of a
     /// function while running on a continuation stack.
+    /// Must be smaller than the value of `stack_size` above.
     pub red_zone_size: usize,
 }
 

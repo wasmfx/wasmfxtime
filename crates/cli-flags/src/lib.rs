@@ -213,6 +213,7 @@ wasmtime_option_group! {
         pub wasmfx_stack_size: Option<usize>,
         /// Space that must be left on stack when starting execution of a
         /// function while running on a continuation stack.
+        /// Must be smaller than the `wasmfx_stack_size` option above.
         pub wasmfx_red_zone_size: Option<usize>,
         /// Configures support for all WebAssembly proposals implemented.
         pub all_proposals: Option<bool>,
