@@ -314,9 +314,14 @@ pub fn cont_new(
     let capacity = cmp::max(param_count, result_count);
     let payload = Payloads::new(capacity);
 
+    let wasmfx_config = unsafe { &*(*instance.store()).wasmfx_config() };
+    // TODO(frank-emrich) Currently, the general `stack_limit` configuration
+    // option of wasmtime is unrelated to the stack size of our fiber stack.
+    let stack_size = wasmfx_config.stack_size;
+    let red_zone_size = wasmfx_config.red_zone_size;
+
     let fiber = {
-        let wasmfx_config = unsafe { &*(*instance.store()).wasmfx_config() };
-        let stack = FiberStack::malloc(wasmfx_config.stack_size)
+        let stack = FiberStack::malloc(stack_size)
             .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
         let args_ptr = payload.data;
         let fiber = Fiber::new(stack, move |_first_val: (), _suspend: &Yield| unsafe {
@@ -332,8 +337,9 @@ pub fn cont_new(
     };
 
     let tsp = fiber.stack().top().unwrap();
+    let stack_limit = unsafe { tsp.sub(stack_size - red_zone_size) } as usize;
     let contobj = Box::new(ContinuationObject {
-        limits: StackLimits::with_stack_limit(unsafe { tsp.sub(DEFAULT_FIBER_SIZE) } as usize),
+        limits: StackLimits::with_stack_limit(stack_limit),
         fiber: Box::into_raw(fiber),
         parent_chain: StackChain::Absent,
         args: payload,
@@ -412,12 +418,6 @@ pub fn resume(
         *runtime_limits.stack_limit.get() = (*contobj).limits.stack_limit;
         *runtime_limits.last_wasm_entry_sp.get() = (*contobj).limits.last_wasm_entry_sp;
     }
-
-    unsafe {
-        (*(*(*instance.store()).vmruntime_limits())
-            .stack_limit
-            .get_mut()) = 0
-    };
 
     Ok(fiber.resume())
 }

@@ -1116,4 +1116,49 @@ mod traps {
 
         Ok(())
     }
+
+    #[test]
+    #[cfg_attr(feature = "typed_continuations_baseline_implementation", ignore)]
+    fn stack_overflow_in_continuation() -> Result<()> {
+        let wat = r#"
+        (module
+            (type $ft (func (param i32)))
+            (type $ct (cont $ft))
+
+            (func $entry (export "entry")
+                (call $a)
+            )
+
+            (func $a (export "a")
+                ;; We ask for a billion recursive calls
+                (i32.const 1_000_000_000)
+
+                (resume $ct (cont.new $ct (ref.func $overflow)))
+            )
+
+            (func $overflow (export "overflow") (param $i i32)
+                (block $continue
+                    (local.get $i)
+                    ;; return if $i == 0
+                    (br_if $continue)
+                    (return)
+                )
+                (i32.sub (local.get $i) (i32.const 1))
+                (call $overflow)
+            )
+
+        )
+    "#;
+
+        let runner = Runner::new();
+
+        let error = runner
+            .run_test::<()>(wat, &[])
+            .expect_err("Expecting execution to yield error");
+
+        assert!(error.root_cause().is::<Trap>());
+        assert_eq!(*error.downcast_ref::<Trap>().unwrap(), Trap::StackOverflow);
+
+        Ok(())
+    }
 }
