@@ -139,7 +139,7 @@ asm_func!(
 // registers at the right before the RET instruction of the former is executed:
 //
 // RSP: TOS - 0x18
-// RDI: irrelevant  (not read by wasmtime_fibre_start)
+// RDI: TOS
 // RSI: irrelevant  (not read by wasmtime_fibre_start)
 // RAX: irrelevant  (not read by wasmtime_fibre_start)
 // RBP: TOS - 0x10
@@ -238,8 +238,8 @@ asm_func!(
         // Note that fiber_start never returns: It calls Suspend::execute, which
         // runs the FuncOnce closure, and calls impl::Suspend::switch afterwards,
         // which returns to the parent FiberStack via wasmtime_fibre_switch.
+        mov rsi, rdi
         mov rdi, r12
-        lea rsi, 0x10[rbp]
         call rbx
         // We should never get here and purposely emit an invalid instruction.
         ud2
