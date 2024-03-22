@@ -133,6 +133,7 @@ extern "C" {
         top_of_stack: *mut u8,
         entry: extern "C" fn(*mut u8, *mut u8),
         entry_arg0: *mut u8,
+        wasmtime_fibre_switch: *const u8,
     );
     fn wasmtime_fibre_switch(top_of_stack: *mut u8, payload: u64) -> u64;
     #[allow(dead_code)] // only used in inline assembly for some platforms
@@ -156,7 +157,12 @@ impl Fiber {
     {
         unsafe {
             let data = Box::into_raw(Box::new(func)).cast();
-            wasmtime_fibre_init(stack.top, fiber_start::<F>, data);
+            wasmtime_fibre_init(
+                stack.top,
+                fiber_start::<F>,
+                data,
+                wasmtime_fibre_switch as *const u8,
+            );
         }
 
         Ok(Self)

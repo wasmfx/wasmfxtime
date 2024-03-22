@@ -61,6 +61,7 @@ asm_func!(
 //    top_of_stack(rdi): *mut u8,
 //    entry_point(rsi): extern fn(*mut u8, *mut u8),
 //    entry_arg0(rdx): *mut u8,
+//    wasmtime_fibre_switch(rcx): *mut u8,
 // )
 //
 // This function installs the launchpad for the computation to run on the fiber,
@@ -99,7 +100,7 @@ asm_func!(
         //
         // The first 16 bytes of stack are reserved for metadata, so we start
         // storing values beneath that.
-        mov qword ptr -0x08[rdi], 0 // would like to use `switch` template argument here
+        mov qword ptr -0x08[rdi], rcx
         lea rax, {start}[rip]
         mov -0x18[rdi], rax
         mov -0x28[rdi], rsi   // loaded into rbx during switch
@@ -113,7 +114,6 @@ asm_func!(
         mov -0x10[rdi], rax // loaded into rax in middle of switch
         ret
     ",
-    // switch = const (super::wasmtime_fibre_switch  as *const u8 as usize),
     start =  sym super::wasmtime_fibre_start,
 );
 
