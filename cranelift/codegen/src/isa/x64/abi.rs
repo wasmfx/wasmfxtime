@@ -101,17 +101,14 @@ impl ABIMachineSpec for X64ABIMachineSpec {
         16
     }
 
-    fn compute_arg_locs<'a, I>(
+    fn compute_arg_locs(
         call_conv: isa::CallConv,
         flags: &settings::Flags,
-        params: I,
+        params: &[ir::AbiParam],
         args_or_rets: ArgsOrRets,
         add_ret_area_ptr: bool,
-        mut args: ArgsAccumulator<'_>,
-    ) -> CodegenResult<(u32, Option<usize>)>
-    where
-        I: IntoIterator<Item = &'a ir::AbiParam>,
-    {
+        mut args: ArgsAccumulator,
+    ) -> CodegenResult<(u32, Option<usize>)> {
         let is_fastcall = call_conv.extends_windows_fastcall();
 
         let mut next_gpr = 0;
@@ -128,7 +125,9 @@ impl ABIMachineSpec for X64ABIMachineSpec {
             next_stack = 32;
         }
 
-        for param in params {
+        for (ix, param) in params.iter().enumerate() {
+            let last_param = ix == params.len() - 1;
+
             if let ir::ArgumentPurpose::StructArgument(size) = param.purpose {
                 let offset = next_stack as i64;
                 let size = size;
@@ -221,14 +220,18 @@ impl ABIMachineSpec for X64ABIMachineSpec {
                         ArgsOrRets::Args => {
                             get_intreg_for_arg(&call_conv, next_gpr, next_param_idx)
                         }
-                        ArgsOrRets::Rets => get_intreg_for_retval(&call_conv, flags, next_gpr),
+                        ArgsOrRets::Rets => {
+                            get_intreg_for_retval(&call_conv, flags, next_gpr, last_param)
+                        }
                     }
                 } else {
                     match args_or_rets {
                         ArgsOrRets::Args => {
                             get_fltreg_for_arg(&call_conv, next_vreg, next_param_idx)
                         }
-                        ArgsOrRets::Rets => get_fltreg_for_retval(&call_conv, next_vreg),
+                        ArgsOrRets::Rets => {
+                            get_fltreg_for_retval(&call_conv, next_vreg, last_param)
+                        }
                     }
                 };
                 next_param_idx += 1;
@@ -244,11 +247,18 @@ impl ABIMachineSpec for X64ABIMachineSpec {
                         extension: param.extension,
                     });
                 } else {
-                    let size = reg_ty.bits() / 8;
-                    let size = std::cmp::max(size, 8);
-                    // Align.
-                    debug_assert!(size.is_power_of_two());
-                    next_stack = align_to(next_stack, size);
+                    let size = reg_ty.bytes();
+                    let size = if call_conv == CallConv::Winch && args_or_rets == ArgsOrRets::Rets {
+                        size
+                    } else {
+                        let size = std::cmp::max(size, 8);
+
+                        // Align.
+                        debug_assert!(size.is_power_of_two());
+                        next_stack = align_to(next_stack, size);
+                        size
+                    };
+
                     slots.push(ABIArgSlot::Stack {
                         offset: next_stack as i64,
                         ty: *reg_ty,
@@ -300,6 +310,23 @@ impl ABIMachineSpec for X64ABIMachineSpec {
         } else {
             None
         };
+
+        // Winch writes the first result to the highest offset, so we need to iterate through the
+        // args and adjust the offsets down.
+        if call_conv == CallConv::Winch && args_or_rets == ArgsOrRets::Rets {
+            for arg in args.args_mut() {
+                if let ABIArg::Slots { slots, .. } = arg {
+                    for slot in slots.iter_mut() {
+                        if let ABIArgSlot::Stack { offset, ty, .. } = slot {
+                            let size = i64::from(ty.bytes());
+                            *offset = i64::from(next_stack) - *offset - size;
+                        }
+                    }
+                } else {
+                    unreachable!("Winch cannot handle {arg:?}");
+                }
+            }
+        }
 
         next_stack = align_to(next_stack, 16);
 
@@ -1040,6 +1067,7 @@ fn get_intreg_for_retval(
     call_conv: &CallConv,
     flags: &settings::Flags,
     intreg_idx: usize,
+    is_last: bool,
 ) -> Option<Reg> {
     match call_conv {
         CallConv::Tail => match intreg_idx {
@@ -1070,16 +1098,19 @@ fn get_intreg_for_retval(
             1 => Some(regs::rdx()), // The Rust ABI for i128s needs this.
             _ => None,
         },
-        CallConv::Winch => match intreg_idx {
-            0 => Some(regs::rax()),
-            _ => None,
-        },
+
+        CallConv::Winch => {
+            // TODO: Once Winch supports SIMD, this will need to be updated to support values
+            // returned in more than one register.
+            // https://github.com/bytecodealliance/wasmtime/issues/8093
+            is_last.then(|| regs::rax())
+        }
         CallConv::Probestack => todo!(),
         CallConv::WasmtimeSystemV | CallConv::AppleAarch64 => unreachable!(),
     }
 }
 
-fn get_fltreg_for_retval(call_conv: &CallConv, fltreg_idx: usize) -> Option<Reg> {
+fn get_fltreg_for_retval(call_conv: &CallConv, fltreg_idx: usize, is_last: bool) -> Option<Reg> {
     match call_conv {
         CallConv::Tail => match fltreg_idx {
             0 => Some(regs::xmm0()),
@@ -1097,10 +1128,11 @@ fn get_fltreg_for_retval(call_conv: &CallConv, fltreg_idx: usize) -> Option<Reg>
             1 => Some(regs::xmm1()),
             _ => None,
         },
-        CallConv::WindowsFastcall | CallConv::Winch => match fltreg_idx {
+        CallConv::WindowsFastcall => match fltreg_idx {
             0 => Some(regs::xmm0()),
             _ => None,
         },
+        CallConv::Winch => is_last.then(|| regs::xmm0()),
         CallConv::Probestack => todo!(),
         CallConv::WasmtimeSystemV | CallConv::AppleAarch64 => unreachable!(),
     }

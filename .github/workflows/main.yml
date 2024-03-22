@@ -216,7 +216,7 @@ jobs:
         submodules: true
     - uses: ./.github/actions/install-rust
       with:
-        toolchain: nightly-2024-03-11
+        toolchain: nightly-2024-03-21
 
     # Build C API documentation
     - run: curl -L https://sourceforge.net/projects/doxygen/files/rel-1.9.3/doxygen-1.9.3.linux.bin.tar.gz/download | tar xzf -
@@ -341,7 +341,7 @@ jobs:
     # Check whether `wasmtime` cross-compiles to aarch64-linux-android
     # - run: rustup target add aarch64-linux-android
     # - name: Set up JDK 17
-    #   uses: actions/setup-java@v3
+    #   uses: actions/setup-java@v4
     #   with:
     #     java-version: '17'
     #     distribution: 'temurin'
@@ -415,7 +415,7 @@ jobs:
     # happen upstream. This is periodically updated through a PR.
     - uses: ./.github/actions/install-rust
       with:
-        toolchain: nightly-2024-03-11
+        toolchain: nightly-2024-03-21
 
     # Ensure that fuzzers sitll build.
     #
@@ -741,7 +741,7 @@ jobs:
         submodules: true
     - uses: ./.github/actions/install-rust
       with:
-        toolchain: nightly-2024-03-11
+        toolchain: nightly-2024-03-21
     - run: rustup component add rust-src miri
     - uses: actions/cache@v4
       with:
