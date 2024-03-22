@@ -11,9 +11,9 @@
 //!
 //! ```text
 //! 0xB000 +-----------------------+   <- top of stack
-//!        | unused                |
+//!        | PC after wfs          |
 //! 0xAff8 +-----------------------+
-//!        | *const u8             |   <- last sp to resume from
+//!        | *const u8             |   <- last rsp to resume from
 //! 0xAff0 +-----------------------+   <- 16-byte aligned
 //!        |                       |
 //!        ~        ...            ~   <- actual native stack space to use

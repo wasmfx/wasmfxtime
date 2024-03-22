@@ -1,3 +1,5 @@
+ 
+
 // A WORD OF CAUTION
 //
 // This entire file basically needs to be kept in sync with itself. It's not
@@ -25,22 +27,22 @@ asm_func!(
         // Note that this order for saving is important since we use CFI directives
         // below to point to where all the saved registers are.
         push rbp
-        push rbx
-        push r12
-        push r13
-        push r14
-        push r15
+        mov rbp, rsp
+        push rbx // at -0x08[rbp]
+        push r12 // at -0x10[rbp]
+        push r13 // at -0x18[rbp]
+        push r14 // at -0x20[rbp]
+        push r15 // at -0x28[rbp]
 
-        // Load pointer that we're going to resume at and store where we're going
+        // Load frame pointer that we're going to resume at and store where we're going
         // to get resumed from. This is in accordance with the diagram at the top
         // of unix.rs.
         mov rax, -0x10[rdi]
-        mov -0x10[rdi], rsp
-
+        mov -0x10[rdi], rbp
 
 
         // Swap stacks and restore all our callee-saved registers
-        mov rsp, rax
+        lea rsp, -0x28[rax]
         pop r15
         pop r14
         pop r13
@@ -76,10 +78,10 @@ asm_func!(
 //  Offset from    |
 //       TOS       | Contents
 //  ---------------|-----------------------------------------------------------
-//          -0x08   undefined
-//          -0x10   TOS - 0x48
+//          -0x08   0
+//          -0x10   TOS - 0x20
 //          -0x18   (RIP-relative) address of wasmtime_fibre_start function
-//          -0x20   TOS
+//          -0x20   TOS - 0x10
 //          -0x28   entry_point (= pointer to fiber_start function)
 //          -0x30   entry_arg0  (= Box<*mut u8> containing pointer to
 //                                 FuncOne closure to actually execute)
@@ -97,22 +99,22 @@ asm_func!(
         //
         // The first 16 bytes of stack are reserved for metadata, so we start
         // storing values beneath that.
+        mov qword ptr -0x08[rdi], 0 // would like to use `switch` template argument here
         lea rax, {start}[rip]
         mov -0x18[rdi], rax
-        mov -0x20[rdi], rdi   // loaded into rbp during switch
         mov -0x28[rdi], rsi   // loaded into rbx during switch
         mov -0x30[rdi], rdx   // loaded into r12 during switch
 
-        // And then we specify the stack pointer resumption should begin at. Our
-        // `wasmtime_fibre_switch` function consumes 6 registers plus a return
-        // pointer, and the top 16 bytes are reserved, so that's:
-        //
-        //	(6 + 1) * 8 + 16 = 0x48
-        lea rax, -0x48[rdi]
-        mov -0x10[rdi], rax
+        // And then we specify the frame pointer for the frame where our
+        // resumption should begin at, which is TOS - 0x10
+        lea rax, -0x10[rdi]
+        mov -0x20[rdi], rax   // loaded into rbp at end of switch
+        sub rax, 0x10
+        mov -0x10[rdi], rax // loaded into rax in middle of switch
         ret
     ",
-    start = sym super::wasmtime_fibre_start,
+    // switch = const (super::wasmtime_fibre_switch  as *const u8 as usize),
+    start =  sym super::wasmtime_fibre_start,
 );
 
 // This is a pretty special function that has no real signature. Its use is to
@@ -134,14 +136,13 @@ asm_func!(
 //
 // This execution of wasmtime_fibre_switch on a stack as described in the
 // comment on wasmtime_fibre_init leads to the following values in various
-// registers at the right before the RET instruction of the latter is executed:
+// registers at the right before the RET instruction of the former is executed:
 //
-// RBP: frame pointer of *caller* of wasmtime_fibre_switch
 // RSP: TOS - 0x18
 // RDI: irrelevant  (not read by wasmtime_fibre_start)
 // RSI: irrelevant  (not read by wasmtime_fibre_start)
 // RAX: irrelevant  (not read by wasmtime_fibre_start)
-// RBP: TOS
+// RBP: TOS - 0x10
 // RBX: entry_point (= pointer to fiber_start function)
 // R12: entry_arg0  (Box with FuncOnce closure to run as contination)
 // R13: irrelevant  (not read by wasmtime_fibre_start)
@@ -155,7 +156,7 @@ asm_func!(
 //  --------------|---------------------------------
 //         -0x08   undefined
 //
-//         -0x10   stack pointer stored by wasmtime_fibre_switch
+//         -0x10   frame pointer of wasmtime_fibre_switch,
 //                 thus pointing into stack of caller of Fiber::resume,
 //                 with pseudo-frame of wasmtime_fibre_switch
 //                 at bottom.
@@ -185,26 +186,27 @@ asm_func!(
         // The expression we're encoding here is that the CFA, the stack pointer
         // of whatever called into `wasmtime_fibre_start`, is:
         //
-        //        *$rsp + 0x38
+        //        *$rsp + 0x10
         //
         // $rsp is the stack pointer of `wasmtime_fibre_start` at the time the
         // next instruction after the `.cfi_escape` is executed. Our $rsp at the
         // start of this function is 16 bytes below the top of the stack (0xAff0
-        // in the diagram in unix.rs). The $rsp to resume at is stored at that
-        // location, so we dereference the stack pointer to load it.
+        // in the diagram in unix.rs). The $rbp of wasmtime_fibre_switch of our
+        // parent invocation is stored at that // location, so we dereference the
+        // stack pointer to load it.
         //
-        // After dereferencing, though, we have the $rsp value for
+        // After dereferencing, though, we have the $rbp value for
         // `wasmtime_fibre_switch` itself. That's a weird function which sort of
         // and sort of doesn't exist on the stack.  We want to point to the
         // caller of `wasmtime_fibre_switch`, so to do that we need to skip the
-        // stack space reserved by `wasmtime_fibre_switch`, which is the 6 saved
-        // registers plus the return address of the caller's `call` instruction.
-        // Hence we offset another 0x38 bytes.
+        // stack space reserved by `wasmtime_fibre_switch`, which is the saved
+        // rbp register plus the return address of the caller's `call` instruction.
+        // Hence we offset another 0x10 bytes.
         .cfi_escape 0x0f, /* DW_CFA_def_cfa_expression */ \
             4,            /* the byte length of this expression */ \
             0x57,         /* DW_OP_reg7 (rsp) */ \
             0x06,         /* DW_OP_deref */ \
-            0x23, 0x38    /* DW_OP_plus_uconst 0x38 */
+            0x23, 0x10    /* DW_OP_plus_uconst 0x10 */
 
         // And now after we've indicated where our CFA is for our parent
         // function, we can define that where all of the saved registers are
@@ -237,7 +239,7 @@ asm_func!(
         // runs the FuncOnce closure, and calls impl::Suspend::switch afterwards,
         // which returns to the parent FiberStack via wasmtime_fibre_switch.
         mov rdi, r12
-        mov rsi, rbp
+        lea rsi, 0x10[rbp]
         call rbx
         // We should never get here and purposely emit an invalid instruction.
         ud2
