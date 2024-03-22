@@ -169,7 +169,7 @@ pub struct ContinuationObject {
     pub parent_chain: StackChain,
 
     /// The underlying `Fiber`.
-    pub fiber: *mut ContinuationFiber,
+    pub fiber: ContinuationFiber,
 
     /// Used to store
     /// 1. The arguments to the function passed to cont.new
@@ -275,7 +275,6 @@ pub fn drop_cont_obj(contobj: *mut ContinuationObject) {
     // parent fields here.
 
     let contobj: Box<ContinuationObject> = unsafe { Box::from_raw(contobj) };
-    let _: Box<ContinuationFiber> = unsafe { Box::from_raw(contobj.fiber) };
     unsafe {
         let _: Vec<u128> = Vec::from_raw_parts(
             contobj.args.data,
@@ -324,7 +323,7 @@ pub fn cont_new(
         let stack = FiberStack::malloc(stack_size)
             .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
         let args_ptr = payload.data;
-        let fiber = Fiber::new(stack, move |_first_val: (), _suspend: &Yield| unsafe {
+        Fiber::new(stack, move |_first_val: (), _suspend: &Yield| unsafe {
             (func_ref.array_call)(
                 callee_ctx,
                 caller_ctx,
@@ -332,15 +331,14 @@ pub fn cont_new(
                 capacity as usize,
             )
         })
-        .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
-        Box::new(fiber)
+        .map_err(|error| TrapReason::user_without_backtrace(error.into()))?
     };
 
     let tsp = fiber.stack().top().unwrap();
     let stack_limit = unsafe { tsp.sub(stack_size - red_zone_size) } as usize;
     let contobj = Box::new(ContinuationObject {
         limits: StackLimits::with_stack_limit(stack_limit),
-        fiber: Box::into_raw(fiber),
+        fiber,
         parent_chain: StackChain::Absent,
         args: payload,
         tag_return_values: Payloads::new(0),
@@ -369,13 +367,6 @@ pub fn resume(
         })?
     };
     assert!(cont.state == State::Allocated || cont.state == State::Invoked);
-    let fiber = unsafe {
-        cont.fiber.as_mut().ok_or_else(|| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null Fiber!"
-            ))
-        })?
-    };
 
     if ENABLE_DEBUG_PRINTING {
         let chain = instance.typed_continuations_stack_chain();
@@ -419,7 +410,7 @@ pub fn resume(
         *runtime_limits.last_wasm_entry_sp.get() = (*contobj).limits.last_wasm_entry_sp;
     }
 
-    Ok(fiber.resume())
+    Ok(cont.fiber.resume())
 }
 
 /// TODO
@@ -445,14 +436,7 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason
         }
     }?;
 
-    let fiber = unsafe {
-        // SAFETY: See above.
-        (*running).fiber.as_ref().ok_or_else(|| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null fiber!"
-            ))
-        })?
-    };
+    let fiber = &running.fiber;
 
     let stack_ptr = fiber.stack().top().ok_or_else(|| {
         TrapReason::user_without_backtrace(anyhow::anyhow!("Failed to retrieve stack top pointer!"))
@@ -881,5 +865,9 @@ fn offset_and_size_constants() {
         continuation_object::STATE
     );
 
+    assert_eq!(
+        std::mem::size_of::<ContinuationFiber>(),
+        CONTINUATION_FIBER_SIZE
+    );
     assert_eq!(std::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
 }

@@ -227,7 +227,7 @@ impl Backtrace {
                 match continuation_opt {
                     Some(continuation) => unsafe {
                         let cont = &*continuation;
-                        let stack_range = (*cont.fiber).stack().range().unwrap();
+                        let stack_range = cont.fiber.stack().range().unwrap();
                         debug_assert!(stack_range.contains(&limits.last_wasm_exit_fp));
                         debug_assert!(stack_range.contains(&limits.last_wasm_entry_sp));
                         debug_assert!(stack_range.contains(&limits.stack_limit));
