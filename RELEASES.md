@@ -16,7 +16,7 @@ Unreleased.
 
 ## 19.0.0
 
-Unreleased.
+Released 2024-03-20
 
 ### Added
 
@@ -111,6 +111,16 @@ Unreleased.
 * Wasmtime now correctly supports `global.get` in all constant expressions
   within a module.
   [#7996](https://github.com/bytecodealliance/wasmtime/pull/7996)
+
+--------------------------------------------------------------------------------
+
+## 18.0.3
+
+Released 2024-03-12
+
+### Fixed
+* Fix inferring native flags when a compilation target is specified.
+  [#7991](https://github.com/bytecodealliance/wasmtime/pull/7991)
 
 --------------------------------------------------------------------------------
 
