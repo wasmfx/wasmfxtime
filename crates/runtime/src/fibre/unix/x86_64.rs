@@ -113,7 +113,7 @@ asm_func!(
         // take over and understands which values are in which registers.
         //
         // Install wasmtime_fibre_switch_pc at TOS - 0x08:
-        mov qword ptr -0x08[rdi], rcx
+        mov -0x08[rdi], rcx
 
         // Store TOS - 0x20 at TOS - 0x10
         // This is the resume frame pointer from which we calculate the new
