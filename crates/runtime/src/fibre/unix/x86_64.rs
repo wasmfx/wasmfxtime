@@ -1,5 +1,3 @@
- 
-
 // A WORD OF CAUTION
 //
 // This entire file basically needs to be kept in sync with itself. It's not
@@ -26,6 +24,10 @@ asm_func!(
         //
         // Note that this order for saving is important since we use CFI directives
         // below to point to where all the saved registers are.
+        //
+        // The frame pointer must come first, so that we have the return address
+        // and then the frame pointer on the stack (at addresses called 0xCFF8
+        // and 0xCFF0, respectively, in the second picture in unix.rs)
         push rbp
         mov rbp, rsp
         push rbx // at -0x08[rbp]
@@ -34,15 +36,26 @@ asm_func!(
         push r14 // at -0x20[rbp]
         push r15 // at -0x28[rbp]
 
-        // Load frame pointer that we're going to resume at and store where we're going
-        // to get resumed from. This is in accordance with the diagram at the top
-        // of unix.rs.
+        // Load the resume frame pointer that we're going to resume at and
+        // store where we're going to get resumed from.
         mov rax, -0x10[rdi]
         mov -0x10[rdi], rbp
 
 
-        // Swap stacks and restore all our callee-saved registers
+        // Swap stacks: We loaded the resume frame pointer into RAX, meaning
+        // that it is near the beginning of the pseudo frame of the invocation of
+        // wasmtime_fibe_switch that we want to get back to.
+        // Thus, we need to turn this *frame* pointer back into the
+        // corresponding *stack* pointer. This is simple: The resume frame
+        // pointer is where wamtime_fibre_switch stored RBP, and we want to
+        // calculate the stack pointer after it pushed the next 5 registers, too.
+        //
+        // Using the values from the second picture in unix.rs: If we loaded
+        // 0xCFF0 into RAX, then we want to set RSP to 0xCFC8. Thus, to reflect
+        // that an additional 5 registers where pushed on the stack after RBP, we
+        // subtract 5 * 8 = 0x28 from RAX.
         lea rsp, -0x28[rax]
+        // Restore callee-saved registers
         pop r15
         pop r14
         pop r13
@@ -61,7 +74,7 @@ asm_func!(
 //    top_of_stack(rdi): *mut u8,
 //    entry_point(rsi): extern fn(*mut u8, *mut u8),
 //    entry_arg0(rdx): *mut u8,
-//    wasmtime_fibre_switch(rcx): *mut u8,
+//    wasmtime_fibre_switch_pc(rcx): *mut u8,
 // )
 //
 // This function installs the launchpad for the computation to run on the fiber,
@@ -72,6 +85,7 @@ asm_func!(
 // instantiation of) the `fiber_start` function in unix.rs and `entry_arg0` is a
 // `Box<*mut u8>`, containing the function to actually run as the continuation
 // as a `FnOnce(A, &super::Suspend<A, B, C>) -> C`, for some `A`, `B`, `C`.
+// `wasmtime_fibre_switch_pc` is the address of `wasmtime_fibre_switch`.
 //
 // The layout of the FiberStack near the top of stack (TOS) *after* running this
 // function is as follows:
@@ -79,7 +93,7 @@ asm_func!(
 //  Offset from    |
 //       TOS       | Contents
 //  ---------------|-----------------------------------------------------------
-//          -0x08   0
+//          -0x08   wasmtime_fibre_switch_pc
 //          -0x10   TOS - 0x20
 //          -0x18   (RIP-relative) address of wasmtime_fibre_start function
 //          -0x20   TOS - 0x10
@@ -98,20 +112,32 @@ asm_func!(
         // registers by that function and the `wasmtime_fibre_start` function will
         // take over and understands which values are in which registers.
         //
-        // The first 16 bytes of stack are reserved for metadata, so we start
-        // storing values beneath that.
+        // Install wasmtime_fibre_switch_pc at TOS - 0x08:
         mov qword ptr -0x08[rdi], rcx
-        lea rax, {start}[rip]
-        mov -0x18[rdi], rax
+
+        // Store TOS - 0x20 at TOS - 0x10
+        // This is the resume frame pointer from which we calculate the new
+        // value of RSP when switching to this stack.
+        lea rax, -0x20[rdi]
+        mov -0x10[rdi], rax // loaded first into rax during switch
+
+        // Install wasmtime_fibre_start PC at TOS - 0x18
+        lea r9, {start}[rip]
+        mov -0x18[rdi], r9
+
+        // Store TOS - 0x10 at TOS - 0x20
+        // This is popped into RBP at the end of wasmtime_fibre_switch when
+        // switching to this stack. It thus becomes the value of RBP while
+        // executing wasmtime_fibre_start. Thus, wasmtime_fibre_start thinks
+        // 'my parent's frame pointer is stored at TOS - 0x10'
+        // NB: RAX still contains TOS - 0x20 at this point
+        add rax, 0x10
+        mov -0x20[rdi], rax
+
+        // Intall entry_point and entry_arg
         mov -0x28[rdi], rsi   // loaded into rbx during switch
         mov -0x30[rdi], rdx   // loaded into r12 during switch
 
-        // And then we specify the frame pointer for the frame where our
-        // resumption should begin at, which is TOS - 0x10
-        lea rax, -0x10[rdi]
-        mov -0x20[rdi], rax   // loaded into rbp at end of switch
-        sub rax, 0x10
-        mov -0x10[rdi], rax // loaded into rax in middle of switch
         ret
     ",
     start =  sym super::wasmtime_fibre_start,
@@ -154,12 +180,12 @@ asm_func!(
 //  Offset from   |
 //       TOS      | Contents
 //  --------------|---------------------------------
-//         -0x08   undefined
+//         -0x08   PC at beginning of wasmtime_fibre_switch
 //
-//         -0x10   frame pointer of wasmtime_fibre_switch,
-//                 thus pointing into stack of caller of Fiber::resume,
-//                 with pseudo-frame of wasmtime_fibre_switch
-//                 at bottom.
+//         -0x10   frame pointer of wasmtime_fibre_switch that switched to us,
+//                 thus pointing right below stack frame of caller of
+//                 Fiber::resume, with pseudo frame of wasmtime_fibre_switch
+//                 below.
 //
 //         -0x18   (RIP-relative) address of wasmtime_fibre_start function
 //
@@ -192,7 +218,7 @@ asm_func!(
         // next instruction after the `.cfi_escape` is executed. Our $rsp at the
         // start of this function is 16 bytes below the top of the stack (0xAff0
         // in the diagram in unix.rs). The $rbp of wasmtime_fibre_switch of our
-        // parent invocation is stored at that // location, so we dereference the
+        // parent invocation is stored at that location, so we dereference the
         // stack pointer to load it.
         //
         // After dereferencing, though, we have the $rbp value for
