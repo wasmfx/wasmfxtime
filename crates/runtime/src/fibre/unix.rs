@@ -28,7 +28,7 @@
 //! continuation, which looks something like this: Here, we assume that some
 //! funtion $g resume-d the active continuation.
 //!
-//! //! ```text
+//! ```text
 //!
 //! 0xF000 +-----------------------+
 //!        |return PC ($g's caller)|   <- beginning of $g's frame
