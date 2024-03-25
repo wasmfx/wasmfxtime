@@ -129,8 +129,8 @@ asm_func!(
         // This is popped into RBP at the end of wasmtime_fibre_switch when
         // switching to this stack. It thus becomes the value of RBP while
         // executing wasmtime_fibre_start. Thus, wasmtime_fibre_start thinks
-        // 'my parent's frame pointer is stored at TOS - 0x10'
-        // NB: RAX still contains TOS - 0x20 at this point
+        // 'my parent's frame pointer is stored at TOS - 0x10'.
+        // NB: RAX still contains TOS - 0x20 at this point.
         add rax, 0x10
         mov -0x20[rdi], rax
 
@@ -140,7 +140,7 @@ asm_func!(
 
         ret
     ",
-    start =  sym super::wasmtime_fibre_start,
+    start = sym super::wasmtime_fibre_start,
 );
 
 // This is a pretty special function that has no real signature. Its use is to
