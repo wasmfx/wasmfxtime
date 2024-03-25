@@ -1,33 +1,102 @@
-//! The unix fiber implementation has some platform-specific details
-//! (naturally) but there's a few details of the stack layout which are common
-//! amongst all platforms using this file. Remember that none of this applies to
-//! Windows, which is entirely separate.
-//!
-//! The stack is expected to look pretty standard with a guard page at the end.
-//! Currently allocation happens in this file but this is probably going to be
-//! refactored to happen somewhere else. Otherwise though the stack layout is
-//! expected to look like so:
+//! The stack layout is expected to look like so:
 //!
 //!
 //! ```text
-//! 0xB000 +-----------------------+   <- top of stack
-//!        | PC after wfs          |
+//! 0xB000 +-----------------------+   <- top of stack (TOS)
+//!        | *const u8             |   <- "dummy return PC"
 //! 0xAff8 +-----------------------+
-//!        | *const u8             |   <- last rsp to resume from
+//!        | *const u8             |   <- "resume frame pointer"
 //! 0xAff0 +-----------------------+   <- 16-byte aligned
 //!        |                       |
 //!        ~        ...            ~   <- actual native stack space to use
 //!        |                       |
 //! 0x1000 +-----------------------+
-//!        |  guard page           |
+//!        |  guard page           |   <- (not currently enabled)
 //! 0x0000 +-----------------------+
 //! ```
 //!
-//! Here `0xAff8` is filled in temporarily while `resume` is running. The fiber
-//! started with 0xB000 as a parameter so it knows how to find this.
-//! Additionally `resumes` stores state at 0xAff0 to restart execution, and
-//! `suspend`, which has 0xB000 so it can find this, will read that and write
-//! its own resumption information into this slot as well.
+//! The meaning of the first two values are as follows:
+//!
+//! 1. Resume frame pointer (at TOS - 0x10, 0xAff0 above):
+//!
+//! This value indicates how to resume computation.
+//! We  distinguish two cases
+//!
+//! 1.1
+//! If the continuation is currently active (i.e., running directly, or ancestor
+//! of the running continuation), it points into the stack of the parent of the
+//! continuation, which looks something like this: Here, we assume that some
+//! funtion $g resume-d the active continuation.
+//!
+//! //! ```text
+//!
+//! 0xF000 +-----------------------+
+//!        |return PC ($g's caller)|   <- beginning of $g's frame
+//! 0xEFF8 | - - - - - - - - - - - |
+//!        |frame ptr ($g's caller)|
+//! 0xEFF0 | - - - - - - - - - - - |
+//!        ~         ...           ~
+//!        |   stack frame of wasm |
+//!  ...   |       function $g     |
+//!        |     calling resume    |
+//!        ~ - - - - - - - - - - - ~
+//!        |  caller-saved regs    |
+//!        |    stored here        |
+//! 0xD000 +-----------------------+   <- beginning of pseudo frame
+//!        |    return PC of $g    |      of wasmtime_fibre_switch
+//! 0xCFF8 | - - - - - - - - - - - |
+//!        |   saved RBP (of $g)   |   <- "pseudo frame pointer" of
+//! 0xCFF0 | - - - - - - - - - - - |      wasmtime_fibre_switch
+//!        |   saved RBX (of $g)   |
+//! 0xCFE8 | - - - - - - - - - - - |
+//!        |   saved R12 (of $g)   |
+//! 0xCFE0 | - - - - - - - - - - - |
+//!        |   saved R13 (of $g)   |
+//! 0xCFD8 | - - - - - - - - - - - |
+//!        |   saved R14 (of $g)   |
+//! 0xCFD0 | - - - - - - - - - - - |
+//!        |   saved R15 (of $g)   |
+//! 0xCFC8 +-----------------------+ <- stack pointer at time of
+//!                                         switching away
+//! ```
+//! Here, the pseudo-frame of the wasmtime_fibre_switch invocation that switched
+//! to the active continuation begins at 0xD000. It's only a pseudo-frame
+//! in the sense that we never go back to it by executing a ret instruction, but by
+//! switching back to it using another invocation of wasmtime_fibre_switch. The
+//! "resume frame pointer" stored in the active continuation (i.e., at 0xAff0 in
+//! the first picture) is then the "pseudo frame pointer" of wamtime_fibre_switch.
+//! In other words, we store 0xCFF0 at 0xAFF0.
+//!
+//! 1.2
+//! If the first picture shows a suspended computation, then we also store a
+//! "pseudo frame pointer" of wamtime_fibre_switch at TOS - 0x10, but this time
+//! the one that resulted from calling wasmtime_fibre_switch when suspending.
+//! (i.e., the stored pseudo frame pointer resides within the continuation's own
+//! stack).
+//!
+//!
+//! 2. Dummy return PC (at TOS - 0x10, 0xAff0 above):
+//! The goal of the layout described in the previous two pictures is to ensure
+//! the following: Whenever a continuation is active, the values at TOS - 0x08
+//! and TOS - 0x10 together look like the beginning of an ordinary stack frame:
+//! Address TOS - 0x10 (called 0xAff0 in first picutre) denotes its frame
+//! pointer, and in turn contains the frame pointer of its "caller". Here, the
+//! "caller" is supposed to be the parent continuation, or rather the call to
+//! `wasmtime_fibre_switch` from the parent. In order to make sure that things
+//! indeed look like a valid stack, we need to put a return PC above the frame
+//! pointer. Thus, at TOS - 0x08 (called 0xAff8 in first picture), we store a PC
+//! that's inside wasmtime_fibre_switch. Note that this PC is never used to
+//! execute an actual ret instruction, but it ensures that any external tool
+//! walking the frame pointer chain to construct a backtrace sees that the
+//! "calling" function is wasmtime_fibre_switch, and the latter's caller is the
+//! function that invoked `resume`.
+//!
+//! Note that this design ensures that external tools can construct backtraces
+//! in the presence of stack switching by using frame pointers only. Wasmtime's
+//! own mechanism for constructing back traces also relies on frame pointer
+//! chains. However, it understands continuations and does not rely on the
+//! trickery outlined here to go from the frames in one continuation to the
+//! parent.
 
 #![allow(unused_macros)]
 
