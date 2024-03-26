@@ -1284,7 +1284,7 @@ pub(crate) fn translate_resume<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     type_index: u32,
-    contref: ir::Value,
+    contXobj: ir::Value,
     resume_args: &[ir::Value],
     resumetable: &[(u32, ir::Block)],
 ) -> Vec<ir::Value> {
@@ -1300,7 +1300,7 @@ pub(crate) fn translate_resume<'a>(
 
     let (resume_contXref, parent_stack_chain) = {
         let resume_contXref =
-            shared::typed_continuations_cont_Xobj_get_cont_Xref(env, builder, contref);
+            shared::typed_continuations_cont_Xobj_get_cont_Xref(env, builder, contXobj);
 
         if resume_args.len() > 0 {
             // We store the arguments in the `VMContXRef` to be resumed.
@@ -1500,9 +1500,9 @@ pub(crate) fn translate_resume<'a>(
 
         // Create and push the continuation Xobject. We only create
         // them here because we don't need them when forwarding.
-        let contref = env.typed_continuations_new_cont_Xobj(builder, resume_contXref);
+        let contXobj = env.typed_continuations_new_cont_Xobj(builder, resume_contXref);
 
-        args.push(contref);
+        args.push(contXobj);
 
         // Now jump to the actual user-defined block handling
         // this tag, as given by the resumetable.

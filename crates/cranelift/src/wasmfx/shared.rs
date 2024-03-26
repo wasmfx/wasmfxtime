@@ -25,13 +25,13 @@ pub(crate) use call_builtin;
 pub(crate) fn typed_continuations_cont_Xobj_get_cont_Xref<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    contref: ir::Value,
+    contXobj: ir::Value,
 ) -> ir::Value {
     if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
-        // The "contref" is a contXref already
-        return contref;
+        // The "contXobj" is a contXref already
+        return contXobj;
     } else {
-        call_builtin!(builder, env, let result = tc_cont_Xobj_get_cont_Xref(contref));
+        call_builtin!(builder, env, let result = tc_cont_Xobj_get_cont_Xref(contXobj));
         return result;
     }
 }

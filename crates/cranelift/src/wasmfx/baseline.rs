@@ -387,9 +387,9 @@ pub(crate) fn translate_cont_new<'a>(
     // Load the builtin continuation allocation function.
     let nargs = builder.ins().iconst(I64, arg_types.len() as i64);
     let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
-    call_builtin!(builder, env, let contref = tc_baseline_cont_new(func, nargs, nreturns));
+    call_builtin!(builder, env, let contXobj = tc_baseline_cont_new(func, nargs, nreturns));
 
-    Ok(contref)
+    Ok(contXobj)
 }
 
 pub(crate) fn translate_suspend<'a>(

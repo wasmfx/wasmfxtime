@@ -791,10 +791,10 @@ fn tc_new_cont_Xobj(_instance: &mut Instance, contXref: *mut u8) -> *mut u8 {
 
 fn tc_cont_Xobj_get_cont_Xref(
     _instance: &mut Instance,
-    contref: *mut u8,
+    contXobj: *mut u8,
 ) -> Result<*mut u8, TrapReason> {
     let ans = crate::continuation::cont_Xobj_get_cont_Xref(
-        contref.cast::<crate::continuation::ContinuationReference>(),
+        contXobj.cast::<crate::continuation::ContinuationReference>(),
     )?;
     Ok(ans.cast::<u8>())
 }
@@ -892,10 +892,10 @@ fn tc_baseline_cont_new(
     Ok(ans_ptr)
 }
 
-fn tc_baseline_resume(instance: &mut Instance, contref: *mut u8) -> Result<u32, TrapReason> {
-    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContXRef>();
-    assert!(contref_ptr as usize == contref as usize);
-    crate::continuation::baseline::resume(instance, unsafe { &mut *(contref_ptr) })
+fn tc_baseline_resume(instance: &mut Instance, contXobj: *mut u8) -> Result<u32, TrapReason> {
+    let contXobj_ptr = contXobj.cast::<crate::continuation::baseline::VMContXRef>();
+    assert!(contXobj_ptr as usize == contXobj as usize);
+    crate::continuation::baseline::resume(instance, unsafe { &mut *(contXobj_ptr) })
 }
 
 fn tc_baseline_suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {
@@ -912,42 +912,42 @@ fn tc_baseline_forward(
     })
 }
 
-fn tc_baseline_drop_continuation_Xobject(instance: &mut Instance, contref: *mut u8) {
+fn tc_baseline_drop_continuation_Xobject(instance: &mut Instance, contXobj: *mut u8) {
     crate::continuation::baseline::drop_continuation_Xobject(
         instance,
-        contref.cast::<crate::continuation::baseline::VMContXRef>(),
+        contXobj.cast::<crate::continuation::baseline::VMContXRef>(),
     )
 }
 
 fn tc_baseline_continuation_arguments_ptr(
     instance: &mut Instance,
-    contref: *mut u8,
+    contXobj: *mut u8,
     nargs: u64,
 ) -> *mut u8 {
-    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContXRef>();
-    assert!(contref_ptr as usize == contref as usize);
+    let contXobj_ptr = contXobj.cast::<crate::continuation::baseline::VMContXRef>();
+    assert!(contXobj_ptr as usize == contXobj as usize);
     let ans = crate::continuation::baseline::get_arguments_ptr(
         instance,
-        unsafe { &mut *(contref_ptr) },
+        unsafe { &mut *(contXobj_ptr) },
         nargs as usize,
     );
     return ans.cast::<u8>();
 }
 
-fn tc_baseline_continuation_values_ptr(instance: &mut Instance, contref: *mut u8) -> *mut u8 {
-    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContXRef>();
-    assert!(contref_ptr as usize == contref as usize);
+fn tc_baseline_continuation_values_ptr(instance: &mut Instance, contXobj: *mut u8) -> *mut u8 {
+    let contXobj_ptr = contXobj.cast::<crate::continuation::baseline::VMContXRef>();
+    assert!(contXobj_ptr as usize == contXobj as usize);
     let ans =
-        crate::continuation::baseline::get_values_ptr(instance, unsafe { &mut *(contref_ptr) });
+        crate::continuation::baseline::get_values_ptr(instance, unsafe { &mut *(contXobj_ptr) });
     let ans_ptr = ans.cast::<u8>();
     assert!(ans as usize == ans_ptr as usize);
     return ans_ptr;
 }
 
-fn tc_baseline_clear_arguments(instance: &mut Instance, contref: *mut u8) {
-    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContXRef>();
-    assert!(contref_ptr as usize == contref as usize);
-    crate::continuation::baseline::clear_arguments(instance, unsafe { &mut *(contref_ptr) });
+fn tc_baseline_clear_arguments(instance: &mut Instance, contXobj: *mut u8) {
+    let contXobj_ptr = contXobj.cast::<crate::continuation::baseline::VMContXRef>();
+    assert!(contXobj_ptr as usize == contXobj as usize);
+    crate::continuation::baseline::clear_arguments(instance, unsafe { &mut *(contXobj_ptr) });
 }
 
 fn tc_baseline_get_payloads_ptr(instance: &mut Instance, nargs: u64) -> *mut u8 {

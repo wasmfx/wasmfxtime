@@ -97,7 +97,7 @@ macro_rules! foreach_builtin_function {
             // Suspends a continuation.
             tc_suspend(vmctx: vmctx, tag: i32);
             // Returns the continuation Xreference corresponding to the given continuation Xobject.
-            tc_cont_Xobj_get_cont_Xref(vmctx: vmctx, contref: pointer) -> pointer;
+            tc_cont_Xobj_get_cont_Xref(vmctx: vmctx, contXobj: pointer) -> pointer;
             // Drops the given continuation Xreference. Currently unused.
             //cont_Xref_drop(vmctx: vmctx, contXref: pointer);
             // Creates a new continuation Xobject.

@@ -2808,11 +2808,11 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         type_index: u32,
-        contref: ir::Value,
+        contXobj: ir::Value,
         resume_args: &[ir::Value],
         resumetable: &[(u32, ir::Block)],
     ) -> Vec<ir::Value> {
-        wasmfx_impl::translate_resume(self, builder, type_index, contref, resume_args, resumetable)
+        wasmfx_impl::translate_resume(self, builder, type_index, contXobj, resume_args, resumetable)
     }
 
     fn translate_resume_throw(
@@ -2866,9 +2866,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn typed_continuations_cont_Xobj_get_cont_Xref(
         &mut self,
         builder: &mut FunctionBuilder,
-        contref: ir::Value,
+        contXobj: ir::Value,
     ) -> ir::Value {
-        wasmfx_impl::typed_continuations_cont_Xobj_get_cont_Xref(self, builder, contref)
+        wasmfx_impl::typed_continuations_cont_Xobj_get_cont_Xref(self, builder, contXobj)
     }
 
     /// TODO
