@@ -539,7 +539,7 @@ pub mod baseline {
             Box::new(fiber)
         };
 
-        let contobj = Box::new(VMContRef {
+        let contref = Box::new(VMContRef {
             parent: std::ptr::null_mut(),
             suspend: std::ptr::null(),
             fiber,
@@ -549,36 +549,36 @@ pub mod baseline {
         });
 
         // TODO(dhil): we need memory clean up of
-        // continuation object objects.
-        debug_assert!(!contobj.fiber.stack().top().unwrap().is_null());
-        Ok(Box::into_raw(contobj))
+        // continuation reference objects.
+        debug_assert!(!contref.fiber.stack().top().unwrap().is_null());
+        Ok(Box::into_raw(contref))
     }
 
     /// Continues a given continuation.
     #[inline(always)]
-    pub fn resume(instance: &mut Instance, contobj: &mut VMContRef) -> Result<u32, TrapReason> {
+    pub fn resume(instance: &mut Instance, contref: &mut VMContRef) -> Result<u32, TrapReason> {
         // Trigger fuse
         if !HAS_EVER_RUN_CONTINUATION.get() {
             HAS_EVER_RUN_CONTINUATION.set(true);
         }
 
         // Attach parent.
-        debug_assert!(contobj.parent.is_null());
-        contobj.parent = get_current_continuation();
+        debug_assert!(contref.parent.is_null());
+        contref.parent = get_current_continuation();
         // Append arguments to the function args/return buffer if this
-        // is the initial resume. Note: the `contobj.args` buffer is
+        // is the initial resume. Note: the `contref.args` buffer is
         // appended in the generated code.
         //
         // NOTE(dhil): The `suspend` field is set during the initial
         // invocation.
-        if contobj.suspend.is_null() {
-            debug_assert!(contobj.values.len() == 0);
-            debug_assert!(contobj.args.len() <= contobj.values.capacity());
-            contobj.values.append(&mut contobj.args);
-            contobj.args.clear();
+        if contref.suspend.is_null() {
+            debug_assert!(contref.values.len() == 0);
+            debug_assert!(contref.args.len() <= contref.values.capacity());
+            contref.values.append(&mut contref.args);
+            contref.args.clear();
         }
         // Change the current continuation.
-        set_current_continuation(contobj);
+        set_current_continuation(contref);
         unsafe {
             (*(*(*instance.store()).vmruntime_limits())
                 .stack_limit
@@ -586,7 +586,7 @@ pub mod baseline {
         };
 
         // Resume the current continuation.
-        contobj
+        contref
             .fiber
             .resume(instance)
             .map(move |()| {
@@ -594,7 +594,7 @@ pub mod baseline {
                 // completion. In this case we update the current
                 // continuation to bet the parent of this
                 // continuation.
-                set_current_continuation(contobj.parent);
+                set_current_continuation(contref.parent);
                 // The value zero signals control returned normally.
                 return 0;
             })
@@ -617,10 +617,10 @@ pub mod baseline {
             let trap = TrapReason::Wasm(wasmtime_environ::Trap::UnhandledTag);
             return Err(trap);
         }
-        let contobj = unsafe { cc.as_mut().unwrap() };
-        let parent = mem::replace(&mut contobj.parent, std::ptr::null_mut());
+        let contref = unsafe { cc.as_mut().unwrap() };
+        let parent = mem::replace(&mut contref.parent, std::ptr::null_mut());
         set_current_continuation(parent);
-        unsafe { contobj.suspend.as_ref().unwrap().suspend(tag_index) };
+        unsafe { contref.suspend.as_ref().unwrap().suspend(tag_index) };
         Ok(())
     }
 
@@ -638,47 +638,47 @@ pub mod baseline {
         Ok(())
     }
 
-    /// Deallocates a gives continuation object.
+    /// Deallocates a gives continuation reference.
     #[inline(always)]
-    pub fn drop_continuation_object(_instance: &mut Instance, contobj: *mut VMContRef) {
-        // Note that continuation references do not own their parents, so
+    pub fn drop_continuation_reference(_instance: &mut Instance, contref: *mut VMContRef) {
+        // Note that continuation objects do not own their parents, so
         // we let the parent object leak.
-        let contobj: Box<VMContRef> = unsafe { Box::from_raw(contobj) };
-        let _: Box<ContinuationFiber> = contobj.fiber;
-        let _: Vec<u128> = contobj.args;
-        let _: Vec<u128> = contobj.values;
+        let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
+        let _: Box<ContinuationFiber> = contref.fiber;
+        let _: Vec<u128> = contref.args;
+        let _: Vec<u128> = contref.values;
     }
 
-    /// Clears the argument buffer on a given continuation object.
+    /// Clears the argument buffer on a given continuation reference.
     #[inline(always)]
-    pub fn clear_arguments(_instance: &mut Instance, contobj: &mut VMContRef) {
-        contobj.args.clear();
+    pub fn clear_arguments(_instance: &mut Instance, contref: &mut VMContRef) {
+        contref.args.clear();
     }
 
     /// Returns the pointer to the argument buffer of a given
-    /// continuation object.
+    /// continuation reference.
     #[inline(always)]
     pub fn get_arguments_ptr(
         _instance: &mut Instance,
-        contobj: &mut VMContRef,
+        contref: &mut VMContRef,
         nargs: usize,
     ) -> *mut u128 {
         let mut offset: isize = 0;
         // Zero initialise `nargs` cells for writing.
         if nargs > 0 {
             for _ in 0..nargs {
-                contobj.args.push(0); // zero initialise
+                contref.args.push(0); // zero initialise
             }
-            offset = (contobj.args.len() - nargs) as isize;
+            offset = (contref.args.len() - nargs) as isize;
         }
-        unsafe { contobj.args.as_mut_ptr().offset(offset) }
+        unsafe { contref.args.as_mut_ptr().offset(offset) }
     }
 
     /// Returns the pointer to the (return) values buffer of a given
-    /// continuation object.
+    /// continuation reference.
     #[inline(always)]
-    pub fn get_values_ptr(_instance: &mut Instance, contobj: &mut VMContRef) -> *mut u128 {
-        contobj.values.as_mut_ptr()
+    pub fn get_values_ptr(_instance: &mut Instance, contref: &mut VMContRef) -> *mut u128 {
+        contref.values.as_mut_ptr()
     }
 
     /// Returns the pointer to the tag payloads buffer.
@@ -759,7 +759,7 @@ pub mod baseline {
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn resume(_instance: &mut Instance, _contobj: &mut VMContRef) -> Result<u32, TrapReason> {
+    pub fn resume(_instance: &mut Instance, _contref: &mut VMContRef) -> Result<u32, TrapReason> {
         panic!("attempt to execute continuation::baseline::resume without `typed_continuation_baseline_implementation` toggled!")
     }
 
@@ -781,15 +781,15 @@ pub mod baseline {
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn drop_continuation_object(_instance: &mut Instance, _cont: *mut VMContRef) {
-        panic!("attempt to execute continuation::baseline::drop_continuation_object without `typed_continuation_baseline_implementation` toggled!")
+    pub fn drop_continuation_reference(_instance: &mut Instance, _cont: *mut VMContRef) {
+        panic!("attempt to execute continuation::baseline::drop_continuation_reference without `typed_continuation_baseline_implementation` toggled!")
     }
 
     #[inline(always)]
     #[allow(missing_docs)]
     pub fn get_arguments_ptr(
         _instance: &mut Instance,
-        _contobj: &mut VMContRef,
+        _contref: &mut VMContRef,
         _nargs: usize,
     ) -> *mut u8 {
         panic!("attempt to execute continuation::baseline::get_arguments_ptr without `typed_continuation_baseline_implementation` toggled!")
@@ -797,13 +797,13 @@ pub mod baseline {
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn get_values_ptr(_instance: &mut Instance, _contobj: &mut VMContRef) -> *mut u8 {
+    pub fn get_values_ptr(_instance: &mut Instance, _contref: &mut VMContRef) -> *mut u8 {
         panic!("attempt to execute continuation::baseline::get_values_ptr without `typed_continuation_baseline_implementation` toggled!")
     }
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn clear_arguments(_instance: &mut Instance, _contobj: &mut VMContRef) {
+    pub fn clear_arguments(_instance: &mut Instance, _contref: &mut VMContRef) {
         panic!("attempt to execute continuation::baseline::clear_arguments without `typed_continuation_baseline_implementation` toggled!")
     }
 
