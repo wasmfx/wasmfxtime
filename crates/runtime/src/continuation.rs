@@ -194,7 +194,7 @@ pub struct ContinuationReference(pub Option<*mut VMContRef>);
 
 /// TODO
 #[inline(always)]
-pub fn cont_ref_get_cont_Xref(
+pub fn cont_Xobj_get_cont_Xref(
     contref: *mut ContinuationReference,
 ) -> Result<*mut VMContRef, TrapReason> {
     //FIXME rename to indicate that this invalidates the cont ref
@@ -257,7 +257,7 @@ pub fn cont_Xref_forward_tag_return_values_buffer(
 
 /// TODO
 #[inline(always)]
-pub fn new_cont_ref(contXref: *mut VMContRef) -> *mut ContinuationReference {
+pub fn new_cont_Xobj(contXref: *mut VMContRef) -> *mut ContinuationReference {
     // If this is enabled, we should never call this function.
     assert!(!cfg!(
         feature = "unsafe_disable_continuation_linearity_check"
@@ -345,7 +345,7 @@ pub fn cont_new(
     });
 
     // TODO(dhil): we need memory clean up of
-    // continuation reference objects.
+    // continuation Xobject objects.
     let pointer = Box::into_raw(contXref);
     debug_println!("Created contXref @ {:p}", pointer);
     Ok(pointer)
@@ -551,7 +551,7 @@ pub mod baseline {
         });
 
         // TODO(dhil): we need memory clean up of
-        // continuation reference objects.
+        // continuation Xobject objects.
         debug_assert!(!contref.fiber.stack().top().unwrap().is_null());
         Ok(Box::into_raw(contref))
     }
@@ -640,9 +640,9 @@ pub mod baseline {
         Ok(())
     }
 
-    /// Deallocates a gives continuation reference.
+    /// Deallocates a gives continuation Xobject.
     #[inline(always)]
-    pub fn drop_continuation_reference(_instance: &mut Instance, contref: *mut VMContRef) {
+    pub fn drop_continuation_Xobject(_instance: &mut Instance, contref: *mut VMContRef) {
         // Note that continuation Xreferences do not own their parents, so
         // we let the parent object leak.
         let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
@@ -651,14 +651,14 @@ pub mod baseline {
         let _: Vec<u128> = contref.values;
     }
 
-    /// Clears the argument buffer on a given continuation reference.
+    /// Clears the argument buffer on a given continuation Xobject.
     #[inline(always)]
     pub fn clear_arguments(_instance: &mut Instance, contref: &mut VMContRef) {
         contref.args.clear();
     }
 
     /// Returns the pointer to the argument buffer of a given
-    /// continuation reference.
+    /// continuation Xobject.
     #[inline(always)]
     pub fn get_arguments_ptr(
         _instance: &mut Instance,
@@ -677,7 +677,7 @@ pub mod baseline {
     }
 
     /// Returns the pointer to the (return) values buffer of a given
-    /// continuation reference.
+    /// continuation Xobject.
     #[inline(always)]
     pub fn get_values_ptr(_instance: &mut Instance, contref: &mut VMContRef) -> *mut u128 {
         contref.values.as_mut_ptr()
@@ -783,8 +783,8 @@ pub mod baseline {
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn drop_continuation_reference(_instance: &mut Instance, _cont: *mut VMContRef) {
-        panic!("attempt to execute continuation::baseline::drop_continuation_reference without `typed_continuation_baseline_implementation` toggled!")
+    pub fn drop_continuation_Xobject(_instance: &mut Instance, _cont: *mut VMContRef) {
+        panic!("attempt to execute continuation::baseline::drop_continuation_Xobject without `typed_continuation_baseline_implementation` toggled!")
     }
 
     #[inline(always)]

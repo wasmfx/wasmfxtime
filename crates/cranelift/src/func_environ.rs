@@ -2863,12 +2863,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     }
 
     /// TODO
-    fn typed_continuations_cont_ref_get_cont_Xref(
+    fn typed_continuations_cont_Xobj_get_cont_Xref(
         &mut self,
         builder: &mut FunctionBuilder,
         contref: ir::Value,
     ) -> ir::Value {
-        wasmfx_impl::typed_continuations_cont_ref_get_cont_Xref(self, builder, contref)
+        wasmfx_impl::typed_continuations_cont_Xobj_get_cont_Xref(self, builder, contref)
     }
 
     /// TODO
@@ -2905,12 +2905,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         wasmfx_impl::typed_continuations_load_continuation_Xreference(self, builder)
     }
 
-    fn typed_continuations_new_cont_ref(
+    fn typed_continuations_new_cont_Xobj(
         &mut self,
         builder: &mut FunctionBuilder,
         contXref_addr: ir::Value,
     ) -> ir::Value {
-        wasmfx_impl::typed_continuations_new_cont_ref(self, builder, contXref_addr)
+        wasmfx_impl::typed_continuations_new_cont_Xobj(self, builder, contXref_addr)
     }
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {

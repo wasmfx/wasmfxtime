@@ -2537,8 +2537,8 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let r = state.pop1();
             let contXref =
                 environ.translate_cont_new(builder, state, r, &arg_types, &result_types)?;
-            let contref = environ.typed_continuations_new_cont_ref(builder, contXref);
-            state.push1(contref);
+            let contXobj = environ.typed_continuations_new_cont_Xobj(builder, contXref);
+            state.push1(contXobj);
         }
         Operator::Resume {
             type_index,
@@ -2560,10 +2560,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 .collect::<Vec<(u32, ir::Block)>>();
 
             let arity = environ.continuation_arguments(*type_index).len();
-            let (contref, call_args) = state.peekn(arity + 1).split_last().unwrap();
+            let (contXobj, call_args) = state.peekn(arity + 1).split_last().unwrap();
 
             let cont_return_vals =
-                environ.translate_resume(builder, *type_index, *contref, call_args, &resumetable);
+                environ.translate_resume(builder, *type_index, *contXobj, call_args, &resumetable);
 
             state.popn(arity + 1); // arguments + continuation
             state.pushn(&cont_return_vals);
@@ -2596,17 +2596,17 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let dst_arity = environ.continuation_arguments(*dst_index).len();
             let arg_count = src_arity - dst_arity;
 
-            let (original_contref, args) = state.peekn(arg_count + 1).split_last().unwrap();
+            let (original_contXobj, args) = state.peekn(arg_count + 1).split_last().unwrap();
             let contXref =
-                environ.typed_continuations_cont_ref_get_cont_Xref(builder, *original_contref);
+                environ.typed_continuations_cont_Xobj_get_cont_Xref(builder, *original_contXobj);
 
             let src_arity_value = builder.ins().iconst(I32, src_arity as i64);
             environ.typed_continuations_store_resume_args(builder, args, src_arity_value, contXref);
 
-            let new_contref = environ.typed_continuations_new_cont_ref(builder, contXref);
+            let new_contXobj = environ.typed_continuations_new_cont_Xobj(builder, contXref);
 
             state.popn(arg_count + 1);
-            state.push1(new_contref);
+            state.push1(new_contXobj);
         }
         Operator::ResumeThrow {
             type_index: _,

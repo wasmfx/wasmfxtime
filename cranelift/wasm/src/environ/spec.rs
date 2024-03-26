@@ -624,7 +624,7 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
         type_index: u32,
-        contref: ir::Value,
+        contXobj: ir::Value,
         resume_args: &[ir::Value],
         resumetable: &[(u32, ir::Block)],
     ) -> Vec<ir::Value>;
@@ -690,17 +690,17 @@ pub trait FuncEnvironment: TargetEnvironment {
     ) -> ir::Value;
 
     /// TODO
-    fn typed_continuations_new_cont_ref(
+    fn typed_continuations_new_cont_Xobj(
         &mut self,
         builder: &mut FunctionBuilder,
         contXref_addr: ir::Value,
     ) -> ir::Value;
 
     /// TODO
-    fn typed_continuations_cont_ref_get_cont_Xref(
+    fn typed_continuations_cont_Xobj_get_cont_Xref(
         &mut self,
         builder: &mut FunctionBuilder,
-        contref: ir::Value,
+        contXobj: ir::Value,
     ) -> ir::Value;
 
     /// Returns whether the CLIF `x86_blendv` instruction should be used for the

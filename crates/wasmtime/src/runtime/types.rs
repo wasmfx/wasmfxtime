@@ -420,14 +420,14 @@ pub enum HeapType {
 
     /// The `cont` heap type represents a reference to any kind of continuation.
     ///
-    /// This is the top type for the continuation references type hierarchy, and is
-    /// therefore a supertype of every continuation reference.
+    /// This is the top type for the continuation Xobjects type hierarchy, and is
+    /// therefore a supertype of every continuation Xobject.
     Cont,
 
-    /// The `nocont` heap type represents the null continuation reference.
+    /// The `nocont` heap type represents the null continuation Xobject.
     ///
-    /// This is the bottom type for the continuation references type hierarchy, and
-    /// therefore `nocont` is a subtype of all continuation reference types.
+    /// This is the bottom type for the continuation Xobjects type hierarchy, and
+    /// therefore `nocont` is a subtype of all continuation Xobject types.
     NoCont,
 }
 
@@ -509,7 +509,7 @@ impl HeapType {
 
         match self {
             // TODO(dhil): We need to check whether Concrete points to
-            // a continuation reference in order to correct deduce the
+            // a continuation Xobject in order to correct deduce the
             // top type.
             HeapType::Func | HeapType::Concrete(_) | HeapType::NoFunc => HeapType::Func,
             HeapType::Extern => HeapType::Extern,

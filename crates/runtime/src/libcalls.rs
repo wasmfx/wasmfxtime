@@ -784,16 +784,16 @@ fn tc_suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason>
     crate::continuation::suspend(instance, tag_index)
 }
 
-fn tc_new_cont_ref(_instance: &mut Instance, contXref: *mut u8) -> *mut u8 {
-    crate::continuation::new_cont_ref(contXref.cast::<crate::continuation::VMContRef>())
+fn tc_new_cont_Xobj(_instance: &mut Instance, contXref: *mut u8) -> *mut u8 {
+    crate::continuation::new_cont_Xobj(contXref.cast::<crate::continuation::VMContRef>())
         .cast::<u8>()
 }
 
-fn tc_cont_ref_get_cont_Xref(
+fn tc_cont_Xobj_get_cont_Xref(
     _instance: &mut Instance,
     contref: *mut u8,
 ) -> Result<*mut u8, TrapReason> {
-    let ans = crate::continuation::cont_ref_get_cont_Xref(
+    let ans = crate::continuation::cont_Xobj_get_cont_Xref(
         contref.cast::<crate::continuation::ContinuationReference>(),
     )?;
     Ok(ans.cast::<u8>())
@@ -912,8 +912,8 @@ fn tc_baseline_forward(
     })
 }
 
-fn tc_baseline_drop_continuation_reference(instance: &mut Instance, contref: *mut u8) {
-    crate::continuation::baseline::drop_continuation_reference(
+fn tc_baseline_drop_continuation_Xobject(instance: &mut Instance, contref: *mut u8) {
+    crate::continuation::baseline::drop_continuation_Xobject(
         instance,
         contref.cast::<crate::continuation::baseline::VMContRef>(),
     )

@@ -11,9 +11,9 @@ use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
 use wasmtime_environ::PtrSize;
 
 #[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_cont_ref_get_cont_Xref;
+pub(crate) use shared::typed_continuations_cont_Xobj_get_cont_Xref;
 #[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_new_cont_ref;
+pub(crate) use shared::typed_continuations_new_cont_Xobj;
 
 fn typed_continuations_load_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -201,7 +201,7 @@ pub(crate) fn translate_resume<'a>(
     // Prelude: Push the continuation arguments.
     {
         let resumee_fiber =
-            shared::typed_continuations_cont_ref_get_cont_Xref(env, builder, resumee_ref);
+            shared::typed_continuations_cont_Xobj_get_cont_Xref(env, builder, resumee_ref);
         if resume_args.len() > 0 {
             let nargs = builder.ins().iconst(I64, resume_args.len() as i64);
 
@@ -302,8 +302,8 @@ pub(crate) fn translate_resume<'a>(
         // entirely.
         let mut args = typed_continuations_load_payloads(env, builder, &param_types);
 
-        // Create and push the continuation reference.
-        let resumee_ref = shared::typed_continuations_new_cont_ref(env, builder, resumee_fiber);
+        // Create and push the continuation Xobject.
+        let resumee_ref = shared::typed_continuations_new_cont_Xobj(env, builder, resumee_fiber);
         args.push(resumee_ref);
 
         // Finally, emit the jump to `label`.
@@ -369,7 +369,7 @@ pub(crate) fn translate_resume<'a>(
         call_builtin!(
             builder,
             env,
-            tc_baseline_drop_continuation_reference(resumee_fiber)
+            tc_baseline_drop_continuation_Xobject(resumee_fiber)
         );
 
         return values;

@@ -22,7 +22,7 @@ macro_rules! call_builtin {
 pub(crate) use call_builtin;
 
 /// TODO
-pub(crate) fn typed_continuations_cont_ref_get_cont_Xref<'a>(
+pub(crate) fn typed_continuations_cont_Xobj_get_cont_Xref<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     contref: ir::Value,
@@ -31,12 +31,12 @@ pub(crate) fn typed_continuations_cont_ref_get_cont_Xref<'a>(
         // The "contref" is a contXref already
         return contref;
     } else {
-        call_builtin!(builder, env, let result = tc_cont_ref_get_cont_Xref(contref));
+        call_builtin!(builder, env, let result = tc_cont_Xobj_get_cont_Xref(contref));
         return result;
     }
 }
 
-pub(crate) fn typed_continuations_new_cont_ref<'a>(
+pub(crate) fn typed_continuations_new_cont_Xobj<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     contXref_addr: ir::Value,
@@ -44,7 +44,7 @@ pub(crate) fn typed_continuations_new_cont_ref<'a>(
     if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
         return contXref_addr;
     } else {
-        call_builtin!(builder, env, let result = tc_new_cont_ref(contXref_addr));
+        call_builtin!(builder, env, let result = tc_new_cont_Xobj(contXref_addr));
         return result;
     }
 }

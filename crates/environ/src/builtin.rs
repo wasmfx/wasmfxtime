@@ -96,12 +96,12 @@ macro_rules! foreach_builtin_function {
             tc_resume(vmctx: vmctx, contXref: pointer, parent_stack_limits: pointer) -> i64;
             // Suspends a continuation.
             tc_suspend(vmctx: vmctx, tag: i32);
-            // Returns the continuation Xreference corresponding to the given continuation reference.
-            tc_cont_ref_get_cont_Xref(vmctx: vmctx, contref: pointer) -> pointer;
+            // Returns the continuation Xreference corresponding to the given continuation Xobject.
+            tc_cont_Xobj_get_cont_Xref(vmctx: vmctx, contref: pointer) -> pointer;
             // Drops the given continuation Xreference. Currently unused.
             //cont_Xref_drop(vmctx: vmctx, contXref: pointer);
-            // Creates a new continuation reference.
-            tc_new_cont_ref(vmctx: vmctx, contXref: pointer) -> pointer;
+            // Creates a new continuation Xobject.
+            tc_new_cont_Xobj(vmctx: vmctx, contXref: pointer) -> pointer;
 
 
             // Sets the tag return values of `child_contXref` to those of `parent_contXref`.
@@ -136,7 +136,7 @@ macro_rules! foreach_builtin_function {
             // Baseline cont.new
             tc_baseline_cont_new(vmctx: vmctx, r: pointer, param_count: i64, result_count: i64) -> pointer;
             // Baseline continuation drop
-            tc_baseline_drop_continuation_reference(vmctx: vmctx, r: pointer);
+            tc_baseline_drop_continuation_Xobject(vmctx: vmctx, r: pointer);
             // Baseline continuation arguments pointer
             tc_baseline_continuation_arguments_ptr(vmctx: vmctx, r: pointer, nargs: i64) -> pointer;
             // Baseline continuation values pointer

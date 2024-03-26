@@ -11,9 +11,9 @@ use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
 use wasmtime_environ::PtrSize;
 
 #[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_cont_ref_get_cont_Xref;
+pub(crate) use shared::typed_continuations_cont_Xobj_get_cont_Xref;
 #[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_new_cont_ref;
+pub(crate) use shared::typed_continuations_new_cont_Xobj;
 
 #[macro_use]
 pub(crate) mod typed_continuation_helpers {
@@ -1300,7 +1300,7 @@ pub(crate) fn translate_resume<'a>(
 
     let (resume_contXref, parent_stack_chain) = {
         let resume_contXref =
-            shared::typed_continuations_cont_ref_get_cont_Xref(env, builder, contref);
+            shared::typed_continuations_cont_Xobj_get_cont_Xref(env, builder, contref);
 
         if resume_args.len() > 0 {
             // We store the arguments in the `VMContRef` to be resumed.
@@ -1498,9 +1498,9 @@ pub(crate) fn translate_resume<'a>(
         tc::VMContRef::new(resume_contXref, pointer_type)
             .set_parent_stack_chain(env, builder, &chain);
 
-        // Create and push the continuation reference. We only create
+        // Create and push the continuation Xobject. We only create
         // them here because we don't need them when forwarding.
-        let contref = env.typed_continuations_new_cont_ref(builder, resume_contXref);
+        let contref = env.typed_continuations_new_cont_Xobj(builder, resume_contXref);
 
         args.push(contref);
 
