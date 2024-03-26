@@ -20,7 +20,7 @@ pub type ContinuationFiber = Fiber;
 /// `StackLimits` object with each element of the list. Here, a "stack" is
 /// either a continuation or the main stack. Note that the linked list character
 /// arises from the fact that `StackChain::Continuation` variants have a pointer
-/// to have `ContinuationObject`, which in turn has a `parent_chain` value of
+/// to have `VMContXRef`, which in turn has a `parent_chain` value of
 /// type `StackChain`.
 ///
 /// There are generally two uses of such chains:
@@ -40,7 +40,7 @@ pub type ContinuationFiber = Fiber;
 ///
 /// As mentioned before, each stack in a `StackChain` has a corresponding
 /// `StackLimits` object. For continuations, this is stored in the `limits`
-/// fields of the corresponding `ContinuationObject`. For the main stack, the
+/// fields of the corresponding `VMContXRef`. For the main stack, the
 /// `MainStack` variant contains a pointer to the
 /// `typed_continuations_main_stack_limits` field of the VMContext.
 ///
@@ -81,7 +81,7 @@ pub type ContinuationFiber = Fiber;
 #[repr(usize, C)]
 pub enum StackChain {
     /// If stored in the VMContext, used to indicate that the MainStack entry
-    /// has not been set, yet. If stored in a ContinuationObject's parent_chain
+    /// has not been set, yet. If stored in a VMContXRef's parent_chain
     /// field, means that there is currently no parent.
     Absent = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT,
     /// Represents the main stack.
@@ -113,7 +113,7 @@ impl StackChain {
 /// Iterator for stacks in a stack chain.
 /// Each stack is represented by a tuple `(co_opt, sl)`, where sl is a pointer
 /// to the stack's `StackLimits` object and `co_opt` is a pointer to the
-/// corresponding `ContinuationObject`, or None for the main stack.
+/// corresponding `VMContXRef`, or None for the main stack.
 pub struct ContinuationChainIterator(StackChain);
 
 impl Iterator for ContinuationChainIterator {
@@ -185,7 +185,7 @@ pub struct VMContXRef {
     pub state: State,
 }
 
-/// M:1 Many-to-one mapping. A single ContinuationObject may be
+/// M:1 Many-to-one mapping. A single VMContXRef may be
 /// referenced by multiple VMContXObj, though, only one
 /// VMContXObj may hold a non-null reference to the object
 /// at a given time.
@@ -234,14 +234,14 @@ pub fn cont_Xref_forward_tag_return_values_buffer(
     let parent = unsafe {
         parent.as_mut().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null (parent) ContinuationObject"
+                "Attempt to dereference null (parent) VMContXRef"
             ))
         })?
     };
     let child = unsafe {
         child.as_mut().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null (child) ContinuationObject"
+                "Attempt to dereference null (child) VMContXRef"
             ))
         })?
     };
@@ -359,7 +359,7 @@ pub fn resume(
     let cont = unsafe {
         contXref.as_ref().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null ContinuationObject!"
+                "Attempt to dereference null VMContXRef!"
             ))
         })?
     };

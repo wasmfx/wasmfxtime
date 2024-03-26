@@ -126,20 +126,20 @@ pub const STACK_CHAIN_MAIN_STACK_DISCRIMINANT: usize = 1;
 /// `wasmtime_runtime::continuation::StackChain`.
 pub const STACK_CHAIN_CONTINUATION_DISCRIMINANT: usize = 2;
 
-/// Encodes the life cycle of a `ContinuationObject`.
+/// Encodes the life cycle of a `VMContXRef`.
 #[derive(PartialEq)]
 #[repr(i32)]
 pub enum State {
-    /// The `ContinuationObject` has been created, but `resume` has never been
+    /// The `VMContXRef` has been created, but `resume` has never been
     /// called on it. During this stage, we may add arguments using `cont.bind`.
     Allocated,
-    /// `resume` has been invoked at least once on the `ContinuationObject`,
+    /// `resume` has been invoked at least once on the `VMContXRef`,
     /// meaning that the function passed to `cont.new` has started executing.
     /// Note that this state does not indicate whether the execution of this
     /// function is currently suspended or not.
     Invoked,
     /// The function originally passed to `cont.new` has returned normally.
-    /// Note that there is no guarantee that a ContinuationObject will ever
+    /// Note that there is no guarantee that a VMContXRef will ever
     /// reach this status, as it may stay suspended until being dropped.
     Returned,
 }
@@ -278,7 +278,7 @@ pub mod offsets {
         pub const LENGTH: usize = offset_of!(Payloads, length);
     }
 
-    /// Offsets of fields in `wasmtime_runtime::continuation::ContinuationObject`.
+    /// Offsets of fields in `wasmtime_runtime::continuation::VMContXRef`.
     /// We uses tests there to ensure these values are correct.
     pub mod vm_cont_Xref {
         use crate::Payloads;
