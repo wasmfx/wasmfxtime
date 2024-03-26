@@ -1305,13 +1305,7 @@ pub(crate) fn translate_resume<'a>(
         if resume_args.len() > 0 {
             // We store the arguments in the `VMContRef` to be resumed.
             let count = builder.ins().iconst(I32, resume_args.len() as i64);
-            typed_continuations_store_resume_args(
-                env,
-                builder,
-                resume_args,
-                count,
-                resume_contref,
-            );
+            typed_continuations_store_resume_args(env, builder, resume_args, count, resume_contref);
         }
 
         // Make the currently running continuation (if any) the parent of the one we are about to resume.
@@ -1537,12 +1531,7 @@ pub(crate) fn translate_resume<'a>(
         // `VMContRef`s, and we need to move them down the chain
         // back to the `VMContRef` where we originally
         // suspended.
-        typed_continuations_forward_tag_return_values(
-            env,
-            builder,
-            parent_contref,
-            resume_contref,
-        );
+        typed_continuations_forward_tag_return_values(env, builder, parent_contref, resume_contref);
 
         // We create a back edge to the resume block.
         // Note that both `resume_cotobj` and `parent_stack_chain` remain unchanged:
@@ -1582,8 +1571,7 @@ pub(crate) fn translate_resume<'a>(
 
         // Load and push the results.
         let returns = env.continuation_returns(type_index).to_vec();
-        let values =
-            typed_continuations_load_return_values(env, builder, &returns, resume_contref);
+        let values = typed_continuations_load_return_values(env, builder, &returns, resume_contref);
 
         // The continuation has returned and all `VMContObjs`
         // to it should have been be invalidated. We may safely deallocate
