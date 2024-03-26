@@ -2808,11 +2808,11 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         type_index: u32,
-        contXobj: ir::Value,
+        contobj: ir::Value,
         resume_args: &[ir::Value],
         resumetable: &[(u32, ir::Block)],
     ) -> Vec<ir::Value> {
-        wasmfx_impl::translate_resume(self, builder, type_index, contXobj, resume_args, resumetable)
+        wasmfx_impl::translate_resume(self, builder, type_index, contobj, resume_args, resumetable)
     }
 
     fn translate_resume_throw(
@@ -2856,19 +2856,19 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn typed_continuations_load_tag_return_values(
         &mut self,
         builder: &mut FunctionBuilder,
-        contXref: ir::Value,
+        contref: ir::Value,
         valtypes: &[WasmValType],
     ) -> Vec<ir::Value> {
-        wasmfx_impl::typed_continuations_load_tag_return_values(self, builder, contXref, valtypes)
+        wasmfx_impl::typed_continuations_load_tag_return_values(self, builder, contref, valtypes)
     }
 
     /// TODO
-    fn typed_continuations_cont_Xobj_get_cont_Xref(
+    fn typed_continuations_cont_obj_get_cont_ref(
         &mut self,
         builder: &mut FunctionBuilder,
-        contXobj: ir::Value,
+        contobj: ir::Value,
     ) -> ir::Value {
-        wasmfx_impl::typed_continuations_cont_Xobj_get_cont_Xref(self, builder, contXobj)
+        wasmfx_impl::typed_continuations_cont_obj_get_cont_ref(self, builder, contobj)
     }
 
     /// TODO
@@ -2877,14 +2877,14 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         values: &[ir::Value],
         remaining_arg_count: ir::Value,
-        contXref: ir::Value,
+        contref: ir::Value,
     ) {
         wasmfx_impl::typed_continuations_store_resume_args(
             self,
             builder,
             values,
             remaining_arg_count,
-            contXref,
+            contref,
         )
     }
 
@@ -2898,19 +2898,19 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         wasmfx_impl::typed_continuations_store_payloads(self, builder, valtypes, values)
     }
 
-    fn typed_continuations_load_continuation_Xreference(
+    fn typed_continuations_load_continuation_reference(
         &mut self,
         builder: &mut FunctionBuilder,
     ) -> ir::Value {
-        wasmfx_impl::typed_continuations_load_continuation_Xreference(self, builder)
+        wasmfx_impl::typed_continuations_load_continuation_reference(self, builder)
     }
 
-    fn typed_continuations_new_cont_Xobj(
+    fn typed_continuations_new_cont_obj(
         &mut self,
         builder: &mut FunctionBuilder,
-        contXref_addr: ir::Value,
+        contref_addr: ir::Value,
     ) -> ir::Value {
-        wasmfx_impl::typed_continuations_new_cont_Xobj(self, builder, contXref_addr)
+        wasmfx_impl::typed_continuations_new_cont_obj(self, builder, contref_addr)
     }
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {

@@ -624,7 +624,7 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
         type_index: u32,
-        contXobj: ir::Value,
+        contobj: ir::Value,
         resume_args: &[ir::Value],
         resumetable: &[(u32, ir::Block)],
     ) -> Vec<ir::Value>;
@@ -655,7 +655,7 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn typed_continuations_load_tag_return_values(
         &mut self,
         builder: &mut FunctionBuilder,
-        contXref: ir::Value,
+        contref: ir::Value,
         valtypes: &[wasmtime_types::WasmValType],
     ) -> std::vec::Vec<ir::Value>;
 
@@ -673,7 +673,7 @@ pub trait FuncEnvironment: TargetEnvironment {
         builder: &mut FunctionBuilder,
         values: &[ir::Value],
         remaining_arg_count: ir::Value,
-        contXref: ir::Value,
+        contref: ir::Value,
     );
 
     /// TODO
@@ -682,25 +682,25 @@ pub trait FuncEnvironment: TargetEnvironment {
     /// TODO
     fn tag_returns(&self, tag_index: u32) -> &[wasmtime_types::WasmValType];
 
-    /// Returns a pointer to the currently running continuation Xreference.
+    /// Returns a pointer to the currently running continuation reference.
     /// Traps if not currently running inside a continuation.
-    fn typed_continuations_load_continuation_Xreference(
+    fn typed_continuations_load_continuation_reference(
         &mut self,
         builder: &mut FunctionBuilder,
     ) -> ir::Value;
 
     /// TODO
-    fn typed_continuations_new_cont_Xobj(
+    fn typed_continuations_new_cont_obj(
         &mut self,
         builder: &mut FunctionBuilder,
-        contXref_addr: ir::Value,
+        contref_addr: ir::Value,
     ) -> ir::Value;
 
     /// TODO
-    fn typed_continuations_cont_Xobj_get_cont_Xref(
+    fn typed_continuations_cont_obj_get_cont_ref(
         &mut self,
         builder: &mut FunctionBuilder,
-        contXobj: ir::Value,
+        contobj: ir::Value,
     ) -> ir::Value;
 
     /// Returns whether the CLIF `x86_blendv` instruction should be used for the

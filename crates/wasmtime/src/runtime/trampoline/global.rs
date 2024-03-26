@@ -24,7 +24,7 @@ impl Drop for VMHostGlobalContext {
                     // Nothing to drop.
                 }
                 HeapType::Cont | HeapType::NoCont => {
-                    // We may have to drop the dynamic continuation Xobject here.
+                    // We may have to drop the dynamic continuation object here.
                     todo!("Drop for VMHostGlobalContext with content of type HeapType::Cont and HeapType::NoCont not yet implemented")
                 }
                 HeapType::Extern => unsafe { ptr::drop_in_place(self.global.as_externref_mut()) },

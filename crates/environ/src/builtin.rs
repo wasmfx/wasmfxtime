@@ -93,25 +93,25 @@ macro_rules! foreach_builtin_function {
             tc_cont_new(vmctx: vmctx, r: pointer, param_count: i32, result_count: i32) -> pointer;
             // Resumes a continuation. The result value is of type
             // wasmtime_continuations::SwitchDirection.
-            tc_resume(vmctx: vmctx, contXref: pointer, parent_stack_limits: pointer) -> i64;
+            tc_resume(vmctx: vmctx, contref: pointer, parent_stack_limits: pointer) -> i64;
             // Suspends a continuation.
             tc_suspend(vmctx: vmctx, tag: i32);
-            // Returns the continuation Xreference corresponding to the given continuation Xobject.
-            tc_cont_Xobj_get_cont_Xref(vmctx: vmctx, contXobj: pointer) -> pointer;
-            // Drops the given continuation Xreference. Currently unused.
-            //cont_Xref_drop(vmctx: vmctx, contXref: pointer);
-            // Creates a new continuation Xobject.
-            tc_new_cont_Xobj(vmctx: vmctx, contXref: pointer) -> pointer;
+            // Returns the continuation reference corresponding to the given continuation object.
+            tc_cont_obj_get_cont_ref(vmctx: vmctx, contobj: pointer) -> pointer;
+            // Drops the given continuation reference. Currently unused.
+            //cont_ref_drop(vmctx: vmctx, contref: pointer);
+            // Creates a new continuation object.
+            tc_new_cont_obj(vmctx: vmctx, contref: pointer) -> pointer;
 
 
-            // Sets the tag return values of `child_contXref` to those of `parent_contXref`.
+            // Sets the tag return values of `child_contref` to those of `parent_contref`.
             // This is implemented by exchanging the pointers to the underlying buffers.
-            // `child_contXref` must not currently have a tag return value buffer.
-            // `parent_contXref` may or may not have one.
-            tc_cont_Xref_forward_tag_return_values_buffer(vmctx: vmctx, parent_contXref: pointer, child_contXref : pointer);
+            // `child_contref` must not currently have a tag return value buffer.
+            // `parent_contref` may or may not have one.
+            tc_cont_ref_forward_tag_return_values_buffer(vmctx: vmctx, parent_contref: pointer, child_contref : pointer);
 
             // TODO
-            tc_drop_cont_Xref(vmctx: vmctx, contXref: pointer);
+            tc_drop_cont_ref(vmctx: vmctx, contref: pointer);
 
             // General-purpose allocation. Only used by typed-continuations
             // code at the moment.
@@ -128,7 +128,7 @@ macro_rules! foreach_builtin_function {
 
             // TC baseline
             // Baseline resume
-            tc_baseline_resume(vmctx: vmctx, contXref: pointer) -> i32;
+            tc_baseline_resume(vmctx: vmctx, contref: pointer) -> i32;
             // Baseline suspend
             tc_baseline_suspend(vmctx: vmctx, tag: i32);
             // Like suspend, but forwards handling.
@@ -136,7 +136,7 @@ macro_rules! foreach_builtin_function {
             // Baseline cont.new
             tc_baseline_cont_new(vmctx: vmctx, r: pointer, param_count: i64, result_count: i64) -> pointer;
             // Baseline continuation drop
-            tc_baseline_drop_continuation_Xobject(vmctx: vmctx, r: pointer);
+            tc_baseline_drop_continuation_object(vmctx: vmctx, r: pointer);
             // Baseline continuation arguments pointer
             tc_baseline_continuation_arguments_ptr(vmctx: vmctx, r: pointer, nargs: i64) -> pointer;
             // Baseline continuation values pointer

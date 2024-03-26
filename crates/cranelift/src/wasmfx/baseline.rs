@@ -11,9 +11,9 @@ use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
 use wasmtime_environ::PtrSize;
 
 #[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_cont_Xobj_get_cont_Xref;
+pub(crate) use shared::typed_continuations_cont_obj_get_cont_ref;
 #[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_new_cont_Xobj;
+pub(crate) use shared::typed_continuations_new_cont_obj;
 
 fn typed_continuations_load_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -43,7 +43,7 @@ fn typed_continuations_load_payloads<'a>(
 pub(crate) fn typed_continuations_load_tag_return_values<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    contXref: ir::Value,
+    contref: ir::Value,
     valtypes: &[WasmValType],
 ) -> Vec<ir::Value> {
     let _memflags = ir::MemFlags::trusted();
@@ -57,7 +57,7 @@ pub(crate) fn typed_continuations_load_tag_return_values<'a>(
             env,
             let args_ptr =
                 tc_baseline_continuation_arguments_ptr(
-                contXref,
+                contref,
                 nargs
             )
         );
@@ -79,7 +79,7 @@ pub(crate) fn typed_continuations_load_tag_return_values<'a>(
         debug_assert!(valtypes.len() == args.len());
 
         // Clear the arguments buffer
-        call_builtin!(builder, env, tc_baseline_clear_arguments(contXref));
+        call_builtin!(builder, env, tc_baseline_clear_arguments(contref));
 
         return args;
     }
@@ -93,7 +93,7 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
     builder: &mut FunctionBuilder,
     values: &[ir::Value],
     _remaining_arg_count: ir::Value,
-    contXref: ir::Value,
+    contref: ir::Value,
 ) {
     if values.len() > 0 {
         // Retrieve the pointer to the arguments buffer.
@@ -103,7 +103,7 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
             env,
             let args_ptr =
                 tc_baseline_continuation_arguments_ptr(
-                contXref,
+                contref,
                 nargs
             )
         );
@@ -140,7 +140,7 @@ pub(crate) fn typed_continuations_store_payloads<'a>(
     }
 }
 
-pub(crate) fn typed_continuations_load_continuation_Xreference<'a>(
+pub(crate) fn typed_continuations_load_continuation_reference<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
 ) -> ir::Value {
@@ -201,7 +201,7 @@ pub(crate) fn translate_resume<'a>(
     // Prelude: Push the continuation arguments.
     {
         let resumee_fiber =
-            shared::typed_continuations_cont_Xobj_get_cont_Xref(env, builder, resumee_ref);
+            shared::typed_continuations_cont_obj_get_cont_ref(env, builder, resumee_ref);
         if resume_args.len() > 0 {
             let nargs = builder.ins().iconst(I64, resume_args.len() as i64);
 
@@ -302,8 +302,8 @@ pub(crate) fn translate_resume<'a>(
         // entirely.
         let mut args = typed_continuations_load_payloads(env, builder, &param_types);
 
-        // Create and push the continuation Xobject.
-        let resumee_ref = shared::typed_continuations_new_cont_Xobj(env, builder, resumee_fiber);
+        // Create and push the continuation object.
+        let resumee_ref = shared::typed_continuations_new_cont_obj(env, builder, resumee_fiber);
         args.push(resumee_ref);
 
         // Finally, emit the jump to `label`.
@@ -369,7 +369,7 @@ pub(crate) fn translate_resume<'a>(
         call_builtin!(
             builder,
             env,
-            tc_baseline_drop_continuation_Xobject(resumee_fiber)
+            tc_baseline_drop_continuation_object(resumee_fiber)
         );
 
         return values;
@@ -387,9 +387,9 @@ pub(crate) fn translate_cont_new<'a>(
     // Load the builtin continuation allocation function.
     let nargs = builder.ins().iconst(I64, arg_types.len() as i64);
     let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
-    call_builtin!(builder, env, let contXobj = tc_baseline_cont_new(func, nargs, nreturns));
+    call_builtin!(builder, env, let contobj = tc_baseline_cont_new(func, nargs, nreturns));
 
-    Ok(contXobj)
+    Ok(contobj)
 }
 
 pub(crate) fn translate_suspend<'a>(

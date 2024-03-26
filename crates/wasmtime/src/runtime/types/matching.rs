@@ -231,7 +231,7 @@ fn match_heap(expected: WasmHeapType, actual: WasmHeapType, desc: &str) -> Resul
             // TODO(dhil): We should really check that Concrete
             // points to a continuation type.
             if let H::Concrete(_idx) = actual {
-                println!("TODO(dhil): [match_heap] has matched an Concrete against a Cont, however, we haven't checked that Concrete points to a continuation Xobject. Tread carefully, here may be bugs!");
+                println!("TODO(dhil): [match_heap] has matched an Concrete against a Cont, however, we haven't checked that Concrete points to a continuation object. Tread carefully, here may be bugs!");
             }
             true
         }

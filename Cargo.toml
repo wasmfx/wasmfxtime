@@ -386,9 +386,9 @@ debug-builtins = ["wasmtime/debug-builtins"]
 # Enables compatibility shims with Wasmtime 13 and prior's CLI.
 old-cli = []
 
-# Until we implement proper reference counting for `VMContXObj` objects,
-# we may use this flag to bypass the creation of VMContXObj objects,
-# directly using the corresponding VMContXRef instead.
+# Until we implement proper reference counting for `VMContObj` objects,
+# we may use this flag to bypass the creation of VMContObj objects,
+# directly using the corresponding VMContRef instead.
 # This is to allow running benchmarks that may create a lot of such objects and
 # may otherwise run out of memory.
 # Note that enabling this is highly unsafe, as it makes it impossible to detect
