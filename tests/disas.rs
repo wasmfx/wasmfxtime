@@ -44,6 +44,7 @@ use clap::Parser;
 use cranelift_codegen::ir::{Function, UserExternalName, UserFuncName};
 use cranelift_codegen::isa::{lookup_by_name, TargetIsa};
 use cranelift_codegen::settings::{Configurable, Flags, SetError};
+use libtest_mimic::{Arguments, Trial};
 use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
 use similar::TextDiff;
@@ -59,16 +60,24 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // First discover all tests ...
     let mut tests = Vec::new();
     find_tests("./tests/disas".as_ref(), &mut tests)?;
 
-    // ... then run all tests!
-    for test in tests.iter() {
-        run_test(&test).with_context(|| format!("failed to run tests {test:?}"))?;
+    let mut trials = Vec::new();
+    for test in tests {
+        trials.push(Trial::test(test.to_str().unwrap().to_string(), move || {
+            run_test(&test)
+                .with_context(|| format!("failed to run tests {test:?}"))
+                .map_err(|e| format!("{e:?}").into())
+        }))
     }
 
-    Ok(())
+    // These tests have some long names so use the "quiet" output by default.
+    let mut arguments = Arguments::parse();
+    if arguments.format.is_none() {
+        arguments.quiet = true;
+    }
+    libtest_mimic::run(&arguments, trials).exit()
 }
 
 fn find_tests(path: &Path, dst: &mut Vec<PathBuf>) -> Result<()> {
@@ -109,7 +118,6 @@ fn run_test(path: &Path) -> Result<()> {
         UserFuncName::Testcase(_) => unreachable!(),
     });
 
-    // And finally, use `cranelift_filetests` to perform the rest of the test.
     run_functions(
         &test.path,
         &test.contents,
@@ -262,7 +270,7 @@ pub enum TestKind {
 }
 
 /// Assert that `wat` contains the test expectations necessary for `funcs`.
-pub fn run_functions(
+fn run_functions(
     path: &Path,
     wat: &str,
     isa: &dyn TargetIsa,
@@ -285,9 +293,12 @@ pub fn run_functions(
                 let mut ctx = cranelift_codegen::Context::for_function(func.clone());
                 ctx.optimize(isa, &mut Default::default())
                     .map_err(|e| codegen_error_to_anyhow_error(&ctx.func, e))?;
+                ctx.func.dfg.resolve_all_aliases();
                 writeln!(&mut actual, "{}", ctx.func.display()).unwrap();
             }
             TestKind::Clif => {
+                let mut func = func.clone();
+                func.dfg.resolve_all_aliases();
                 writeln!(&mut actual, "{}", func.display()).unwrap();
             }
         }

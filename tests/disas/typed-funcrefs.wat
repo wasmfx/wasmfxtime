@@ -120,7 +120,6 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;;                                     v6 -> v2
 ;; @0039                               jump block1
 ;;
 ;;                                 block1:
@@ -132,22 +131,14 @@
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned gv3+72
+;;     gv4 = load.i64 notrap aligned readonly gv3+72
 ;;     sig0 = (i64 vmctx, i32 uext, i32 uext) -> i64 system_v
 ;;     sig1 = (i64 vmctx, i64, i32, i32, i32, i32) -> i32 fast
 ;;     fn0 = colocated u1:9 sig0
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;;                                     v21 -> v0
-;;                                     v45 -> v0
-;;                                     v52 -> v0
-;;                                     v55 -> v0
-;;                                     v28 -> v2
-;;                                     v29 -> v3
-;;                                     v30 -> v4
-;;                                     v31 -> v5
-;; @0048                               v12 = load.i64 notrap aligned v0+72
+;; @0048                               v12 = load.i64 notrap aligned readonly v0+72
 ;;                                     v66 = iconst.i64 8
 ;; @0048                               v14 = iadd v12, v66  ; v66 = 8
 ;; @0048                               v17 = load.i64 table_oob aligned table v14
@@ -157,7 +148,6 @@
 ;;
 ;;                                 block2 cold:
 ;; @003c                               v7 = iconst.i32 0
-;;                                     v26 -> v7
 ;; @0046                               v8 = iconst.i32 1
 ;; @0048                               v22 = call fn0(v0, v7, v8)  ; v7 = 0, v8 = 1
 ;; @0048                               jump block3(v22)
@@ -166,9 +156,8 @@
 ;; @004a                               v23 = load.i64 null_reference aligned readonly v19+16
 ;; @004a                               v24 = load.i64 notrap aligned readonly v19+32
 ;; @004a                               v25 = call_indirect sig1, v23(v24, v0, v2, v3, v4, v5)
-;; @005b                               v36 = load.i64 notrap aligned v0+72
 ;;                                     v74 = iconst.i64 16
-;; @005b                               v38 = iadd v36, v74  ; v74 = 16
+;; @005b                               v38 = iadd.i64 v12, v74  ; v74 = 16
 ;; @005b                               v41 = load.i64 table_oob aligned table v38
 ;;                                     v75 = iconst.i64 -2
 ;;                                     v76 = band v41, v75  ; v75 = -2
@@ -188,7 +177,6 @@
 ;;
 ;;                                 block1:
 ;; @0061                               v51 = iadd.i32 v49, v25
-;;                                     v6 -> v51
 ;; @0066                               return v51
 ;; }
 ;;
@@ -197,22 +185,14 @@
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned gv3+72
+;;     gv4 = load.i64 notrap aligned readonly gv3+72
 ;;     sig0 = (i64 vmctx, i64, i32, i32, i32, i32) -> i32 fast
 ;;     sig1 = (i64 vmctx, i32 uext, i32 uext) -> i64 system_v
 ;;     fn0 = colocated u1:9 sig1
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;;                                     v21 -> v0
-;;                                     v45 -> v0
-;;                                     v52 -> v0
-;;                                     v55 -> v0
-;;                                     v28 -> v2
-;;                                     v29 -> v3
-;;                                     v30 -> v4
-;;                                     v31 -> v5
-;; @0075                               v12 = load.i64 notrap aligned v0+72
+;; @0075                               v12 = load.i64 notrap aligned readonly v0+72
 ;;                                     v66 = iconst.i64 8
 ;; @0075                               v14 = iadd v12, v66  ; v66 = 8
 ;; @0075                               v17 = load.i64 table_oob aligned table v14
@@ -222,7 +202,6 @@
 ;;
 ;;                                 block2 cold:
 ;; @0069                               v7 = iconst.i32 0
-;;                                     v26 -> v7
 ;; @0073                               v8 = iconst.i32 1
 ;; @0075                               v22 = call fn0(v0, v7, v8)  ; v7 = 0, v8 = 1
 ;; @0075                               jump block3(v22)
@@ -231,9 +210,8 @@
 ;; @0075                               v23 = load.i64 icall_null aligned readonly v19+16
 ;; @0075                               v24 = load.i64 notrap aligned readonly v19+32
 ;; @0075                               v25 = call_indirect sig0, v23(v24, v0, v2, v3, v4, v5)
-;; @0087                               v36 = load.i64 notrap aligned v0+72
 ;;                                     v74 = iconst.i64 16
-;; @0087                               v38 = iadd v36, v74  ; v74 = 16
+;; @0087                               v38 = iadd.i64 v12, v74  ; v74 = 16
 ;; @0087                               v41 = load.i64 table_oob aligned table v38
 ;;                                     v75 = iconst.i64 -2
 ;;                                     v76 = band v41, v75  ; v75 = -2
@@ -253,7 +231,6 @@
 ;;
 ;;                                 block1:
 ;; @008c                               v51 = iadd.i32 v49, v25
-;;                                     v6 -> v51
 ;; @0091                               return v51
 ;; }
 ;;
@@ -266,8 +243,6 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;;                                     v8 -> v0
-;;                                     v14 -> v0
 ;; @009e                               v9 = load.i64 notrap aligned table v0+96
 ;; @00a0                               v10 = load.i64 null_reference aligned readonly v9+16
 ;; @00a0                               v11 = load.i64 notrap aligned readonly v9+32
@@ -280,6 +255,5 @@
 ;;
 ;;                                 block1:
 ;; @00b5                               v19 = iadd.i32 v18, v12
-;;                                     v6 -> v19
 ;; @00ba                               return v19
 ;; }
