@@ -140,7 +140,7 @@ pub(crate) fn typed_continuations_store_payloads<'a>(
     }
 }
 
-pub(crate) fn typed_continuations_load_continuation_object<'a>(
+pub(crate) fn typed_continuations_load_continuation_Xreference<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
 ) -> ir::Value {

@@ -111,7 +111,7 @@ macro_rules! foreach_builtin_function {
             tc_cont_Xref_forward_tag_return_values_buffer(vmctx: vmctx, parent_contXref: pointer, child_contXref : pointer);
 
             // TODO
-            tc_drop_cont_obj(vmctx: vmctx, contXref: pointer);
+            tc_drop_cont_Xref(vmctx: vmctx, contXref: pointer);
 
             // General-purpose allocation. Only used by typed-continuations
             // code at the moment.

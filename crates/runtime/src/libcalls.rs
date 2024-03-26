@@ -810,8 +810,8 @@ fn tc_cont_Xref_forward_tag_return_values_buffer(
     )
 }
 
-fn tc_drop_cont_obj(_instance: &mut Instance, contXref: *mut u8) {
-    crate::continuation::drop_cont_obj(contXref.cast::<crate::continuation::VMContRef>())
+fn tc_drop_cont_Xref(_instance: &mut Instance, contXref: *mut u8) {
+    crate::continuation::drop_cont_Xref(contXref.cast::<crate::continuation::VMContRef>())
 }
 
 fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> Result<*mut u8, TrapReason> {

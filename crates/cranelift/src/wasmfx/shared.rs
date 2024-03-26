@@ -50,10 +50,10 @@ pub(crate) fn typed_continuations_new_cont_ref<'a>(
 }
 
 /// TODO
-pub(crate) fn typed_continuations_drop_cont_obj<'a>(
+pub(crate) fn typed_continuations_drop_cont_Xref<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     contXref: ir::Value,
 ) {
-    call_builtin!(builder, env, tc_drop_cont_obj(contXref));
+    call_builtin!(builder, env, tc_drop_cont_Xref(contXref));
 }

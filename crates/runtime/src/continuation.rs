@@ -269,7 +269,7 @@ pub fn new_cont_ref(contXref: *mut VMContRef) -> *mut ContinuationReference {
 
 /// TODO
 #[inline(always)]
-pub fn drop_cont_obj(contXref: *mut VMContRef) {
+pub fn drop_cont_Xref(contXref: *mut VMContRef) {
     // Note that continuation Xreferences do not own their parents, hence we ignore
     // parent fields here.
 

@@ -1588,7 +1588,7 @@ pub(crate) fn translate_resume<'a>(
         // The continuation has returned and all `ContinuationReferences`
         // to it should have been be invalidated. We may safely deallocate
         // it.
-        shared::typed_continuations_drop_cont_obj(env, builder, resume_contXref);
+        shared::typed_continuations_drop_cont_Xref(env, builder, resume_contXref);
 
         return values;
     }
