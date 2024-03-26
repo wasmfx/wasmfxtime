@@ -1,5 +1,6 @@
 use super::shared;
 
+use crate::wasmfx::shared::call_builtin;
 use cranelift_codegen::ir;
 use cranelift_codegen::ir::condcodes::*;
 use cranelift_codegen::ir::types::*;
@@ -16,6 +17,7 @@ pub(crate) use shared::typed_continuations_new_cont_ref;
 
 #[macro_use]
 pub(crate) mod typed_continuation_helpers {
+    use crate::wasmfx::shared::call_builtin;
     use cranelift_codegen::ir;
     use cranelift_codegen::ir::condcodes::IntCC;
     use cranelift_codegen::ir::types::*;
@@ -69,30 +71,24 @@ pub(crate) mod typed_continuation_helpers {
                 let len = s.len();
                 let len = builder.ins().iconst(I64, len as i64);
 
-                let print_str = env.builtin_functions.tc_print_str(&mut builder.func);
-                let vmctx = env.vmctx_val(&mut builder.cursor());
-                builder.ins().call(print_str, &[vmctx, ptr, len]);
+                call_builtin!(builder, env, tc_print_str, ptr, len);
             }
         };
         let print_int = |env: &mut crate::func_environ::FuncEnvironment<'a>,
                          builder: &mut FunctionBuilder,
                          val: ir::Value| {
-            let print_int = env.builtin_functions.tc_print_int(&mut builder.func);
             let ty = builder.func.dfg.value_type(val);
             let val = match ty {
                 I32 => builder.ins().uextend(I64, val),
                 I64 => val,
                 _ => panic!("Cannot print type {}", ty),
             };
-            let vmctx = env.vmctx_val(&mut builder.cursor());
-            builder.ins().call(print_int, &[vmctx, val]);
+            call_builtin!(builder, env, tc_print_int, val);
         };
         let print_pointer = |env: &mut crate::func_environ::FuncEnvironment<'a>,
                              builder: &mut FunctionBuilder,
                              ptr: ir::Value| {
-            let print_pointer = env.builtin_functions.tc_print_pointer(&mut builder.func);
-            let vmctx = env.vmctx_val(&mut builder.cursor());
-            builder.ins().call(print_pointer, &[vmctx, ptr]);
+            call_builtin!(builder, env, tc_print_pointer, ptr);
         };
 
         if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
@@ -554,12 +550,9 @@ pub(crate) mod typed_continuation_helpers {
             let entry_size =
                 std::mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>();
             let size = builder.ins().imul_imm(capacity, entry_size as i64);
-
-            let deallocate = env.builtin_functions.tc_deallocate(&mut builder.func);
-            let vmctx = env.vmctx_val(&mut builder.cursor());
-
             let ptr = self.get_data(builder);
-            builder.ins().call(deallocate, &[vmctx, ptr, size, align]);
+
+            call_builtin!(builder, env, tc_deallocate, ptr, size, align);
 
             self.set_capacity(builder, zero32);
             self.set_length(builder, zero32);
@@ -637,14 +630,10 @@ pub(crate) mod typed_continuation_helpers {
                 let old_size = builder.ins().uextend(I64, old_size);
                 let new_size = builder.ins().uextend(I64, new_size);
 
-                let reallocate = env.builtin_functions.tc_reallocate(&mut builder.func);
-
                 let ptr = self.get_data(builder);
-                let vmctx = env.vmctx_val(&mut builder.cursor());
-                let call_inst = builder
-                    .ins()
-                    .call(reallocate, &[vmctx, ptr, old_size, new_size, align]);
-                let new_data = *builder.func.dfg.inst_results(call_inst).first().unwrap();
+                call_builtin!(
+                    new_data = (builder, env, tc_reallocate, ptr, old_size, new_size, align)
+                );
 
                 self.set_capacity(builder, required_capacity);
                 self.set_data(builder, new_data);
@@ -1108,13 +1097,12 @@ fn typed_continuations_forward_tag_return_values<'a>(
     parent_contobj: ir::Value,
     child_contobj: ir::Value,
 ) {
-    let cont_obj_forward_tag_return_values_buffer = env
-        .builtin_functions
-        .tc_cont_obj_forward_tag_return_values_buffer(&mut builder.func);
-    let vmctx = env.vmctx_val(&mut builder.cursor());
-    builder.ins().call(
-        cont_obj_forward_tag_return_values_buffer,
-        &[vmctx, parent_contobj, child_contobj],
+    call_builtin!(
+        builder,
+        env,
+        tc_cont_obj_forward_tag_return_values_buffer,
+        parent_contobj,
+        child_contobj
     );
 }
 
@@ -1126,8 +1114,7 @@ fn typed_continuations_load_payloads<'a>(
     let mut values = vec![];
 
     if valtypes.len() > 0 {
-        let vmctx = env.vmctx(builder.cursor().func);
-        let vmctx = builder.ins().global_value(env.pointer_type(), vmctx);
+        let vmctx = env.vmctx_val(&mut builder.cursor());
         let vmctx_payloads = tc::Payloads::new(
             vmctx,
             env.offsets.vmctx_typed_continuations_payloads() as i32,
@@ -1253,8 +1240,7 @@ pub(crate) fn typed_continuations_store_payloads<'a>(
 ) {
     assert_eq!(values.len(), valtypes.len());
     if valtypes.len() > 0 {
-        let vmctx = env.vmctx(builder.cursor().func);
-        let vmctx = builder.ins().global_value(env.pointer_type(), vmctx);
+        let vmctx = env.vmctx_val(&mut builder.cursor());
         let payloads = tc::Payloads::new(
             vmctx,
             env.offsets.vmctx_typed_continuations_payloads() as i32,
@@ -1272,8 +1258,7 @@ pub(crate) fn typed_continuations_load_continuation_object<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
 ) -> ir::Value {
-    let vmctx = env.vmctx(builder.cursor().func);
-    let vmctx = builder.ins().global_value(env.pointer_type(), vmctx);
+    let vmctx = env.vmctx_val(&mut builder.cursor());
     let vmctx = tc::VMContext::new(vmctx, env.pointer_type());
     let active_stack_chain = vmctx.load_stack_chain(env, builder);
     active_stack_chain.unwrap_continuation_or_trap(
@@ -1293,13 +1278,8 @@ pub(crate) fn translate_cont_new<'a>(
 ) -> WasmResult<ir::Value> {
     let nargs = builder.ins().iconst(I32, arg_types.len() as i64);
     let nreturns = builder.ins().iconst(I32, return_types.len() as i64);
-
-    let pos = &mut builder.cursor();
-    let cont_new = env.builtin_functions.tc_cont_new(&mut pos.func);
-    let vmctx = env.vmctx_val(pos);
-
-    let call_inst = pos.ins().call(cont_new, &[vmctx, func, nargs, nreturns]);
-    Ok(*pos.func.dfg.inst_results(call_inst).first().unwrap())
+    call_builtin!(result = (builder, env, tc_cont_new, func, nargs, nreturns));
+    Ok(result)
 }
 
 pub(crate) fn translate_resume<'a>(
@@ -1316,8 +1296,7 @@ pub(crate) fn translate_resume<'a>(
     let switch_block = builder.create_block();
     let forwarding_block = builder.create_block();
 
-    let vmctx = env.vmctx(builder.func);
-    let vmctx = builder.ins().global_value(env.pointer_type(), vmctx);
+    let vmctx = env.vmctx_val(&mut builder.cursor());
 
     // Preamble: Part of previously active block
 
@@ -1376,14 +1355,15 @@ pub(crate) fn translate_resume<'a>(
         let co = tc::ContinuationObject::new(resume_contobj, env.pointer_type());
         co.set_state(builder, wasmtime_continuations::State::Invoked);
 
-        let mut pos = &mut builder.cursor();
-        let resume = env.builtin_functions.tc_resume(&mut pos.func);
-        let vmctx_val = env.vmctx_val(&mut pos);
-        let call_inst = pos.ins().call(
-            resume,
-            &[vmctx_val, resume_contobj, parent_stacks_limit_pointer],
+        call_builtin!(
+            result = (
+                builder,
+                env,
+                tc_resume,
+                resume_contobj,
+                parent_stacks_limit_pointer
+            )
         );
-        let result = *pos.func.dfg.inst_results(call_inst).first().unwrap();
 
         emit_debug_println!(
             env,
@@ -1547,9 +1527,7 @@ pub(crate) fn translate_resume<'a>(
         // We suspend, thus deferring handling to the parent.
         // We do nothing about tag *parameters*, these remain unchanged within the
         // payload buffer associated with the whole VMContext.
-        let suspend = env.builtin_functions.tc_suspend(&mut builder.func);
-        let vmctx = env.vmctx_val(&mut builder.cursor());
-        builder.ins().call(suspend, &[vmctx, tag]);
+        call_builtin!(builder, env, tc_suspend, tag);
 
         // "Tag return values" (i.e., values provided by cont.bind or
         // resume to the continuation) are actually stored in
@@ -1612,8 +1590,7 @@ pub(crate) fn translate_suspend<'a>(
     builder: &mut FunctionBuilder,
     tag_index: ir::Value,
 ) -> ir::Value {
-    let suspend = env.builtin_functions.tc_suspend(&mut builder.func);
-    let vmctx = env.vmctx_val(&mut builder.cursor());
-    builder.ins().call(suspend, &[vmctx, tag_index]);
-    return vmctx;
+    call_builtin!(builder, env, tc_suspend, tag_index);
+    // TODO(dhil): We should change the interface of `translate_suspend` to return nothing.
+    return env.vmctx_val(&mut builder.cursor());
 }
