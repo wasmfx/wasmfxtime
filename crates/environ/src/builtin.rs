@@ -128,7 +128,7 @@ macro_rules! foreach_builtin_function {
 
             // TC baseline
             // Baseline resume
-            tc_baseline_resume(vmctx: vmctx, contref: pointer) -> i32;
+            tc_baseline_resume(vmctx: vmctx, contobj: pointer) -> i32;
             // Baseline suspend
             tc_baseline_suspend(vmctx: vmctx, tag: i32);
             // Like suspend, but forwards handling.
@@ -136,7 +136,7 @@ macro_rules! foreach_builtin_function {
             // Baseline cont.new
             tc_baseline_cont_new(vmctx: vmctx, r: pointer, param_count: i64, result_count: i64) -> pointer;
             // Baseline continuation drop
-            tc_baseline_drop_continuation_object(vmctx: vmctx, r: pointer);
+            tc_baseline_drop_continuation_reference(vmctx: vmctx, r: pointer);
             // Baseline continuation arguments pointer
             tc_baseline_continuation_arguments_ptr(vmctx: vmctx, r: pointer, nargs: i64) -> pointer;
             // Baseline continuation values pointer
