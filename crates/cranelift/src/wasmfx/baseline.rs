@@ -369,7 +369,7 @@ pub(crate) fn translate_resume<'a>(
         call_builtin!(
             builder,
             env,
-            tc_baseline_drop_continuation_object(resumee_fiber)
+            tc_baseline_drop_continuation_reference(resumee_fiber)
         );
 
         return values;
