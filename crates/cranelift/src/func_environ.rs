@@ -33,7 +33,7 @@ cfg_if::cfg_if! {
 
 /// A struct with an `Option<ir::FuncRef>` member for every builtin
 /// function, to de-duplicate constructing/getting its function.
-struct BuiltinFunctions {
+pub(crate) struct BuiltinFunctions {
     types: BuiltinFunctionSignatures,
 
     builtins:
@@ -78,7 +78,7 @@ macro_rules! declare_function_signatures {
     )*) => {
         $(impl BuiltinFunctions {
             $( #[$attr] )*
-            fn $name(&mut self, func: &mut Function) -> ir::FuncRef {
+            pub(crate) fn $name(&mut self, func: &mut Function) -> ir::FuncRef {
                 self.load_builtin(func, BuiltinFunctionIndex::$name())
             }
         })*
@@ -222,7 +222,8 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         })
     }
 
-    fn vmctx_val(&mut self, pos: &mut FuncCursor<'_>) -> ir::Value {
+    // NOTE(dhil): pub for use in crate::wasmfx::* modules
+    pub(crate) fn vmctx_val(&mut self, pos: &mut FuncCursor<'_>) -> ir::Value {
         let pointer_type = self.pointer_type();
         let vmctx = self.vmctx(&mut pos.func);
         pos.ins().global_value(pointer_type, vmctx)
@@ -259,34 +260,6 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             ),
             x => panic!("get_memory_atomic_wait unsupported type: {:?}", x),
         }
-    }
-
-    /// Translates load of builtin function and returns a pair of values `vmctx`
-    /// and address of the loaded function.
-    /// NOTE(frank-emrich) pub for use in crate::wasmfx::* modules
-    pub(crate) fn translate_load_builtin_function_address(
-        &mut self,
-        pos: &mut FuncCursor<'_>,
-        callee_func_idx: BuiltinFunctionIndex,
-    ) -> (ir::Value, ir::Value) {
-        // We use an indirect call so that we don't have to patch the code at runtime.
-        let pointer_type = self.pointer_type();
-        let vmctx = self.vmctx(&mut pos.func);
-        let base = pos.ins().global_value(pointer_type, vmctx);
-
-        let mem_flags = ir::MemFlags::trusted().with_readonly();
-
-        // Load the base of the array of builtin functions
-        let array_offset = i32::try_from(self.offsets.vmctx_builtin_functions()).unwrap();
-        let array_addr = pos.ins().load(pointer_type, mem_flags, base, array_offset);
-
-        // Load the callee address.
-        let body_offset = i32::try_from(callee_func_idx.index() * pointer_type.bytes()).unwrap();
-        let func_addr = pos
-            .ins()
-            .load(pointer_type, mem_flags, array_addr, body_offset);
-
-        (base, func_addr)
     }
 
     /// Generate code to increment or decrement the given `externref`'s
@@ -960,38 +933,6 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             .func_names
             .get(&func_index)
             .map(|s| *s)
-    }
-
-    // Used by the typed continuations API.
-    pub fn generate_builtin_call(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        index: BuiltinFunctionIndex,
-        sig: ir::SigRef,
-        args: Vec<ir::Value>,
-    ) -> (ir::Value, ir::Value) {
-        let mut args = args;
-        let (vmctx, addr) =
-            self.translate_load_builtin_function_address(&mut builder.cursor(), index);
-        args.insert(0, vmctx);
-        let call_inst = builder.ins().call_indirect(sig, addr, &args);
-        let result_value = builder.func.dfg.first_result(call_inst);
-        return (vmctx, result_value);
-    }
-
-    pub fn generate_builtin_call_no_return_val(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        index: BuiltinFunctionIndex,
-        sig: ir::SigRef,
-        args: Vec<ir::Value>,
-    ) -> ir::Value {
-        let mut args = args;
-        let (vmctx, addr) =
-            self.translate_load_builtin_function_address(&mut builder.cursor(), index);
-        args.insert(0, vmctx);
-        builder.ins().call_indirect(sig, addr, &args);
-        return vmctx;
     }
 
     /// Proof-carrying code: create a memtype describing an empty
