@@ -71,7 +71,7 @@ pub(crate) mod typed_continuation_helpers {
                 let len = s.len();
                 let len = builder.ins().iconst(I64, len as i64);
 
-                call_builtin!(builder, env, tc_print_str, ptr, len);
+                call_builtin!(builder, env, tc_print_str(ptr, len));
             }
         };
         let print_int = |env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -83,12 +83,12 @@ pub(crate) mod typed_continuation_helpers {
                 I64 => val,
                 _ => panic!("Cannot print type {}", ty),
             };
-            call_builtin!(builder, env, tc_print_int, val);
+            call_builtin!(builder, env, tc_print_int(val));
         };
         let print_pointer = |env: &mut crate::func_environ::FuncEnvironment<'a>,
                              builder: &mut FunctionBuilder,
                              ptr: ir::Value| {
-            call_builtin!(builder, env, tc_print_pointer, ptr);
+            call_builtin!(builder, env, tc_print_pointer(ptr));
         };
 
         if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
@@ -552,7 +552,7 @@ pub(crate) mod typed_continuation_helpers {
             let size = builder.ins().imul_imm(capacity, entry_size as i64);
             let ptr = self.get_data(builder);
 
-            call_builtin!(builder, env, tc_deallocate, ptr, size, align);
+            call_builtin!(builder, env, tc_deallocate(ptr, size, align));
 
             self.set_capacity(builder, zero32);
             self.set_length(builder, zero32);
@@ -632,7 +632,7 @@ pub(crate) mod typed_continuation_helpers {
 
                 let ptr = self.get_data(builder);
                 call_builtin!(
-                    new_data = (builder, env, tc_reallocate, ptr, old_size, new_size, align)
+                    builder, env, let new_data = tc_reallocate(ptr, old_size, new_size, align)
                 );
 
                 self.set_capacity(builder, required_capacity);
@@ -1100,9 +1100,7 @@ fn typed_continuations_forward_tag_return_values<'a>(
     call_builtin!(
         builder,
         env,
-        tc_cont_obj_forward_tag_return_values_buffer,
-        parent_contobj,
-        child_contobj
+        tc_cont_obj_forward_tag_return_values_buffer(parent_contobj, child_contobj)
     );
 }
 
@@ -1278,7 +1276,7 @@ pub(crate) fn translate_cont_new<'a>(
 ) -> WasmResult<ir::Value> {
     let nargs = builder.ins().iconst(I32, arg_types.len() as i64);
     let nreturns = builder.ins().iconst(I32, return_types.len() as i64);
-    call_builtin!(result = (builder, env, tc_cont_new, func, nargs, nreturns));
+    call_builtin!(builder, env, let result = tc_cont_new(func, nargs, nreturns));
     Ok(result)
 }
 
@@ -1356,13 +1354,12 @@ pub(crate) fn translate_resume<'a>(
         co.set_state(builder, wasmtime_continuations::State::Invoked);
 
         call_builtin!(
-            result = (
-                builder,
-                env,
-                tc_resume,
+            builder,
+            env,
+            let result =
+                tc_resume(
                 resume_contobj,
-                parent_stacks_limit_pointer
-            )
+                parent_stacks_limit_pointer)
         );
 
         emit_debug_println!(
@@ -1527,7 +1524,7 @@ pub(crate) fn translate_resume<'a>(
         // We suspend, thus deferring handling to the parent.
         // We do nothing about tag *parameters*, these remain unchanged within the
         // payload buffer associated with the whole VMContext.
-        call_builtin!(builder, env, tc_suspend, tag);
+        call_builtin!(builder, env, tc_suspend(tag));
 
         // "Tag return values" (i.e., values provided by cont.bind or
         // resume to the continuation) are actually stored in
@@ -1590,7 +1587,7 @@ pub(crate) fn translate_suspend<'a>(
     builder: &mut FunctionBuilder,
     tag_index: ir::Value,
 ) -> ir::Value {
-    call_builtin!(builder, env, tc_suspend, tag_index);
+    call_builtin!(builder, env, tc_suspend(tag_index));
     // TODO(dhil): We should change the interface of `translate_suspend` to return nothing.
     return env.vmctx_val(&mut builder.cursor());
 }
