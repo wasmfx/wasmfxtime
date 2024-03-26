@@ -15,7 +15,7 @@ pub(crate) fn typed_continuations_cont_ref_get_cont_obj<'a>(
     } else {
         let cont_ref_get_cont_obj = env
             .builtin_functions
-            .tc_cont_ref_get_cont_obj(&mut builder.func);
+            .tc_cont_ref_get_cont_Xref(&mut builder.func);
         let vmctx = env.vmctx_val(&mut builder.cursor());
         let call_inst = builder.ins().call(cont_ref_get_cont_obj, &[vmctx, contref]);
         let result = *builder.func.dfg.inst_results(call_inst).first().unwrap();

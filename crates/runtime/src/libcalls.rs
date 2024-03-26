@@ -789,7 +789,7 @@ fn tc_new_cont_ref(_instance: &mut Instance, contXref: *mut u8) -> *mut u8 {
         .cast::<u8>()
 }
 
-fn tc_cont_ref_get_cont_obj(
+fn tc_cont_ref_get_cont_Xref(
     _instance: &mut Instance,
     contref: *mut u8,
 ) -> Result<*mut u8, TrapReason> {
