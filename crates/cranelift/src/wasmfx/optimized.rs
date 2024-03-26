@@ -11,7 +11,7 @@ use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
 use wasmtime_environ::PtrSize;
 
 #[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_cont_ref_get_cont_obj;
+pub(crate) use shared::typed_continuations_cont_ref_get_cont_Xref;
 #[allow(unused_imports)]
 pub(crate) use shared::typed_continuations_new_cont_ref;
 
@@ -333,12 +333,12 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         pub fn args(&self) -> Payloads {
-            let offset = wasmtime_continuations::offsets::vm_cont_ref::ARGS;
+            let offset = wasmtime_continuations::offsets::vm_cont_Xref::ARGS;
             Payloads::new(self.address, offset as i32, self.pointer_type)
         }
 
         pub fn tag_return_values(&self) -> Payloads {
-            let offset = wasmtime_continuations::offsets::vm_cont_ref::TAG_RETURN_VALUES;
+            let offset = wasmtime_continuations::offsets::vm_cont_Xref::TAG_RETURN_VALUES;
             Payloads::new(self.address, offset as i32, self.pointer_type)
         }
 
@@ -346,7 +346,7 @@ pub(crate) mod typed_continuation_helpers {
         /// which is represented using the `State` enum.
         fn load_state(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let mem_flags = ir::MemFlags::trusted();
-            let offset = wasmtime_continuations::offsets::vm_cont_ref::STATE as i32;
+            let offset = wasmtime_continuations::offsets::vm_cont_Xref::STATE as i32;
 
             // Let's make sure that we still represent the State enum as i32.
             debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
@@ -361,7 +361,7 @@ pub(crate) mod typed_continuation_helpers {
             state: wasmtime_continuations::State,
         ) {
             let mem_flags = ir::MemFlags::trusted();
-            let offset = wasmtime_continuations::offsets::vm_cont_ref::STATE as i32;
+            let offset = wasmtime_continuations::offsets::vm_cont_Xref::STATE as i32;
 
             // Let's make sure that we still represent the State enum as i32.
             debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
@@ -419,7 +419,7 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
             new_stack_chain: &StackChain,
         ) {
-            let offset = wasmtime_continuations::offsets::vm_cont_ref::PARENT_CHAIN as i32;
+            let offset = wasmtime_continuations::offsets::vm_cont_Xref::PARENT_CHAIN as i32;
             new_stack_chain.store(env, builder, self.address, offset)
         }
     }
@@ -984,7 +984,7 @@ pub(crate) mod typed_continuation_helpers {
             // Since a `VMContRef` starts with an (inlined) StackLimits
             // object at offset 0, we actually have in both cases that `ptr` is
             // now the address of the beginning of a StackLimits object.
-            debug_assert_eq!(o::vm_cont_ref::LIMITS, 0);
+            debug_assert_eq!(o::vm_cont_Xref::LIMITS, 0);
             ptr
         }
 
@@ -1252,7 +1252,7 @@ pub(crate) fn typed_continuations_store_payloads<'a>(
     }
 }
 
-pub(crate) fn typed_continuations_load_continuation_object<'a>(
+pub(crate) fn typed_continuations_load_continuation_Xreference<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
 ) -> ir::Value {
@@ -1300,7 +1300,7 @@ pub(crate) fn translate_resume<'a>(
 
     let (resume_contXref, parent_stack_chain) = {
         let resume_contXref =
-            shared::typed_continuations_cont_ref_get_cont_obj(env, builder, contref);
+            shared::typed_continuations_cont_ref_get_cont_Xref(env, builder, contref);
 
         if resume_args.len() > 0 {
             // We store the arguments in the `VMContRef` to be resumed.

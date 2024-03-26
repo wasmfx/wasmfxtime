@@ -11,7 +11,7 @@ use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
 use wasmtime_environ::PtrSize;
 
 #[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_cont_ref_get_cont_obj;
+pub(crate) use shared::typed_continuations_cont_ref_get_cont_Xref;
 #[allow(unused_imports)]
 pub(crate) use shared::typed_continuations_new_cont_ref;
 
@@ -201,7 +201,7 @@ pub(crate) fn translate_resume<'a>(
     // Prelude: Push the continuation arguments.
     {
         let resumee_fiber =
-            shared::typed_continuations_cont_ref_get_cont_obj(env, builder, resumee_ref);
+            shared::typed_continuations_cont_ref_get_cont_Xref(env, builder, resumee_ref);
         if resume_args.len() > 0 {
             let nargs = builder.ins().iconst(I64, resume_args.len() as i64);
 

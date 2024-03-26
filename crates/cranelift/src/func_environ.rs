@@ -2863,12 +2863,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     }
 
     /// TODO
-    fn typed_continuations_cont_ref_get_cont_obj(
+    fn typed_continuations_cont_ref_get_cont_Xref(
         &mut self,
         builder: &mut FunctionBuilder,
         contref: ir::Value,
     ) -> ir::Value {
-        wasmfx_impl::typed_continuations_cont_ref_get_cont_obj(self, builder, contref)
+        wasmfx_impl::typed_continuations_cont_ref_get_cont_Xref(self, builder, contref)
     }
 
     /// TODO
@@ -2898,11 +2898,11 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         wasmfx_impl::typed_continuations_store_payloads(self, builder, valtypes, values)
     }
 
-    fn typed_continuations_load_continuation_object(
+    fn typed_continuations_load_continuation_Xreference(
         &mut self,
         builder: &mut FunctionBuilder,
     ) -> ir::Value {
-        wasmfx_impl::typed_continuations_load_continuation_object(self, builder)
+        wasmfx_impl::typed_continuations_load_continuation_Xreference(self, builder)
     }
 
     fn typed_continuations_new_cont_ref(

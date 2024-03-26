@@ -793,7 +793,7 @@ fn tc_cont_ref_get_cont_Xref(
     _instance: &mut Instance,
     contref: *mut u8,
 ) -> Result<*mut u8, TrapReason> {
-    let ans = crate::continuation::cont_ref_get_cont_obj(
+    let ans = crate::continuation::cont_ref_get_cont_Xref(
         contref.cast::<crate::continuation::ContinuationReference>(),
     )?;
     Ok(ans.cast::<u8>())

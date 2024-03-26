@@ -682,9 +682,9 @@ pub trait FuncEnvironment: TargetEnvironment {
     /// TODO
     fn tag_returns(&self, tag_index: u32) -> &[wasmtime_types::WasmValType];
 
-    /// Returns a pointer to the currently running continuation object.
+    /// Returns a pointer to the currently running continuation Xreference.
     /// Traps if not currently running inside a continuation.
-    fn typed_continuations_load_continuation_object(
+    fn typed_continuations_load_continuation_Xreference(
         &mut self,
         builder: &mut FunctionBuilder,
     ) -> ir::Value;
@@ -697,7 +697,7 @@ pub trait FuncEnvironment: TargetEnvironment {
     ) -> ir::Value;
 
     /// TODO
-    fn typed_continuations_cont_ref_get_cont_obj(
+    fn typed_continuations_cont_ref_get_cont_Xref(
         &mut self,
         builder: &mut FunctionBuilder,
         contref: ir::Value,

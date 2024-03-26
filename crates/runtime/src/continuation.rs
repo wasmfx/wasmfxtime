@@ -194,7 +194,7 @@ pub struct ContinuationReference(pub Option<*mut VMContRef>);
 
 /// TODO
 #[inline(always)]
-pub fn cont_ref_get_cont_obj(
+pub fn cont_ref_get_cont_Xref(
     contref: *mut ContinuationReference,
 ) -> Result<*mut VMContRef, TrapReason> {
     //FIXME rename to indicate that this invalidates the cont ref
@@ -270,7 +270,7 @@ pub fn new_cont_ref(contXref: *mut VMContRef) -> *mut ContinuationReference {
 /// TODO
 #[inline(always)]
 pub fn drop_cont_obj(contXref: *mut VMContRef) {
-    // Note that continuation objects do not own their parents, hence we ignore
+    // Note that continuation Xreferences do not own their parents, hence we ignore
     // parent fields here.
 
     let contXref: Box<VMContRef> = unsafe { Box::from_raw(contXref) };
@@ -643,7 +643,7 @@ pub mod baseline {
     /// Deallocates a gives continuation reference.
     #[inline(always)]
     pub fn drop_continuation_reference(_instance: &mut Instance, contref: *mut VMContRef) {
-        // Note that continuation objects do not own their parents, so
+        // Note that continuation Xreferences do not own their parents, so
         // we let the parent object leak.
         let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
         let _: Box<ContinuationFiber> = contref.fiber;
@@ -841,28 +841,19 @@ fn offset_and_size_constants() {
 
     assert_eq!(
         memoffset::offset_of!(VMContRef, limits),
-        continuation_object::LIMITS
+        vm_cont_Xref::LIMITS
     );
     assert_eq!(
         memoffset::offset_of!(VMContRef, parent_chain),
-        continuation_object::PARENT_CHAIN
+        vm_cont_Xref::PARENT_CHAIN
     );
-    assert_eq!(
-        memoffset::offset_of!(VMContRef, fiber),
-        continuation_object::FIBER
-    );
-    assert_eq!(
-        memoffset::offset_of!(VMContRef, args),
-        continuation_object::ARGS
-    );
+    assert_eq!(memoffset::offset_of!(VMContRef, fiber), vm_cont_Xref::FIBER);
+    assert_eq!(memoffset::offset_of!(VMContRef, args), vm_cont_Xref::ARGS);
     assert_eq!(
         memoffset::offset_of!(VMContRef, tag_return_values),
-        continuation_object::TAG_RETURN_VALUES
+        vm_cont_Xref::TAG_RETURN_VALUES
     );
-    assert_eq!(
-        memoffset::offset_of!(VMContRef, state),
-        continuation_object::STATE
-    );
+    assert_eq!(memoffset::offset_of!(VMContRef, state), vm_cont_Xref::STATE);
 
     assert_eq!(
         std::mem::size_of::<ContinuationFiber>(),

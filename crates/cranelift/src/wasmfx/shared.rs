@@ -22,7 +22,7 @@ macro_rules! call_builtin {
 pub(crate) use call_builtin;
 
 /// TODO
-pub(crate) fn typed_continuations_cont_ref_get_cont_obj<'a>(
+pub(crate) fn typed_continuations_cont_ref_get_cont_Xref<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     contref: ir::Value,

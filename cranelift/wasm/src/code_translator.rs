@@ -2580,7 +2580,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let tag_index_val = builder.ins().iconst(I32, *tag_index as i64);
             environ.translate_suspend(builder, tag_index_val);
 
-            let contXref = environ.typed_continuations_load_continuation_object(builder);
+            let contXref = environ.typed_continuations_load_continuation_Xreference(builder);
 
             let return_types = environ.tag_returns(*tag_index).to_vec();
             let return_values =
@@ -2598,7 +2598,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
 
             let (original_contref, args) = state.peekn(arg_count + 1).split_last().unwrap();
             let contXref =
-                environ.typed_continuations_cont_ref_get_cont_obj(builder, *original_contref);
+                environ.typed_continuations_cont_ref_get_cont_Xref(builder, *original_contref);
 
             let src_arity_value = builder.ins().iconst(I32, src_arity as i64);
             environ.typed_continuations_store_resume_args(builder, args, src_arity_value, contXref);

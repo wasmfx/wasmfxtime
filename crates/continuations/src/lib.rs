@@ -280,7 +280,7 @@ pub mod offsets {
 
     /// Offsets of fields in `wasmtime_runtime::continuation::ContinuationObject`.
     /// We uses tests there to ensure these values are correct.
-    pub mod vm_cont_ref {
+    pub mod vm_cont_Xref {
         use crate::Payloads;
 
         /// Offset of `limits` field
