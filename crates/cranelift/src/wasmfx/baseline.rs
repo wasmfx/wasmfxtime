@@ -303,8 +303,8 @@ pub(crate) fn translate_resume<'a>(
         let mut args = typed_continuations_load_payloads(env, builder, &param_types);
 
         // Create and push the continuation object.
-        let resumee_ref = shared::typed_continuations_new_cont_obj(env, builder, resumee_fiber);
-        args.push(resumee_ref);
+        let resumee_obj = shared::typed_continuations_new_cont_obj(env, builder, resumee_fiber);
+        args.push(resumee_obj);
 
         // Finally, emit the jump to `label`.
         builder.ins().jump(label, &args);
