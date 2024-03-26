@@ -93,25 +93,25 @@ macro_rules! foreach_builtin_function {
             tc_cont_new(vmctx: vmctx, r: pointer, param_count: i32, result_count: i32) -> pointer;
             // Resumes a continuation. The result value is of type
             // wasmtime_continuations::SwitchDirection.
-            tc_resume(vmctx: vmctx, contobj: pointer, parent_stack_limits: pointer) -> i64;
+            tc_resume(vmctx: vmctx, contXref: pointer, parent_stack_limits: pointer) -> i64;
             // Suspends a continuation.
             tc_suspend(vmctx: vmctx, tag: i32);
             // Returns the continuation object corresponding to the given continuation reference.
             tc_cont_ref_get_cont_obj(vmctx: vmctx, contref: pointer) -> pointer;
             // Drops the given continuation object. Currently unused.
-            //cont_obj_drop(vmctx: vmctx, contobj: pointer);
+            //cont_obj_drop(vmctx: vmctx, contXref: pointer);
             // Creates a new continuation reference.
-            tc_new_cont_ref(vmctx: vmctx, contobj: pointer) -> pointer;
+            tc_new_cont_ref(vmctx: vmctx, contXref: pointer) -> pointer;
 
 
-            // Sets the tag return values of `child_contobj` to those of `parent_contobj`.
+            // Sets the tag return values of `child_contXref` to those of `parent_contXref`.
             // This is implemented by exchanging the pointers to the underlying buffers.
-            // `child_contobj` must not currently have a tag return value buffer.
-            // `parent_contobj` may or may not have one.
-            tc_cont_obj_forward_tag_return_values_buffer(vmctx: vmctx, parent_contobj: pointer, child_contobj : pointer);
+            // `child_contXref` must not currently have a tag return value buffer.
+            // `parent_contXref` may or may not have one.
+            tc_cont_obj_forward_tag_return_values_buffer(vmctx: vmctx, parent_contXref: pointer, child_contXref : pointer);
 
             // TODO
-            tc_drop_cont_obj(vmctx: vmctx, contobj: pointer);
+            tc_drop_cont_obj(vmctx: vmctx, contXref: pointer);
 
             // General-purpose allocation. Only used by typed-continuations
             // code at the moment.
@@ -128,7 +128,7 @@ macro_rules! foreach_builtin_function {
 
             // TC baseline
             // Baseline resume
-            tc_baseline_resume(vmctx: vmctx, contobj: pointer) -> i32;
+            tc_baseline_resume(vmctx: vmctx, contXref: pointer) -> i32;
             // Baseline suspend
             tc_baseline_suspend(vmctx: vmctx, tag: i32);
             // Like suspend, but forwards handling.

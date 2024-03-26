@@ -655,7 +655,7 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn typed_continuations_load_tag_return_values(
         &mut self,
         builder: &mut FunctionBuilder,
-        contobj: ir::Value,
+        contXref: ir::Value,
         valtypes: &[wasmtime_types::WasmValType],
     ) -> std::vec::Vec<ir::Value>;
 
@@ -673,7 +673,7 @@ pub trait FuncEnvironment: TargetEnvironment {
         builder: &mut FunctionBuilder,
         values: &[ir::Value],
         remaining_arg_count: ir::Value,
-        contobj: ir::Value,
+        contXref: ir::Value,
     );
 
     /// TODO
@@ -693,7 +693,7 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn typed_continuations_new_cont_ref(
         &mut self,
         builder: &mut FunctionBuilder,
-        contobj_addr: ir::Value,
+        contXref_addr: ir::Value,
     ) -> ir::Value;
 
     /// TODO

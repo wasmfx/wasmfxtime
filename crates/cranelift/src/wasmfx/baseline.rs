@@ -50,7 +50,7 @@ fn typed_continuations_load_payloads<'a>(
 pub(crate) fn typed_continuations_load_tag_return_values<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    contobj: ir::Value,
+    contXref: ir::Value,
     valtypes: &[WasmValType],
 ) -> Vec<ir::Value> {
     let _memflags = ir::MemFlags::trusted();
@@ -65,7 +65,7 @@ pub(crate) fn typed_continuations_load_tag_return_values<'a>(
         let vmctx = env.vmctx_val(&mut builder.cursor());
         let call_inst = builder
             .ins()
-            .call(continuation_arguments_ptr, &[vmctx, contobj, nargs]);
+            .call(continuation_arguments_ptr, &[vmctx, contXref, nargs]);
         let args_ptr = *builder.func.dfg.inst_results(call_inst).first().unwrap();
 
         // Load arguments.
@@ -88,7 +88,7 @@ pub(crate) fn typed_continuations_load_tag_return_values<'a>(
         let clear_arguments = env
             .builtin_functions
             .tc_baseline_clear_arguments(&mut builder.func);
-        builder.ins().call(clear_arguments, &[vmctx, contobj]);
+        builder.ins().call(clear_arguments, &[vmctx, contXref]);
 
         return args;
     }
@@ -102,7 +102,7 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
     builder: &mut FunctionBuilder,
     values: &[ir::Value],
     _remaining_arg_count: ir::Value,
-    contobj: ir::Value,
+    contXref: ir::Value,
 ) {
     if values.len() > 0 {
         // Retrieve the pointer to the arguments buffer.
@@ -113,7 +113,7 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
         let vmctx = env.vmctx_val(&mut builder.cursor());
         let call_inst = builder
             .ins()
-            .call(continuation_arguments_ptr, &[vmctx, contobj, nargs]);
+            .call(continuation_arguments_ptr, &[vmctx, contXref, nargs]);
         let args_ptr = *builder.func.dfg.inst_results(call_inst).first().unwrap();
 
         // Store arguments.

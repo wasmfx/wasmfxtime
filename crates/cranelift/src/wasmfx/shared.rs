@@ -10,7 +10,7 @@ pub(crate) fn typed_continuations_cont_ref_get_cont_obj<'a>(
     contref: ir::Value,
 ) -> ir::Value {
     if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
-        // The "contref" is a contobj already
+        // The "contref" is a contXref already
         return contref;
     } else {
         let cont_ref_get_cont_obj = env
@@ -26,14 +26,14 @@ pub(crate) fn typed_continuations_cont_ref_get_cont_obj<'a>(
 pub(crate) fn typed_continuations_new_cont_ref<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    contobj_addr: ir::Value,
+    contXref_addr: ir::Value,
 ) -> ir::Value {
     if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
-        return contobj_addr;
+        return contXref_addr;
     } else {
         let new_cont_ref = env.builtin_functions.tc_new_cont_ref(&mut builder.func);
         let vmctx = env.vmctx_val(&mut builder.cursor());
-        let call_inst = builder.ins().call(new_cont_ref, &[vmctx, contobj_addr]);
+        let call_inst = builder.ins().call(new_cont_ref, &[vmctx, contXref_addr]);
         let result = *builder.func.dfg.inst_results(call_inst).first().unwrap();
         return result;
     }
@@ -43,9 +43,9 @@ pub(crate) fn typed_continuations_new_cont_ref<'a>(
 pub(crate) fn typed_continuations_drop_cont_obj<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    contobj: ir::Value,
+    contXref: ir::Value,
 ) {
     let cont_drop_obj = env.builtin_functions.tc_drop_cont_obj(&mut builder.func);
     let vmctx = env.vmctx_val(&mut builder.cursor());
-    builder.ins().call(cont_drop_obj, &[vmctx, contobj]);
+    builder.ins().call(cont_drop_obj, &[vmctx, contXref]);
 }

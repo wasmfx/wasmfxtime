@@ -2856,10 +2856,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn typed_continuations_load_tag_return_values(
         &mut self,
         builder: &mut FunctionBuilder,
-        contobj: ir::Value,
+        contXref: ir::Value,
         valtypes: &[WasmValType],
     ) -> Vec<ir::Value> {
-        wasmfx_impl::typed_continuations_load_tag_return_values(self, builder, contobj, valtypes)
+        wasmfx_impl::typed_continuations_load_tag_return_values(self, builder, contXref, valtypes)
     }
 
     /// TODO
@@ -2877,14 +2877,14 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         values: &[ir::Value],
         remaining_arg_count: ir::Value,
-        contobj: ir::Value,
+        contXref: ir::Value,
     ) {
         wasmfx_impl::typed_continuations_store_resume_args(
             self,
             builder,
             values,
             remaining_arg_count,
-            contobj,
+            contXref,
         )
     }
 
@@ -2908,9 +2908,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn typed_continuations_new_cont_ref(
         &mut self,
         builder: &mut FunctionBuilder,
-        contobj_addr: ir::Value,
+        contXref_addr: ir::Value,
     ) -> ir::Value {
-        wasmfx_impl::typed_continuations_new_cont_ref(self, builder, contobj_addr)
+        wasmfx_impl::typed_continuations_new_cont_ref(self, builder, contXref_addr)
     }
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {

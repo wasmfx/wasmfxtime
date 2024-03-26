@@ -220,11 +220,11 @@ pub fn cont_ref_get_cont_obj(
             "Continuation is already taken",
         ))), // TODO(dhil): presumably we can set things up such that
         // we always read from a non-null reference.
-        Some(contobj) => {
+        Some(contXref) => {
             unsafe {
                 *contref = ContinuationReference(None);
             }
-            Ok(contobj.cast::<VMContRef>())
+            Ok(contXref.cast::<VMContRef>())
         }
     }
 }
@@ -258,31 +258,31 @@ pub fn cont_obj_forward_tag_return_values_buffer(
 
 /// TODO
 #[inline(always)]
-pub fn new_cont_ref(contobj: *mut VMContRef) -> *mut ContinuationReference {
+pub fn new_cont_ref(contXref: *mut VMContRef) -> *mut ContinuationReference {
     // If this is enabled, we should never call this function.
     assert!(!cfg!(
         feature = "unsafe_disable_continuation_linearity_check"
     ));
 
-    let contref = Box::new(ContinuationReference(Some(contobj)));
+    let contref = Box::new(ContinuationReference(Some(contXref)));
     Box::into_raw(contref)
 }
 
 /// TODO
 #[inline(always)]
-pub fn drop_cont_obj(contobj: *mut VMContRef) {
+pub fn drop_cont_obj(contXref: *mut VMContRef) {
     // Note that continuation objects do not own their parents, hence we ignore
     // parent fields here.
 
-    let contobj: Box<VMContRef> = unsafe { Box::from_raw(contobj) };
+    let contXref: Box<VMContRef> = unsafe { Box::from_raw(contXref) };
     unsafe {
         let _: Vec<u128> = Vec::from_raw_parts(
-            contobj.args.data,
-            contobj.args.length as usize,
-            contobj.args.capacity as usize,
+            contXref.args.data,
+            contXref.args.length as usize,
+            contXref.args.capacity as usize,
         );
     };
-    let payloads = &contobj.tag_return_values;
+    let payloads = &contXref.tag_return_values;
     let _: Vec<u128> = unsafe {
         Vec::from_raw_parts(
             payloads.data,
@@ -336,7 +336,7 @@ pub fn cont_new(
 
     let tsp = fiber.stack().top().unwrap();
     let stack_limit = unsafe { tsp.sub(stack_size - red_zone_size) } as usize;
-    let contobj = Box::new(VMContRef {
+    let contXref = Box::new(VMContRef {
         limits: StackLimits::with_stack_limit(stack_limit),
         fiber,
         parent_chain: StackChain::Absent,
@@ -347,8 +347,8 @@ pub fn cont_new(
 
     // TODO(dhil): we need memory clean up of
     // continuation reference objects.
-    let pointer = Box::into_raw(contobj);
-    debug_println!("Created contobj @ {:p}", pointer);
+    let pointer = Box::into_raw(contXref);
+    debug_println!("Created contXref @ {:p}", pointer);
     Ok(pointer)
 }
 
@@ -356,11 +356,11 @@ pub fn cont_new(
 #[inline(always)]
 pub fn resume(
     instance: &mut Instance,
-    contobj: *mut VMContRef,
+    contXref: *mut VMContRef,
     parent_stack_limits: *mut StackLimits,
 ) -> Result<SwitchDirection, TrapReason> {
     let cont = unsafe {
-        contobj.as_ref().ok_or_else(|| {
+        contXref.as_ref().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
                 "Attempt to dereference null ContinuationObject!"
             ))
@@ -374,12 +374,12 @@ pub fn resume(
         // VMContext is non-null and contains a chain of zero or more
         // StackChain::Continuation values followed by StackChain::Main.
         match unsafe { (**chain).0.get_mut() } {
-            StackChain::Continuation(running_contobj) => {
-                debug_assert_eq!(contobj, *running_contobj);
+            StackChain::Continuation(running_contXref) => {
+                debug_assert_eq!(contXref, *running_contXref);
                 debug_println!(
-                    "Resuming contobj @ {:p}, previously running contobj is {:p}",
-                    contobj,
-                    running_contobj
+                    "Resuming contXref @ {:p}, previously running contXref is {:p}",
+                    contXref,
+                    running_contXref
                 )
             }
             _ => {
@@ -406,8 +406,8 @@ pub fn resume(
         (*parent_stack_limits).last_wasm_exit_fp = *runtime_limits.last_wasm_exit_fp.get();
         (*parent_stack_limits).last_wasm_exit_pc = *runtime_limits.last_wasm_exit_pc.get();
 
-        *runtime_limits.stack_limit.get() = (*contobj).limits.stack_limit;
-        *runtime_limits.last_wasm_entry_sp.get() = (*contobj).limits.last_wasm_entry_sp;
+        *runtime_limits.stack_limit.get() = (*contXref).limits.stack_limit;
+        *runtime_limits.last_wasm_entry_sp.get() = (*contXref).limits.last_wasm_entry_sp;
     }
 
     Ok(cont.fiber.resume())
