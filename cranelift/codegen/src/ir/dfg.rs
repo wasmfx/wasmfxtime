@@ -378,12 +378,73 @@ impl DataFlowGraph {
         resolve_aliases(&self.values, value)
     }
 
+    /// Replace all uses of value aliases with their resolved values, and delete
+    /// the aliases.
+    pub fn resolve_all_aliases(&mut self) {
+        let invalid_value = ValueDataPacked::from(ValueData::Alias {
+            ty: types::INVALID,
+            original: Value::reserved_value(),
+        });
+
+        // Rewrite each chain of aliases. Update every alias along the chain
+        // into an alias directly to the final value. Due to updating every
+        // alias that it looks at, this loop runs in time linear in the number
+        // of values.
+        for mut src in self.values.keys() {
+            let value_data = self.values[src];
+            if value_data == invalid_value {
+                continue;
+            }
+            if let ValueData::Alias { mut original, .. } = value_data.into() {
+                // We don't use the type after this, we just need some place to
+                // store the resolved aliases temporarily.
+                let resolved = ValueDataPacked::from(ValueData::Alias {
+                    ty: types::INVALID,
+                    original: resolve_aliases(&self.values, original),
+                });
+                // Walk the chain again, splatting the new alias everywhere.
+                // resolve_aliases panics if there's an alias cycle, so we don't
+                // need to guard against cycles here.
+                loop {
+                    self.values[src] = resolved;
+                    src = original;
+                    if let ValueData::Alias { original: next, .. } = self.values[src].into() {
+                        original = next;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Now aliases don't point to other aliases, so we can replace any use
+        // of an alias with the final value in constant time.
+        for inst in self.insts.0.values_mut() {
+            inst.map_values(&mut self.value_lists, &mut self.jump_tables, |arg| {
+                if let ValueData::Alias { original, .. } = self.values[arg].into() {
+                    original
+                } else {
+                    arg
+                }
+            });
+        }
+
+        // Delete all aliases now that there are no uses left.
+        for value in self.values.values_mut() {
+            if let ValueData::Alias { .. } = ValueData::from(*value) {
+                *value = invalid_value;
+            }
+        }
+    }
+
     /// Resolve all aliases among inst's arguments.
     ///
     /// For each argument of inst which is defined by an alias, replace the
     /// alias with the aliased value.
     pub fn resolve_aliases_in_arguments(&mut self, inst: Inst) {
-        self.map_inst_values(inst, |dfg, arg| resolve_aliases(&dfg.values, arg));
+        self.insts[inst].map_values(&mut self.value_lists, &mut self.jump_tables, |arg| {
+            resolve_aliases(&self.values, arg)
+        });
     }
 
     /// Turn a value into an alias of another.
@@ -732,24 +793,11 @@ impl DataFlowGraph {
     }
 
     /// Map a function over the values of the instruction.
-    pub fn map_inst_values<F>(&mut self, inst: Inst, mut body: F)
+    pub fn map_inst_values<F>(&mut self, inst: Inst, body: F)
     where
-        F: FnMut(&mut DataFlowGraph, Value) -> Value,
+        F: FnMut(Value) -> Value,
     {
-        for i in 0..self.inst_args(inst).len() {
-            let arg = self.inst_args(inst)[i];
-            self.inst_args_mut(inst)[i] = body(self, arg);
-        }
-
-        for block_ix in 0..self.insts[inst].branch_destination(&self.jump_tables).len() {
-            // We aren't changing the size of the args list, so we won't need to write the branch
-            // back to the instruction.
-            let mut block = self.insts[inst].branch_destination(&self.jump_tables)[block_ix];
-            for i in 0..block.args_slice(&self.value_lists).len() {
-                let arg = block.args_slice(&self.value_lists)[i];
-                block.args_slice_mut(&mut self.value_lists)[i] = body(self, arg);
-            }
-        }
+        self.insts[inst].map_values(&mut self.value_lists, &mut self.jump_tables, body);
     }
 
     /// Overwrite the instruction's value references with values from the iterator.
@@ -759,16 +807,9 @@ impl DataFlowGraph {
     where
         I: Iterator<Item = Value>,
     {
-        for arg in self.inst_args_mut(inst) {
-            *arg = values.next().unwrap();
-        }
-
-        for block_ix in 0..self.insts[inst].branch_destination(&self.jump_tables).len() {
-            let mut block = self.insts[inst].branch_destination(&self.jump_tables)[block_ix];
-            for arg in block.args_slice_mut(&mut self.value_lists) {
-                *arg = values.next().unwrap();
-            }
-        }
+        self.insts[inst].map_values(&mut self.value_lists, &mut self.jump_tables, |_| {
+            values.next().unwrap()
+        });
     }
 
     /// Get all value arguments on `inst` as a slice.
