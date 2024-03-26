@@ -293,7 +293,7 @@ pub(crate) mod typed_continuation_helpers {
     }
 
     #[derive(Copy, Clone)]
-    pub struct ContinuationObject {
+    pub struct VMContRef {
         address: ir::Value,
         pointer_type: ir::Type,
     }
@@ -328,29 +328,29 @@ pub(crate) mod typed_continuation_helpers {
         pointer_type: ir::Type,
     }
 
-    impl ContinuationObject {
-        pub fn new(address: ir::Value, pointer_type: ir::Type) -> ContinuationObject {
-            ContinuationObject {
+    impl VMContRef {
+        pub fn new(address: ir::Value, pointer_type: ir::Type) -> VMContRef {
+            VMContRef {
                 address,
                 pointer_type,
             }
         }
 
         pub fn args(&self) -> Payloads {
-            let offset = wasmtime_continuations::offsets::continuation_object::ARGS;
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::ARGS;
             Payloads::new(self.address, offset as i32, self.pointer_type)
         }
 
         pub fn tag_return_values(&self) -> Payloads {
-            let offset = wasmtime_continuations::offsets::continuation_object::TAG_RETURN_VALUES;
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::TAG_RETURN_VALUES;
             Payloads::new(self.address, offset as i32, self.pointer_type)
         }
 
-        /// Loads the value of the `state` field of the continuation object,
+        /// Loads the value of the `state` field of the VMContRef,
         /// which is represented using the `State` enum.
         fn load_state(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let mem_flags = ir::MemFlags::trusted();
-            let offset = wasmtime_continuations::offsets::continuation_object::STATE as i32;
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::STATE as i32;
 
             // Let's make sure that we still represent the State enum as i32.
             debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
@@ -365,7 +365,7 @@ pub(crate) mod typed_continuation_helpers {
             state: wasmtime_continuations::State,
         ) {
             let mem_flags = ir::MemFlags::trusted();
-            let offset = wasmtime_continuations::offsets::continuation_object::STATE as i32;
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::STATE as i32;
 
             // Let's make sure that we still represent the State enum as i32.
             debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
@@ -378,7 +378,7 @@ pub(crate) mod typed_continuation_helpers {
         /// was called at least once on the object).
         pub fn is_invoked(&self, builder: &mut FunctionBuilder) -> ir::Value {
             // TODO(frank-emrich) In the future, we may get rid of the State field
-            // in `ContinuationObject` and try to infer the state by other means.
+            // in `VMContRef` and try to infer the state by other means.
             // For example, we may alllocate the `ContinuationFiber` lazily, doing
             // so only at the point when a continuation is actualy invoked, meaning
             // that we can use the null-ness of the `fiber` field as an indicator
@@ -423,7 +423,7 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
             new_stack_chain: &StackChain,
         ) {
-            let offset = wasmtime_continuations::offsets::continuation_object::PARENT_CHAIN as i32;
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::PARENT_CHAIN as i32;
             new_stack_chain.store(env, builder, self.address, offset)
         }
     }
@@ -995,7 +995,7 @@ pub(crate) mod typed_continuation_helpers {
             // Since a ContinuationObject starts with an (inlined) StackLimits
             // object at offset 0, we actually have in both cases that `ptr` is
             // now the address of the beginning of a StackLimits object.
-            debug_assert_eq!(o::continuation_object::LIMITS, 0);
+            debug_assert_eq!(o::vm_cont_ref::LIMITS, 0);
             ptr
         }
 
@@ -1080,7 +1080,7 @@ fn typed_continuations_load_return_values<'a>(
     valtypes: &[WasmValType],
     contobj: ir::Value,
 ) -> std::vec::Vec<ir::Value> {
-    let co = tc::ContinuationObject::new(contobj, env.pointer_type());
+    let co = tc::VMContRef::new(contobj, env.pointer_type());
     let mut values = vec![];
 
     if valtypes.len() > 0 {
@@ -1155,7 +1155,7 @@ pub(crate) fn typed_continuations_load_tag_return_values<'a>(
     let mut values = vec![];
 
     if valtypes.len() > 0 {
-        let co = tc::ContinuationObject::new(contobj, env.pointer_type());
+        let co = tc::VMContRef::new(contobj, env.pointer_type());
         let tag_return_values = co.tag_return_values();
 
         let payload_ptr = tag_return_values.get_data(builder);
@@ -1195,7 +1195,7 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
         let store_data_block = builder.create_block();
         builder.append_block_param(store_data_block, env.pointer_type());
 
-        let co = tc::ContinuationObject::new(contobj, env.pointer_type());
+        let co = tc::VMContRef::new(contobj, env.pointer_type());
         let is_invoked = co.is_invoked(builder);
         builder
             .ins()
@@ -1335,7 +1335,7 @@ pub(crate) fn translate_resume<'a>(
         let original_stack_chain =
             tc::VMContext::new(vmctx, env.pointer_type()).load_stack_chain(env, builder);
         original_stack_chain.assert_not_absent(env, builder);
-        tc::ContinuationObject::new(resume_contobj, env.pointer_type()).set_parent_stack_chain(
+        tc::VMContRef::new(resume_contobj, env.pointer_type()).set_parent_stack_chain(
             env,
             builder,
             &original_stack_chain,
@@ -1373,7 +1373,7 @@ pub(crate) fn translate_resume<'a>(
         let parent_stacks_limit_pointer = parent_stack_chain.get_stack_limits_ptr(env, builder);
 
         // We mark `resume_contobj` to be invoked
-        let co = tc::ContinuationObject::new(resume_contobj, env.pointer_type());
+        let co = tc::VMContRef::new(resume_contobj, env.pointer_type());
         co.set_state(builder, wasmtime_continuations::State::Invoked);
 
         let mut pos = &mut builder.cursor();
@@ -1512,7 +1512,7 @@ pub(crate) fn translate_resume<'a>(
         // link to `StackChain::Absent`.
         let pointer_type = env.pointer_type();
         let chain = tc::StackChain::absent(builder, pointer_type);
-        tc::ContinuationObject::new(resume_contobj, pointer_type)
+        tc::VMContRef::new(resume_contobj, pointer_type)
             .set_parent_stack_chain(env, builder, &chain);
 
         // Create and push the continuation reference. We only create
@@ -1591,7 +1591,7 @@ pub(crate) fn translate_resume<'a>(
         // parent of the returned continuation (which is now active).
         parent_stack_chain.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
-        let co = tc::ContinuationObject::new(resume_contobj, env.pointer_type());
+        let co = tc::VMContRef::new(resume_contobj, env.pointer_type());
         co.set_state(builder, wasmtime_continuations::State::Returned);
 
         // Load and push the results.
