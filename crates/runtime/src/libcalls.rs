@@ -794,7 +794,7 @@ fn tc_cont_Xobj_get_cont_Xref(
     contXobj: *mut u8,
 ) -> Result<*mut u8, TrapReason> {
     let ans = crate::continuation::cont_Xobj_get_cont_Xref(
-        contXobj.cast::<crate::continuation::ContinuationReference>(),
+        contXobj.cast::<crate::continuation::VMContXObj>(),
     )?;
     Ok(ans.cast::<u8>())
 }

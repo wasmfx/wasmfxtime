@@ -186,17 +186,15 @@ pub struct VMContXRef {
 }
 
 /// M:1 Many-to-one mapping. A single ContinuationObject may be
-/// referenced by multiple ContinuationReference, though, only one
-/// ContinuationReference may hold a non-null reference to the object
+/// referenced by multiple VMContXObj, though, only one
+/// VMContXObj may hold a non-null reference to the object
 /// at a given time.
 #[repr(C)]
-pub struct ContinuationReference(pub Option<*mut VMContXRef>);
+pub struct VMContXObj(pub Option<*mut VMContXRef>);
 
 /// TODO
 #[inline(always)]
-pub fn cont_Xobj_get_cont_Xref(
-    contXobj: *mut ContinuationReference,
-) -> Result<*mut VMContXRef, TrapReason> {
+pub fn cont_Xobj_get_cont_Xref(contXobj: *mut VMContXObj) -> Result<*mut VMContXRef, TrapReason> {
     //FIXME rename to indicate that this invalidates the cont ref
 
     // If this is enabled, we should never call this function.
@@ -209,7 +207,7 @@ pub fn cont_Xobj_get_cont_Xref(
             .as_mut()
             .ok_or_else(|| {
                 TrapReason::user_without_backtrace(anyhow::anyhow!(
-                    "Attempt to dereference null ContinuationReference!"
+                    "Attempt to dereference null VMContXObj!"
                 ))
             })?
             .0
@@ -221,7 +219,7 @@ pub fn cont_Xobj_get_cont_Xref(
         // we always read from a non-null reference.
         Some(contXref) => {
             unsafe {
-                *contXobj = ContinuationReference(None);
+                *contXobj = VMContXObj(None);
             }
             Ok(contXref.cast::<VMContXRef>())
         }
@@ -257,13 +255,13 @@ pub fn cont_Xref_forward_tag_return_values_buffer(
 
 /// TODO
 #[inline(always)]
-pub fn new_cont_Xobj(contXref: *mut VMContXRef) -> *mut ContinuationReference {
+pub fn new_cont_Xobj(contXref: *mut VMContXRef) -> *mut VMContXObj {
     // If this is enabled, we should never call this function.
     assert!(!cfg!(
         feature = "unsafe_disable_continuation_linearity_check"
     ));
 
-    let contXobj = Box::new(ContinuationReference(Some(contXref)));
+    let contXobj = Box::new(VMContXObj(Some(contXref)));
     Box::into_raw(contXobj)
 }
 

@@ -1585,7 +1585,7 @@ pub(crate) fn translate_resume<'a>(
         let values =
             typed_continuations_load_return_values(env, builder, &returns, resume_contXref);
 
-        // The continuation has returned and all `ContinuationReferences`
+        // The continuation has returned and all `VMContXObjs`
         // to it should have been be invalidated. We may safely deallocate
         // it.
         shared::typed_continuations_drop_cont_Xref(env, builder, resume_contXref);
