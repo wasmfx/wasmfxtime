@@ -1108,12 +1108,12 @@ fn typed_continuations_forward_tag_return_values<'a>(
     parent_contXref: ir::Value,
     child_contXref: ir::Value,
 ) {
-    let cont_obj_forward_tag_return_values_buffer = env
+    let cont_Xref_forward_tag_return_values_buffer = env
         .builtin_functions
-        .tc_cont_obj_forward_tag_return_values_buffer(&mut builder.func);
+        .tc_cont_Xref_forward_tag_return_values_buffer(&mut builder.func);
     let vmctx = env.vmctx_val(&mut builder.cursor());
     builder.ins().call(
-        cont_obj_forward_tag_return_values_buffer,
+        cont_Xref_forward_tag_return_values_buffer,
         &[vmctx, parent_contXref, child_contXref],
     );
 }

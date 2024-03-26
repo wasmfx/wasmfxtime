@@ -87,8 +87,7 @@ pub enum StackChain {
     /// Represents the main stack.
     MainStack(*mut StackLimits) = wasmtime_continuations::STACK_CHAIN_MAIN_STACK_DISCRIMINANT,
     /// Represents a continuation's stack.
-    Continuation(*mut VMContRef) =
-        wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT,
+    Continuation(*mut VMContRef) = wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT,
 }
 
 impl StackChain {
@@ -230,7 +229,7 @@ pub fn cont_ref_get_cont_obj(
 }
 
 /// TODO
-pub fn cont_obj_forward_tag_return_values_buffer(
+pub fn cont_Xref_forward_tag_return_values_buffer(
     parent: *mut VMContRef,
     child: *mut VMContRef,
 ) -> Result<(), TrapReason> {

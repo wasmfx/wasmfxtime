@@ -799,12 +799,12 @@ fn tc_cont_ref_get_cont_obj(
     Ok(ans.cast::<u8>())
 }
 
-fn tc_cont_obj_forward_tag_return_values_buffer(
+fn tc_cont_Xref_forward_tag_return_values_buffer(
     _instance: &mut Instance,
     parent_contXref: *mut u8,
     child_contXref: *mut u8,
 ) -> Result<(), TrapReason> {
-    crate::continuation::cont_obj_forward_tag_return_values_buffer(
+    crate::continuation::cont_Xref_forward_tag_return_values_buffer(
         parent_contXref.cast::<crate::continuation::VMContRef>(),
         child_contXref.cast::<crate::continuation::VMContRef>(),
     )

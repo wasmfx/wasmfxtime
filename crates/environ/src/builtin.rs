@@ -99,7 +99,7 @@ macro_rules! foreach_builtin_function {
             // Returns the continuation object corresponding to the given continuation reference.
             tc_cont_ref_get_cont_obj(vmctx: vmctx, contref: pointer) -> pointer;
             // Drops the given continuation object. Currently unused.
-            //cont_obj_drop(vmctx: vmctx, contXref: pointer);
+            //cont_Xref_drop(vmctx: vmctx, contXref: pointer);
             // Creates a new continuation reference.
             tc_new_cont_ref(vmctx: vmctx, contXref: pointer) -> pointer;
 
@@ -108,7 +108,7 @@ macro_rules! foreach_builtin_function {
             // This is implemented by exchanging the pointers to the underlying buffers.
             // `child_contXref` must not currently have a tag return value buffer.
             // `parent_contXref` may or may not have one.
-            tc_cont_obj_forward_tag_return_values_buffer(vmctx: vmctx, parent_contXref: pointer, child_contXref : pointer);
+            tc_cont_Xref_forward_tag_return_values_buffer(vmctx: vmctx, parent_contXref: pointer, child_contXref : pointer);
 
             // TODO
             tc_drop_cont_obj(vmctx: vmctx, contXref: pointer);
