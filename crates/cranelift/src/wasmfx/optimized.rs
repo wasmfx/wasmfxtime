@@ -289,7 +289,7 @@ pub(crate) mod typed_continuation_helpers {
     }
 
     #[derive(Copy, Clone)]
-    pub struct VMContRef {
+    pub struct VMContXRef {
         address: ir::Value,
         pointer_type: ir::Type,
     }
@@ -324,9 +324,9 @@ pub(crate) mod typed_continuation_helpers {
         pointer_type: ir::Type,
     }
 
-    impl VMContRef {
-        pub fn new(address: ir::Value, pointer_type: ir::Type) -> VMContRef {
-            VMContRef {
+    impl VMContXRef {
+        pub fn new(address: ir::Value, pointer_type: ir::Type) -> VMContXRef {
+            VMContXRef {
                 address,
                 pointer_type,
             }
@@ -342,7 +342,7 @@ pub(crate) mod typed_continuation_helpers {
             Payloads::new(self.address, offset as i32, self.pointer_type)
         }
 
-        /// Loads the value of the `state` field of the VMContRef,
+        /// Loads the value of the `state` field of the VMContXRef,
         /// which is represented using the `State` enum.
         fn load_state(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let mem_flags = ir::MemFlags::trusted();
@@ -354,7 +354,7 @@ pub(crate) mod typed_continuation_helpers {
             builder.ins().load(I32, mem_flags, self.address, offset)
         }
 
-        /// Sets the value of the `state` field of the `VMContRef`,
+        /// Sets the value of the `state` field of the `VMContXRef`,
         pub fn set_state(
             &self,
             builder: &mut FunctionBuilder,
@@ -370,11 +370,11 @@ pub(crate) mod typed_continuation_helpers {
             builder.ins().store(mem_flags, v, self.address, offset);
         }
 
-        /// Checks whether the `VMContRef` is invoked (i.e., `resume`
+        /// Checks whether the `VMContXRef` is invoked (i.e., `resume`
         /// was called at least once on the object).
         pub fn is_invoked(&self, builder: &mut FunctionBuilder) -> ir::Value {
             // TODO(frank-emrich) In the future, we may get rid of the State field
-            // in `VMContRef` and try to infer the state by other means.
+            // in `VMContXRef` and try to infer the state by other means.
             // For example, we may alllocate the `ContinuationFiber` lazily, doing
             // so only at the point when a continuation is actualy invoked, meaning
             // that we can use the null-ness of the `fiber` field as an indicator
@@ -386,7 +386,7 @@ pub(crate) mod typed_continuation_helpers {
                 .icmp_imm(IntCC::Equal, actual_state, invoked as i64)
         }
 
-        /// Checks whether the `VMContRef` has returned (i.e., the
+        /// Checks whether the `VMContXRef` has returned (i.e., the
         /// function used as continuation has returned normally).
         pub fn has_returned(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let actual_state = self.load_state(builder);
@@ -921,7 +921,7 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         /// If `self` corresponds to a `StackChain::Continuation`, return the
-        /// pointer to the `VMContRef` stored in the variant.
+        /// pointer to the `VMContXRef` stored in the variant.
         /// If `self` corresponds to `StackChain::MainStack`, trap with the
         /// given `trap_code`.
         /// Calling this if `self` corresponds to `StackChain::Absent` indicates
@@ -960,7 +960,7 @@ pub(crate) mod typed_continuation_helpers {
         /// Returns a pointer to the associated `StackLimits` object (i.e., in
         /// the former case, the pointer directly stored in the variant, or in
         /// the latter case a pointer to the `StackLimits` data within the
-        /// `VMContRef`.
+        /// `VMContXRef`.
         pub fn get_stack_limits_ptr<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -976,12 +976,12 @@ pub(crate) mod typed_continuation_helpers {
             let ptr = self.payload;
 
             // `obj` is now a pointer to the beginning of either
-            // 1. A `VMContRef` object (in the case of a
+            // 1. A `VMContXRef` object (in the case of a
             // StackChain::Continuation)
             // 2. A StackLimits object (in the case of
             // StackChain::MainStack)
             //
-            // Since a `VMContRef` starts with an (inlined) StackLimits
+            // Since a `VMContXRef` starts with an (inlined) StackLimits
             // object at offset 0, we actually have in both cases that `ptr` is
             // now the address of the beginning of a StackLimits object.
             debug_assert_eq!(o::vm_cont_Xref::LIMITS, 0);
@@ -1069,7 +1069,7 @@ fn typed_continuations_load_return_values<'a>(
     valtypes: &[WasmValType],
     contXref: ir::Value,
 ) -> std::vec::Vec<ir::Value> {
-    let co = tc::VMContRef::new(contXref, env.pointer_type());
+    let co = tc::VMContXRef::new(contXref, env.pointer_type());
     let mut values = vec![];
 
     if valtypes.len() > 0 {
@@ -1140,7 +1140,7 @@ pub(crate) fn typed_continuations_load_tag_return_values<'a>(
     let mut values = vec![];
 
     if valtypes.len() > 0 {
-        let co = tc::VMContRef::new(contXref, env.pointer_type());
+        let co = tc::VMContXRef::new(contXref, env.pointer_type());
         let tag_return_values = co.tag_return_values();
 
         let payload_ptr = tag_return_values.get_data(builder);
@@ -1180,7 +1180,7 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
         let store_data_block = builder.create_block();
         builder.append_block_param(store_data_block, env.pointer_type());
 
-        let co = tc::VMContRef::new(contXref, env.pointer_type());
+        let co = tc::VMContXRef::new(contXref, env.pointer_type());
         let is_invoked = co.is_invoked(builder);
         builder
             .ins()
@@ -1204,7 +1204,7 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
 
             // Unlike for the args buffer (where we know the maximum
             // required capacity at the time of creation of the
-            // `VMContRef`), tag return buffers are re-used and may
+            // `VMContXRef`), tag return buffers are re-used and may
             // be too small.
             tag_return_values.ensure_capacity(env, builder, remaining_arg_count);
 
@@ -1303,7 +1303,7 @@ pub(crate) fn translate_resume<'a>(
             shared::typed_continuations_cont_Xobj_get_cont_Xref(env, builder, contref);
 
         if resume_args.len() > 0 {
-            // We store the arguments in the `VMContRef` to be resumed.
+            // We store the arguments in the `VMContXRef` to be resumed.
             let count = builder.ins().iconst(I32, resume_args.len() as i64);
             typed_continuations_store_resume_args(
                 env,
@@ -1318,7 +1318,7 @@ pub(crate) fn translate_resume<'a>(
         let original_stack_chain =
             tc::VMContext::new(vmctx, env.pointer_type()).load_stack_chain(env, builder);
         original_stack_chain.assert_not_absent(env, builder);
-        tc::VMContRef::new(resume_contXref, env.pointer_type()).set_parent_stack_chain(
+        tc::VMContXRef::new(resume_contXref, env.pointer_type()).set_parent_stack_chain(
             env,
             builder,
             &original_stack_chain,
@@ -1329,10 +1329,10 @@ pub(crate) fn translate_resume<'a>(
     };
 
     // Resume block: actually resume the fiber corresponding to the
-    // `VMContRef` given as a parameter to the block. This
+    // `VMContXRef` given as a parameter to the block. This
     // parameterisation is necessary to enable forwarding, requiring us
     // to resume objects other than `original_contXref`.
-    // We make the `VMContRef` that was actually resumed available via
+    // We make the `VMContXRef` that was actually resumed available via
     // `resumed_contXref`, so that subsequent blocks can refer to it.
     let (resume_result, vm_runtime_limits_ptr) = {
         builder.switch_to_block(resume_block);
@@ -1356,7 +1356,7 @@ pub(crate) fn translate_resume<'a>(
         let parent_stacks_limit_pointer = parent_stack_chain.get_stack_limits_ptr(env, builder);
 
         // We mark `resume_contXref` to be invoked
-        let co = tc::VMContRef::new(resume_contXref, env.pointer_type());
+        let co = tc::VMContXRef::new(resume_contXref, env.pointer_type());
         co.set_state(builder, wasmtime_continuations::State::Invoked);
 
         call_builtin!(
@@ -1491,11 +1491,11 @@ pub(crate) fn translate_resume<'a>(
         let mut args = typed_continuations_load_payloads(env, builder, &param_types);
 
         // We have an actual handling block for this tag, rather than just
-        // forwarding. Detatch the `VMContRef` by setting its parent
+        // forwarding. Detatch the `VMContXRef` by setting its parent
         // link to `StackChain::Absent`.
         let pointer_type = env.pointer_type();
         let chain = tc::StackChain::absent(builder, pointer_type);
-        tc::VMContRef::new(resume_contXref, pointer_type)
+        tc::VMContXRef::new(resume_contXref, pointer_type)
             .set_parent_stack_chain(env, builder, &chain);
 
         // Create and push the continuation Xobject. We only create
@@ -1534,8 +1534,8 @@ pub(crate) fn translate_resume<'a>(
 
         // "Tag return values" (i.e., values provided by cont.bind or
         // resume to the continuation) are actually stored in
-        // `VMContRef`s, and we need to move them down the chain
-        // back to the `VMContRef` where we originally
+        // `VMContXRef`s, and we need to move them down the chain
+        // back to the `VMContXRef` where we originally
         // suspended.
         typed_continuations_forward_tag_return_values(
             env,
@@ -1577,7 +1577,7 @@ pub(crate) fn translate_resume<'a>(
         // parent of the returned continuation (which is now active).
         parent_stack_chain.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
-        let co = tc::VMContRef::new(resume_contXref, env.pointer_type());
+        let co = tc::VMContXRef::new(resume_contXref, env.pointer_type());
         co.set_state(builder, wasmtime_continuations::State::Returned);
 
         // Load and push the results.

@@ -87,7 +87,7 @@ pub enum StackChain {
     /// Represents the main stack.
     MainStack(*mut StackLimits) = wasmtime_continuations::STACK_CHAIN_MAIN_STACK_DISCRIMINANT,
     /// Represents a continuation's stack.
-    Continuation(*mut VMContRef) = wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT,
+    Continuation(*mut VMContXRef) = wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT,
 }
 
 impl StackChain {
@@ -117,7 +117,7 @@ impl StackChain {
 pub struct ContinuationChainIterator(StackChain);
 
 impl Iterator for ContinuationChainIterator {
-    type Item = (Option<*mut VMContRef>, *mut StackLimits);
+    type Item = (Option<*mut VMContXRef>, *mut StackLimits);
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.0 {
@@ -159,7 +159,7 @@ unsafe impl Sync for StackChainCell {}
 
 /// TODO
 #[repr(C)]
-pub struct VMContRef {
+pub struct VMContXRef {
     /// The limits of this continuation's stack.
     pub limits: StackLimits,
 
@@ -190,13 +190,13 @@ pub struct VMContRef {
 /// ContinuationReference may hold a non-null reference to the object
 /// at a given time.
 #[repr(C)]
-pub struct ContinuationReference(pub Option<*mut VMContRef>);
+pub struct ContinuationReference(pub Option<*mut VMContXRef>);
 
 /// TODO
 #[inline(always)]
 pub fn cont_Xobj_get_cont_Xref(
     contref: *mut ContinuationReference,
-) -> Result<*mut VMContRef, TrapReason> {
+) -> Result<*mut VMContXRef, TrapReason> {
     //FIXME rename to indicate that this invalidates the cont ref
 
     // If this is enabled, we should never call this function.
@@ -223,15 +223,15 @@ pub fn cont_Xobj_get_cont_Xref(
             unsafe {
                 *contref = ContinuationReference(None);
             }
-            Ok(contXref.cast::<VMContRef>())
+            Ok(contXref.cast::<VMContXRef>())
         }
     }
 }
 
 /// TODO
 pub fn cont_Xref_forward_tag_return_values_buffer(
-    parent: *mut VMContRef,
-    child: *mut VMContRef,
+    parent: *mut VMContXRef,
+    child: *mut VMContXRef,
 ) -> Result<(), TrapReason> {
     let parent = unsafe {
         parent.as_mut().ok_or_else(|| {
@@ -257,7 +257,7 @@ pub fn cont_Xref_forward_tag_return_values_buffer(
 
 /// TODO
 #[inline(always)]
-pub fn new_cont_Xobj(contXref: *mut VMContRef) -> *mut ContinuationReference {
+pub fn new_cont_Xobj(contXref: *mut VMContXRef) -> *mut ContinuationReference {
     // If this is enabled, we should never call this function.
     assert!(!cfg!(
         feature = "unsafe_disable_continuation_linearity_check"
@@ -269,11 +269,11 @@ pub fn new_cont_Xobj(contXref: *mut VMContRef) -> *mut ContinuationReference {
 
 /// TODO
 #[inline(always)]
-pub fn drop_cont_Xref(contXref: *mut VMContRef) {
+pub fn drop_cont_Xref(contXref: *mut VMContXRef) {
     // Note that continuation Xreferences do not own their parents, hence we ignore
     // parent fields here.
 
-    let contXref: Box<VMContRef> = unsafe { Box::from_raw(contXref) };
+    let contXref: Box<VMContXRef> = unsafe { Box::from_raw(contXref) };
     unsafe {
         let _: Vec<u128> = Vec::from_raw_parts(
             contXref.args.data,
@@ -298,7 +298,7 @@ pub fn cont_new(
     func: *mut u8,
     param_count: u32,
     result_count: u32,
-) -> Result<*mut VMContRef, TrapReason> {
+) -> Result<*mut VMContXRef, TrapReason> {
     let func_ref = unsafe {
         func.cast::<VMFuncRef>().as_ref().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
@@ -335,7 +335,7 @@ pub fn cont_new(
 
     let tsp = fiber.stack().top().unwrap();
     let stack_limit = unsafe { tsp.sub(stack_size - red_zone_size) } as usize;
-    let contXref = Box::new(VMContRef {
+    let contXref = Box::new(VMContXRef {
         limits: StackLimits::with_stack_limit(stack_limit),
         fiber,
         parent_chain: StackChain::Absent,
@@ -355,7 +355,7 @@ pub fn cont_new(
 #[inline(always)]
 pub fn resume(
     instance: &mut Instance,
-    contXref: *mut VMContRef,
+    contXref: *mut VMContXRef,
     parent_stack_limits: *mut StackLimits,
 ) -> Result<SwitchDirection, TrapReason> {
     let cont = unsafe {
@@ -467,10 +467,10 @@ pub mod baseline {
     /// the list consists of a pointer to an actual
     /// wasmtime_fiber::Fiber, a suspend object, a parent pointer, an
     /// arguments buffer, and a return buffer.
-    pub struct VMContRef {
+    pub struct VMContXRef {
         pub fiber: Box<ContinuationFiber>,
         pub suspend: *const Yield,
-        pub parent: *mut VMContRef,
+        pub parent: *mut VMContXRef,
         pub args: Vec<u128>,
         pub values: Vec<u128>,
         pub _marker: std::marker::PhantomPinned,
@@ -482,7 +482,7 @@ pub mod baseline {
     thread_local! {
         // The current continuation, i.e. the currently executing
         // continuation.
-        static CC: Cell<*mut VMContRef> = Cell::new(std::ptr::null_mut());
+        static CC: Cell<*mut VMContXRef> = Cell::new(std::ptr::null_mut());
         // A buffer to help propagate tag payloads across
         // continuations.
         static SUSPEND_PAYLOADS: RefCell<Vec<u128>> = RefCell::new(vec![]);
@@ -499,7 +499,7 @@ pub mod baseline {
         func: *mut u8,
         param_count: usize,
         result_count: usize,
-    ) -> Result<*mut VMContRef, TrapReason> {
+    ) -> Result<*mut VMContXRef, TrapReason> {
         let func_ref = unsafe {
             func.cast::<VMFuncRef>().as_ref().ok_or_else(|| {
                 TrapReason::user_without_backtrace(anyhow::anyhow!(
@@ -541,7 +541,7 @@ pub mod baseline {
             Box::new(fiber)
         };
 
-        let contref = Box::new(VMContRef {
+        let contref = Box::new(VMContXRef {
             parent: std::ptr::null_mut(),
             suspend: std::ptr::null(),
             fiber,
@@ -558,7 +558,7 @@ pub mod baseline {
 
     /// Continues a given continuation.
     #[inline(always)]
-    pub fn resume(instance: &mut Instance, contref: &mut VMContRef) -> Result<u32, TrapReason> {
+    pub fn resume(instance: &mut Instance, contref: &mut VMContXRef) -> Result<u32, TrapReason> {
         // Trigger fuse
         if !HAS_EVER_RUN_CONTINUATION.get() {
             HAS_EVER_RUN_CONTINUATION.set(true);
@@ -631,7 +631,7 @@ pub mod baseline {
     pub fn forward(
         instance: &mut Instance,
         tag_index: u32,
-        subcont: &mut VMContRef,
+        subcont: &mut VMContXRef,
     ) -> Result<(), TrapReason> {
         let cc = get_current_continuation();
         suspend(instance, tag_index)?;
@@ -642,10 +642,10 @@ pub mod baseline {
 
     /// Deallocates a gives continuation Xobject.
     #[inline(always)]
-    pub fn drop_continuation_Xobject(_instance: &mut Instance, contref: *mut VMContRef) {
+    pub fn drop_continuation_Xobject(_instance: &mut Instance, contref: *mut VMContXRef) {
         // Note that continuation Xreferences do not own their parents, so
         // we let the parent object leak.
-        let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
+        let contref: Box<VMContXRef> = unsafe { Box::from_raw(contref) };
         let _: Box<ContinuationFiber> = contref.fiber;
         let _: Vec<u128> = contref.args;
         let _: Vec<u128> = contref.values;
@@ -653,7 +653,7 @@ pub mod baseline {
 
     /// Clears the argument buffer on a given continuation Xobject.
     #[inline(always)]
-    pub fn clear_arguments(_instance: &mut Instance, contref: &mut VMContRef) {
+    pub fn clear_arguments(_instance: &mut Instance, contref: &mut VMContXRef) {
         contref.args.clear();
     }
 
@@ -662,7 +662,7 @@ pub mod baseline {
     #[inline(always)]
     pub fn get_arguments_ptr(
         _instance: &mut Instance,
-        contref: &mut VMContRef,
+        contref: &mut VMContXRef,
         nargs: usize,
     ) -> *mut u128 {
         let mut offset: isize = 0;
@@ -679,7 +679,7 @@ pub mod baseline {
     /// Returns the pointer to the (return) values buffer of a given
     /// continuation Xobject.
     #[inline(always)]
-    pub fn get_values_ptr(_instance: &mut Instance, contref: &mut VMContRef) -> *mut u128 {
+    pub fn get_values_ptr(_instance: &mut Instance, contref: &mut VMContXRef) -> *mut u128 {
         contref.values.as_mut_ptr()
     }
 
@@ -714,7 +714,7 @@ pub mod baseline {
     /// Moves the arguments of `src` continuation to `dst`
     /// continuation.
     #[inline(always)]
-    fn move_continuation_arguments(src: &mut VMContRef, dst: &mut VMContRef) {
+    fn move_continuation_arguments(src: &mut VMContXRef, dst: &mut VMContXRef) {
         let srclen = src.args.len();
         debug_assert!(dst.args.len() == 0);
         dst.args.append(&mut src.args);
@@ -724,13 +724,13 @@ pub mod baseline {
 
     /// Gets the current continuation.
     #[inline(always)]
-    pub fn get_current_continuation() -> *mut VMContRef {
+    pub fn get_current_continuation() -> *mut VMContXRef {
         CC.get()
     }
 
     /// Sets the current continuation.
     #[inline(always)]
-    fn set_current_continuation(cont: *mut VMContRef) {
+    fn set_current_continuation(cont: *mut VMContXRef) {
         CC.set(cont)
     }
 
@@ -746,7 +746,7 @@ pub mod baseline {
 
     #[allow(missing_docs)]
     #[repr(C)]
-    pub struct VMContRef();
+    pub struct VMContXRef();
 
     #[inline(always)]
     #[allow(missing_docs)]
@@ -755,13 +755,13 @@ pub mod baseline {
         _func: *mut u8,
         _param_count: usize,
         _result_count: usize,
-    ) -> Result<*mut VMContRef, TrapReason> {
+    ) -> Result<*mut VMContXRef, TrapReason> {
         panic!("attempt to execute continuation::baseline::cont_new without `typed_continuation_baseline_implementation` toggled!")
     }
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn resume(_instance: &mut Instance, _contref: &mut VMContRef) -> Result<u32, TrapReason> {
+    pub fn resume(_instance: &mut Instance, _contref: &mut VMContXRef) -> Result<u32, TrapReason> {
         panic!("attempt to execute continuation::baseline::resume without `typed_continuation_baseline_implementation` toggled!")
     }
 
@@ -776,14 +776,14 @@ pub mod baseline {
     pub fn forward(
         _instance: &mut Instance,
         _tag_index: u32,
-        _subcont: &mut VMContRef,
+        _subcont: &mut VMContXRef,
     ) -> Result<(), TrapReason> {
         panic!("attempt to execute continuation::baseline::forward without `typed_continuation_baseline_implementation` toggled!")
     }
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn drop_continuation_Xobject(_instance: &mut Instance, _cont: *mut VMContRef) {
+    pub fn drop_continuation_Xobject(_instance: &mut Instance, _cont: *mut VMContXRef) {
         panic!("attempt to execute continuation::baseline::drop_continuation_Xobject without `typed_continuation_baseline_implementation` toggled!")
     }
 
@@ -791,7 +791,7 @@ pub mod baseline {
     #[allow(missing_docs)]
     pub fn get_arguments_ptr(
         _instance: &mut Instance,
-        _contref: &mut VMContRef,
+        _contref: &mut VMContXRef,
         _nargs: usize,
     ) -> *mut u8 {
         panic!("attempt to execute continuation::baseline::get_arguments_ptr without `typed_continuation_baseline_implementation` toggled!")
@@ -799,13 +799,13 @@ pub mod baseline {
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn get_values_ptr(_instance: &mut Instance, _contref: &mut VMContRef) -> *mut u8 {
+    pub fn get_values_ptr(_instance: &mut Instance, _contref: &mut VMContXRef) -> *mut u8 {
         panic!("attempt to execute continuation::baseline::get_values_ptr without `typed_continuation_baseline_implementation` toggled!")
     }
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn clear_arguments(_instance: &mut Instance, _contref: &mut VMContRef) {
+    pub fn clear_arguments(_instance: &mut Instance, _contref: &mut VMContXRef) {
         panic!("attempt to execute continuation::baseline::clear_arguments without `typed_continuation_baseline_implementation` toggled!")
     }
 
@@ -823,7 +823,7 @@ pub mod baseline {
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn get_current_continuation() -> *mut VMContRef {
+    pub fn get_current_continuation() -> *mut VMContXRef {
         panic!("attempt to execute continuation::baseline::get_current_continuation without `typed_continuation_baseline_implementation` toggled!")
     }
 
@@ -840,20 +840,20 @@ fn offset_and_size_constants() {
     use wasmtime_continuations::offsets::*;
 
     assert_eq!(
-        memoffset::offset_of!(VMContRef, limits),
+        memoffset::offset_of!(VMContXRef, limits),
         vm_cont_Xref::LIMITS
     );
     assert_eq!(
-        memoffset::offset_of!(VMContRef, parent_chain),
+        memoffset::offset_of!(VMContXRef, parent_chain),
         vm_cont_Xref::PARENT_CHAIN
     );
-    assert_eq!(memoffset::offset_of!(VMContRef, fiber), vm_cont_Xref::FIBER);
-    assert_eq!(memoffset::offset_of!(VMContRef, args), vm_cont_Xref::ARGS);
+    assert_eq!(memoffset::offset_of!(VMContXRef, fiber), vm_cont_Xref::FIBER);
+    assert_eq!(memoffset::offset_of!(VMContXRef, args), vm_cont_Xref::ARGS);
     assert_eq!(
-        memoffset::offset_of!(VMContRef, tag_return_values),
+        memoffset::offset_of!(VMContXRef, tag_return_values),
         vm_cont_Xref::TAG_RETURN_VALUES
     );
-    assert_eq!(memoffset::offset_of!(VMContRef, state), vm_cont_Xref::STATE);
+    assert_eq!(memoffset::offset_of!(VMContXRef, state), vm_cont_Xref::STATE);
 
     assert_eq!(
         std::mem::size_of::<ContinuationFiber>(),

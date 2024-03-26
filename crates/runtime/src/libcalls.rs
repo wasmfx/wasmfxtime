@@ -774,7 +774,7 @@ fn tc_resume(
 ) -> Result<u64, TrapReason> {
     crate::continuation::resume(
         instance,
-        contXref.cast::<crate::continuation::VMContRef>(),
+        contXref.cast::<crate::continuation::VMContXRef>(),
         parent_stack_limits.cast::<crate::continuation::StackLimits>(),
     )
     .map(|reason| reason.into())
@@ -785,7 +785,7 @@ fn tc_suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason>
 }
 
 fn tc_new_cont_Xobj(_instance: &mut Instance, contXref: *mut u8) -> *mut u8 {
-    crate::continuation::new_cont_Xobj(contXref.cast::<crate::continuation::VMContRef>())
+    crate::continuation::new_cont_Xobj(contXref.cast::<crate::continuation::VMContXRef>())
         .cast::<u8>()
 }
 
@@ -805,13 +805,13 @@ fn tc_cont_Xref_forward_tag_return_values_buffer(
     child_contXref: *mut u8,
 ) -> Result<(), TrapReason> {
     crate::continuation::cont_Xref_forward_tag_return_values_buffer(
-        parent_contXref.cast::<crate::continuation::VMContRef>(),
-        child_contXref.cast::<crate::continuation::VMContRef>(),
+        parent_contXref.cast::<crate::continuation::VMContXRef>(),
+        child_contXref.cast::<crate::continuation::VMContXRef>(),
     )
 }
 
 fn tc_drop_cont_Xref(_instance: &mut Instance, contXref: *mut u8) {
-    crate::continuation::drop_cont_Xref(contXref.cast::<crate::continuation::VMContRef>())
+    crate::continuation::drop_cont_Xref(contXref.cast::<crate::continuation::VMContXRef>())
 }
 
 fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> Result<*mut u8, TrapReason> {
@@ -893,7 +893,7 @@ fn tc_baseline_cont_new(
 }
 
 fn tc_baseline_resume(instance: &mut Instance, contref: *mut u8) -> Result<u32, TrapReason> {
-    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContRef>();
+    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContXRef>();
     assert!(contref_ptr as usize == contref as usize);
     crate::continuation::baseline::resume(instance, unsafe { &mut *(contref_ptr) })
 }
@@ -908,14 +908,14 @@ fn tc_baseline_forward(
     subcont: *mut u8,
 ) -> Result<(), TrapReason> {
     crate::continuation::baseline::forward(instance, tag_index, unsafe {
-        &mut *subcont.cast::<crate::continuation::baseline::VMContRef>()
+        &mut *subcont.cast::<crate::continuation::baseline::VMContXRef>()
     })
 }
 
 fn tc_baseline_drop_continuation_Xobject(instance: &mut Instance, contref: *mut u8) {
     crate::continuation::baseline::drop_continuation_Xobject(
         instance,
-        contref.cast::<crate::continuation::baseline::VMContRef>(),
+        contref.cast::<crate::continuation::baseline::VMContXRef>(),
     )
 }
 
@@ -924,7 +924,7 @@ fn tc_baseline_continuation_arguments_ptr(
     contref: *mut u8,
     nargs: u64,
 ) -> *mut u8 {
-    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContRef>();
+    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContXRef>();
     assert!(contref_ptr as usize == contref as usize);
     let ans = crate::continuation::baseline::get_arguments_ptr(
         instance,
@@ -935,7 +935,7 @@ fn tc_baseline_continuation_arguments_ptr(
 }
 
 fn tc_baseline_continuation_values_ptr(instance: &mut Instance, contref: *mut u8) -> *mut u8 {
-    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContRef>();
+    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContXRef>();
     assert!(contref_ptr as usize == contref as usize);
     let ans =
         crate::continuation::baseline::get_values_ptr(instance, unsafe { &mut *(contref_ptr) });
@@ -945,7 +945,7 @@ fn tc_baseline_continuation_values_ptr(instance: &mut Instance, contref: *mut u8
 }
 
 fn tc_baseline_clear_arguments(instance: &mut Instance, contref: *mut u8) {
-    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContRef>();
+    let contref_ptr = contref.cast::<crate::continuation::baseline::VMContXRef>();
     assert!(contref_ptr as usize == contref as usize);
     crate::continuation::baseline::clear_arguments(instance, unsafe { &mut *(contref_ptr) });
 }
