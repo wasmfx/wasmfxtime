@@ -371,7 +371,7 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         /// Checks whether the `VMContRef` is invoked (i.e., `resume`
-        /// was called at least once on the object).
+        /// was called at least once on the continuation).
         pub fn is_invoked(&self, builder: &mut FunctionBuilder) -> ir::Value {
             // TODO(frank-emrich) In the future, we may get rid of the State field
             // in `VMContRef` and try to infer the state by other means.
@@ -976,9 +976,9 @@ pub(crate) mod typed_continuation_helpers {
             let ptr = self.payload;
 
             // `obj` is now a pointer to the beginning of either
-            // 1. A `VMContRef` object (in the case of a
+            // 1. A `VMContRef` struct (in the case of a
             // StackChain::Continuation)
-            // 2. A StackLimits object (in the case of
+            // 2. A StackLimits struct (in the case of
             // StackChain::MainStack)
             //
             // Since a `VMContRef` starts with an (inlined) StackLimits
