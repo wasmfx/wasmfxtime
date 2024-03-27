@@ -343,7 +343,7 @@ pub fn cont_new(
     });
 
     // TODO(dhil): we need memory clean up of
-    // continuation object objects.
+    // continuation reference objects.
     let pointer = Box::into_raw(contref);
     debug_println!("Created contref @ {:p}", pointer);
     Ok(pointer)

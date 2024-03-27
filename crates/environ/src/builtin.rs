@@ -128,7 +128,7 @@ macro_rules! foreach_builtin_function {
 
             // TC baseline
             // Baseline resume
-            tc_baseline_resume(vmctx: vmctx, contobj: pointer) -> i32;
+            tc_baseline_resume(vmctx: vmctx, contref: pointer) -> i32;
             // Baseline suspend
             tc_baseline_suspend(vmctx: vmctx, tag: i32);
             // Like suspend, but forwards handling.
