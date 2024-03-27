@@ -152,7 +152,7 @@ pub(crate) fn translate_resume<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     type_index: u32,
-    resumee_ref: ir::Value,
+    resumee_obj: ir::Value,
     resume_args: &[ir::Value],
     resumetable: &[(u32, ir::Block)],
 ) -> Vec<ir::Value> {
@@ -201,7 +201,7 @@ pub(crate) fn translate_resume<'a>(
     // Prelude: Push the continuation arguments.
     {
         let resumee_fiber =
-            shared::typed_continuations_cont_obj_get_cont_ref(env, builder, resumee_ref);
+            shared::typed_continuations_cont_obj_get_cont_ref(env, builder, resumee_obj);
         if resume_args.len() > 0 {
             let nargs = builder.ins().iconst(I64, resume_args.len() as i64);
 
@@ -387,9 +387,9 @@ pub(crate) fn translate_cont_new<'a>(
     // Load the builtin continuation allocation function.
     let nargs = builder.ins().iconst(I64, arg_types.len() as i64);
     let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
-    call_builtin!(builder, env, let contobj = tc_baseline_cont_new(func, nargs, nreturns));
+    call_builtin!(builder, env, let contref = tc_baseline_cont_new(func, nargs, nreturns));
 
-    Ok(contobj)
+    Ok(contref)
 }
 
 pub(crate) fn translate_suspend<'a>(
