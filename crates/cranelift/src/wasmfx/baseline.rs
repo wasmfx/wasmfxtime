@@ -11,9 +11,9 @@ use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
 use wasmtime_environ::PtrSize;
 
 #[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_cont_ref_get_cont_obj;
+pub(crate) use shared::typed_continuations_cont_obj_get_cont_ref;
 #[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_new_cont_ref;
+pub(crate) use shared::typed_continuations_new_cont_obj;
 
 fn typed_continuations_load_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -43,7 +43,7 @@ fn typed_continuations_load_payloads<'a>(
 pub(crate) fn typed_continuations_load_tag_return_values<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    contobj: ir::Value,
+    contref: ir::Value,
     valtypes: &[WasmValType],
 ) -> Vec<ir::Value> {
     let _memflags = ir::MemFlags::trusted();
@@ -57,7 +57,7 @@ pub(crate) fn typed_continuations_load_tag_return_values<'a>(
             env,
             let args_ptr =
                 tc_baseline_continuation_arguments_ptr(
-                contobj,
+                contref,
                 nargs
             )
         );
@@ -79,7 +79,7 @@ pub(crate) fn typed_continuations_load_tag_return_values<'a>(
         debug_assert!(valtypes.len() == args.len());
 
         // Clear the arguments buffer
-        call_builtin!(builder, env, tc_baseline_clear_arguments(contobj));
+        call_builtin!(builder, env, tc_baseline_clear_arguments(contref));
 
         return args;
     }
@@ -93,7 +93,7 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
     builder: &mut FunctionBuilder,
     values: &[ir::Value],
     _remaining_arg_count: ir::Value,
-    contobj: ir::Value,
+    contref: ir::Value,
 ) {
     if values.len() > 0 {
         // Retrieve the pointer to the arguments buffer.
@@ -103,7 +103,7 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
             env,
             let args_ptr =
                 tc_baseline_continuation_arguments_ptr(
-                contobj,
+                contref,
                 nargs
             )
         );
@@ -140,7 +140,7 @@ pub(crate) fn typed_continuations_store_payloads<'a>(
     }
 }
 
-pub(crate) fn typed_continuations_load_continuation_object<'a>(
+pub(crate) fn typed_continuations_load_continuation_reference<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
 ) -> ir::Value {
@@ -152,7 +152,7 @@ pub(crate) fn translate_resume<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     type_index: u32,
-    resumee_ref: ir::Value,
+    resumee_obj: ir::Value,
     resume_args: &[ir::Value],
     resumetable: &[(u32, ir::Block)],
 ) -> Vec<ir::Value> {
@@ -201,7 +201,7 @@ pub(crate) fn translate_resume<'a>(
     // Prelude: Push the continuation arguments.
     {
         let resumee_fiber =
-            shared::typed_continuations_cont_ref_get_cont_obj(env, builder, resumee_ref);
+            shared::typed_continuations_cont_obj_get_cont_ref(env, builder, resumee_obj);
         if resume_args.len() > 0 {
             let nargs = builder.ins().iconst(I64, resume_args.len() as i64);
 
@@ -302,9 +302,9 @@ pub(crate) fn translate_resume<'a>(
         // entirely.
         let mut args = typed_continuations_load_payloads(env, builder, &param_types);
 
-        // Create and push the continuation reference.
-        let resumee_ref = shared::typed_continuations_new_cont_ref(env, builder, resumee_fiber);
-        args.push(resumee_ref);
+        // Create and push the continuation object.
+        let resumee_obj = shared::typed_continuations_new_cont_obj(env, builder, resumee_fiber);
+        args.push(resumee_obj);
 
         // Finally, emit the jump to `label`.
         builder.ins().jump(label, &args);

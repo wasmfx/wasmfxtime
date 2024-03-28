@@ -20,7 +20,7 @@ pub type ContinuationFiber = Fiber;
 /// `StackLimits` object with each element of the list. Here, a "stack" is
 /// either a continuation or the main stack. Note that the linked list character
 /// arises from the fact that `StackChain::Continuation` variants have a pointer
-/// to have `ContinuationObject`, which in turn has a `parent_chain` value of
+/// to have `VMContRef`, which in turn has a `parent_chain` value of
 /// type `StackChain`.
 ///
 /// There are generally two uses of such chains:
@@ -40,7 +40,7 @@ pub type ContinuationFiber = Fiber;
 ///
 /// As mentioned before, each stack in a `StackChain` has a corresponding
 /// `StackLimits` object. For continuations, this is stored in the `limits`
-/// fields of the corresponding `ContinuationObject`. For the main stack, the
+/// fields of the corresponding `VMContRef`. For the main stack, the
 /// `MainStack` variant contains a pointer to the
 /// `typed_continuations_main_stack_limits` field of the VMContext.
 ///
@@ -81,14 +81,13 @@ pub type ContinuationFiber = Fiber;
 #[repr(usize, C)]
 pub enum StackChain {
     /// If stored in the VMContext, used to indicate that the MainStack entry
-    /// has not been set, yet. If stored in a ContinuationObject's parent_chain
+    /// has not been set, yet. If stored in a VMContRef's parent_chain
     /// field, means that there is currently no parent.
     Absent = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT,
     /// Represents the main stack.
     MainStack(*mut StackLimits) = wasmtime_continuations::STACK_CHAIN_MAIN_STACK_DISCRIMINANT,
     /// Represents a continuation's stack.
-    Continuation(*mut ContinuationObject) =
-        wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT,
+    Continuation(*mut VMContRef) = wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT,
 }
 
 impl StackChain {
@@ -114,11 +113,11 @@ impl StackChain {
 /// Iterator for stacks in a stack chain.
 /// Each stack is represented by a tuple `(co_opt, sl)`, where sl is a pointer
 /// to the stack's `StackLimits` object and `co_opt` is a pointer to the
-/// corresponding `ContinuationObject`, or None for the main stack.
+/// corresponding `VMContRef`, or None for the main stack.
 pub struct ContinuationChainIterator(StackChain);
 
 impl Iterator for ContinuationChainIterator {
-    type Item = (Option<*mut ContinuationObject>, *mut StackLimits);
+    type Item = (Option<*mut VMContRef>, *mut StackLimits);
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.0 {
@@ -160,7 +159,7 @@ unsafe impl Sync for StackChainCell {}
 
 /// TODO
 #[repr(C)]
-pub struct ContinuationObject {
+pub struct VMContRef {
     /// The limits of this continuation's stack.
     pub limits: StackLimits,
 
@@ -186,18 +185,16 @@ pub struct ContinuationObject {
     pub state: State,
 }
 
-/// M:1 Many-to-one mapping. A single ContinuationObject may be
-/// referenced by multiple ContinuationReference, though, only one
-/// ContinuationReference may hold a non-null reference to the object
+/// M:1 Many-to-one mapping. A single VMContRef may be
+/// referenced by multiple VMContObj, though, only one
+/// VMContObj may hold a non-null reference to the object
 /// at a given time.
 #[repr(C)]
-pub struct ContinuationReference(pub Option<*mut ContinuationObject>);
+pub struct VMContObj(pub Option<*mut VMContRef>);
 
 /// TODO
 #[inline(always)]
-pub fn cont_ref_get_cont_obj(
-    contref: *mut ContinuationReference,
-) -> Result<*mut ContinuationObject, TrapReason> {
+pub fn cont_obj_get_cont_ref(contobj: *mut VMContObj) -> Result<*mut VMContRef, TrapReason> {
     //FIXME rename to indicate that this invalidates the cont ref
 
     // If this is enabled, we should never call this function.
@@ -206,11 +203,11 @@ pub fn cont_ref_get_cont_obj(
     ));
 
     let contopt = unsafe {
-        contref
+        contobj
             .as_mut()
             .ok_or_else(|| {
                 TrapReason::user_without_backtrace(anyhow::anyhow!(
-                    "Attempt to dereference null ContinuationReference!"
+                    "Attempt to dereference null VMContObj!"
                 ))
             })?
             .0
@@ -220,31 +217,31 @@ pub fn cont_ref_get_cont_obj(
             "Continuation is already taken",
         ))), // TODO(dhil): presumably we can set things up such that
         // we always read from a non-null reference.
-        Some(contobj) => {
+        Some(contref) => {
             unsafe {
-                *contref = ContinuationReference(None);
+                *contobj = VMContObj(None);
             }
-            Ok(contobj.cast::<ContinuationObject>())
+            Ok(contref.cast::<VMContRef>())
         }
     }
 }
 
 /// TODO
-pub fn cont_obj_forward_tag_return_values_buffer(
-    parent: *mut ContinuationObject,
-    child: *mut ContinuationObject,
+pub fn cont_ref_forward_tag_return_values_buffer(
+    parent: *mut VMContRef,
+    child: *mut VMContRef,
 ) -> Result<(), TrapReason> {
     let parent = unsafe {
         parent.as_mut().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null (parent) ContinuationObject"
+                "Attempt to dereference null (parent) VMContRef"
             ))
         })?
     };
     let child = unsafe {
         child.as_mut().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null (child) ContinuationObject"
+                "Attempt to dereference null (child) VMContRef"
             ))
         })?
     };
@@ -258,31 +255,31 @@ pub fn cont_obj_forward_tag_return_values_buffer(
 
 /// TODO
 #[inline(always)]
-pub fn new_cont_ref(contobj: *mut ContinuationObject) -> *mut ContinuationReference {
+pub fn new_cont_obj(contref: *mut VMContRef) -> *mut VMContObj {
     // If this is enabled, we should never call this function.
     assert!(!cfg!(
         feature = "unsafe_disable_continuation_linearity_check"
     ));
 
-    let contref = Box::new(ContinuationReference(Some(contobj)));
-    Box::into_raw(contref)
+    let contobj = Box::new(VMContObj(Some(contref)));
+    Box::into_raw(contobj)
 }
 
 /// TODO
 #[inline(always)]
-pub fn drop_cont_obj(contobj: *mut ContinuationObject) {
-    // Note that continuation objects do not own their parents, hence we ignore
+pub fn drop_cont_ref(contref: *mut VMContRef) {
+    // Note that continuation references do not own their parents, hence we ignore
     // parent fields here.
 
-    let contobj: Box<ContinuationObject> = unsafe { Box::from_raw(contobj) };
+    let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
     unsafe {
         let _: Vec<u128> = Vec::from_raw_parts(
-            contobj.args.data,
-            contobj.args.length as usize,
-            contobj.args.capacity as usize,
+            contref.args.data,
+            contref.args.length as usize,
+            contref.args.capacity as usize,
         );
     };
-    let payloads = &contobj.tag_return_values;
+    let payloads = &contref.tag_return_values;
     let _: Vec<u128> = unsafe {
         Vec::from_raw_parts(
             payloads.data,
@@ -299,7 +296,7 @@ pub fn cont_new(
     func: *mut u8,
     param_count: u32,
     result_count: u32,
-) -> Result<*mut ContinuationObject, TrapReason> {
+) -> Result<*mut VMContRef, TrapReason> {
     let func_ref = unsafe {
         func.cast::<VMFuncRef>().as_ref().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
@@ -336,7 +333,7 @@ pub fn cont_new(
 
     let tsp = fiber.stack().top().unwrap();
     let stack_limit = unsafe { tsp.sub(stack_size - red_zone_size) } as usize;
-    let contobj = Box::new(ContinuationObject {
+    let contref = Box::new(VMContRef {
         limits: StackLimits::with_stack_limit(stack_limit),
         fiber,
         parent_chain: StackChain::Absent,
@@ -347,8 +344,8 @@ pub fn cont_new(
 
     // TODO(dhil): we need memory clean up of
     // continuation reference objects.
-    let pointer = Box::into_raw(contobj);
-    debug_println!("Created contobj @ {:p}", pointer);
+    let pointer = Box::into_raw(contref);
+    debug_println!("Created contref @ {:p}", pointer);
     Ok(pointer)
 }
 
@@ -356,13 +353,13 @@ pub fn cont_new(
 #[inline(always)]
 pub fn resume(
     instance: &mut Instance,
-    contobj: *mut ContinuationObject,
+    contref: *mut VMContRef,
     parent_stack_limits: *mut StackLimits,
 ) -> Result<SwitchDirection, TrapReason> {
     let cont = unsafe {
-        contobj.as_ref().ok_or_else(|| {
+        contref.as_ref().ok_or_else(|| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null ContinuationObject!"
+                "Attempt to dereference null VMContRef!"
             ))
         })?
     };
@@ -374,12 +371,12 @@ pub fn resume(
         // VMContext is non-null and contains a chain of zero or more
         // StackChain::Continuation values followed by StackChain::Main.
         match unsafe { (**chain).0.get_mut() } {
-            StackChain::Continuation(running_contobj) => {
-                debug_assert_eq!(contobj, *running_contobj);
+            StackChain::Continuation(running_contref) => {
+                debug_assert_eq!(contref, *running_contref);
                 debug_println!(
-                    "Resuming contobj @ {:p}, previously running contobj is {:p}",
-                    contobj,
-                    running_contobj
+                    "Resuming contref @ {:p}, previously running contref is {:p}",
+                    contref,
+                    running_contref
                 )
             }
             _ => {
@@ -406,8 +403,8 @@ pub fn resume(
         (*parent_stack_limits).last_wasm_exit_fp = *runtime_limits.last_wasm_exit_fp.get();
         (*parent_stack_limits).last_wasm_exit_pc = *runtime_limits.last_wasm_exit_pc.get();
 
-        *runtime_limits.stack_limit.get() = (*contobj).limits.stack_limit;
-        *runtime_limits.last_wasm_entry_sp.get() = (*contobj).limits.last_wasm_entry_sp;
+        *runtime_limits.stack_limit.get() = (*contref).limits.stack_limit;
+        *runtime_limits.last_wasm_entry_sp.get() = (*contref).limits.last_wasm_entry_sp;
     }
 
     Ok(cont.fiber.resume())
@@ -841,29 +838,20 @@ fn offset_and_size_constants() {
     use wasmtime_continuations::offsets::*;
 
     assert_eq!(
-        memoffset::offset_of!(ContinuationObject, limits),
-        continuation_object::LIMITS
+        memoffset::offset_of!(VMContRef, limits),
+        vm_cont_ref::LIMITS
     );
     assert_eq!(
-        memoffset::offset_of!(ContinuationObject, parent_chain),
-        continuation_object::PARENT_CHAIN
+        memoffset::offset_of!(VMContRef, parent_chain),
+        vm_cont_ref::PARENT_CHAIN
     );
+    assert_eq!(memoffset::offset_of!(VMContRef, fiber), vm_cont_ref::FIBER);
+    assert_eq!(memoffset::offset_of!(VMContRef, args), vm_cont_ref::ARGS);
     assert_eq!(
-        memoffset::offset_of!(ContinuationObject, fiber),
-        continuation_object::FIBER
+        memoffset::offset_of!(VMContRef, tag_return_values),
+        vm_cont_ref::TAG_RETURN_VALUES
     );
-    assert_eq!(
-        memoffset::offset_of!(ContinuationObject, args),
-        continuation_object::ARGS
-    );
-    assert_eq!(
-        memoffset::offset_of!(ContinuationObject, tag_return_values),
-        continuation_object::TAG_RETURN_VALUES
-    );
-    assert_eq!(
-        memoffset::offset_of!(ContinuationObject, state),
-        continuation_object::STATE
-    );
+    assert_eq!(memoffset::offset_of!(VMContRef, state), vm_cont_ref::STATE);
 
     assert_eq!(
         std::mem::size_of::<ContinuationFiber>(),

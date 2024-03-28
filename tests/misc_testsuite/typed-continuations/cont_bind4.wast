@@ -1,5 +1,5 @@
 ;; Testing that the creation of the necessary payload buffers works as expect,
-;; even when the same continuation object is suspended multiple times
+;; even when the same continuation reference is suspended multiple times
 
 (module
   (type $unit_to_int (func (result i32)))
