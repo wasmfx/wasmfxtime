@@ -129,33 +129,9 @@ mod test_utils {
 
 mod wasi {
     use anyhow::Result;
-    use wasmtime::*;
-    use wasmtime_wasi::*;
-    struct WasiHostCtx {
-        preview2_ctx: WasiCtx,
-        preview2_table: wasmtime::component::ResourceTable,
-        preview1_adapter: preview1::WasiPreview1Adapter,
-    }
-
-    impl WasiView for WasiHostCtx {
-        fn table(&mut self) -> &mut wasmtime::component::ResourceTable {
-            &mut self.preview2_table
-        }
-
-        fn ctx(&mut self) -> &mut WasiCtx {
-            &mut self.preview2_ctx
-        }
-    }
-
-    impl preview1::WasiPreview1View for WasiHostCtx {
-        fn adapter(&self) -> &preview1::WasiPreview1Adapter {
-            &self.preview1_adapter
-        }
-
-        fn adapter_mut(&mut self) -> &mut preview1::WasiPreview1Adapter {
-            &mut self.preview1_adapter
-        }
-    }
+    use wasmtime::{Config, Engine, Linker, Module, Store};
+    use wasmtime_wasi::preview1::{self, WasiP1Ctx};
+    use wasmtime_wasi::WasiCtxBuilder;
 
     fn run_wasi_test(wat: &'static str) -> Result<i32> {
         // Construct the wasm engine with async support disabled.
@@ -169,18 +145,13 @@ mod wasi {
 
         // Add the WASI preview1 API to the linker (will be implemented in terms of
         // the preview2 API)
-        let mut linker: Linker<WasiHostCtx> = Linker::new(&engine);
+        let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
         preview1::add_to_linker_sync(&mut linker, |t| t)?;
 
         // Add capabilities (e.g. filesystem access) to the WASI preview2 context here.
-        let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().build();
+        let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().build_p1();
 
-        let host_ctx = WasiHostCtx {
-            preview2_ctx: wasi_ctx,
-            preview2_table: ResourceTable::new(),
-            preview1_adapter: preview1::WasiPreview1Adapter::new(),
-        };
-        let mut store: Store<WasiHostCtx> = Store::new(&engine, host_ctx);
+        let mut store: Store<WasiP1Ctx> = Store::new(&engine, wasi_ctx);
 
         // Instantiate our wasm module.
         let module = Module::new(&engine, wat)?;
@@ -205,18 +176,13 @@ mod wasi {
 
         // Add the WASI preview1 API to the linker (will be implemented in terms of
         // the preview2 API)
-        let mut linker: Linker<WasiHostCtx> = Linker::new(&engine);
+        let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
         preview1::add_to_linker_async(&mut linker, |t| t)?;
 
         // Add capabilities (e.g. filesystem access) to the WASI preview2 context here.
-        let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().build();
+        let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().build_p1();
 
-        let host_ctx = WasiHostCtx {
-            preview2_ctx: wasi_ctx,
-            preview2_table: ResourceTable::new(),
-            preview1_adapter: preview1::WasiPreview1Adapter::new(),
-        };
-        let mut store: Store<WasiHostCtx> = Store::new(&engine, host_ctx);
+        let mut store: Store<WasiP1Ctx> = Store::new(&engine, wasi_ctx);
 
         // Instantiate our wasm module.
         let module = Module::new(&engine, wat)?;
