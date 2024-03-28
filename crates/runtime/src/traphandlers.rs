@@ -2,6 +2,12 @@
 //! signalhandling mechanisms.
 
 mod backtrace;
+
+#[cfg(feature = "coredump")]
+#[path = "traphandlers/coredump_enabled.rs"]
+mod coredump;
+#[cfg(not(feature = "coredump"))]
+#[path = "traphandlers/coredump_disabled.rs"]
 mod coredump;
 
 use crate::continuation::StackChainCell;
@@ -312,6 +318,7 @@ mod call_thread_state {
         pub(super) jmp_buf: Cell<*const u8>,
         pub(super) signal_handler: Option<*const SignalHandler<'static>>,
         pub(super) capture_backtrace: bool,
+        #[cfg(feature = "coredump")]
         pub(super) capture_coredump: bool,
 
         pub(crate) limits: *const VMRuntimeLimits,
@@ -362,11 +369,14 @@ mod call_thread_state {
             limits: *const VMRuntimeLimits,
             callee_stack_chain: Option<*const StackChainCell>,
         ) -> CallThreadState {
+            let _ = capture_coredump;
+
             CallThreadState {
                 unwind: UnsafeCell::new(MaybeUninit::uninit()),
                 jmp_buf: Cell::new(ptr::null()),
                 signal_handler,
                 capture_backtrace,
+                #[cfg(feature = "coredump")]
                 capture_coredump,
                 limits,
                 callee_stack_chain,
@@ -547,17 +557,6 @@ impl CallThreadState {
         }
 
         Some(unsafe { Backtrace::new_with_trap_state(limits, self, trap_pc_and_fp) })
-    }
-
-    fn capture_coredump(
-        &self,
-        limits: *const VMRuntimeLimits,
-        trap_pc_and_fp: Option<(usize, usize)>,
-    ) -> Option<CoreDumpStack> {
-        if !self.capture_coredump {
-            return None;
-        }
-        Some(CoreDumpStack::new(&self, limits, trap_pc_and_fp))
     }
 
     pub(crate) fn iter<'a>(&'a self) -> impl Iterator<Item = &Self> + 'a {
