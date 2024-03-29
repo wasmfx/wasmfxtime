@@ -134,7 +134,7 @@ asm_func!(
         add rax, 0x10
         mov -0x20[rdi], rax
 
-        // Install remaing arguments
+        // Install remaining arguments
         mov -0x28[rdi], rsi   // loaded into rbx during switch
         mov -0x30[rdi], rdx   // loaded into r12 during switch
         mov -0x38[rdi], rcx   // loaded into r13 during switch
