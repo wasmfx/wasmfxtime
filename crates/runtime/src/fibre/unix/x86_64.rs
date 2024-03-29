@@ -83,9 +83,10 @@ asm_func!(
 // such that invoking wasmtime_fibre_switch on the stack actually runs the
 // desired computation.
 //
-// Concretely, switching to the stack prepare by `wasmtime_fibre_init` function
-// evokes that we enter `wasmtime_fibre_start`, which then in turn calls
-// `fiber_start` with the arguments above.
+// Concretely, switching to the stack prepare by the `wasmtime_fibre_init`
+// function evokes that we enter `wasmtime_fibre_start`, which then in turn
+// calls `fiber_start` with a subset of the arguments above (namely: func_ref,
+// caller_vmctx, args_ptr, args_capacity).
 //
 // The layout of the FiberStack near the top of stack (TOS) *after* running this
 // function is as follows:
