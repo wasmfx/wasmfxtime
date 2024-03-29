@@ -274,7 +274,7 @@ asm_func!(
         mov rsi, rbx // func_ref
         mov rdx, r12 // caller_vmctx
         mov rcx, r13 // args_ptr
-        mov r8, r13  // args_capacity
+        mov r8, r14  // args_capacity
         call {fiber_start}
 
         // We should never get here and purposely emit an invalid instruction.
