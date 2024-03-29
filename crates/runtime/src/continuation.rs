@@ -1,7 +1,7 @@
 //! Continuations TODO
 
-use crate::fibre::{Fiber, FiberStack, Suspend};
-use crate::vmcontext::{VMFuncRef, VMOpaqueContext, ValRaw};
+use crate::fibre::{Fiber, FiberStack};
+use crate::vmcontext::{VMFuncRef, ValRaw};
 use crate::{Instance, TrapReason};
 use std::cell::UnsafeCell;
 use std::cmp;

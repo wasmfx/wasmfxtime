@@ -253,11 +253,12 @@ asm_func!(
         // already loaded into registers by the switch function. The
         // `wasmtime_fibre_init` routine arranged the various values to be
         // materialized into the registers used here. Our job is to then move
-        // the values into the ABI-defined registers and call the entry-point.
+        // the values into the ABI-defined registers and call the entry-point
+        // (i.e., the fiber_start function).
         // Note that `call` is used here to leave this frame on the stack so we
         // can use the dwarf info here for unwinding.
         //
-        // Note that the next three instructions amount to calling fiber_start
+        // Note that the next 5 instructions amount to calling fiber_start
         // with the following arguments:
         // 1. TOS
         // 2. func_ref
