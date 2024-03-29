@@ -106,6 +106,8 @@ use std::ops::Range;
 use std::ptr;
 use wasmtime_continuations::SwitchDirection;
 
+use crate::{VMContext, VMFuncRef, VMOpaqueContext, ValRaw};
+
 #[derive(Debug)]
 pub struct FiberStack {
     // The top of the stack; for stacks allocated by the fiber implementation itself,
@@ -200,36 +202,54 @@ pub struct Suspend(*mut u8);
 extern "C" {
     fn wasmtime_fibre_init(
         top_of_stack: *mut u8,
-        entry: extern "C" fn(*mut u8, *mut u8),
-        entry_arg0: *mut u8,
-        wasmtime_fibre_switch: *const u8,
+        func_ref: *const VMFuncRef,
+        caller_vmctx: *mut VMContext,
+        args_ptr: *mut ValRaw,
+        args_capacity: usize,
+        wasmtime_fibre_switch_pc: *const u8,
     );
     fn wasmtime_fibre_switch(top_of_stack: *mut u8, payload: u64) -> u64;
     #[allow(dead_code)] // only used in inline assembly for some platforms
     fn wasmtime_fibre_start();
 }
 
-extern "C" fn fiber_start<F>(arg0: *mut u8, top_of_stack: *mut u8)
-where
-    F: FnOnce((), &super::Suspend),
-{
+extern "C" fn fiber_start(
+    top_of_stack: *mut u8,
+    func_ref: *const VMFuncRef,
+    caller_vmctx: *mut VMContext,
+    args_ptr: *mut ValRaw,
+    args_capacity: usize,
+) {
     unsafe {
+        let func_ref = &*func_ref;
+        let array_call_trampoline = func_ref.array_call;
+        let caller_vmxtx = VMOpaqueContext::from_vmcontext(caller_vmctx);
+        let callee_vmxtx = func_ref.vmctx;
+
+        array_call_trampoline(callee_vmxtx, caller_vmxtx, args_ptr, args_capacity);
+
+        // Switch back to parent, indicating that the continuation returned.
         let inner = Suspend(top_of_stack);
-        super::Suspend::execute(inner, Box::from_raw(arg0.cast::<F>()))
+        let reason = SwitchDirection::return_();
+        inner.switch(reason);
     }
 }
 
 impl Fiber {
-    pub fn new<F>(stack: &FiberStack, func: F) -> io::Result<Self>
-    where
-        F: FnOnce((), &super::Suspend),
-    {
+    pub fn new(
+        stack: &FiberStack,
+        func_ref: *const VMFuncRef,
+        caller_vmctx: *mut VMContext,
+        args_ptr: *mut ValRaw,
+        args_capacity: usize,
+    ) -> io::Result<Self> {
         unsafe {
-            let data = Box::into_raw(Box::new(func)).cast();
             wasmtime_fibre_init(
                 stack.top,
-                fiber_start::<F>,
-                data,
+                func_ref,
+                caller_vmctx,
+                args_ptr,
+                args_capacity,
                 wasmtime_fibre_switch as *const u8,
             );
         }

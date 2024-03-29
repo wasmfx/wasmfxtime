@@ -11,8 +11,6 @@ pub use wasmtime_continuations::{
     Payloads, StackLimits, State, SwitchDirection, DEFAULT_FIBER_SIZE,
 };
 
-type Yield = Suspend;
-
 /// Fibers used for continuations
 pub type ContinuationFiber = Fiber;
 
@@ -297,15 +295,7 @@ pub fn cont_new(
     param_count: u32,
     result_count: u32,
 ) -> Result<*mut VMContRef, TrapReason> {
-    let func_ref = unsafe {
-        func.cast::<VMFuncRef>().as_ref().ok_or_else(|| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null VMFuncRef"
-            ))
-        })?
-    };
-    let callee_ctx = func_ref.vmctx;
-    let caller_ctx = VMOpaqueContext::from_vmcontext(instance.vmctx());
+    let caller_vmctx = instance.vmctx();
 
     let capacity = cmp::max(param_count, result_count);
     let payload = Payloads::new(capacity);
@@ -319,15 +309,13 @@ pub fn cont_new(
     let fiber = {
         let stack = FiberStack::malloc(stack_size)
             .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
-        let args_ptr = payload.data;
-        Fiber::new(stack, move |_first_val: (), _suspend: &Yield| unsafe {
-            (func_ref.array_call)(
-                callee_ctx,
-                caller_ctx,
-                args_ptr.cast::<ValRaw>(),
-                capacity as usize,
-            )
-        })
+        Fiber::new(
+            stack,
+            func.cast::<VMFuncRef>(),
+            caller_vmctx,
+            payload.data as *mut ValRaw,
+            payload.capacity as usize,
+        )
         .map_err(|error| TrapReason::user_without_backtrace(error.into()))?
     };
 

@@ -72,20 +72,20 @@ asm_func!(
 
 // fn(
 //    top_of_stack(rdi): *mut u8,
-//    entry_point(rsi): extern fn(*mut u8, *mut u8),
-//    entry_arg0(rdx): *mut u8,
-//    wasmtime_fibre_switch_pc(rcx): *mut u8,
+//    func_ref(rsi): *const VMFuncRef,
+//    caller_vmctx(rdx): *mut VMContext
+//    args_ptr(rcx): *mut ValRaw
+//    args_capacity(r8) : u64
+//    wasmtime_fibre_switch_pc(r9): *mut u8,
 // )
 //
 // This function installs the launchpad for the computation to run on the fiber,
 // such that invoking wasmtime_fibre_switch on the stack actually runs the
 // desired computation.
 //
-// This function is only ever called such that `entry_point` is a pointer to (an
-// instantiation of) the `fiber_start` function in unix.rs and `entry_arg0` is a
-// `Box<*mut u8>`, containing the function to actually run as the continuation
-// as a `FnOnce(A, &super::Suspend<A, B, C>) -> C`, for some `A`, `B`, `C`.
-// `wasmtime_fibre_switch_pc` is the address of `wasmtime_fibre_switch`.
+// Concretely, switching to the stack prepare by `wasmtime_fibre_init` function
+// evokes that we enter `wasmtime_fibre_start`, which then in turn calls
+// `fiber_start` with the arguments above.
 //
 // The layout of the FiberStack near the top of stack (TOS) *after* running this
 // function is as follows:
@@ -97,11 +97,10 @@ asm_func!(
 //          -0x10   TOS - 0x20
 //          -0x18   (RIP-relative) address of wasmtime_fibre_start function
 //          -0x20   TOS - 0x10
-//          -0x28   entry_point (= pointer to fiber_start function)
-//          -0x30   entry_arg0  (= Box<*mut u8> containing pointer to
-//                                 FuncOne closure to actually execute)
-//          -0x38   undefined
-//          -0x40   undefined
+//          -0x28   func_ref
+//          -0x30   caller_vmctx
+//          -0x38   args_ptr
+//          -0x40   args_capacity
 //          -0x48   undefined
 #[rustfmt::skip]
 asm_func!(
@@ -113,7 +112,7 @@ asm_func!(
         // take over and understands which values are in which registers.
         //
         // Install wasmtime_fibre_switch_pc at TOS - 0x08:
-        mov -0x08[rdi], rcx
+        mov -0x08[rdi], r9
 
         // Store TOS - 0x20 at TOS - 0x10
         // This is the resume frame pointer from which we calculate the new
@@ -134,9 +133,11 @@ asm_func!(
         add rax, 0x10
         mov -0x20[rdi], rax
 
-        // Install entry_point and entry_arg
+        // Install remaing arguments
         mov -0x28[rdi], rsi   // loaded into rbx during switch
         mov -0x30[rdi], rdx   // loaded into r12 during switch
+        mov -0x38[rdi], rcx   // loaded into r13 during switch
+        mov -0x40[rdi], r8    // loaded into r14 during switch
 
         ret
     ",
@@ -169,10 +170,10 @@ asm_func!(
 // RSI: irrelevant  (not read by wasmtime_fibre_start)
 // RAX: irrelevant  (not read by wasmtime_fibre_start)
 // RBP: TOS - 0x10
-// RBX: entry_point (= pointer to fiber_start function)
-// R12: entry_arg0  (Box with FuncOnce closure to run as contination)
-// R13: irrelevant  (not read by wasmtime_fibre_start)
-// R14: irrelevant  (not read by wasmtime_fibre_start)
+// RBX: func_ref       (= VMFuncRef to execute)
+// R12: caller_vmctx
+// R13: args_ptr       (used by array call trampoline)
+// R14: args_capacity  (used by array call trampoline)
 // R15: irrelevant  (not read by wasmtime_fibre_start)
 //
 // At this point in time, the stack layout is as follows:
@@ -258,17 +259,25 @@ asm_func!(
         //
         // Note that the next three instructions amount to calling fiber_start
         // with the following arguments:
-        // 1. entry_arg0  (Box with FuncOnce closure to run as contination)
-        // 2. TOS
+        // 1. TOS
+        // 2. func_ref
+        // 3. caller_vmctx
+        // 4. args_ptr
+        // 5. args_capacity
         //
-        // Note that fiber_start never returns: It calls Suspend::execute, which
-        // runs the FuncOnce closure, and calls impl::Suspend::switch afterwards,
-        // which returns to the parent FiberStack via wasmtime_fibre_switch.
-        mov rsi, rdi
-        mov rdi, r12
-        call rbx
+        // Note that fiber_start never returns: Instead, it // resume to the
+        // parent FiberStack via wasmtime_fibre_switch.
+
+        // TOS is already in RDI
+        mov rsi, rbx // func_ref
+        mov rdx, r12 // caller_vmctx
+        mov rcx, r13 // args_ptr
+        mov r8, r13  // args_capacity
+        call {fiber_start}
+
         // We should never get here and purposely emit an invalid instruction.
         ud2
         .cfi_endproc
     ",
+    fiber_start = sym super::fiber_start,
 );
