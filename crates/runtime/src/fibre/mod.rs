@@ -8,6 +8,8 @@ use std::io;
 use std::ops::Range;
 use wasmtime_continuations::{SwitchDirection, SwitchDirectionEnum, TagId};
 
+use crate::{VMContext, VMFuncRef, ValRaw};
+
 cfg_if::cfg_if! {
     if #[cfg(unix)] {
         pub mod unix;
@@ -79,8 +81,14 @@ impl Fiber {
     /// This function returns a `Fiber` which, when resumed, will execute `func`
     /// to completion. When desired the `func` can suspend itself via
     /// `Fiber::suspend`.
-    pub fn new(stack: FiberStack, func: impl FnOnce((), &Suspend)) -> io::Result<Self> {
-        let inner = imp::Fiber::new(&stack.0, func)?;
+    pub fn new(
+        stack: FiberStack,
+        func_ref: *const VMFuncRef,
+        caller_vmctx: *mut VMContext,
+        args_ptr: *mut ValRaw,
+        args_capacity: usize,
+    ) -> io::Result<Self> {
+        let inner = imp::Fiber::new(&stack.0, func_ref, caller_vmctx, args_ptr, args_capacity)?;
 
         Ok(Self {
             stack,
@@ -141,20 +149,6 @@ impl Suspend {
     pub fn suspend(&self, tag: TagId) {
         let reason = SwitchDirection::suspend(tag);
         self.inner.switch(reason);
-    }
-
-    fn execute(inner: imp::Suspend, func: impl FnOnce((), &Suspend)) {
-        let suspend = Suspend { inner };
-        // Note that the original wasmtime-fiber crate runs `func` wrapped in
-        // `panic::catch_unwind`, to stop panics from being propagated onward,
-        // instead just reporting parent. We eschew this, doing nothing special
-        // about panics. This is justified because we only ever call this
-        // function such that `func` is a closure around a call to a
-        // `VMArrayCallFunction`, namely a host-to-wasm trampoline. It is thus
-        // guaranteed not to panic.
-        (func)((), &suspend);
-        let reason = SwitchDirection::return_();
-        suspend.inner.switch(reason);
     }
 }
 

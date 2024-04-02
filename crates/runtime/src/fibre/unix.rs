@@ -106,6 +106,8 @@ use std::ops::Range;
 use std::ptr;
 use wasmtime_continuations::SwitchDirection;
 
+use crate::{VMContext, VMFuncRef, VMOpaqueContext, ValRaw};
+
 #[derive(Debug)]
 pub struct FiberStack {
     // The top of the stack; for stacks allocated by the fiber implementation itself,
@@ -198,38 +200,74 @@ pub struct Fiber;
 pub struct Suspend(*mut u8);
 
 extern "C" {
+    // We allow "improper ctypes" here (i.e., passing values as parameters in an
+    // extern C function that Rust deems non FFI-safe): The two problematic
+    // parameters, namely `func_ref` and `args_ptr`, are piped through into
+    // `fiber_start` (a Rust function), and not accessed in between.
+    #[allow(improper_ctypes)]
     fn wasmtime_fibre_init(
         top_of_stack: *mut u8,
-        entry: extern "C" fn(*mut u8, *mut u8),
-        entry_arg0: *mut u8,
-        wasmtime_fibre_switch: *const u8,
+        func_ref: *const VMFuncRef,
+        caller_vmctx: *mut VMContext,
+        args_ptr: *mut ValRaw,
+        args_capacity: usize,
+        wasmtime_fibre_switch_pc: *const u8,
     );
     fn wasmtime_fibre_switch(top_of_stack: *mut u8, payload: u64) -> u64;
     #[allow(dead_code)] // only used in inline assembly for some platforms
     fn wasmtime_fibre_start();
 }
 
-extern "C" fn fiber_start<F>(arg0: *mut u8, top_of_stack: *mut u8)
-where
-    F: FnOnce((), &super::Suspend),
-{
+/// This function is responsible for actually running a wasm function inside a
+/// continuation. It is only ever called from `wasmtime_fibre_start`. Hence, it
+/// must never return.
+extern "C" fn fiber_start(
+    top_of_stack: *mut u8,
+    func_ref: *const VMFuncRef,
+    caller_vmctx: *mut VMContext,
+    args_ptr: *mut ValRaw,
+    args_capacity: usize,
+) {
     unsafe {
+        let func_ref = &*func_ref;
+        let array_call_trampoline = func_ref.array_call;
+        let caller_vmxtx = VMOpaqueContext::from_vmcontext(caller_vmctx);
+        let callee_vmxtx = func_ref.vmctx;
+
+        // NOTE(frank-emrich) The usage of the `caller_vmctx` is probably not
+        // 100% correct here. Currently, we determine the "caller" vmctx when
+        // initilizing the fiber stack/continuation (i.e. as part of
+        // `cont.new`). However, we may subsequenly `resume` the continuation
+        // from a different Wasm instance. The way to fix this would be to make
+        // the currently active `VMContext` an additional parameter of
+        // `wasmtime_fibre_switch` and pipe it through to this point. However,
+        // since the caller vmctx is only really used to access stuff in the
+        // underlying `Store`, it's fine to be slightly sloppy about the exact
+        // value we set.
+        array_call_trampoline(callee_vmxtx, caller_vmxtx, args_ptr, args_capacity);
+
+        // Switch back to parent, indicating that the continuation returned.
         let inner = Suspend(top_of_stack);
-        super::Suspend::execute(inner, Box::from_raw(arg0.cast::<F>()))
+        let reason = SwitchDirection::return_();
+        inner.switch(reason);
     }
 }
 
 impl Fiber {
-    pub fn new<F>(stack: &FiberStack, func: F) -> io::Result<Self>
-    where
-        F: FnOnce((), &super::Suspend),
-    {
+    pub fn new(
+        stack: &FiberStack,
+        func_ref: *const VMFuncRef,
+        caller_vmctx: *mut VMContext,
+        args_ptr: *mut ValRaw,
+        args_capacity: usize,
+    ) -> io::Result<Self> {
         unsafe {
-            let data = Box::into_raw(Box::new(func)).cast();
             wasmtime_fibre_init(
                 stack.top,
-                fiber_start::<F>,
-                data,
+                func_ref,
+                caller_vmctx,
+                args_ptr,
+                args_capacity,
                 wasmtime_fibre_switch as *const u8,
             );
         }
