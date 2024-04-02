@@ -61,6 +61,7 @@ use crate::{Instance, TrapReason};
 #[cfg(feature = "wmemcheck")]
 use anyhow::bail;
 use anyhow::Result;
+#[cfg(feature = "threads")]
 use std::time::{Duration, Instant};
 use wasmtime_environ::{DataIndex, ElemIndex, FuncIndex, MemoryIndex, TableIndex, Trap, Unsigned};
 #[cfg(feature = "wmemcheck")]
@@ -110,17 +111,14 @@ pub mod raw {
                 ) $( -> libcall!(@ty $result))? {
                     $(#[cfg($attr)])?
                     {
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let ret = crate::traphandlers::catch_unwind_and_longjmp(|| {
                             Instance::from_vmctx(vmctx, |instance| {
                                 {
                                     super::$name(instance, $($pname),*)
                                 }
                             })
-                        }));
-                        match result {
-                            Ok(ret) => LibcallResult::convert(ret),
-                            Err(panic) => crate::traphandlers::resume_panic(panic),
-                        }
+                        });
+                        LibcallResult::convert(ret)
                     }
                     $(
                         #[cfg(not($attr))]
@@ -435,6 +433,7 @@ unsafe fn externref_global_set(instance: &mut Instance, index: u32, externref: *
 }
 
 // Implementation of `memory.atomic.notify` for locally defined memories.
+#[cfg(feature = "threads")]
 fn memory_atomic_notify(
     instance: &mut Instance,
     memory_index: u32,
@@ -448,6 +447,7 @@ fn memory_atomic_notify(
 }
 
 // Implementation of `memory.atomic.wait32` for locally defined memories.
+#[cfg(feature = "threads")]
 fn memory_atomic_wait32(
     instance: &mut Instance,
     memory_index: u32,
@@ -464,6 +464,7 @@ fn memory_atomic_wait32(
 }
 
 // Implementation of `memory.atomic.wait64` for locally defined memories.
+#[cfg(feature = "threads")]
 fn memory_atomic_wait64(
     instance: &mut Instance,
     memory_index: u32,
