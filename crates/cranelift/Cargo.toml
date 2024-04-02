@@ -16,7 +16,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 log = { workspace = true }
-wasmtime-environ = { workspace = true }
+wasmtime-environ = { workspace = true, features = ['compile'] }
 cranelift-wasm = { workspace = true }
 cranelift-codegen = { workspace = true, features = ["host-arch"] }
 cranelift-frontend = { workspace = true }
@@ -41,3 +41,4 @@ wmemcheck = []
 unsafe_disable_continuation_linearity_check = []
 typed_continuations_baseline_implementation = []
 gc = ["wasmtime-environ/gc"]
+threads = ["wasmtime-environ/threads"]

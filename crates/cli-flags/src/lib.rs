@@ -252,6 +252,8 @@ wasmtime_option_group! {
         pub exceptions: Option<bool>,
         /// Configure support for the typed continuations proposal.
         pub typed_continuations: Option<bool>,
+        /// Configure support for the GC proposal.
+        pub gc: Option<bool>,
     }
 
     enum Wasm {
@@ -631,20 +633,11 @@ impl CommonOptions {
         if let Some(enable) = self.wasm.bulk_memory.or(all) {
             config.wasm_bulk_memory(enable);
         }
-        if let Some(enable) = self.wasm.reference_types.or(all) {
-            config.wasm_reference_types(enable);
-        }
-        if let Some(enable) = self.wasm.function_references.or(all) {
-            config.wasm_function_references(enable);
-        }
         if let Some(enable) = self.wasm.multi_value.or(all) {
             config.wasm_multi_value(enable);
         }
         if let Some(enable) = self.wasm.tail_call.or(all) {
             config.wasm_tail_call(enable);
-        }
-        if let Some(enable) = self.wasm.threads.or(all) {
-            config.wasm_threads(enable);
         }
         if let Some(enable) = self.wasm.multi_memory.or(all) {
             config.wasm_multi_memory(enable);
@@ -658,13 +651,26 @@ impl CommonOptions {
         if let Some(enable) = self.wasm.typed_continuations {
             config.wasm_typed_continuations(enable);
         }
-        if let Some(enable) = self.wasm.component_model.or(all) {
-            #[cfg(feature = "component-model")]
-            config.wasm_component_model(enable);
-            #[cfg(not(feature = "component-model"))]
-            if enable && all.is_none() {
-                anyhow::bail!("support for the component model was disabled at compile-time");
-            }
+
+        macro_rules! handle_conditionally_compiled {
+            ($(($feature:tt, $field:tt, $method:tt))*) => ($(
+                if let Some(enable) = self.wasm.$field.or(all) {
+                    #[cfg(feature = $feature)]
+                    config.$method(enable);
+                    #[cfg(not(feature = $feature))]
+                    if enable && all.is_none() {
+                        anyhow::bail!("support for {} was disabled at compile-time", $feature);
+                    }
+                }
+            )*)
+        }
+
+        handle_conditionally_compiled! {
+            ("component-model", component_model, wasm_component_model)
+            ("threads", threads, wasm_threads)
+            ("gc", gc, wasm_gc)
+            ("gc", reference_types, wasm_reference_types)
+            ("gc", function_references, wasm_function_references)
         }
         Ok(())
     }

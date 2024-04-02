@@ -22,7 +22,6 @@ mod instance;
 mod memory;
 mod mmap;
 mod mmap_vec;
-mod parking_spot;
 mod send_sync_ptr;
 mod store_box;
 mod sys;
@@ -31,6 +30,9 @@ mod traphandlers;
 mod vmcontext;
 
 pub mod continuation;
+mod threads;
+pub use self::threads::*;
+
 #[cfg(feature = "debug-builtins")]
 pub mod debug_builtins;
 pub mod fibre;
@@ -52,9 +54,7 @@ pub use crate::instance::{
 pub use crate::instance::{
     InstanceLimits, PoolingInstanceAllocator, PoolingInstanceAllocatorConfig,
 };
-pub use crate::memory::{
-    DefaultMemoryCreator, Memory, RuntimeLinearMemory, RuntimeMemoryCreator, SharedMemory,
-};
+pub use crate::memory::{DefaultMemoryCreator, Memory, RuntimeLinearMemory, RuntimeMemoryCreator};
 pub use crate::mmap::Mmap;
 pub use crate::mmap_vec::MmapVec;
 pub use crate::mpk::MpkEnabled;

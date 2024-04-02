@@ -9,7 +9,7 @@ use std::sync::atomic::{
 /// indicate whether the function was successful and subsequent results are valid,
 /// or whether an error occured. This trait allows wiggle to return the correct
 /// value when the interface function's idiomatic Rust method returns
-/// Ok(<rest of return values>).
+/// `Ok(<rest of return values>)`.
 pub trait GuestErrorType {
     fn success() -> Self;
 }
@@ -81,7 +81,7 @@ macro_rules! integer_primitives {
                 //
                 // Note that shared memories don't allow borrows and other
                 // shared borrows are ok to overlap with this.
-                if ptr.mem().is_mut_borrowed(region) {
+                if !ptr.mem().can_read(region) {
                     return Err(GuestError::PtrBorrowed(region));
                 }
 
@@ -106,7 +106,7 @@ macro_rules! integer_primitives {
                 let offset = ptr.offset();
                 let (host_ptr, region) = super::validate_size_align::<Self>(ptr.mem(), offset, 1)?;
                 let host_ptr = &host_ptr[0];
-                if ptr.mem().is_shared_borrowed(region) || ptr.mem().is_mut_borrowed(region) {
+                if !ptr.mem().can_write(region) {
                     return Err(GuestError::PtrBorrowed(region));
                 }
                 let atomic_value_ref: &$ty_atomic =
@@ -139,7 +139,7 @@ macro_rules! float_primitives {
                     1,
                 )?;
                 let host_ptr = &host_ptr[0];
-                if ptr.mem().is_mut_borrowed(region) {
+                if !ptr.mem().can_read(region) {
                     return Err(GuestError::PtrBorrowed(region));
                 }
                 let atomic_value_ref: &$ty_atomic =
@@ -158,7 +158,7 @@ macro_rules! float_primitives {
                     1,
                 )?;
                 let host_ptr = &host_ptr[0];
-                if ptr.mem().is_shared_borrowed(region) || ptr.mem().is_mut_borrowed(region) {
+                if !ptr.mem().can_write(region) {
                     return Err(GuestError::PtrBorrowed(region));
                 }
                 let atomic_value_ref: &$ty_atomic =
