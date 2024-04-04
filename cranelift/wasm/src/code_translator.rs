@@ -2604,13 +2604,9 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let arg_count = src_arity - dst_arity;
 
             let (original_contobj, args) = state.peekn(arg_count + 1).split_last().unwrap();
-            let contref =
-                environ.typed_continuations_cont_obj_get_cont_ref(builder, *original_contobj);
 
-            let src_arity_value = builder.ins().iconst(I32, src_arity as i64);
-            environ.typed_continuations_store_resume_args(builder, args, src_arity_value, contref);
-
-            let new_contobj = environ.typed_continuations_new_cont_obj(builder, contref);
+            let new_contobj =
+                environ.translate_cont_bind(builder, *original_contobj, args, src_arity);
 
             state.popn(arg_count + 1);
             state.push1(new_contobj);

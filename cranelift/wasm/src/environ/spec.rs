@@ -616,6 +616,18 @@ pub trait FuncEnvironment: TargetEnvironment {
         false
     }
 
+    /// Translates cont.bind instructions.
+    /// `remaining_arg_count` is the *overall* number of remaining arguments of
+    /// the continuation before supplying `args` (i.e., it is the number of
+    /// parameters of the continuation's type before cont.bind was executed).
+    fn translate_cont_bind(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+        args: &[ir::Value],
+        remaining_arg_count: usize,
+    ) -> ir::Value;
+
     /// TODO(dhil): write documentation.
     fn translate_cont_new(
         &mut self,

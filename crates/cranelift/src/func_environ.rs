@@ -2584,6 +2584,16 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         self.isa.triple().architecture == target_lexicon::Architecture::X86_64
     }
 
+    fn translate_cont_bind(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+        args: &[ir::Value],
+        remaining_arg_count : usize,
+    ) ->ir::Value {
+        wasmfx_impl::translate_cont_bind(self, builder, contobj, args, remaining_arg_count)
+    }
+
     fn translate_cont_new(
         &mut self,
         builder: &mut FunctionBuilder,
