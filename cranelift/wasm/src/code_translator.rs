@@ -2583,22 +2583,16 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         }
         Operator::Suspend { tag_index } => {
             let param_types = environ.tag_params(*tag_index).to_vec();
+            let return_types = environ.tag_returns(*tag_index).to_vec();
 
             let params = state.peekn(param_types.len());
             let param_count = params.len();
 
-            environ.typed_continuations_store_payloads(builder, &param_types, params);
-            state.popn(param_count);
-
             let tag_index_val = builder.ins().iconst(I32, *tag_index as i64);
-            environ.translate_suspend(builder, tag_index_val);
-
-            let contref = environ.typed_continuations_load_continuation_reference(builder);
-
-            let return_types = environ.tag_returns(*tag_index).to_vec();
             let return_values =
-                environ.typed_continuations_load_tag_return_values(builder, contref, &return_types);
+                environ.translate_suspend(builder, tag_index_val, params, &return_types);
 
+            state.popn(param_count);
             state.pushn(&return_values);
         }
         Operator::ContBind {

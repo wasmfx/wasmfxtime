@@ -1233,11 +1233,9 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
 pub(crate) fn typed_continuations_store_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    valtypes: &[WasmValType],
     values: &[ir::Value],
 ) {
-    assert_eq!(values.len(), valtypes.len());
-    if valtypes.len() > 0 {
+    if values.len() > 0 {
         let vmctx = env.vmctx_val(&mut builder.cursor());
         let payloads = tc::Payloads::new(
             vmctx,
@@ -1586,8 +1584,18 @@ pub(crate) fn translate_suspend<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     tag_index: ir::Value,
-) -> ir::Value {
+    suspend_args : &[ir::Value],
+    tag_return_types: &[WasmValType],
+) -> Vec<ir::Value> {
+    typed_continuations_store_payloads(env, builder, suspend_args);
+
     call_builtin!(builder, env, tc_suspend(tag_index));
-    // TODO(dhil): We should change the interface of `translate_suspend` to return nothing.
-    return env.vmctx_val(&mut builder.cursor());
+
+    let contref = env.typed_continuations_load_continuation_reference(builder);
+
+    let return_values =
+        typed_continuations_load_tag_return_values(env, builder, contref, tag_return_types);
+
+    return_values
+
 }

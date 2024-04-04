@@ -122,11 +122,9 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
 pub(crate) fn typed_continuations_store_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    valtypes: &[WasmValType],
     values: &[ir::Value],
 ) {
-    assert_eq!(values.len(), valtypes.len());
-    if valtypes.len() > 0 {
+    if values.len() > 0 {
         // Retrieve the pointer to the payloads buffer.
         let nargs = builder.ins().iconst(I64, values.len() as i64);
         call_builtin!(builder, env, let payloads_ptr = tc_baseline_get_payloads_ptr(nargs));
@@ -396,7 +394,16 @@ pub(crate) fn translate_suspend<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     tag_index: ir::Value,
-) -> ir::Value {
+    suspend_args : &[ir::Value],
+    tag_return_types: &[WasmValType],
+) -> Vec<ir::Value> {
+    typed_continuations_store_payloads(env, builder, suspend_args);
     call_builtin!(builder, env, tc_baseline_suspend(tag_index));
-    return env.vmctx_val(&mut builder.cursor());
+    let contref = env.typed_continuations_load_continuation_reference(builder);
+
+    let return_values =
+        typed_continuations_load_tag_return_values(env, builder, contref, tag_return_types);
+
+    return_values
+
 }

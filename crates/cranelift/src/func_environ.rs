@@ -2624,8 +2624,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         tag_index: ir::Value,
-    ) -> ir::Value {
-        wasmfx_impl::translate_suspend(self, builder, tag_index)
+        suspend_args : &[ir::Value],
+        tag_return_types: &[WasmValType],
+    ) -> Vec<ir::Value> {
+        wasmfx_impl::translate_suspend(self, builder, tag_index, suspend_args, tag_return_types)
     }
 
     fn continuation_arguments(&self, index: u32) -> &[WasmValType] {
@@ -2648,14 +2650,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         self.types[idx].returns()
     }
 
-    fn typed_continuations_load_tag_return_values(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        contref: ir::Value,
-        valtypes: &[WasmValType],
-    ) -> Vec<ir::Value> {
-        wasmfx_impl::typed_continuations_load_tag_return_values(self, builder, contref, valtypes)
-    }
 
     /// TODO
     fn typed_continuations_cont_obj_get_cont_ref(
@@ -2683,14 +2677,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         )
     }
 
-    //TODO(frank-emrich) Consider removing `valtypes` argument, as values are inherently typed
     fn typed_continuations_store_payloads(
         &mut self,
         builder: &mut FunctionBuilder,
-        valtypes: &[WasmValType],
         values: &[ir::Value],
     ) {
-        wasmfx_impl::typed_continuations_store_payloads(self, builder, valtypes, values)
+        wasmfx_impl::typed_continuations_store_payloads(self, builder, values)
     }
 
     fn typed_continuations_load_continuation_reference(
