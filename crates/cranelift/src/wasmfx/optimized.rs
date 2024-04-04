@@ -8,12 +8,9 @@ use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::{FunctionBuilder, Switch};
 use cranelift_wasm::FuncEnvironment;
 use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
+use shared::typed_continuations_cont_obj_get_cont_ref;
+use shared::typed_continuations_new_cont_obj;
 use wasmtime_environ::PtrSize;
-
-#[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_cont_obj_get_cont_ref;
-#[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_new_cont_obj;
 
 #[macro_use]
 pub(crate) mod typed_continuation_helpers {
@@ -1233,11 +1230,9 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
 pub(crate) fn typed_continuations_store_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    valtypes: &[WasmValType],
     values: &[ir::Value],
 ) {
-    assert_eq!(values.len(), valtypes.len());
-    if valtypes.len() > 0 {
+    if values.len() > 0 {
         let vmctx = env.vmctx_val(&mut builder.cursor());
         let payloads = tc::Payloads::new(
             vmctx,
@@ -1266,6 +1261,20 @@ pub(crate) fn typed_continuations_load_continuation_reference<'a>(
     )
 }
 
+pub(crate) fn translate_cont_bind<'a>(
+    env: &mut crate::func_environ::FuncEnvironment<'a>,
+    builder: &mut FunctionBuilder,
+    contobj: ir::Value,
+    args: &[ir::Value],
+    remaining_arg_count: usize,
+) -> ir::Value {
+    let contref = typed_continuations_cont_obj_get_cont_ref(env, builder, contobj);
+    let remaining_arg_count = builder.ins().iconst(I32, remaining_arg_count as i64);
+    typed_continuations_store_resume_args(env, builder, args, remaining_arg_count, contref);
+
+    typed_continuations_new_cont_obj(env, builder, contref)
+}
+
 pub(crate) fn translate_cont_new<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
@@ -1276,8 +1285,9 @@ pub(crate) fn translate_cont_new<'a>(
 ) -> WasmResult<ir::Value> {
     let nargs = builder.ins().iconst(I32, arg_types.len() as i64);
     let nreturns = builder.ins().iconst(I32, return_types.len() as i64);
-    call_builtin!(builder, env, let result = tc_cont_new(func, nargs, nreturns));
-    Ok(result)
+    call_builtin!(builder, env, let contref = tc_cont_new(func, nargs, nreturns));
+    let contobj = typed_continuations_new_cont_obj(env, builder, contref);
+    Ok(contobj)
 }
 
 pub(crate) fn translate_resume<'a>(
@@ -1494,7 +1504,7 @@ pub(crate) fn translate_resume<'a>(
 
         // Create and push the continuation object. We only create
         // them here because we don't need them when forwarding.
-        let contobj = env.typed_continuations_new_cont_obj(builder, resume_contref);
+        let contobj = typed_continuations_new_cont_obj(env, builder, resume_contref);
 
         args.push(contobj);
 
@@ -1586,8 +1596,17 @@ pub(crate) fn translate_suspend<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     tag_index: ir::Value,
-) -> ir::Value {
+    suspend_args: &[ir::Value],
+    tag_return_types: &[WasmValType],
+) -> Vec<ir::Value> {
+    typed_continuations_store_payloads(env, builder, suspend_args);
+
     call_builtin!(builder, env, tc_suspend(tag_index));
-    // TODO(dhil): We should change the interface of `translate_suspend` to return nothing.
-    return env.vmctx_val(&mut builder.cursor());
+
+    let contref = typed_continuations_load_continuation_reference(env, builder);
+
+    let return_values =
+        typed_continuations_load_tag_return_values(env, builder, contref, tag_return_types);
+
+    return_values
 }

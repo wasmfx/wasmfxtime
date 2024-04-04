@@ -616,6 +616,18 @@ pub trait FuncEnvironment: TargetEnvironment {
         false
     }
 
+    /// Translates cont.bind instructions.
+    /// `remaining_arg_count` is the *overall* number of remaining arguments of
+    /// the continuation before supplying `args` (i.e., it is the number of
+    /// parameters of the continuation's type before cont.bind was executed).
+    fn translate_cont_bind(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        contobj: ir::Value,
+        args: &[ir::Value],
+        remaining_arg_count: usize,
+    ) -> ir::Value;
+
     /// TODO(dhil): write documentation.
     fn translate_cont_new(
         &mut self,
@@ -652,7 +664,9 @@ pub trait FuncEnvironment: TargetEnvironment {
         &mut self,
         builder: &mut FunctionBuilder,
         tag_index: ir::Value,
-    ) -> ir::Value;
+        suspend_args: &[ir::Value],
+        tag_return_types: &[wasmtime_types::WasmValType],
+    ) -> Vec<ir::Value>;
 
     /// TODO
     fn continuation_arguments(&self, type_index: u32) -> &[wasmtime_types::WasmValType];
@@ -661,56 +675,10 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn continuation_returns(&self, type_index: u32) -> &[wasmtime_types::WasmValType];
 
     /// TODO
-    fn typed_continuations_load_tag_return_values(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        contref: ir::Value,
-        valtypes: &[wasmtime_types::WasmValType],
-    ) -> std::vec::Vec<ir::Value>;
-
-    /// TODO
-    fn typed_continuations_store_payloads(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        valtypes: &[wasmtime_types::WasmValType],
-        values: &[ir::Value],
-    );
-
-    /// TODO
-    fn typed_continuations_store_resume_args(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        values: &[ir::Value],
-        remaining_arg_count: ir::Value,
-        contref: ir::Value,
-    );
-
-    /// TODO
     fn tag_params(&self, tag_index: u32) -> &[wasmtime_types::WasmValType];
 
     /// TODO
     fn tag_returns(&self, tag_index: u32) -> &[wasmtime_types::WasmValType];
-
-    /// Returns a pointer to the currently running continuation reference.
-    /// Traps if not currently running inside a continuation.
-    fn typed_continuations_load_continuation_reference(
-        &mut self,
-        builder: &mut FunctionBuilder,
-    ) -> ir::Value;
-
-    /// TODO
-    fn typed_continuations_new_cont_obj(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        contref_addr: ir::Value,
-    ) -> ir::Value;
-
-    /// TODO
-    fn typed_continuations_cont_obj_get_cont_ref(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        contobj: ir::Value,
-    ) -> ir::Value;
 
     /// Returns whether the CLIF `x86_blendv` instruction should be used for the
     /// relaxed simd `*.relaxed_laneselect` instruction for the specified type.
