@@ -50,6 +50,7 @@ pub fn dummy_value(val_ty: ValType) -> Result<Val> {
             HeapType::Extern => Val::null_extern_ref(),
             HeapType::NoFunc | HeapType::Func | HeapType::Concrete(_) => Val::null_func_ref(),
             HeapType::NoCont | HeapType::Cont => todo!(), // TODO(dhil): We need to extend the embedder API with continuation support first.
+            HeapType::Any | HeapType::I31 | HeapType::None => Val::null_any_ref(),
         },
     })
 }

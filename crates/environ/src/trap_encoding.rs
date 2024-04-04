@@ -74,6 +74,9 @@ pub enum Trap {
     /// Call to a null reference.
     NullReference,
 
+    /// Attempt to get the bits of a null `i31ref`.
+    NullI31Ref,
+
     /// When the `component-model` feature is enabled this trap represents a
     /// scenario where one component tried to call another component but it
     /// would have violated the reentrance rules of the component model,
@@ -114,6 +117,7 @@ impl Trap {
             OutOfFuel
             AtomicWaitNonSharedMemory
             NullReference
+            NullI31Ref
             CannotEnterComponent
             UnhandledTag
         }
@@ -142,6 +146,7 @@ impl fmt::Display for Trap {
             OutOfFuel => "all fuel consumed by WebAssembly",
             AtomicWaitNonSharedMemory => "atomic wait on non-shared memory",
             NullReference => "null reference",
+            NullI31Ref => "null i31 reference",
             CannotEnterComponent => "cannot enter component instance",
             UnhandledTag => "unhandled tag",
         };

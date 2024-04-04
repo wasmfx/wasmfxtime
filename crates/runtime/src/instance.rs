@@ -4,7 +4,6 @@
 
 use crate::continuation::StackChainCell;
 use crate::export::Export;
-use crate::gc::VMExternRefActivationsTable;
 use crate::memory::{Memory, RuntimeMemoryCreator};
 use crate::table::{Table, TableElement, TableElementType};
 use crate::vmcontext::{
@@ -13,8 +12,8 @@ use crate::vmcontext::{
     VMTableDefinition, VMTableImport,
 };
 use crate::{
-    ExportFunction, ExportGlobal, ExportMemory, ExportTable, Imports, ModuleRuntimeInfo,
-    SendSyncPtr, Store, VMFunctionBody, VMSharedTypeIndex, WasmFault,
+    ExportFunction, ExportGlobal, ExportMemory, ExportTable, GcStore, Imports, ModuleRuntimeInfo,
+    SendSyncPtr, Store, VMFunctionBody, VMGcRef, VMSharedTypeIndex, WasmFault, I31,
 };
 use anyhow::Error;
 use anyhow::Result;
@@ -31,8 +30,8 @@ use wasmtime_environ::{
     packed_option::ReservedValue, DataIndex, DefinedGlobalIndex, DefinedMemoryIndex,
     DefinedTableIndex, ElemIndex, EntityIndex, EntityRef, EntitySet, FuncIndex, GlobalIndex,
     GlobalInit, HostPtr, MemoryIndex, MemoryPlan, Module, PrimaryMap, TableElementExpression,
-    TableIndex, TableInitialValue, TableSegmentElements, Trap, VMOffsets, WasmHeapType,
-    WasmRefType, WasmValType, VMCONTEXT_MAGIC,
+    TableIndex, TableInitialValue, TableSegmentElements, Trap, VMOffsets, WasmRefType, WasmValType,
+    VMCONTEXT_MAGIC,
 };
 #[cfg(feature = "wmemcheck")]
 use wasmtime_wmemcheck::Wmemcheck;
@@ -145,10 +144,11 @@ pub struct Instance {
     /// seems not too bad.
     vmctx_self_reference: SendSyncPtr<VMContext>,
 
+    // TODO: add support for multiple memories; `wmemcheck_state` corresponds to
+    // memory 0.
     #[cfg(feature = "wmemcheck")]
     pub(crate) wmemcheck_state: Option<Wmemcheck>,
-    // TODO: add support for multiple memories, wmemcheck_state corresponds to
-    // memory 0.
+
     /// Additional context used by compiled wasm code. This field is last, and
     /// represents a dynamically-sized array that extends beyond the nominal
     /// end of the struct (similar to a flexible array member).
@@ -234,6 +234,7 @@ impl Instance {
     /// pointers to the same `Instance`.
     #[inline]
     pub unsafe fn from_vmctx<R>(vmctx: *mut VMContext, f: impl FnOnce(&mut Instance) -> R) -> R {
+        assert!(!vmctx.is_null());
         let ptr = vmctx
             .byte_sub(mem::size_of::<Instance>())
             .cast::<Instance>();
@@ -262,6 +263,12 @@ impl Instance {
 
     pub(crate) fn module(&self) -> &Arc<Module> {
         self.runtime_info.module()
+    }
+
+    /// Translate a module-level interned type index into an engine-level
+    /// interned type index.
+    pub fn engine_type_index(&self, module_index: ModuleInternedTypeIndex) -> VMSharedTypeIndex {
+        self.runtime_info.engine_type_index(module_index)
     }
 
     #[inline]
@@ -399,6 +406,7 @@ impl Instance {
                 idx,
                 ExportGlobal {
                     definition: self.defined_or_imported_global_ptr(idx),
+                    vmctx: self.vmctx(),
                     global: self.module().globals[idx],
                 },
             )
@@ -418,6 +426,7 @@ impl Instance {
                 let def_idx = module.defined_global_index(global_idx).unwrap();
                 let global = ExportGlobal {
                     definition: self.global_ptr(def_idx),
+                    vmctx: self.vmctx(),
                     global: self.module().globals[global_idx],
                 };
                 (def_idx, global)
@@ -443,9 +452,19 @@ impl Instance {
         unsafe { self.vmctx_plus_offset_mut(self.offsets().vmctx_epoch_ptr()) }
     }
 
-    /// Return a pointer to the `VMExternRefActivationsTable`.
-    pub fn externref_activations_table(&mut self) -> *mut *mut VMExternRefActivationsTable {
-        unsafe { self.vmctx_plus_offset_mut(self.offsets().vmctx_externref_activations_table()) }
+    /// Return a pointer to the GC heap base pointer.
+    pub fn gc_heap_base(&mut self) -> *mut *mut u8 {
+        unsafe { self.vmctx_plus_offset_mut(self.offsets().vmctx_gc_heap_base()) }
+    }
+
+    /// Return a pointer to the GC heap bound.
+    pub fn gc_heap_bound(&mut self) -> *mut usize {
+        unsafe { self.vmctx_plus_offset_mut(self.offsets().vmctx_gc_heap_bound()) }
+    }
+
+    /// Return a pointer to the collector-specific heap data.
+    pub fn gc_heap_data(&mut self) -> *mut *mut u8 {
+        unsafe { self.vmctx_plus_offset_mut(self.offsets().vmctx_gc_heap_data()) }
     }
 
     /// Gets a pointer to this instance's `Store` which was originally
@@ -472,7 +491,7 @@ impl Instance {
             *self.runtime_limits() = (*store).vmruntime_limits();
             *self.stack_chain() = (*store).stack_chain();
             *self.epoch_ptr() = (*store).epoch_ptr();
-            *self.externref_activations_table() = (*store).externref_activations_table().0;
+            self.set_gc_heap((*store).maybe_gc_store());
         } else {
             assert_eq!(
                 mem::size_of::<*mut dyn Store>(),
@@ -480,11 +499,21 @@ impl Instance {
             );
             *self.vmctx_plus_offset_mut::<[*mut (); 2]>(self.offsets().vmctx_store()) =
                 [ptr::null_mut(), ptr::null_mut()];
-
             *self.runtime_limits() = ptr::null_mut();
             *self.epoch_ptr() = ptr::null_mut();
+            self.set_gc_heap(None);
+        }
+    }
 
-            *self.externref_activations_table() = ptr::null_mut();
+    unsafe fn set_gc_heap(&mut self, gc_store: Option<&mut GcStore>) {
+        if let Some(gc_store) = gc_store {
+            *self.gc_heap_base() = gc_store.gc_heap.vmctx_gc_heap_base();
+            *self.gc_heap_bound() = gc_store.gc_heap.vmctx_gc_heap_bound();
+            *self.gc_heap_data() = gc_store.gc_heap.vmctx_gc_heap_data();
+        } else {
+            *self.gc_heap_base() = ptr::null_mut();
+            *self.gc_heap_bound() = 0;
+            *self.gc_heap_data() = ptr::null_mut();
         }
     }
 
@@ -564,6 +593,7 @@ impl Instance {
             } else {
                 self.imported_global(index).from
             },
+            vmctx: self.vmctx(),
             global: self.module().globals[index],
         }
     }
@@ -875,15 +905,19 @@ impl Instance {
                             }),
                         )?;
                     }
-                    TableElementType::Extern => {
-                        table.init_extern(
+                    TableElementType::GcRef => {
+                        table.init_gc_refs(
                             dst,
                             exprs.iter().map(|expr| match expr {
                                 TableElementExpression::Null => None,
                                 TableElementExpression::Function(_) => unreachable!(),
                                 TableElementExpression::GlobalGet(idx) => {
                                     let global = self.defined_or_imported_global_ptr(*idx);
-                                    unsafe { (*global).as_externref().clone() }
+                                    let gc_ref = unsafe { (*global).as_gc_ref() };
+                                    gc_ref.map(|r| {
+                                        let store = unsafe { &mut *self.store() };
+                                        store.gc_store().clone_gc_ref(r)
+                                    })
                                 }
                             }),
                         )?;
@@ -1080,7 +1114,8 @@ impl Instance {
 
         if elt_ty == TableElementType::Func {
             for i in range {
-                let value = match self.tables[idx].1.get(i) {
+                let gc_store = unsafe { (*self.store()).gc_store() };
+                let value = match self.tables[idx].1.get(gc_store, i) {
                     Some(value) => value,
                     None => {
                         // Out-of-bounds; caller will handle by likely
@@ -1104,7 +1139,9 @@ impl Instance {
                 let module = self.module();
                 let precomputed = match &module.table_initialization.initial_values[idx] {
                     TableInitialValue::Null { precomputed } => precomputed,
-                    TableInitialValue::FuncRef(_) | TableInitialValue::GlobalGet(_) => {
+                    TableInitialValue::FuncRef(_)
+                    | TableInitialValue::GlobalGet(_)
+                    | TableInitialValue::I31Ref(_) => {
                         unreachable!()
                     }
                 };
@@ -1283,16 +1320,17 @@ impl Instance {
                     } else {
                         &*self.imported_global(x).from
                     };
-                    // Globals of type `externref` need to manage the reference
-                    // count as values move between globals, everything else is just
-                    // copy-able bits.
-                    match wasm_ty {
-                        WasmValType::Ref(WasmRefType {
-                            heap_type: WasmHeapType::Extern,
-                            ..
-                        }) => *(*to).as_externref_mut() = from.as_externref().clone(),
 
-                        _ => ptr::copy_nonoverlapping(from, to, 1),
+                    // GC-managed globals may need to invoke GC barriers,
+                    // everything else is just copy-able bits.
+                    if wasm_ty.is_gc_heap_type() {
+                        let gc_ref = (*from)
+                            .as_gc_ref()
+                            .map(|r| r.unchecked_copy())
+                            .map(|r| (*self.store()).gc_store().clone_gc_ref(&r));
+                        (*to).init_gc_ref(gc_ref);
+                    } else {
+                        ptr::copy_nonoverlapping(from, to, 1);
                     }
                 }
                 GlobalInit::RefFunc(f) => {
@@ -1303,6 +1341,10 @@ impl Instance {
                     WasmValType::Ref(WasmRefType { nullable: true, .. }) => {}
                     ty => panic!("unsupported reference type for global: {:?}", ty),
                 },
+                GlobalInit::RefI31Const(x) => {
+                    let gc_ref = VMGcRef::from_i31(I31::wrapping_i32(x));
+                    (*to).init_gc_ref(Some(gc_ref));
+                }
             }
         }
     }
@@ -1345,31 +1387,8 @@ impl Instance {
     }
 }
 
-impl Drop for Instance {
-    fn drop(&mut self) {
-        // Drop any defined globals
-        let module = self.module().clone();
-        for (idx, global) in module.globals.iter() {
-            let idx = match module.defined_global_index(idx) {
-                Some(idx) => idx,
-                None => continue,
-            };
-            match global.wasm_ty {
-                // For now only externref globals need to get destroyed
-                WasmValType::Ref(WasmRefType {
-                    heap_type: WasmHeapType::Extern,
-                    ..
-                }) => unsafe {
-                    drop((*self.global_ptr(idx)).as_externref_mut().take());
-                },
-
-                _ => continue,
-            }
-        }
-    }
-}
-
 /// A handle holding an `Instance` of a WebAssembly module.
+#[derive(Debug)]
 pub struct InstanceHandle {
     instance: Option<SendSyncPtr<Instance>>,
 }
@@ -1460,6 +1479,30 @@ impl InstanceHandle {
     ) -> *mut Table {
         let index = self.instance().module().table_index(index);
         self.instance_mut().get_table_with_lazy_init(index, range)
+    }
+
+    /// Get all tables within this instance.
+    ///
+    /// Returns both import and defined tables.
+    ///
+    /// Returns both exported and non-exported tables.
+    ///
+    /// Gives access to the full tables space.
+    pub fn all_tables<'a>(
+        &'a mut self,
+    ) -> impl ExactSizeIterator<Item = (TableIndex, ExportTable)> + 'a {
+        let indices = (0..self.module().table_plans.len())
+            .map(|i| TableIndex::new(i))
+            .collect::<Vec<_>>();
+        indices.into_iter().map(|i| (i, self.get_exported_table(i)))
+    }
+
+    /// Return the tables defined in this instance (not imported).
+    pub fn defined_tables<'a>(&'a mut self) -> impl ExactSizeIterator<Item = ExportTable> + 'a {
+        let num_imported = self.module().num_imported_tables;
+        self.all_tables()
+            .skip(num_imported)
+            .map(|(_i, table)| table)
     }
 
     /// Get all memories within this instance.

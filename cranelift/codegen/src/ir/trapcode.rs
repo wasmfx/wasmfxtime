@@ -57,6 +57,9 @@ pub enum TrapCode {
 
     /// We are suspending to a tag for which there is no active handler.
     UnhandledTag,
+
+    /// A null `i31ref` was encountered which was required to be non-null.
+    NullI31Ref,
 }
 
 impl TrapCode {
@@ -98,6 +101,7 @@ impl Display for TrapCode {
             User(x) => return write!(f, "user{}", x),
             NullReference => "null_reference",
             UnhandledTag => "unhandled_tag",
+            NullI31Ref => "null_i31ref",
         };
         f.write_str(identifier)
     }
@@ -122,6 +126,7 @@ impl FromStr for TrapCode {
             "interrupt" => Ok(Interrupt),
             "null_reference" => Ok(NullReference),
             "unhandled_tag" => Ok(UnhandledTag),
+            "null_i31ref" => Ok(NullI31Ref),
             _ if s.starts_with("user") => s[4..].parse().map(User).map_err(|_| ()),
             _ => Err(()),
         }

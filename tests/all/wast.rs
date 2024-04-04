@@ -27,7 +27,9 @@ fn run_wast(wast: &str, strategy: Strategy, pooling: bool) -> anyhow::Result<()>
     let threads = feature_found(wast, "threads");
     let typed_continuations = feature_found(wast, "typed-continuations");
     let exceptions = feature_found(wast, "exception-handling") || typed_continuations;
-    let function_references = feature_found(wast, "function-references") || typed_continuations;
+    let gc = feature_found(wast, "gc");
+    let function_references =
+        gc || typed_continuations || feature_found(wast, "function-references");
     let reference_types = !(threads && feature_found(wast, "proposals"));
     let relaxed_simd = feature_found(wast, "relaxed-simd");
     let tail_call = feature_found(wast, "tail-call") || feature_found(wast, "function-references");
@@ -49,6 +51,7 @@ fn run_wast(wast: &str, strategy: Strategy, pooling: bool) -> anyhow::Result<()>
         .wasm_threads(threads)
         .wasm_memory64(memory64)
         .wasm_function_references(function_references)
+        .wasm_gc(gc)
         .wasm_reference_types(reference_types)
         .wasm_relaxed_simd(relaxed_simd)
         .wasm_tail_call(tail_call)
