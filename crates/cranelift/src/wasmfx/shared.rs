@@ -6,15 +6,19 @@ use cranelift_frontend::FunctionBuilder;
 #[allow(unused_macros)]
 macro_rules! call_builtin {
     ( $builder:ident, $env:ident, $f:ident( $($args:expr),* ) ) => (
-        let _fname = $env.builtin_functions.$f(&mut $builder.func);
-        let _vmctx_libcall_arg = $env.vmctx_val(&mut $builder.cursor());
-        let _call_inst = $builder.ins().call(_fname, &[_vmctx_libcall_arg, $( $args ), * ]);
+        {
+            let fname = $env.builtin_functions.$f(&mut $builder.func);
+            let vmctx = $env.vmctx_val(&mut $builder.cursor());
+            $builder.ins().call(fname, &[vmctx, $( $args ), * ]);
+        }
     );
     ( $builder:ident, $env:ident, let $name:ident = $f:ident( $($args:expr),* ) )=> (
-        let _fname = $env.builtin_functions.$f(&mut $builder.func);
-        let _vmctx_libcall_arg = $env.vmctx_val(&mut $builder.cursor());
-        let _call_inst = $builder.ins().call(_fname, &[_vmctx_libcall_arg, $( $args ), * ]);
-        let $name = *$builder.func.dfg.inst_results(_call_inst).first().unwrap();
+        let $name = {
+            let fname = $env.builtin_functions.$f(&mut $builder.func);
+            let vmctx = $env.vmctx_val(&mut $builder.cursor());
+            let call_inst = $builder.ins().call(fname, &[vmctx, $( $args ), * ]);
+            *$builder.func.dfg.inst_results(call_inst).first().unwrap()
+        };
     );
 }
 
