@@ -2548,9 +2548,8 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let arg_types = environ.continuation_arguments(*type_index).to_vec();
             let result_types = environ.continuation_returns(*type_index).to_vec();
             let r = state.pop1();
-            let contref =
+            let contobj =
                 environ.translate_cont_new(builder, state, r, &arg_types, &result_types)?;
-            let contobj = environ.typed_continuations_new_cont_obj(builder, contref);
             state.push1(contobj);
         }
         Operator::Resume {

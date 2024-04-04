@@ -1288,8 +1288,9 @@ pub(crate) fn translate_cont_new<'a>(
 ) -> WasmResult<ir::Value> {
     let nargs = builder.ins().iconst(I32, arg_types.len() as i64);
     let nreturns = builder.ins().iconst(I32, return_types.len() as i64);
-    call_builtin!(builder, env, let result = tc_cont_new(func, nargs, nreturns));
-    Ok(result)
+    call_builtin!(builder, env, let contref = tc_cont_new(func, nargs, nreturns));
+    let contobj = typed_continuations_new_cont_obj(env, builder, contref);
+    Ok(contobj)
 }
 
 pub(crate) fn translate_resume<'a>(
