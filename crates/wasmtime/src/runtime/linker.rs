@@ -348,8 +348,11 @@ impl<T> Linker<T> {
                                             | HeapType::Concrete(_)
                                             | HeapType::NoFunc => Val::null_func_ref(),
                                             HeapType::Extern => Val::null_extern_ref(),
-                                            // TODO(dhil): We need to know what `Concrete` points to.
+                                            // TODO(dhil): We should probably do the same as for function, i.e. return a null ref.
                                             HeapType::Cont | HeapType::NoCont => todo!("Linker support for continuations has not yet been implemented!"),
+                                            HeapType::Any | HeapType::I31 | HeapType::None => {
+                                                Val::null_any_ref()
+                                            }
                                         }
                                     }
                                 };
