@@ -2589,8 +2589,8 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         contobj: ir::Value,
         args: &[ir::Value],
-        remaining_arg_count : usize,
-    ) ->ir::Value {
+        remaining_arg_count: usize,
+    ) -> ir::Value {
         wasmfx_impl::translate_cont_bind(self, builder, contobj, args, remaining_arg_count)
     }
 
@@ -2634,7 +2634,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         &mut self,
         builder: &mut FunctionBuilder,
         tag_index: ir::Value,
-        suspend_args : &[ir::Value],
+        suspend_args: &[ir::Value],
         tag_return_types: &[WasmValType],
     ) -> Vec<ir::Value> {
         wasmfx_impl::translate_suspend(self, builder, tag_index, suspend_args, tag_return_types)
@@ -2658,56 +2658,6 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn tag_returns(&self, tag_index: u32) -> &[WasmValType] {
         let idx = self.module.tags[TagIndex::from_u32(tag_index)].signature;
         self.types[idx].returns()
-    }
-
-
-    /// TODO
-    fn typed_continuations_cont_obj_get_cont_ref(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        contobj: ir::Value,
-    ) -> ir::Value {
-        wasmfx_impl::typed_continuations_cont_obj_get_cont_ref(self, builder, contobj)
-    }
-
-    /// TODO
-    fn typed_continuations_store_resume_args(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        values: &[ir::Value],
-        remaining_arg_count: ir::Value,
-        contref: ir::Value,
-    ) {
-        wasmfx_impl::typed_continuations_store_resume_args(
-            self,
-            builder,
-            values,
-            remaining_arg_count,
-            contref,
-        )
-    }
-
-    fn typed_continuations_store_payloads(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        values: &[ir::Value],
-    ) {
-        wasmfx_impl::typed_continuations_store_payloads(self, builder, values)
-    }
-
-    fn typed_continuations_load_continuation_reference(
-        &mut self,
-        builder: &mut FunctionBuilder,
-    ) -> ir::Value {
-        wasmfx_impl::typed_continuations_load_continuation_reference(self, builder)
-    }
-
-    fn typed_continuations_new_cont_obj(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        contref_addr: ir::Value,
-    ) -> ir::Value {
-        wasmfx_impl::typed_continuations_new_cont_obj(self, builder, contref_addr)
     }
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {

@@ -378,11 +378,11 @@ pub(crate) fn translate_cont_bind<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     contobj: ir::Value,
-        args: &[ir::Value],
-        remaining_arg_count : usize,
+    args: &[ir::Value],
+    remaining_arg_count: usize,
 ) -> ir::Value {
     let contref = typed_continuations_cont_obj_get_cont_ref(env, builder, contobj);
-    let remaining_arg_count = builder.ins().iconst(I32, remaining_arg_count as i64) ;
+    let remaining_arg_count = builder.ins().iconst(I32, remaining_arg_count as i64);
     typed_continuations_store_resume_args(env, builder, args, remaining_arg_count, contref);
 
     typed_continuations_new_cont_obj(env, builder, contref)
@@ -408,16 +408,15 @@ pub(crate) fn translate_suspend<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     tag_index: ir::Value,
-    suspend_args : &[ir::Value],
+    suspend_args: &[ir::Value],
     tag_return_types: &[WasmValType],
 ) -> Vec<ir::Value> {
     typed_continuations_store_payloads(env, builder, suspend_args);
     call_builtin!(builder, env, tc_baseline_suspend(tag_index));
-    let contref = env.typed_continuations_load_continuation_reference(builder);
+    let contref = typed_continuations_load_continuation_reference(env, builder);
 
     let return_values =
         typed_continuations_load_tag_return_values(env, builder, contref, tag_return_types);
 
     return_values
-
 }
