@@ -8,12 +8,9 @@ use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::{FunctionBuilder, Switch};
 use cranelift_wasm::FuncEnvironment;
 use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
+use shared::typed_continuations_cont_obj_get_cont_ref;
+use shared::typed_continuations_new_cont_obj;
 use wasmtime_environ::PtrSize;
-
-#[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_cont_obj_get_cont_ref;
-#[allow(unused_imports)]
-pub(crate) use shared::typed_continuations_new_cont_obj;
 
 fn typed_continuations_load_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
