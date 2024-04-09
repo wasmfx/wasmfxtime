@@ -36,9 +36,9 @@ impl Into<AMode> for StackAMode {
     fn into(self) -> AMode {
         match self {
             // Argument area begins after saved frame pointer + return address.
-            StackAMode::ArgOffset(off, ty) => AMode::FPOffset { off: off + 16, ty },
-            StackAMode::NominalSPOffset(off, ty) => AMode::NominalSPOffset { off, ty },
-            StackAMode::SPOffset(off, ty) => AMode::SPOffset { off, ty },
+            StackAMode::IncomingArg(off) => AMode::FPOffset { off: off + 16 },
+            StackAMode::Slot(off) => AMode::NominalSPOffset { off },
+            StackAMode::OutgoingArg(off) => AMode::SPOffset { off },
         }
     }
 }
@@ -457,7 +457,7 @@ impl ABIMachineSpec for AArch64MachineDeps {
         insts
     }
 
-    fn gen_get_stack_addr(mem: StackAMode, into_reg: Writable<Reg>, _ty: Type) -> Inst {
+    fn gen_get_stack_addr(mem: StackAMode, into_reg: Writable<Reg>) -> Inst {
         // FIXME: Do something different for dynamic types?
         let mem = mem.into();
         Inst::LoadAddr { rd: into_reg, mem }
@@ -471,7 +471,6 @@ impl ABIMachineSpec for AArch64MachineDeps {
         let mem = AMode::RegOffset {
             rn: base,
             off: offset as i64,
-            ty,
         };
         Inst::gen_load(into_reg, mem, ty, MemFlags::trusted())
     }
@@ -480,7 +479,6 @@ impl ABIMachineSpec for AArch64MachineDeps {
         let mem = AMode::RegOffset {
             rn: base,
             off: offset as i64,
-            ty,
         };
         Inst::gen_store(mem, from_reg, ty, MemFlags::trusted())
     }
@@ -1166,7 +1164,6 @@ impl ABIMachineSpec for AArch64MachineDeps {
         };
 
         // Return FrameLayout structure.
-        debug_assert!(outgoing_args_size == 0);
         FrameLayout {
             stack_args_size,
             setup_area_size,
@@ -1191,7 +1188,7 @@ impl AArch64MachineDeps {
             insts.extend(Self::gen_sp_reg_adjust(-(guard_size as i32)));
 
             insts.push(Inst::gen_store(
-                AMode::SPOffset { off: 0, ty: I8 },
+                AMode::SPOffset { off: 0 },
                 zero_reg(),
                 I32,
                 MemFlags::trusted(),

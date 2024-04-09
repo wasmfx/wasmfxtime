@@ -1719,8 +1719,11 @@ impl StoreOpaque {
                     .expect("we should never use the high 32 bits of an r64");
 
                 if gc_ref.is_some() {
-                    gc_roots_list
-                        .add_wasm_stack_root(SendSyncPtr::new(NonNull::new(stack_slot).unwrap()));
+                    unsafe {
+                        gc_roots_list.add_wasm_stack_root(SendSyncPtr::new(
+                            NonNull::new(stack_slot).unwrap(),
+                        ));
+                    }
                 }
             }
 
