@@ -846,10 +846,11 @@ impl<T: WasiHttpView> crate::bindings::http::types::HostFutureIncomingResponse f
             headers: parts.headers,
             body: Some({
                 let mut body = HostIncomingBody::new(body, resp.between_bytes_timeout);
-                body.retain_worker(&resp.worker);
+                if let Some(worker) = resp.worker {
+                    body.retain_worker(worker);
+                }
                 body
             }),
-            worker: resp.worker,
         })?;
 
         Ok(Some(Ok(Ok(resp))))
