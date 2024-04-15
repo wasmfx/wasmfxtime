@@ -13,6 +13,7 @@ use std::ptr::{self, NonNull};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::u32;
 pub use vm_host_func_context::{VMArrayCallHostFuncContext, VMNativeCallHostFuncContext};
+use wasmtime_environ::VMSharedTypeIndex;
 use wasmtime_environ::{BuiltinFunctionIndex, DefinedMemoryIndex, Unsigned, VMCONTEXT_MAGIC};
 
 /// A function pointer that exposes the array calling convention.
@@ -569,12 +570,6 @@ impl VMGlobalDefinition {
     }
 }
 
-/// An index into the shared type registry, usable for checking signatures
-/// at indirect calls.
-#[repr(C)]
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
-pub struct VMSharedTypeIndex(u32);
-
 #[cfg(test)]
 mod test_vmshared_type_index {
     use super::VMSharedTypeIndex;
@@ -589,32 +584,6 @@ mod test_vmshared_type_index {
             size_of::<VMSharedTypeIndex>(),
             usize::from(offsets.size_of_vmshared_type_index())
         );
-    }
-}
-
-impl VMSharedTypeIndex {
-    /// Create a new `VMSharedTypeIndex`.
-    #[inline]
-    pub fn new(value: u32) -> Self {
-        assert_ne!(
-            value,
-            u32::MAX,
-            "u32::MAX is reserved for the default value"
-        );
-        Self(value)
-    }
-
-    /// Returns the underlying bits of the index.
-    #[inline]
-    pub fn bits(&self) -> u32 {
-        self.0
-    }
-}
-
-impl Default for VMSharedTypeIndex {
-    #[inline]
-    fn default() -> Self {
-        Self(u32::MAX)
     }
 }
 
@@ -1032,13 +1001,14 @@ pub union ValRaw {
 
     /// A WebAssembly `v128` value.
     ///
-    /// The payload here is a Rust `u128` which has the same number of bits but
-    /// note that `v128` in WebAssembly is often considered a vector type such
-    /// as `i32x4` or `f64x2`. This means that the actual interpretation of the
-    /// underlying bits is left up to the instructions which consume this value.
+    /// The payload here is a Rust `[u8; 16]` which has the same number of bits
+    /// but note that `v128` in WebAssembly is often considered a vector type
+    /// such as `i32x4` or `f64x2`. This means that the actual interpretation
+    /// of the underlying bits is left up to the instructions which consume
+    /// this value.
     ///
     /// This value is always stored in a little-endian format.
-    v128: u128,
+    v128: [u8; 16],
 
     /// A WebAssembly `funcref` value (or one of its subtypes).
     ///
@@ -1073,6 +1043,14 @@ pub union ValRaw {
     anyref: u32,
 }
 
+// The `ValRaw` type is matched as `wasmtime_val_raw_t` in the C API so these
+// are some simple assertions about the shape of the type which are additionally
+// matched in C.
+const _: () = {
+    assert!(std::mem::size_of::<ValRaw>() == 16);
+    assert!(std::mem::align_of::<ValRaw>() == 8);
+};
+
 // This type is just a bag-of-bits so it's up to the caller to figure out how
 // to safely deal with threading concerns and safely access interior bits.
 unsafe impl Send for ValRaw {}
@@ -1096,7 +1074,7 @@ impl std::fmt::Debug for ValRaw {
                 .field("i64", &Hex(self.i64))
                 .field("f32", &Hex(self.f32))
                 .field("f64", &Hex(self.f64))
-                .field("v128", &Hex(self.v128))
+                .field("v128", &Hex(u128::from_le_bytes(self.v128)))
                 .field("funcref", &self.funcref)
                 .field("externref", &Hex(self.externref))
                 .field("anyref", &Hex(self.anyref))
@@ -1155,7 +1133,9 @@ impl ValRaw {
     /// Creates a WebAssembly `v128` value
     #[inline]
     pub fn v128(i: u128) -> ValRaw {
-        ValRaw { v128: i.to_le() }
+        ValRaw {
+            v128: i.to_le_bytes(),
+        }
     }
 
     /// Creates a WebAssembly `funcref` value
@@ -1221,7 +1201,7 @@ impl ValRaw {
     /// Gets the WebAssembly `v128` value
     #[inline]
     pub fn get_v128(&self) -> u128 {
-        unsafe { u128::from_le(self.v128) }
+        unsafe { u128::from_le_bytes(self.v128) }
     }
 
     /// Gets the WebAssembly `funcref` value
