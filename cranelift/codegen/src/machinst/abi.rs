@@ -285,7 +285,7 @@ pub enum ArgsOrRets {
 #[derive(Clone, Copy, Debug)]
 pub enum StackAMode {
     /// Offset into the current frame's argument area.
-    IncomingArg(i64),
+    IncomingArg(i64, u32),
     /// Offset within the stack slots in the current frame.
     Slot(i64),
     /// Offset into the callee frame's argument area.
@@ -524,7 +524,8 @@ pub trait ABIMachineSpec {
         sig: &Signature,
         regs: &[Writable<RealReg>],
         is_leaf: bool,
-        stack_args_size: u32,
+        incoming_args_size: u32,
+        tail_args_size: u32,
         fixed_frame_storage_size: u32,
         outgoing_args_size: u32,
     ) -> FrameLayout;
@@ -1015,7 +1016,13 @@ pub struct FrameLayout {
     /// need to access it.  Depending on the ABI, we may need to set up a
     /// frame pointer to do so; we also may need to pop this area from the
     /// stack upon return.
-    pub stack_args_size: u32,
+    pub incoming_args_size: u32,
+
+    /// The size of the incoming argument area, taking into account any
+    /// potential increase in size required for tail calls present in the
+    /// function. In the case that no tail calls are present, this value
+    /// will be the same as [`Self::incoming_args_size`].
+    pub tail_args_size: u32,
 
     /// Size of the "setup area", typically holding the return address
     /// and/or the saved frame pointer.  This may be written either during
@@ -1048,6 +1055,22 @@ pub struct FrameLayout {
     pub clobbered_callee_saves: Vec<Writable<RealReg>>,
 }
 
+impl FrameLayout {
+    /// Split the clobbered callee-save registers into integer-class and
+    /// float-class groups.
+    ///
+    /// This method does not currently support vector-class callee-save
+    /// registers because no current backend has them.
+    pub fn clobbered_callee_saves_by_class(&self) -> (&[Writable<RealReg>], &[Writable<RealReg>]) {
+        let (ints, floats) = self.clobbered_callee_saves.split_at(
+            self.clobbered_callee_saves
+                .partition_point(|r| r.to_reg().class() == RegClass::Int),
+        );
+        debug_assert!(floats.iter().all(|r| r.to_reg().class() == RegClass::Float));
+        (ints, floats)
+    }
+}
+
 /// ABI object for a function body.
 pub struct Callee<M: ABIMachineSpec> {
     /// CLIF-level signature, possibly normalized.
@@ -1064,6 +1087,10 @@ pub struct Callee<M: ABIMachineSpec> {
     stackslots_size: u32,
     /// Stack size to be reserved for outgoing arguments.
     outgoing_args_size: u32,
+    /// Initially the number of bytes originating in the callers frame where stack arguments will
+    /// live. After lowering this number may be larger than the size expected by the function being
+    /// compiled, as tail calls potentially require more space for stack arguments.
+    tail_args_size: u32,
     /// Register-argument defs, to be provided to the `args`
     /// pseudo-inst, and pregs to constrain them to.
     reg_args: Vec<ArgPair>,
@@ -1097,9 +1124,6 @@ pub struct Callee<M: ABIMachineSpec> {
     /// manually register-allocated and carefully only use caller-saved
     /// registers and keep nothing live after this sequence of instructions.
     stack_limit: Option<(Reg, SmallInstVec<M::I>)>,
-    /// Are we to invoke the probestack function in the prologue? If so,
-    /// what is the minimum size at which we must invoke it?
-    probestack_min_frame: Option<u32>,
 
     _mach: PhantomData<M>,
 }
@@ -1207,17 +1231,7 @@ impl<M: ABIMachineSpec> Callee<M> {
                         .map(|gv| gen_stack_limit::<M>(f, sigs, sig, gv))
                 });
 
-        // Determine whether a probestack call is required for large enough
-        // frames (and the minimum frame size if so).
-        let probestack_min_frame = if flags.enable_probestack() {
-            assert!(
-                !flags.probestack_func_adjusts_sp(),
-                "SP-adjusting probestack not supported in new backends"
-            );
-            Some(1 << flags.probestack_size_log2())
-        } else {
-            None
-        };
+        let tail_args_size = sigs[sig].sized_stack_arg_space;
 
         Ok(Self {
             ir_sig: ensure_struct_return_ptr_is_returned(&f.signature),
@@ -1227,6 +1241,7 @@ impl<M: ABIMachineSpec> Callee<M> {
             sized_stackslots,
             stackslots_size,
             outgoing_args_size: 0,
+            tail_args_size,
             reg_args: vec![],
             clobbered: vec![],
             spillslots: None,
@@ -1238,7 +1253,6 @@ impl<M: ABIMachineSpec> Callee<M> {
             isa_flags: isa_flags.clone(),
             is_leaf: f.is_leaf(),
             stack_limit,
-            probestack_min_frame,
             _mach: PhantomData,
         })
     }
@@ -1451,6 +1465,15 @@ impl<M: ABIMachineSpec> Callee<M> {
         }
     }
 
+    /// Accumulate the incoming argument area size requirements for a tail call,
+    /// as it could be larger than the incoming arguments of the function
+    /// currently being compiled.
+    pub fn accumulate_tail_args_size(&mut self, size: u32) {
+        if size > self.tail_args_size {
+            self.tail_args_size = size;
+        }
+    }
+
     pub fn is_forward_edge_cfi_enabled(&self) -> bool {
         self.isa_flags.is_forward_edge_cfi_enabled()
     }
@@ -1514,7 +1537,7 @@ impl<M: ABIMachineSpec> Callee<M> {
                             ty
                         };
                     insts.push(M::gen_load_stack(
-                        StackAMode::IncomingArg(offset),
+                        StackAMode::IncomingArg(offset, sigs[self.sig].sized_stack_arg_space),
                         *into_reg,
                         ty,
                     ));
@@ -1539,7 +1562,7 @@ impl<M: ABIMachineSpec> Callee<M> {
                 } else {
                     // Buffer address is implicitly defined by the ABI.
                     insts.push(M::gen_get_stack_addr(
-                        StackAMode::IncomingArg(offset),
+                        StackAMode::IncomingArg(offset, sigs[self.sig].sized_stack_arg_space),
                         into_reg,
                     ));
                 }
@@ -1561,7 +1584,7 @@ impl<M: ABIMachineSpec> Callee<M> {
                         // This was allocated in the `init` routine.
                         let addr_reg = self.arg_temp_reg[idx].unwrap();
                         insts.push(M::gen_load_stack(
-                            StackAMode::IncomingArg(offset),
+                            StackAMode::IncomingArg(offset, sigs[self.sig].sized_stack_arg_space),
                             addr_reg,
                             ty,
                         ));
@@ -1819,6 +1842,7 @@ impl<M: ABIMachineSpec> Callee<M> {
             &self.clobbered,
             self.is_leaf,
             self.stack_args_size(sigs),
+            self.tail_args_size,
             total_stacksize,
             self.outgoing_args_size,
         ));
@@ -1848,7 +1872,8 @@ impl<M: ABIMachineSpec> Callee<M> {
         // might need. Note that s390x may also use the outgoing args area for
         // backtrace support even in leaf functions, so that should be accounted
         // for unconditionally.
-        let total_stacksize = frame_layout.clobber_size
+        let total_stacksize = (frame_layout.tail_args_size - frame_layout.incoming_args_size)
+            + frame_layout.clobber_size
             + frame_layout.fixed_frame_storage_size
             + frame_layout.outgoing_args_size
             + if self.is_leaf {
@@ -1865,22 +1890,20 @@ impl<M: ABIMachineSpec> Callee<M> {
                 self.insert_stack_check(*reg, total_stacksize, &mut insts);
             }
 
-            let needs_probestack = self
-                .probestack_min_frame
-                .map_or(false, |min_frame| total_stacksize >= min_frame);
-
-            if needs_probestack {
-                match self.flags.probestack_strategy() {
-                    ProbestackStrategy::Inline => {
-                        let guard_size = 1 << self.flags.probestack_size_log2();
-                        M::gen_inline_probestack(
+            if self.flags.enable_probestack() {
+                let guard_size = 1 << self.flags.probestack_size_log2();
+                if total_stacksize >= guard_size {
+                    match self.flags.probestack_strategy() {
+                        ProbestackStrategy::Inline => M::gen_inline_probestack(
                             &mut insts,
                             self.call_conv,
                             total_stacksize,
                             guard_size,
-                        )
+                        ),
+                        ProbestackStrategy::Outline => {
+                            M::gen_probestack(&mut insts, total_stacksize)
+                        }
                     }
-                    ProbestackStrategy::Outline => M::gen_probestack(&mut insts, total_stacksize),
                 }
             }
         }
@@ -2286,12 +2309,7 @@ impl<M: ABIMachineSpec> CallSite<M> {
                 }),
                 ArgLoc::Stack { offset, ty } => {
                     let amode = if self.is_tail_call() {
-                        assert!(
-                            self.flags.preserve_frame_pointers(),
-                            "tail calls require frame pointers to be enabled"
-                        );
-
-                        StackAMode::IncomingArg(offset)
+                        StackAMode::IncomingArg(offset, ctx.sigs()[self.sig].sized_stack_arg_space)
                     } else {
                         StackAMode::OutgoingArg(offset)
                     };

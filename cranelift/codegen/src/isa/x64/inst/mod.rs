@@ -52,8 +52,15 @@ pub struct CallInfo {
 /// Out-of-line data for return-calls, to keep the size of `Inst` down.
 #[derive(Clone, Debug)]
 pub struct ReturnCallInfo {
+    /// The size of the argument area for this return-call, potentially smaller than that of the
+    /// caller, but never larger.
+    pub new_stack_arg_size: u32,
+
     /// The in-register arguments and their constraints.
     pub uses: CallArgList,
+
+    /// A temporary for use when moving the return address.
+    pub tmp: WritableGpr,
 }
 
 #[test]
@@ -124,8 +131,6 @@ impl Inst {
             | Inst::Pop64 { .. }
             | Inst::Push64 { .. }
             | Inst::StackProbeLoop { .. }
-            | Inst::GrowArgumentArea { .. }
-            | Inst::ShrinkArgumentArea { .. }
             | Inst::Args { .. }
             | Inst::Rets { .. }
             | Inst::Ret { .. }
@@ -1663,8 +1668,14 @@ impl PrettyPrint for Inst {
             }
 
             Inst::ReturnCallKnown { callee, info } => {
-                let ReturnCallInfo { uses } = &**info;
-                let mut s = format!("return_call_known {callee:?}");
+                let ReturnCallInfo {
+                    uses,
+                    new_stack_arg_size,
+                    tmp,
+                } = &**info;
+                let tmp = pretty_print_reg(tmp.to_reg().to_reg(), 8, allocs);
+                let mut s =
+                    format!("return_call_known {callee:?} ({new_stack_arg_size}) tmp={tmp}");
                 for ret in uses {
                     let preg = regs::show_reg(ret.preg);
                     let vreg = pretty_print_reg(ret.vreg, 8, allocs);
@@ -1674,27 +1685,21 @@ impl PrettyPrint for Inst {
             }
 
             Inst::ReturnCallUnknown { callee, info } => {
-                let ReturnCallInfo { uses } = &**info;
+                let ReturnCallInfo {
+                    uses,
+                    new_stack_arg_size,
+                    tmp,
+                } = &**info;
                 let callee = callee.pretty_print(8, allocs);
-                let mut s = format!("return_call_unknown {callee}");
+                let tmp = pretty_print_reg(tmp.to_reg().to_reg(), 8, allocs);
+                let mut s =
+                    format!("return_call_unknown {callee} ({new_stack_arg_size}) tmp={tmp}");
                 for ret in uses {
                     let preg = regs::show_reg(ret.preg);
                     let vreg = pretty_print_reg(ret.vreg, 8, allocs);
                     write!(&mut s, " {vreg}={preg}").unwrap();
                 }
                 s
-            }
-
-            Inst::GrowArgumentArea { amount, tmp } => {
-                let amount = *amount;
-                let tmp = pretty_print_reg(tmp.to_reg().to_reg(), 8, allocs);
-                format!("grow_argument_area {amount} {tmp}")
-            }
-
-            Inst::ShrinkArgumentArea { amount, tmp } => {
-                let amount = *amount;
-                let tmp = pretty_print_reg(tmp.to_reg().to_reg(), 8, allocs);
-                format!("shrink_argument_area {amount} {tmp}")
             }
 
             Inst::Args { args } => {
@@ -2346,7 +2351,8 @@ fn x64_get_operands<F: Fn(VReg) -> VReg>(inst: &Inst, collector: &mut OperandCol
         }
 
         Inst::ReturnCallKnown { callee, info } => {
-            let ReturnCallInfo { uses } = &**info;
+            let ReturnCallInfo { uses, tmp, .. } = &**info;
+            collector.reg_early_def(tmp.to_writable_reg());
             // Same as in the `Inst::CallKnown` branch.
             debug_assert_ne!(*callee, ExternalName::LibCall(LibCall::Probestack));
             for u in uses {
@@ -2355,15 +2361,12 @@ fn x64_get_operands<F: Fn(VReg) -> VReg>(inst: &Inst, collector: &mut OperandCol
         }
 
         Inst::ReturnCallUnknown { callee, info } => {
-            let ReturnCallInfo { uses } = &**info;
+            let ReturnCallInfo { uses, tmp, .. } = &**info;
             callee.get_operands(collector);
+            collector.reg_early_def(tmp.to_writable_reg());
             for u in uses {
                 collector.reg_fixed_use(u.vreg, u.preg);
             }
-        }
-
-        Inst::GrowArgumentArea { tmp, .. } | Inst::ShrinkArgumentArea { tmp, .. } => {
-            collector.reg_def(tmp.to_writable_reg());
         }
 
         Inst::JmpTableSeq {

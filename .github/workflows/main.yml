@@ -263,30 +263,9 @@ jobs:
         key: cargo-mdbook-bin-${{ env.CARGO_MDBOOK_VERSION }}
     - run: |
         echo "${{ runner.tool_cache }}/mdbook/bin" >> $GITHUB_PATH
-        cargo install --root ${{ runner.tool_cache }}/mdbook --version ${{ env.CARGO_MDBOOK_VERSION }} mdbook
+        cargo install --root ${{ runner.tool_cache }}/mdbook --version ${{ env.CARGO_MDBOOK_VERSION }} mdbook --locked
     - run: (cd docs && mdbook build)
     - run: cargo build -p wasi-common --features wasmtime/wat,wasmtime/cranelift
-      # TODO(dhil): strange, possibly, transient error from CI:
-      #     |
-      # 871 |                     proc_macro::Literal::byte_character(byte)
-      #     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-      #     |
-      #     = note: see issue #115268 <https://github.com/rust-lang/rust/issues/115268> for more information
-      #     = help: add `#![feature(proc_macro_byte_character)]` to the crate attributes to enable
-      #     = note: this compiler was built on 2024-03-20; consider upgrading it if it is out of date
-      #
-      # error[E0658]: use of unstable library feature 'proc_macro_c_str_literals'
-      #    --> /home/runner/.cargo/registry/src/index.crates.io-6f17d22bba15001f/proc-macro2-1.0.80/src/wrapper.rs:898:21
-      #     |
-      # 898 |                     proc_macro::Literal::c_string(string)
-      #     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-      #     |
-      #     = note: see issue #119750 <https://github.com/rust-lang/rust/issues/119750> for more information
-      #     = help: add `#![feature(proc_macro_c_str_literals)]` to the crate attributes to enable
-      #     = note: this compiler was built on 2024-03-20; consider upgrading it if it is out of date
-      #
-      # Since this is a non-critical step, I will disable it for now.
-    #- run: (cd docs/rust_wasi_markdown_parser && cargo build)
     - run: (cd docs && mdbook test -L ../target/debug/deps)
 
     # Build Rust API documentation.
@@ -414,7 +393,7 @@ jobs:
     #     path: ${{ runner.tool_cache }}/cargo-ndk
     #     key: cargo-ndk-bin-${{ env.CARGO_NDK_VERSION }}
     # - run: echo "${{ runner.tool_cache }}/cargo-ndk/bin" >> $GITHUB_PATH
-    # - run: cargo install --root ${{ runner.tool_cache }}/cargo-ndk --version ${{ env.CARGO_NDK_VERSION }} cargo-ndk
+    # - run: cargo install --root ${{ runner.tool_cache }}/cargo-ndk --version ${{ env.CARGO_NDK_VERSION }} cargo-ndk --locked
     # - run: cargo ndk -t arm64-v8a check -p wasmtime
 
     # Run clippy configuration
@@ -483,7 +462,7 @@ jobs:
     #
     # Install the OCaml packages necessary for fuzz targets that use the
     # `wasm-spec-interpreter`.
-    - run: cargo install cargo-fuzz --vers "^0.11"
+    - run: cargo install cargo-fuzz --vers "^0.11" --locked
     - run: sudo apt-get update && sudo apt install -y ocaml-nox ocamlbuild ocaml-findlib libzarith-ocaml-dev
     - run: cargo fetch
       working-directory: ./fuzz
@@ -494,11 +473,11 @@ jobs:
     #
     # Afterwards make sure the generated header file is up to date by ensuring
     # that the regeneration process didn't change anything in-tree.
-    # - run: cargo install cbindgen --vers "^0.26"
-    # - run: rustup component add rust-src
-    # - run: ./build.sh ./embedding/x86_64-unknown-unknown.json
-    #   working-directory: ./examples/min-platform
-    # - run: git diff --exit-code
+    - run: cargo install cbindgen --vers "^0.26" --locked
+    - run: rustup component add rust-src
+    - run: ./build.sh ./embedding/x86_64-unknown-unknown.json
+      working-directory: ./examples/min-platform
+    - run: git diff --exit-code
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
@@ -828,7 +807,7 @@ jobs:
         path: ${{ runner.tool_cache }}/cargo-nextest
         key: cargo-nextest-bin-${{ env.CARGO_NEXTEST_VERSION }}
     - run: echo "${{ runner.tool_cache }}/cargo-nextest/bin" >> $GITHUB_PATH
-    - run: cargo install --root ${{ runner.tool_cache }}/cargo-nextest --version ${{ env.CARGO_NEXTEST_VERSION }} cargo-nextest
+    - run: cargo install --root ${{ runner.tool_cache }}/cargo-nextest --version ${{ env.CARGO_NEXTEST_VERSION }} cargo-nextest --locked
     - run: |
         cargo miri nextest run -j4 --no-fail-fast \
           -p wasmtime \
