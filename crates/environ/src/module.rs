@@ -748,9 +748,9 @@ impl Module {
     /// Appends a new function to this module with the given type information,
     /// used for functions that either don't escape or aren't certain whether
     /// they escape yet.
-    pub fn push_function(&mut self, signature: ModuleInternedTypeIndex) -> FuncIndex {
+    pub fn push_function(&mut self, signature: ModuleType) -> FuncIndex {
         self.functions.push(FunctionType {
-            signature,
+            signature: signature.unwrap_function(),
             func_ref: FuncRefIndex::reserved_value(),
         })
     }

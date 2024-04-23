@@ -199,7 +199,7 @@ impl<'a, 'translation, 'data, P: PtrSize> FuncEnv<'a, 'translation, 'data, P> {
             FuncType(idx) => {
                 let sig_index =
                     self.translation.module.types[TypeIndex::from_u32(idx)].unwrap_function();
-                let sig = &self.types[sig_index];
+                let sig = self.types[sig_index].unwrap_function();
                 BlockSig::new(control::BlockType::func(sig.clone()))
             }
         }
@@ -341,7 +341,7 @@ impl<'a, 'translation, 'data, P: PtrSize> FuncEnv<'a, 'translation, 'data, P> {
             Callee::FuncRef(idx) => {
                 let val = || {
                     let sig_index = self.translation.module.types[*idx].unwrap_function();
-                    let ty = &self.types[sig_index];
+                    let ty = &self.types[sig_index].unwrap_function();
                     let sig = wasm_sig::<A>(ty);
                     sig
                 };
@@ -392,11 +392,8 @@ pub(crate) struct TypeConverter<'a, 'data: 'a> {
 
 impl TypeConvert for TypeConverter<'_, '_> {
     fn lookup_heap_type(&self, idx: wasmparser::UnpackedIndex) -> WasmHeapType {
-        wasmtime_environ::WasmparserTypeConverter {
-            module: &self.translation.module,
-            types: self.types,
-        }
-        .lookup_heap_type(idx)
+        wasmtime_environ::WasmparserTypeConverter::new(self.types, &self.translation.module)
+            .lookup_heap_type(idx)
     }
 }
 

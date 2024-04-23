@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use std::fmt::{self, Display};
 use wasmtime_environ::{
     EngineOrModuleTypeIndex, EntityType, Global, Memory, ModuleTypes, Table, TypeTrace,
-    VMSharedTypeIndex, WasmFuncType, WasmHeapType, WasmRefType, WasmValType,
+    VMSharedTypeIndex, WasmDefType, WasmFuncType, WasmHeapType, WasmRefType, WasmValType,
 };
 
 use crate::{type_registry::RegisteredType, Engine};
@@ -699,7 +699,8 @@ impl HeapType {
             WasmHeapType::Concrete(EngineOrModuleTypeIndex::Engine(idx)) => {
                 HeapType::Concrete(FuncType::from_shared_type_index(engine, *idx))
             }
-            WasmHeapType::Concrete(EngineOrModuleTypeIndex::Module(_)) => {
+            WasmHeapType::Concrete(EngineOrModuleTypeIndex::Module(_))
+            | WasmHeapType::Concrete(EngineOrModuleTypeIndex::RecGroup(_)) => {
                 panic!("HeapType::from_wasm_type on non-canonical heap type")
             }
             WasmHeapType::Cont => HeapType::Cont,
@@ -798,8 +799,10 @@ impl ExternType {
                     FuncType::from_shared_type_index(engine, *e).into()
                 }
                 EngineOrModuleTypeIndex::Module(m) => {
-                    FuncType::from_wasm_func_type(engine, types[*m].clone()).into()
+                    FuncType::from_wasm_func_type(engine, types[*m].unwrap_function().clone())
+                        .into()
                 }
+                EngineOrModuleTypeIndex::RecGroup(_) => unreachable!(),
             },
             EntityType::Global(ty) => GlobalType::from_wasmtime_global(engine, ty).into(),
             EntityType::Memory(ty) => MemoryType::from_wasmtime_memory(ty).into(),
@@ -918,6 +921,7 @@ impl FuncType {
     pub fn param(&self, i: usize) -> Option<ValType> {
         let engine = self.engine();
         self.registered_type
+            .unwrap_function()
             .params()
             .get(i)
             .map(|ty| ValType::from_wasm_type(engine, ty))
@@ -928,6 +932,7 @@ impl FuncType {
     pub fn params(&self) -> impl ExactSizeIterator<Item = ValType> + '_ {
         let engine = self.engine();
         self.registered_type
+            .unwrap_function()
             .params()
             .iter()
             .map(|ty| ValType::from_wasm_type(engine, ty))
@@ -939,6 +944,7 @@ impl FuncType {
     pub fn result(&self, i: usize) -> Option<ValType> {
         let engine = self.engine();
         self.registered_type
+            .unwrap_function()
             .returns()
             .get(i)
             .map(|ty| ValType::from_wasm_type(engine, ty))
@@ -949,6 +955,7 @@ impl FuncType {
     pub fn results(&self) -> impl ExactSizeIterator<Item = ValType> + '_ {
         let engine = self.engine();
         self.registered_type
+            .unwrap_function()
             .returns()
             .iter()
             .map(|ty| ValType::from_wasm_type(engine, ty))
@@ -1009,7 +1016,7 @@ impl FuncType {
     }
 
     pub(crate) fn as_wasm_func_type(&self) -> &WasmFuncType {
-        &self.registered_type
+        &self.registered_type.unwrap_function()
     }
 
     pub(crate) fn into_registered_type(self) -> RegisteredType {
@@ -1027,7 +1034,7 @@ impl FuncType {
     /// holding a strong reference to all of its types, including any `(ref null
     /// <index>)` types used in the function's parameters and results.
     pub(crate) fn from_wasm_func_type(engine: &Engine, ty: WasmFuncType) -> FuncType {
-        let ty = RegisteredType::new(engine, ty);
+        let ty = RegisteredType::new(engine, WasmDefType::Func(ty));
         Self {
             registered_type: ty,
         }
@@ -1120,16 +1127,10 @@ impl TableType {
     pub fn new(element: RefType, min: u32, max: Option<u32>) -> TableType {
         let wasm_ty = element.to_wasm_type();
 
-        if cfg!(debug_assertions) {
-            wasm_ty
-                .trace(&mut |idx| match idx {
-                    EngineOrModuleTypeIndex::Engine(_) => Ok(()),
-                    EngineOrModuleTypeIndex::Module(module_idx) => Err(format!(
-                        "found module-level canonicalized type index: {module_idx:?}"
-                    )),
-                })
-                .expect("element type should be engine-level canonicalized");
-        }
+        debug_assert!(
+            wasm_ty.is_canonicalized_for_runtime_usage(),
+            "should be canonicalized for runtime usage: {wasm_ty:?}"
+        );
 
         TableType {
             element,

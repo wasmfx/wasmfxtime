@@ -1,12 +1,12 @@
 use crate::module::{
     FuncRefIndex, Initializer, MemoryInitialization, MemoryInitializer, MemoryPlan, Module,
-    ModuleType, TableElementExpression, TablePlan, TableSegment, TableSegmentElements,
+    TableElementExpression, TablePlan, TableSegment, TableSegmentElements,
 };
 use crate::{
     DataIndex, DefinedFuncIndex, ElemIndex, EntityIndex, EntityType, FuncIndex, GlobalIndex,
-    GlobalInit, InitMemory, MemoryIndex, ModuleTypesBuilder, PrimaryMap, StaticMemoryInitializer,
-    TableIndex, TableInitialValue, Tunables, TypeConvert, TypeIndex, Unsigned, WasmError,
-    WasmHeapType, WasmResult, WasmValType, WasmparserTypeConverter,
+    GlobalInit, InitMemory, MemoryIndex, ModuleType, ModuleTypesBuilder, PrimaryMap,
+    StaticMemoryInitializer, TableIndex, TableInitialValue, Tunables, TypeConvert, TypeIndex,
+    Unsigned, WasmError, WasmHeapType, WasmResult, WasmValType, WasmparserTypeConverter,
 };
 use anyhow::{bail, Result};
 use cranelift_entity::packed_option::ReservedValue;
@@ -15,11 +15,10 @@ use std::collections::HashMap;
 use std::mem;
 use std::path::PathBuf;
 use std::sync::Arc;
-use wasmparser::types::{CoreTypeId, Types};
 use wasmparser::{
-    CompositeType, CustomSectionReader, DataKind, ElementItems, ElementKind, Encoding,
-    ExternalKind, FuncToValidate, FunctionBody, NameSectionReader, Naming, Operator, Parser,
-    Payload, TypeRef, Validator, ValidatorResources, WasmFeatures,
+    types::Types, CustomSectionReader, DataKind, ElementItems, ElementKind, Encoding, ExternalKind,
+    FuncToValidate, FunctionBody, NameSectionReader, Naming, Operator, Parser, Payload, TypeRef,
+    Validator, ValidatorResources, WasmFeatures,
 };
 use wasmtime_types::ModuleInternedTypeIndex;
 
@@ -236,14 +235,63 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
 
             Payload::TypeSection(types) => {
                 self.validator.type_section(&types)?;
-                let num = usize::try_from(types.count()).unwrap();
-                self.result.module.types.reserve(num);
-                self.types.reserve_wasm_signatures(num);
 
-                for i in 0..types.count() {
-                    let types = self.validator.types(0).unwrap();
-                    let ty = types.core_type_at(i);
-                    self.declare_type(ty.unwrap_sub())?;
+                let count = types.count();
+                let capacity = usize::try_from(count).unwrap();
+                self.result.module.types.reserve(capacity);
+                self.types.reserve_wasm_signatures(capacity);
+
+                // Iterate over each *rec group* -- not type -- defined in the
+                // types section. Rec groups are the unit of canonicalization
+                // and therefore the unit at which we need to process at a
+                // time. `wasmparser` has already done the hard work of
+                // de-duplicating and canonicalizing the rec groups within the
+                // module for us, we just need to translate them into our data
+                // structures. Note that, if the Wasm defines duplicate rec
+                // groups, we need copy the duplicates over (shallowly) as well,
+                // so that our types index space doesn't have holes.
+                let mut type_index = 0;
+                for _ in 0..count {
+                    let validator_types = self.validator.types(0).unwrap();
+
+                    // Get the rec group for the current type index, which is
+                    // always the first type defined in a rec group.
+                    let core_type_id = validator_types.core_type_at(type_index).unwrap_sub();
+                    log::trace!(
+                        "about to intern rec group for {core_type_id:?} = {:?}",
+                        validator_types[core_type_id]
+                    );
+                    let rec_group_id = validator_types.rec_group_id_of(core_type_id);
+                    debug_assert_eq!(
+                        validator_types
+                            .rec_group_elements(rec_group_id)
+                            .position(|id| id == core_type_id),
+                        Some(0)
+                    );
+
+                    // Intern the rec group and then fill in this module's types
+                    // index space.
+                    let interned = self.types.intern_rec_group(
+                        &self.result.module,
+                        validator_types,
+                        rec_group_id,
+                    )?;
+                    let elems = self.types.rec_group_elements(interned);
+                    let len = elems.len();
+                    self.result.module.types.reserve(len);
+                    for ty in elems {
+                        self.result
+                            .module
+                            .types
+                            .push(if self.types.is_cont_type_index(ty) {
+                                ModuleType::Continuation(ty)
+                            } else {
+                                ModuleType::Function(ty)
+                            });
+                    }
+
+                    // Advance `type_index` to the start of the next rec group.
+                    type_index += u32::try_from(len).unwrap();
                 }
             }
 
@@ -258,11 +306,14 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                     let ty = match import.ty {
                         TypeRef::Func(index) => {
                             let index = TypeIndex::from_u32(index);
-                            let sig_index = self.result.module.types[index].unwrap_function();
+                            let interned_index = match self.result.module.types[index] {
+                                ModuleType::Function(interned_index) => interned_index,
+                                ModuleType::Continuation(interned_index) => interned_index,
+                            };
                             self.result.module.num_imported_funcs += 1;
                             self.result.debuginfo.wasm_file.imported_func_count += 1;
                             EntityType::Function(wasmtime_types::EngineOrModuleTypeIndex::Module(
-                                sig_index,
+                                interned_index,
                             ))
                         }
                         TypeRef::Memory(ty) => {
@@ -294,8 +345,8 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                 for entry in functions {
                     let sigindex = entry?;
                     let ty = TypeIndex::from_u32(sigindex);
-                    let sig_index = self.result.module.types[ty].unwrap_function();
-                    self.result.module.push_function(sig_index);
+                    let interned_index = self.result.module.types[ty];
+                    self.result.module.push_function(interned_index);
                 }
             }
 
@@ -599,7 +650,7 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
 
                 if self.tunables.generate_native_debuginfo {
                     let sig_index = self.result.module.functions[func_index].signature;
-                    let sig = &self.types[sig_index];
+                    let sig = &self.types[sig_index].unwrap_function();
                     let mut locals = Vec::new();
                     for pair in body.get_locals_reader()? {
                         let (cnt, ty) = pair?;
@@ -826,7 +877,7 @@ and for re-adding support for interface types you can see this issue:
             EntityType::Function(ty) => EntityIndex::Function(
                 self.result
                     .module
-                    .push_function(ty.unwrap_module_type_index()),
+                    .push_function(ModuleType::Function(ty.unwrap_module_type_index())),
             ),
             EntityType::Table(ty) => {
                 let plan = TablePlan::for_table(ty, &self.tunables);
@@ -850,33 +901,6 @@ and for re-adding support for interface types you can see this issue:
         let index = self.result.module.num_escaped_funcs as u32;
         ty.func_ref = FuncRefIndex::from_u32(index);
         self.result.module.num_escaped_funcs += 1;
-    }
-
-    fn declare_type(&mut self, id: CoreTypeId) -> WasmResult<()> {
-        let types = self.validator.types(0).unwrap();
-        let ty = &types[id];
-        assert!(ty.is_final);
-        assert!(ty.supertype_idx.is_none());
-        match &ty.composite_type {
-            CompositeType::Func(ty) => {
-                let wasm = self.convert_func_type(ty);
-                let sig_index = self.types.wasm_func_type(id, wasm);
-                self.result
-                    .module
-                    .types
-                    .push(ModuleType::Function(sig_index));
-            }
-            CompositeType::Array(_) | CompositeType::Struct(_) => unimplemented!(),
-            CompositeType::Cont(ct) => {
-                let wasm = self.convert_cont_type(ct);
-                let sig_index = self.types.wasm_cont_type(id, wasm);
-                self.result
-                    .module
-                    .types
-                    .push(ModuleType::Continuation(sig_index));
-            }
-        }
-        Ok(())
     }
 
     /// Parses the Name section of the wasm module.
@@ -951,11 +975,7 @@ and for re-adding support for interface types you can see this issue:
 
 impl TypeConvert for ModuleEnvironment<'_, '_> {
     fn lookup_heap_type(&self, index: wasmparser::UnpackedIndex) -> WasmHeapType {
-        WasmparserTypeConverter {
-            types: &self.types,
-            module: &self.result.module,
-        }
-        .lookup_heap_type(index)
+        WasmparserTypeConverter::new(&self.types, &self.result.module).lookup_heap_type(index)
     }
 }
 

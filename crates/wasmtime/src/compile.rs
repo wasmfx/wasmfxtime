@@ -68,9 +68,9 @@ pub(crate) fn build_artifacts<T: FinishedObject>(
     // about the wasm module. This is where the WebAssembly is parsed and
     // validated. Afterwards `types` will have all the type information for
     // this module.
-    let mut validator = wasmparser::Validator::new_with_features(engine.config().features.clone());
     let parser = wasmparser::Parser::new(0);
-    let mut types = Default::default();
+    let mut validator = wasmparser::Validator::new_with_features(engine.config().features.clone());
+    let mut types = ModuleTypesBuilder::new(&validator);
     let mut translation = ModuleEnvironment::new(tunables, &mut validator, &mut types)
         .translate(parser, wasm)
         .context("failed to parse WebAssembly module")?;
@@ -122,7 +122,9 @@ pub(crate) fn build_component_artifacts<T: FinishedObject>(
     engine: &Engine,
     binary: &[u8],
 ) -> Result<(T, Option<wasmtime_environ::component::ComponentArtifacts>)> {
-    use wasmtime_environ::component::{CompiledComponentInfo, ComponentArtifacts};
+    use wasmtime_environ::component::{
+        CompiledComponentInfo, ComponentArtifacts, ComponentTypesBuilder,
+    };
     use wasmtime_environ::ScopeVec;
 
     let tunables = engine.tunables();
@@ -130,7 +132,7 @@ pub(crate) fn build_component_artifacts<T: FinishedObject>(
 
     let scope = ScopeVec::new();
     let mut validator = wasmparser::Validator::new_with_features(engine.config().features.clone());
-    let mut types = Default::default();
+    let mut types = ComponentTypesBuilder::new(&validator);
     let (component, mut module_translations) =
         Translator::new(tunables, &mut validator, &mut types, &scope)
             .translate(binary)
@@ -394,7 +396,8 @@ impl<'a> CompileInputs<'a> {
         if component.component.num_resources > 0 {
             if let Some(sig) = types.find_resource_drop_signature() {
                 ret.push_input(move |compiler| {
-                    let trampoline = compiler.compile_wasm_to_native_trampoline(&types[sig])?;
+                    let trampoline = compiler
+                        .compile_wasm_to_native_trampoline(&types[sig].unwrap_function())?;
                     Ok(CompileOutput {
                         key: CompileKey::resource_drop_wasm_to_native_trampoline(),
                         symbol: "resource_drop_trampoline".to_string(),
@@ -487,8 +490,11 @@ impl<'a> CompileInputs<'a> {
         }
 
         for signature in sigs {
+            if types.is_cont_type_index(signature) {
+                continue;
+            }
             self.push_input(move |compiler| {
-                let wasm_func_ty = &types[signature];
+                let wasm_func_ty = &types[signature].unwrap_function();
                 let trampoline = compiler.compile_wasm_to_native_trampoline(wasm_func_ty)?;
                 Ok(CompileOutput {
                     key: CompileKey::wasm_to_native_trampoline(signature),
@@ -825,8 +831,9 @@ impl FunctionIndices {
                     .module
                     .types
                     .iter()
-                    .map(|(_, ty)| match ty {
-                        ModuleType::Function(ty) | ModuleType::Continuation(ty) => *ty,
+                    .filter_map(|(_, ty)| match ty {
+                        ModuleType::Function(ty) => Some(*ty),
+                        _ => None,
                     })
                     .collect::<BTreeSet<_>>();
                 let wasm_to_native_trampolines = unique_and_sorted_sigs

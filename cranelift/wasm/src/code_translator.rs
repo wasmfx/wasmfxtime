@@ -2616,6 +2616,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             resumetable: _,
         }
         | Operator::Barrier { blockty: _, .. } => todo!("Implement continuation instructions"),
+
+        Operator::GlobalAtomicGet { .. } | Operator::GlobalAtomicSet { .. } => {
+            unimplemented!("shared-everything-threads not yet implemented")
+        }
     };
     Ok(())
 }
