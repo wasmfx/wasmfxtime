@@ -1258,6 +1258,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             // validation error to perform a call through a non-function table,
             // so these cases are dynamically not reachable.
             WasmHeapType::Concrete(EngineOrModuleTypeIndex::Engine(_))
+            | WasmHeapType::Concrete(EngineOrModuleTypeIndex::RecGroup(_))
             | WasmHeapType::Extern
             | WasmHeapType::Any
             | WasmHeapType::I31
@@ -1282,9 +1283,15 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             base,
             i32::try_from(self.env.offsets.vmctx_type_ids_array()).unwrap(),
         );
-        let sig_index = self.env.module.types[ty_index].unwrap_function();
-        let offset =
-            i32::try_from(sig_index.as_u32().checked_mul(sig_id_type.bytes()).unwrap()).unwrap();
+        let sig_index = self.env.module.types[ty_index];
+        let offset = i32::try_from(
+            sig_index
+                .unwrap_function()
+                .as_u32()
+                .checked_mul(sig_id_type.bytes())
+                .unwrap(),
+        )
+        .unwrap();
         let caller_sig_id = self
             .builder
             .ins()
@@ -1407,11 +1414,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
 
 impl TypeConvert for FuncEnvironment<'_> {
     fn lookup_heap_type(&self, ty: wasmparser::UnpackedIndex) -> WasmHeapType {
-        wasmtime_environ::WasmparserTypeConverter {
-            module: self.module,
-            types: self.types,
-        }
-        .lookup_heap_type(ty)
+        wasmtime_environ::WasmparserTypeConverter::new(self.types, self.module).lookup_heap_type(ty)
     }
 }
 
@@ -2034,8 +2037,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         func: &mut ir::Function,
         index: TypeIndex,
     ) -> WasmResult<ir::SigRef> {
-        let index = self.module.types[index].unwrap_function();
-        let sig = crate::wasm_call_signature(self.isa, &self.types[index], &self.tunables);
+        let index = self.module.types[index];
+        let sig = crate::wasm_call_signature(
+            self.isa,
+            &self.types[index.unwrap_function()].unwrap_function(),
+            &self.tunables,
+        );
         Ok(func.import_signature(sig))
     }
 
@@ -2045,7 +2052,11 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         index: FuncIndex,
     ) -> WasmResult<ir::FuncRef> {
         let sig = self.module.functions[index].signature;
-        let sig = crate::wasm_call_signature(self.isa, &self.types[sig], &self.tunables);
+        let sig = crate::wasm_call_signature(
+            self.isa,
+            &self.types[sig].unwrap_function(),
+            &self.tunables,
+        );
         let signature = func.import_signature(sig);
         let name =
             ir::ExternalName::User(func.declare_imported_user_function(ir::UserExternalName {
@@ -2642,22 +2653,32 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
     fn continuation_arguments(&self, index: u32) -> &[WasmValType] {
         let idx = self.module.types[TypeIndex::from_u32(index)].unwrap_continuation();
-        self.types[idx].params()
+        self.types[self.types[idx]
+            .unwrap_continuation()
+            .clone()
+            .interned_type_index()]
+        .unwrap_function()
+        .params()
     }
 
     fn continuation_returns(&self, index: u32) -> &[WasmValType] {
         let idx = self.module.types[TypeIndex::from_u32(index)].unwrap_continuation();
-        self.types[idx].returns()
+        self.types[self.types[idx]
+            .unwrap_continuation()
+            .clone()
+            .interned_type_index()]
+        .unwrap_function()
+        .returns()
     }
 
     fn tag_params(&self, tag_index: u32) -> &[WasmValType] {
         let idx = self.module.tags[TagIndex::from_u32(tag_index)].signature;
-        self.types[idx].params()
+        self.types[idx].unwrap_function().params()
     }
 
     fn tag_returns(&self, tag_index: u32) -> &[WasmValType] {
         let idx = self.module.tags[TagIndex::from_u32(tag_index)].signature;
-        self.types[idx].returns()
+        self.types[idx].unwrap_function().returns()
     }
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {

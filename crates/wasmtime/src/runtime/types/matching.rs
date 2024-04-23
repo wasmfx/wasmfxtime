@@ -1,8 +1,8 @@
 use crate::{linker::DefinitionType, Engine, FuncType};
 use anyhow::{anyhow, bail, Result};
 use wasmtime_environ::{
-    EngineOrModuleTypeIndex, EntityType, Global, Memory, ModuleTypes, Table, TypeTrace,
-    VMSharedTypeIndex, WasmFuncType, WasmHeapType, WasmRefType, WasmValType,
+    EntityType, Global, Memory, ModuleTypes, Table, TypeTrace, VMSharedTypeIndex, WasmDefType,
+    WasmFuncType, WasmHeapType, WasmRefType, WasmValType,
 };
 
 pub struct MatchCx<'a> {
@@ -36,7 +36,7 @@ impl MatchCx<'_> {
             None => panic!("{actual:?} is not registered"),
         };
 
-        Err(func_ty_mismatch(msg, &expected, &actual))
+        Err(ty_mismatch(msg, &expected, &actual))
     }
 
     /// Validates that the `expected` type matches the type of `actual`
@@ -91,8 +91,9 @@ pub fn entity_ty(
         },
         EntityType::Function(expected) => match actual {
             EntityType::Function(actual) => {
-                let expected = &expected_types[expected.unwrap_module_type_index()];
-                let actual = &actual_types[actual.unwrap_module_type_index()];
+                let expected =
+                    &expected_types[expected.unwrap_module_type_index()].unwrap_function();
+                let actual = &actual_types[actual.unwrap_module_type_index()].unwrap_function();
                 if expected == actual {
                     Ok(())
                 } else {
@@ -106,6 +107,41 @@ pub fn entity_ty(
             _ => bail!("expected func found {}", entity_desc(actual)),
         },
         EntityType::Tag(_) => unimplemented!(),
+    }
+}
+
+fn ty_mismatch(msg: &str, expected: &WasmDefType, actual: &WasmDefType) -> anyhow::Error {
+    let render = |ty: &WasmDefType| {
+        match ty {
+            WasmDefType::Func(ty) => {
+                let params = ty
+                    .params()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let returns = ty
+                    .returns()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("`({}) -> ({})`", params, returns)
+            }
+            WasmDefType::Cont(ty) => {
+                format!("{:?}", ty) // TODO(dhil): do some pretty rendering later.
+            }
+        }
+    };
+    match (expected, actual) {
+        (WasmDefType::Func(a), WasmDefType::Func(b)) => func_ty_mismatch(msg, a, b),
+        (_, _) => {
+            anyhow!(
+                "{msg}: expected type {}, found type {}",
+                render(expected),
+                render(actual)
+            )
+        }
     }
 }
 
@@ -257,25 +293,14 @@ fn match_ref(expected: WasmRefType, actual: WasmRefType, desc: &str) -> Result<(
 fn match_ty(expected: WasmValType, actual: WasmValType, desc: &str) -> Result<()> {
     // Assert that both our types are engine-level canonicalized. We can't
     // compare types otherwise.
-    if cfg!(debug_assertions) {
-        expected
-            .trace(&mut |idx| match idx {
-                EngineOrModuleTypeIndex::Engine(_) => Ok(()),
-                EngineOrModuleTypeIndex::Module(mod_idx) => {
-                    Err(format!("found module-level index: {mod_idx:?}"))
-                }
-            })
-            .expect("expected type should be engine-level canonicalized");
-
-        actual
-            .trace(&mut |idx| match idx {
-                EngineOrModuleTypeIndex::Engine(_) => Ok(()),
-                EngineOrModuleTypeIndex::Module(mod_idx) => {
-                    Err(format!("found module-level index: {mod_idx:?}"))
-                }
-            })
-            .expect("actual type should be engine-level canonicalized");
-    }
+    debug_assert!(
+        expected.is_canonicalized_for_runtime_usage(),
+        "expected type should be canonicalized for runtime usage: {expected:?}"
+    );
+    debug_assert!(
+        actual.is_canonicalized_for_runtime_usage(),
+        "actual type should be canonicalized for runtime usage: {actual:?}"
+    );
 
     match (actual, expected) {
         (WasmValType::Ref(actual), WasmValType::Ref(expected)) => match_ref(expected, actual, desc),
@@ -286,25 +311,14 @@ fn match_ty(expected: WasmValType, actual: WasmValType, desc: &str) -> Result<()
 fn equal_ty(expected: WasmValType, actual: WasmValType, desc: &str) -> Result<()> {
     // Assert that both our types are engine-level canonicalized. We can't
     // compare types otherwise.
-    if cfg!(debug_assertions) {
-        expected
-            .trace(&mut |idx| match idx {
-                EngineOrModuleTypeIndex::Engine(_) => Ok(()),
-                EngineOrModuleTypeIndex::Module(mod_idx) => {
-                    Err(format!("found module-level index: {mod_idx:?}"))
-                }
-            })
-            .expect("expected type should be engine-level canonicalized");
-
-        actual
-            .trace(&mut |idx| match idx {
-                EngineOrModuleTypeIndex::Engine(_) => Ok(()),
-                EngineOrModuleTypeIndex::Module(mod_idx) => {
-                    Err(format!("found module-level index: {mod_idx:?}"))
-                }
-            })
-            .expect("actual type should be engine-level canonicalized");
-    }
+    debug_assert!(
+        expected.is_canonicalized_for_runtime_usage(),
+        "expected type should be canonicalized for runtime usage: {expected:?}"
+    );
+    debug_assert!(
+        actual.is_canonicalized_for_runtime_usage(),
+        "actual type should be canonicalized for runtime usage: {actual:?}"
+    );
 
     if expected == actual {
         return Ok(());
