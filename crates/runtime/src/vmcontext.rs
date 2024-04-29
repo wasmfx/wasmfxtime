@@ -455,7 +455,7 @@ impl VMGlobalDefinition {
                 }
                 WasmHeapTopType::Any => global.init_gc_ref(VMGcRef::from_raw_u32(raw.get_anyref())),
                 WasmHeapTopType::Func => *global.as_func_ref_mut() = raw.get_funcref().cast(),
-                WasmHeapTopType::Cont => unimplemented!(), // TODO(dhil): Need a raw continuation entity first.
+                WasmHeapTopType::Cont => *global.as_func_ref_mut() = raw.get_funcref().cast(), // TODO(dhil): temporary hack.
             },
         }
         global
