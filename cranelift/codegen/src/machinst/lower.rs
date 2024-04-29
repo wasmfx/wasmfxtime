@@ -751,7 +751,7 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
             }
 
             // Normal instruction: codegen if the instruction is side-effecting
-            // or any of its outputs its used.
+            // or any of its outputs is used.
             if has_side_effect || value_needed {
                 trace!("lowering: inst {}: {:?}", inst, self.f.dfg.insts[inst]);
                 let temp_regs = backend.lower(self, inst).unwrap_or_else(|| {
@@ -777,13 +777,14 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
                 // regalloc to use. These aliases effectively rewrite any use of
                 // the pre-assigned register to the register that was returned by
                 // the ISLE lowering logic.
-                debug_assert_eq!(temp_regs.len(), self.num_outputs(inst));
-                for i in 0..self.num_outputs(inst) {
-                    let regs = temp_regs[i];
-                    let dsts = self.value_regs[self.f.dfg.inst_results(inst)[i]];
+                let results = self.f.dfg.inst_results(inst);
+                debug_assert_eq!(temp_regs.len(), results.len());
+                for (regs, &result) in temp_regs.iter().zip(results) {
+                    let dsts = self.value_regs[result];
                     debug_assert_eq!(regs.len(), dsts.len());
-                    for (dst, temp) in dsts.regs().iter().zip(regs.regs().iter()) {
-                        self.set_vreg_alias(*dst, *temp);
+                    for (&dst, &temp) in dsts.regs().iter().zip(regs.regs()) {
+                        trace!("set vreg alias: {result:?} = {dst:?}, lowering = {temp:?}");
+                        self.vcode.set_vreg_alias(dst, temp);
 
                         // If there was any PCC fact about the
                         // original VReg, move it to the aliased reg
@@ -835,12 +836,8 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
 
     fn add_block_params(&mut self, block: Block) -> CodegenResult<()> {
         for &param in self.f.dfg.block_params(block) {
-            let ty = self.f.dfg.value_type(param);
-            let (_reg_rcs, reg_tys) = I::rc_for_type(ty)?;
-            debug_assert_eq!(reg_tys.len(), self.value_regs[param].len());
-            for (&reg, &rty) in self.value_regs[param].regs().iter().zip(reg_tys.iter()) {
+            for &reg in self.value_regs[param].regs() {
                 let vreg = reg.to_virtual_reg().unwrap();
-                self.vregs.set_vreg_type(vreg, rty);
                 self.vcode.add_block_param(vreg);
             }
         }
@@ -920,12 +917,11 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
     }
 
     fn finish_ir_inst(&mut self, loc: RelSourceLoc) {
-        self.vcode.set_srcloc(loc);
         // The VCodeBuilder builds in reverse order (and reverses at
         // the end), but `ir_insts` is in forward order, so reverse
         // it.
         for inst in self.ir_insts.drain(..).rev() {
-            self.vcode.push(inst);
+            self.vcode.push(inst, loc);
         }
     }
 
@@ -988,14 +984,10 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
             for &arg in branch_args {
                 let arg = self.f.dfg.resolve_aliases(arg);
                 let regs = self.put_value_in_regs(arg);
-                for &vreg in regs.regs() {
-                    let vreg = self.vcode.vcode.resolve_vreg_alias(vreg.into());
-                    branch_arg_vregs.push(vreg.into());
-                }
+                branch_arg_vregs.extend_from_slice(regs.regs());
             }
             self.vcode.add_succ(succ, &branch_arg_vregs[..]);
         }
-        self.finish_ir_inst(Default::default());
     }
 
     fn collect_branches_and_targets(
@@ -1018,15 +1010,7 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
     ) -> CodegenResult<VCode<I>> {
         trace!("about to lower function: {:?}", self.f);
 
-        // Initialize the ABI object, giving it temps if requested.
-        let temps = self
-            .vcode
-            .abi()
-            .temps_needed(self.sigs())
-            .into_iter()
-            .map(|temp_ty| self.alloc_tmp(temp_ty).only_reg().unwrap())
-            .collect::<Vec<_>>();
-        self.vcode.init_abi(temps);
+        self.vcode.init_retval_area(&mut self.vregs)?;
 
         // Get the pinned reg here (we only parameterize this function on `B`,
         // not the whole `Lower` impl).
@@ -1425,12 +1409,6 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
             self.emit(I::gen_move(new_reg, reg, ty));
             new_reg.to_reg()
         }
-    }
-
-    /// Note that one vreg is to be treated as an alias of another.
-    pub fn set_vreg_alias(&mut self, from: Reg, to: Reg) {
-        trace!("set vreg alias: from {:?} to {:?}", from, to);
-        self.vcode.set_vreg_alias(from, to);
     }
 
     /// Add a range fact to a register, if no other fact is present.

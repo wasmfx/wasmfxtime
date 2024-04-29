@@ -1094,16 +1094,10 @@ pub struct Callee<M: ABIMachineSpec> {
     /// Register-argument defs, to be provided to the `args`
     /// pseudo-inst, and pregs to constrain them to.
     reg_args: Vec<ArgPair>,
-    /// Clobbered registers, from regalloc.
-    clobbered: Vec<Writable<RealReg>>,
-    /// Total number of spillslots, including for 'dynamic' types, from regalloc.
-    spillslots: Option<usize>,
     /// Finalized frame layout for this function.
     frame_layout: Option<FrameLayout>,
     /// The register holding the return-area pointer, if needed.
-    ret_area_ptr: Option<Writable<Reg>>,
-    /// Temp registers required for argument setup, if needed.
-    arg_temp_reg: Vec<Option<Writable<Reg>>>,
+    ret_area_ptr: Option<Reg>,
     /// Calling convention this function expects.
     call_conv: isa::CallConv,
     /// The settings controlling this function's compilation.
@@ -1243,11 +1237,8 @@ impl<M: ABIMachineSpec> Callee<M> {
             outgoing_args_size: 0,
             tail_args_size,
             reg_args: vec![],
-            clobbered: vec![],
-            spillslots: None,
             frame_layout: None,
             ret_area_ptr: None,
-            arg_temp_reg: vec![],
             call_conv,
             flags,
             isa_flags: isa_flags.clone(),
@@ -1412,45 +1403,19 @@ impl<M: ABIMachineSpec> Callee<M> {
         &self.ir_sig
     }
 
-    /// Does the ABI-body code need temp registers (and if so, of what type)?
-    /// They will be provided to `init()` as the `temps` arg if so.
-    pub fn temps_needed(&self, sigs: &SigSet) -> Vec<Type> {
-        let mut temp_tys = vec![];
-        for arg in sigs.args(self.sig) {
-            match arg {
-                &ABIArg::ImplicitPtrArg { pointer, .. } => match &pointer {
-                    &ABIArgSlot::Reg { .. } => {}
-                    &ABIArgSlot::Stack { ty, .. } => {
-                        temp_tys.push(ty);
-                    }
-                },
-                _ => {}
-            }
-        }
-        if sigs[self.sig].stack_ret_arg.is_some() {
-            temp_tys.push(M::word_type());
-        }
-        temp_tys
-    }
-
     /// Initialize. This is called after the Callee is constructed because it
-    /// may be provided with a vector of temp vregs, which can only be allocated
-    /// once the lowering context exists.
-    pub fn init(&mut self, sigs: &SigSet, temps: Vec<Writable<Reg>>) {
-        let mut temps_iter = temps.into_iter();
-        for arg in sigs.args(self.sig) {
-            let temp = match arg {
-                &ABIArg::ImplicitPtrArg { pointer, .. } => match &pointer {
-                    &ABIArgSlot::Reg { .. } => None,
-                    &ABIArgSlot::Stack { .. } => Some(temps_iter.next().unwrap()),
-                },
-                _ => None,
-            };
-            self.arg_temp_reg.push(temp);
-        }
+    /// may allocate a temp vreg, which can only be allocated once the lowering
+    /// context exists.
+    pub fn init_retval_area(
+        &mut self,
+        sigs: &SigSet,
+        vregs: &mut VRegAllocator<M::I>,
+    ) -> CodegenResult<()> {
         if sigs[self.sig].stack_ret_arg.is_some() {
-            self.ret_area_ptr = Some(temps_iter.next().unwrap());
+            let ret_area_ptr = vregs.alloc(M::word_type())?;
+            self.ret_area_ptr = Some(ret_area_ptr.only_reg().unwrap());
         }
+        Ok(())
     }
 
     /// Accumulate outgoing arguments.
@@ -1580,9 +1545,9 @@ impl<M: ABIMachineSpec> Callee<M> {
                         tmp
                     }
                     &ABIArgSlot::Stack { offset, ty, .. } => {
-                        // In this case we need a temp register to hold the address.
-                        // This was allocated in the `init` routine.
-                        let addr_reg = self.arg_temp_reg[idx].unwrap();
+                        let addr_reg = writable_value_regs(vregs.alloc_with_deferred_error(ty))
+                            .only_reg()
+                            .unwrap();
                         insts.push(M::gen_load_stack(
                             StackAMode::IncomingArg(offset, sigs[self.sig].sized_stack_arg_space),
                             addr_reg,
@@ -1682,7 +1647,7 @@ impl<M: ABIMachineSpec> Callee<M> {
                                 _ => {}
                             };
                             ret.push(M::gen_store_base_offset(
-                                self.ret_area_ptr.unwrap().to_reg(),
+                                self.ret_area_ptr.unwrap(),
                                 off,
                                 from_reg,
                                 ty,
@@ -1712,17 +1677,14 @@ impl<M: ABIMachineSpec> Callee<M> {
         vregs: &mut VRegAllocator<M::I>,
     ) -> Option<M::I> {
         if let Some(i) = sigs[self.sig].stack_ret_arg {
-            let insts = self.gen_copy_arg_to_regs(
-                sigs,
-                i.into(),
-                ValueRegs::one(self.ret_area_ptr.unwrap()),
-                vregs,
-            );
+            let ret_area_ptr = Writable::from_reg(self.ret_area_ptr.unwrap());
+            let insts =
+                self.gen_copy_arg_to_regs(sigs, i.into(), ValueRegs::one(ret_area_ptr), vregs);
             insts.into_iter().next().map(|inst| {
                 trace!(
                     "gen_retval_area_setup: inst {:?}; ptr reg is {:?}",
                     inst,
-                    self.ret_area_ptr.unwrap().to_reg()
+                    ret_area_ptr.to_reg()
                 );
                 inst
             })
@@ -1777,16 +1739,6 @@ impl<M: ABIMachineSpec> Callee<M> {
 /// These methods of `Callee` may only be called after
 /// regalloc.
 impl<M: ABIMachineSpec> Callee<M> {
-    /// Update with the number of spillslots, post-regalloc.
-    pub fn set_num_spillslots(&mut self, slots: usize) {
-        self.spillslots = Some(slots);
-    }
-
-    /// Update with the clobbered registers, post-regalloc.
-    pub fn set_clobbered(&mut self, clobbered: Vec<Writable<RealReg>>) {
-        self.clobbered = clobbered;
-    }
-
     /// Generate a stack map, given a list of spillslots and the emission state
     /// at a given program point (prior to emission of the safepointing
     /// instruction).
@@ -1823,16 +1775,21 @@ impl<M: ABIMachineSpec> Callee<M> {
     /// Compute the final frame layout, post-regalloc.
     ///
     /// This must be called before gen_prologue or gen_epilogue.
-    pub fn compute_frame_layout(&mut self, sigs: &SigSet) {
+    pub fn compute_frame_layout(
+        &mut self,
+        sigs: &SigSet,
+        spillslots: usize,
+        clobbered: Vec<Writable<RealReg>>,
+    ) {
         let bytes = M::word_bytes();
-        let total_stacksize = self.stackslots_size + bytes * self.spillslots.unwrap() as u32;
+        let total_stacksize = self.stackslots_size + bytes * spillslots as u32;
         let mask = M::stack_align(self.call_conv) - 1;
         let total_stacksize = (total_stacksize + mask) & !mask; // 16-align the stack.
         self.frame_layout = Some(M::compute_frame_layout(
             self.call_conv,
             &self.flags,
             self.signature(),
-            &self.clobbered,
+            &clobbered,
             self.is_leaf,
             self.stack_args_size(sigs),
             self.tail_args_size,
@@ -2401,7 +2358,7 @@ impl<M: ABIMachineSpec> CallSite<M> {
                 "if the tail callee has a return pointer, then the tail caller \
                  must as well",
             );
-            self.gen_arg(ctx, i.into(), ValueRegs::one(ret_area_ptr.to_reg()));
+            self.gen_arg(ctx, i.into(), ValueRegs::one(ret_area_ptr));
         }
     }
 

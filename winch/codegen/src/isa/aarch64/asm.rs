@@ -1,8 +1,9 @@
 //! Assembler library implementation for Aarch64.
 
 use super::{address::Address, regs};
+use crate::masm::RoundingMode;
 use crate::{masm::OperandSize, reg::Reg};
-use cranelift_codegen::isa::aarch64::inst::{FPUOp2, ScalarSize};
+use cranelift_codegen::isa::aarch64::inst::{FPUOp1, FPUOp2, FpuRoundMode, ScalarSize};
 use cranelift_codegen::{
     ir::{MemFlags, SourceLoc},
     isa::aarch64::inst::{
@@ -161,12 +162,22 @@ impl Assembler {
         });
     }
 
-    pub fn fmov64_rr(&mut self, rm: Reg, rd: Reg) {
-        let writable_rd = Writable::from_reg(rd.into());
-        self.emit(Inst::FpuMove64 {
-            rd: writable_rd,
-            rn: rm.into(),
-        })
+    /// Floating point register to register move.
+    pub fn fmov_rr(&mut self, rn: Reg, rd: Reg, size: OperandSize) {
+        let writable = Writable::from_reg(rd.into());
+        let inst = match size {
+            OperandSize::S32 => Inst::FpuMove32 {
+                rd: writable,
+                rn: rn.into(),
+            },
+            OperandSize::S64 => Inst::FpuMove64 {
+                rd: writable,
+                rn: rn.into(),
+            },
+            _ => unreachable!(),
+        };
+
+        self.emit(inst);
     }
 
     pub fn mov_to_fpu(&mut self, rn: Reg, rd: Reg, size: OperandSize) {
@@ -254,6 +265,37 @@ impl Assembler {
         self.emit_fpu_rrr(FPUOp2::Min, rm, rn, rd, size);
     }
 
+    /// Float neg with two registers.
+    pub fn fneg_rr(&mut self, rn: Reg, rd: Reg, size: OperandSize) {
+        self.emit_fpu_rr(FPUOp1::Neg, rn, rd, size);
+    }
+
+    /// Float abs with two registers.
+    pub fn fabs_rr(&mut self, rn: Reg, rd: Reg, size: OperandSize) {
+        self.emit_fpu_rr(FPUOp1::Abs, rn, rd, size);
+    }
+
+    /// Float sqrt with two registers.
+    pub fn fsqrt_rr(&mut self, rn: Reg, rd: Reg, size: OperandSize) {
+        self.emit_fpu_rr(FPUOp1::Sqrt, rn, rd, size);
+    }
+
+    /// Float round (ceil, trunc, floor) with two registers.
+    pub fn fround_rr(&mut self, rn: Reg, rd: Reg, mode: RoundingMode, size: OperandSize) {
+        let fpu_mode = match (mode, size) {
+            (RoundingMode::Nearest, OperandSize::S32) => FpuRoundMode::Nearest32,
+            (RoundingMode::Up, OperandSize::S32) => FpuRoundMode::Plus32,
+            (RoundingMode::Down, OperandSize::S32) => FpuRoundMode::Minus32,
+            (RoundingMode::Zero, OperandSize::S32) => FpuRoundMode::Zero32,
+            (RoundingMode::Nearest, OperandSize::S64) => FpuRoundMode::Nearest64,
+            (RoundingMode::Up, OperandSize::S64) => FpuRoundMode::Plus64,
+            (RoundingMode::Down, OperandSize::S64) => FpuRoundMode::Minus64,
+            (RoundingMode::Zero, OperandSize::S64) => FpuRoundMode::Zero64,
+            (m, o) => panic!("Invalid rounding mode or operand size {:?}, {:?}", m, o),
+        };
+        self.emit_fpu_round(fpu_mode, rn, rd)
+    }
+
     /// Return instruction.
     pub fn ret(&mut self) {
         self.emit(Inst::Ret {});
@@ -300,6 +342,23 @@ impl Assembler {
             rd: Writable::from_reg(rd.into()),
             rn: rn.into(),
             rm: rm.into(),
+        });
+    }
+
+    fn emit_fpu_rr(&mut self, op: FPUOp1, rn: Reg, rd: Reg, size: OperandSize) {
+        self.emit(Inst::FpuRR {
+            fpu_op: op,
+            size: size.into(),
+            rd: Writable::from_reg(rd.into()),
+            rn: rn.into(),
+        });
+    }
+
+    fn emit_fpu_round(&mut self, op: FpuRoundMode, rn: Reg, rd: Reg) {
+        self.emit(Inst::FpuRound {
+            op: op,
+            rd: Writable::from_reg(rd.into()),
+            rn: rn.into(),
         });
     }
 

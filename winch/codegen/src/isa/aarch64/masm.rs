@@ -212,8 +212,7 @@ impl Masm for MacroAssembler {
             }
             (RegImm::Reg(rs), rd) => match (rs.class(), rd.class()) {
                 (RegClass::Int, RegClass::Int) => self.asm.mov_rr(rs, rd, size),
-                // TODO: verify whether we should use `fmov sd, sn` for F32.
-                (RegClass::Float, RegClass::Float) => self.asm.fmov64_rr(rs, rd),
+                (RegClass::Float, RegClass::Float) => self.asm.fmov_rr(rs, rd, size),
                 (RegClass::Int, RegClass::Float) => self.asm.mov_to_fpu(rs, rd, size),
                 _ => todo!(),
             },
@@ -317,27 +316,29 @@ impl Masm for MacroAssembler {
         todo!()
     }
 
-    fn float_neg(&mut self, _dst: Reg, _size: OperandSize) {
-        todo!()
+    fn float_neg(&mut self, dst: Reg, size: OperandSize) {
+        self.asm.fneg_rr(dst, dst, size);
     }
 
-    fn float_abs(&mut self, _dst: Reg, _size: OperandSize) {
-        todo!()
+    fn float_abs(&mut self, dst: Reg, size: OperandSize) {
+        self.asm.fabs_rr(dst, dst, size);
     }
 
     fn float_round<F: FnMut(&mut FuncEnv<Self::Ptr>, &mut CodeGenContext, &mut Self)>(
         &mut self,
-        _mode: RoundingMode,
+        mode: RoundingMode,
         _env: &mut FuncEnv<Self::Ptr>,
-        _context: &mut CodeGenContext,
-        _size: OperandSize,
+        context: &mut CodeGenContext,
+        size: OperandSize,
         _fallback: F,
     ) {
-        todo!();
+        let src = context.pop_to_reg(self, None);
+        self.asm.fround_rr(src.into(), src.into(), mode, size);
+        context.stack.push(src.into());
     }
 
-    fn float_sqrt(&mut self, _dst: Reg, _src: Reg, _size: OperandSize) {
-        todo!()
+    fn float_sqrt(&mut self, dst: Reg, src: Reg, size: OperandSize) {
+        self.asm.fsqrt_rr(src, dst, size);
     }
 
     fn and(&mut self, _dst: Reg, _lhs: Reg, _rhs: RegImm, _size: OperandSize) {

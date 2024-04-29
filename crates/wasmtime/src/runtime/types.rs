@@ -2,7 +2,8 @@ use anyhow::{bail, Result};
 use std::fmt::{self, Display};
 use wasmtime_environ::{
     EngineOrModuleTypeIndex, EntityType, Global, Memory, ModuleTypes, Table, TypeTrace,
-    VMSharedTypeIndex, WasmDefType, WasmFuncType, WasmHeapType, WasmRefType, WasmValType,
+    VMSharedTypeIndex, WasmArrayType, WasmCompositeType, WasmFieldType, WasmFuncType, WasmHeapType,
+    WasmRefType, WasmStorageType, WasmSubType, WasmValType,
 };
 
 use crate::{type_registry::RegisteredType, Engine};
@@ -362,6 +363,7 @@ impl RefType {
     }
 
     /// The heap type that this is a reference to.
+    #[inline]
     pub fn heap_type(&self) -> &HeapType {
         &self.heap_type
     }
@@ -423,7 +425,7 @@ impl RefType {
     }
 
     pub(crate) fn is_gc_heap_type(&self) -> bool {
-        self.heap_type().is_gc_heap_type()
+        self.heap_type().is_vmgcref_type_and_points_to_object()
     }
 }
 
@@ -439,26 +441,31 @@ impl RefType {
 /// between types, you can use the [`HeapType::eq`] method.
 #[derive(Debug, Clone, Hash)]
 pub enum HeapType {
-    /// The `extern` heap type represents external host data.
+    /// The abstract `extern` heap type represents external host data.
     Extern,
 
-    /// The `func` heap type represents a reference to any kind of function.
+    /// The abstract `func` heap type represents a reference to any kind of
+    /// function.
     ///
     /// This is the top type for the function references type hierarchy, and is
     /// therefore a supertype of every function reference.
     Func,
 
-    /// The concrete heap type represents a reference to a function of a
-    /// specific, concrete type.
+    /// A reference to a function of a specific, concrete type.
     ///
-    /// This is a subtype of `func` and a supertype of `nofunc`.
-    Concrete(FuncType),
+    /// These are subtypes of `func` and supertypes of `nofunc`.
+    ConcreteFunc(FuncType),
 
-    /// The `nofunc` heap type represents the null function reference.
+    /// The abstract `nofunc` heap type represents the null function reference.
     ///
     /// This is the bottom type for the function references type hierarchy, and
     /// therefore `nofunc` is a subtype of all function reference types.
     NoFunc,
+
+    /// A reference to a continuation of a specific, concrete type.
+    ///
+    /// These are subtypes of `cont` and supertypes of `nocont`.
+    ConcreteCont(ContType),
 
     /// The `cont` heap type represents a reference to any kind of continuation.
     ///
@@ -480,7 +487,25 @@ pub enum HeapType {
     Any,
 
     /// The `i31` heap type represents unboxed 31-bit integers.
+    ///
+    /// This is a subtype of `any` and a supertype of `none`.
     I31,
+
+    /// The abstract `array` heap type represents a reference to any kind of array.
+    ///
+    /// This is a subtype of `any` and a supertype of all concrete array types,
+    /// as well as a supertype of the abstract `none` heap type.
+    //
+    // TODO: add docs for subtype of `eq` once we add that heap type
+    Array,
+
+    /// A reference to an array of a specific, concrete type.
+    ///
+    /// These are subtypes of the `array` heap type (therefore also a subtype of
+    /// `any`) and supertypes of the `none` heap type.
+    //
+    // TODO: add docs for subtype of `eq` once we add that heap type
+    ConcreteArray(ArrayType),
 
     /// The abstract `none` heap type represents the null internal reference.
     ///
@@ -497,10 +522,13 @@ impl Display for HeapType {
             HeapType::NoFunc => write!(f, "nofunc"),
             HeapType::Any => write!(f, "any"),
             HeapType::I31 => write!(f, "i31"),
+            HeapType::Array => write!(f, "array"),
             HeapType::None => write!(f, "none"),
-            HeapType::Concrete(ty) => write!(f, "(concrete {:?})", ty.type_index()),
+            HeapType::ConcreteCont(ty) => write!(f, "(concrete cont {:?})", ty.type_index()),
             HeapType::Cont => write!(f, "cont"),
             HeapType::NoCont => write!(f, "nocont"),
+            HeapType::ConcreteFunc(ty) => write!(f, "(concrete func {:?})", ty.type_index()),
+            HeapType::ConcreteArray(ty) => write!(f, "(concrete array {:?})", ty.type_index()),
         }
     }
 }
@@ -508,7 +536,21 @@ impl Display for HeapType {
 impl From<FuncType> for HeapType {
     #[inline]
     fn from(f: FuncType) -> Self {
-        HeapType::Concrete(f)
+        HeapType::ConcreteFunc(f)
+    }
+}
+
+impl From<ArrayType> for HeapType {
+    #[inline]
+    fn from(a: ArrayType) -> Self {
+        HeapType::ConcreteArray(a)
+    }
+}
+
+impl From<ContType> for HeapType {
+    #[inline]
+    fn from(f: ContType) -> Self {
+        HeapType::ConcreteCont(f)
     }
 }
 
@@ -543,6 +585,11 @@ impl HeapType {
         matches!(self, HeapType::None)
     }
 
+    /// Is this the abstract `cont` heap type?
+    pub fn is_cont(&self) -> bool {
+        matches!(self, HeapType::Cont)
+    }
+
     /// Is this an abstract type?
     ///
     /// Types that are not abstract are concrete, user-defined types.
@@ -553,44 +600,78 @@ impl HeapType {
     /// Is this a concrete, user-defined heap type?
     ///
     /// Types that are not concrete, user-defined types are abstract types.
+    #[inline]
     pub fn is_concrete(&self) -> bool {
-        matches!(self, HeapType::Concrete(_))
+        matches!(self, HeapType::ConcreteFunc(_) | HeapType::ConcreteArray(_))
     }
 
-    /// Get the underlying concrete, user-defined type, if any.
+    /// Is this a concrete, user-defined function type?
+    pub fn is_concrete_func(&self) -> bool {
+        matches!(self, HeapType::ConcreteFunc(_))
+    }
+
+    /// Get the underlying concrete, user-defined function type, if any.
     ///
-    /// Returns `None` for abstract types.
-    pub fn as_concrete(&self) -> Option<&FuncType> {
+    /// Returns `None` if this is not a concrete function type.
+    pub fn as_concrete_func(&self) -> Option<&FuncType> {
         match self {
-            HeapType::Concrete(f) => Some(f),
+            HeapType::ConcreteFunc(f) => Some(f),
             _ => None,
         }
     }
 
-    /// Get the underlying concrete, user-defined type, panicking if this heap
-    /// type is not concrete.
-    pub fn unwrap_concrete(&self) -> &FuncType {
-        self.as_concrete()
-            .expect("HeapType::unwrap_concrete on non-concrete heap type")
+    /// Get the underlying concrete, user-defined type, panicking if this is not
+    /// a concrete function type.
+    pub fn unwrap_concrete_func(&self) -> &FuncType {
+        self.as_concrete_func().unwrap()
+    }
+
+    /// Is this a concrete, user-defined array type?
+    pub fn is_concrete_array(&self) -> bool {
+        matches!(self, HeapType::ConcreteArray(_))
+    }
+
+    /// Get the underlying concrete, user-defined array type, if any.
+    ///
+    /// Returns `None` for if this is not a concrete array type.
+    pub fn as_concrete_array(&self) -> Option<&ArrayType> {
+        match self {
+            HeapType::ConcreteArray(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// Get the underlying concrete, user-defined type, panicking if this is not
+    /// a concrete array type.
+    pub fn unwrap_concrete_array(&self) -> &ArrayType {
+        self.as_concrete_array().unwrap()
     }
 
     /// Get the top type of this heap type's type hierarchy.
     ///
     /// The returned heap type is a supertype of all types in this heap type's
     /// type hierarchy.
-    pub fn top(&self, engine: &Engine) -> HeapType {
-        // The engine isn't used yet, but will be once we support Wasm GC, so
-        // future-proof our API.
-        let _ = engine;
-
+    #[inline]
+    pub fn top(&self) -> HeapType {
         match self {
-            // TODO(dhil): We need to check whether Concrete points to
-            // a continuation object in order to correct deduce the
-            // top type.
-            HeapType::Func | HeapType::Concrete(_) | HeapType::NoFunc => HeapType::Func,
+            HeapType::Cont | HeapType::ConcreteCont(_) | HeapType::NoCont => HeapType::Cont,
+            HeapType::Func | HeapType::ConcreteFunc(_) | HeapType::NoFunc => HeapType::Func,
+
             HeapType::Extern => HeapType::Extern,
-            HeapType::Cont | HeapType::NoCont => HeapType::Cont,
-            HeapType::Any | HeapType::I31 | HeapType::None => HeapType::Any,
+
+            HeapType::Any
+            | HeapType::I31
+            | HeapType::Array
+            | HeapType::ConcreteArray(_)
+            | HeapType::None => HeapType::Any,
+        }
+    }
+
+    /// Is this the top type within its type hierarchy?
+    pub fn is_top(&self) -> bool {
+        match self {
+            HeapType::Any | HeapType::Extern | HeapType::Func | HeapType::Cont => true,
+            _ => false,
         }
     }
 
@@ -607,12 +688,14 @@ impl HeapType {
             (HeapType::Extern, HeapType::Extern) => true,
             (HeapType::Extern, _) => false,
 
-            (HeapType::NoFunc, HeapType::NoFunc | HeapType::Concrete(_) | HeapType::Func) => true,
+            (HeapType::NoFunc, HeapType::NoFunc | HeapType::ConcreteFunc(_) | HeapType::Func) => {
+                true
+            }
             (HeapType::NoFunc, _) => false,
 
-            (HeapType::Concrete(_), HeapType::Func) => true,
-            (HeapType::Concrete(a), HeapType::Concrete(b)) => a.matches(b),
-            (HeapType::Concrete(_), _) => false,
+            (HeapType::ConcreteFunc(_), HeapType::Func) => true,
+            (HeapType::ConcreteFunc(a), HeapType::ConcreteFunc(b)) => a.matches(b),
+            (HeapType::ConcreteFunc(_), _) => false,
 
             (HeapType::Func, HeapType::Func) => true,
             (HeapType::Func, _) => false,
@@ -620,11 +703,32 @@ impl HeapType {
             (HeapType::Cont, HeapType::Cont) => true,
             (HeapType::Cont, _) => false,
 
-            (HeapType::NoCont, HeapType::NoCont | HeapType::Concrete(_) | HeapType::Cont) => true,
+            (HeapType::NoCont, HeapType::NoCont | HeapType::ConcreteCont(_) | HeapType::Cont) => {
+                true
+            }
             (HeapType::NoCont, _) => false,
 
-            (HeapType::None, HeapType::None | HeapType::I31 | HeapType::Any) => true,
+            (HeapType::ConcreteCont(_), HeapType::Cont) => true,
+            (HeapType::ConcreteCont(a), HeapType::ConcreteCont(b)) => a.matches(b),
+            (HeapType::ConcreteCont(_), _) => false,
+
+            (
+                HeapType::None,
+                HeapType::None
+                | HeapType::ConcreteArray(_)
+                | HeapType::Array
+                | HeapType::I31
+                | HeapType::Any,
+            ) => true,
+
             (HeapType::None, _) => false,
+
+            (HeapType::ConcreteArray(_), HeapType::Array | HeapType::Any) => true,
+            (HeapType::ConcreteArray(a), HeapType::ConcreteArray(b)) => a.matches(b),
+            (HeapType::ConcreteArray(_), _) => false,
+
+            (HeapType::Array, HeapType::Array | HeapType::Any) => true,
+            (HeapType::Array, _) => false,
 
             (HeapType::I31, HeapType::I31 | HeapType::Any) => true,
             (HeapType::I31, _) => false,
@@ -667,8 +771,11 @@ impl HeapType {
             | HeapType::NoCont
             | HeapType::Any
             | HeapType::I31
+            | HeapType::Array
             | HeapType::None => true,
-            HeapType::Concrete(ty) => ty.comes_from_same_engine(engine),
+            HeapType::ConcreteFunc(ty) => ty.comes_from_same_engine(engine),
+            HeapType::ConcreteArray(ty) => ty.comes_from_same_engine(engine),
+            HeapType::ConcreteCont(ty) => ty.comes_from_same_engine(engine),
         }
     }
 
@@ -679,12 +786,19 @@ impl HeapType {
             HeapType::NoFunc => WasmHeapType::NoFunc,
             HeapType::Any => WasmHeapType::Any,
             HeapType::I31 => WasmHeapType::I31,
+            HeapType::Array => WasmHeapType::Array,
             HeapType::None => WasmHeapType::None,
-            HeapType::Concrete(f) => {
-                WasmHeapType::Concrete(EngineOrModuleTypeIndex::Engine(f.type_index()))
+            HeapType::ConcreteFunc(f) => {
+                WasmHeapType::ConcreteFunc(EngineOrModuleTypeIndex::Engine(f.type_index()))
+            }
+            HeapType::ConcreteArray(a) => {
+                WasmHeapType::ConcreteArray(EngineOrModuleTypeIndex::Engine(a.type_index()))
             }
             HeapType::Cont => WasmHeapType::Cont,
             HeapType::NoCont => WasmHeapType::NoCont,
+            HeapType::ConcreteCont(c) => {
+                WasmHeapType::ConcreteCont(EngineOrModuleTypeIndex::Engine(c.type_index()))
+            }
         }
     }
 
@@ -695,45 +809,62 @@ impl HeapType {
             WasmHeapType::NoFunc => HeapType::NoFunc,
             WasmHeapType::Any => HeapType::Any,
             WasmHeapType::I31 => HeapType::I31,
+            WasmHeapType::Array => HeapType::Array,
             WasmHeapType::None => HeapType::None,
-            WasmHeapType::Concrete(EngineOrModuleTypeIndex::Engine(idx)) => {
-                HeapType::Concrete(FuncType::from_shared_type_index(engine, *idx))
+            WasmHeapType::ConcreteFunc(EngineOrModuleTypeIndex::Engine(idx)) => {
+                HeapType::ConcreteFunc(FuncType::from_shared_type_index(engine, *idx))
             }
-            WasmHeapType::Concrete(EngineOrModuleTypeIndex::Module(_))
-            | WasmHeapType::Concrete(EngineOrModuleTypeIndex::RecGroup(_)) => {
-                panic!("HeapType::from_wasm_type on non-canonical heap type")
+            WasmHeapType::ConcreteArray(EngineOrModuleTypeIndex::Engine(idx)) => {
+                HeapType::ConcreteArray(ArrayType::from_shared_type_index(engine, *idx))
+            }
+
+            WasmHeapType::ConcreteFunc(EngineOrModuleTypeIndex::Module(_))
+            | WasmHeapType::ConcreteFunc(EngineOrModuleTypeIndex::RecGroup(_))
+            | WasmHeapType::ConcreteArray(EngineOrModuleTypeIndex::Module(_))
+            | WasmHeapType::ConcreteArray(EngineOrModuleTypeIndex::RecGroup(_))
+            | WasmHeapType::ConcreteCont(EngineOrModuleTypeIndex::Module(_))
+            | WasmHeapType::ConcreteCont(EngineOrModuleTypeIndex::RecGroup(_)) => {
+                panic!("HeapType::from_wasm_type on non-canonicalized-for-runtime-usage heap type")
             }
             WasmHeapType::Cont => HeapType::Cont,
             WasmHeapType::NoCont => HeapType::NoCont,
+            WasmHeapType::ConcreteCont(EngineOrModuleTypeIndex::Engine(idx)) => {
+                HeapType::ConcreteCont(ContType::from_shared_type_index(engine, *idx))
+            }
         }
     }
 
-    pub(crate) fn is_gc_heap_type(&self) -> bool {
-        // All `t <: (ref null any)` and `t <: (ref null extern)` that are
-        // not `(ref null? i31)` are GC-managed references.
+    pub(crate) fn as_registered_type(&self) -> Option<&RegisteredType> {
         match self {
-            // These types are managed by the GC.
-            HeapType::Extern | HeapType::Any => true,
-
-            // TODO: Once we support concrete struct and array types, we will
-            // need to inspect the payload to determine whether this is a
-            // GC-managed type or not.
-            Self::Concrete(_) => false,
-
-            // These are compatible with GC references, but don't actually point
-            // to GC objecs. It would generally be safe to return `true` here,
-            // but there is no need to.
-            HeapType::I31 => false,
-
-            // These are a subtype of GC-managed types, but are uninhabited, so
-            // can never actually point to a GC object. Again, we could return
-            // `true` here but there is no need.
-            HeapType::None => false,
-
-            // These types are not managed by the GC.
-            HeapType::Func | HeapType::NoFunc => false,
-            HeapType::Cont | HeapType::NoCont => false,
+            HeapType::ConcreteCont(c) => Some(&c.registered_type),
+            HeapType::ConcreteFunc(f) => Some(&f.registered_type),
+            HeapType::ConcreteArray(a) => Some(&a.registered_type),
+            HeapType::Extern
+            | HeapType::Cont
+            | HeapType::NoCont
+            | HeapType::Func
+            | HeapType::NoFunc
+            | HeapType::Any
+            | HeapType::I31
+            | HeapType::Array
+            | HeapType::None => None,
         }
+    }
+
+    #[inline]
+    pub(crate) fn is_vmgcref_type(&self) -> bool {
+        match self.top() {
+            Self::Any | Self::Extern => true,
+            Self::Func => false,
+            ty => unreachable!("not a top type: {ty:?}"),
+        }
+    }
+
+    /// Is this a `VMGcRef` type that is not i31 and is not an uninhabited
+    /// bottom type?
+    #[inline]
+    pub(crate) fn is_vmgcref_type_and_points_to_object(&self) -> bool {
+        self.is_vmgcref_type() && !matches!(self, HeapType::I31 | HeapType::NoFunc | HeapType::None)
     }
 }
 
@@ -799,8 +930,7 @@ impl ExternType {
                     FuncType::from_shared_type_index(engine, *e).into()
                 }
                 EngineOrModuleTypeIndex::Module(m) => {
-                    FuncType::from_wasm_func_type(engine, types[*m].unwrap_function().clone())
-                        .into()
+                    FuncType::from_wasm_func_type(engine, types[*m].unwrap_func().clone()).into()
                 }
                 EngineOrModuleTypeIndex::RecGroup(_) => unreachable!(),
             },
@@ -833,6 +963,352 @@ impl From<MemoryType> for ExternType {
 impl From<TableType> for ExternType {
     fn from(ty: TableType) -> ExternType {
         ExternType::Table(ty)
+    }
+}
+
+/// The storage type of a `struct` field or `array` element.
+///
+/// This is either a packed 8- or -16 bit integer, or else it is some unpacked
+/// Wasm value type.
+#[derive(Clone, Hash)]
+pub enum StorageType {
+    /// `i8`, an 8-bit integer.
+    I8,
+    /// `i16`, a 16-bit integer.
+    I16,
+    /// A value type.
+    ValType(ValType),
+}
+
+impl From<ValType> for StorageType {
+    #[inline]
+    fn from(v: ValType) -> Self {
+        StorageType::ValType(v)
+    }
+}
+
+impl StorageType {
+    /// Is this an `i8`?
+    #[inline]
+    pub fn is_i8(&self) -> bool {
+        matches!(self, Self::I8)
+    }
+
+    /// Is this an `i16`?
+    #[inline]
+    pub fn is_i16(&self) -> bool {
+        matches!(self, Self::I16)
+    }
+
+    /// Is this a Wasm value type?
+    #[inline]
+    pub fn is_val_type(&self) -> bool {
+        matches!(self, Self::I16)
+    }
+
+    /// Get this storage type's underlying value type, if any.
+    ///
+    /// Returns `None` if this storage type is not a value type.
+    #[inline]
+    pub fn as_val_type(&self) -> Option<&ValType> {
+        match self {
+            Self::ValType(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// Get this storage type's underlying value type, panicking if it is not a
+    /// value type.
+    pub fn unwrap_val_type(&self) -> &ValType {
+        self.as_val_type().unwrap()
+    }
+
+    /// Does this field type match the other field type?
+    ///
+    /// That is, is this field type a subtype of the other field type?
+    ///
+    /// # Panics
+    ///
+    /// Panics if either type is associated with a different engine from the
+    /// other.
+    pub fn matches(&self, other: &Self) -> bool {
+        match (self, other) {
+            (StorageType::I8, StorageType::I8) => true,
+            (StorageType::I8, _) => false,
+            (StorageType::I16, StorageType::I16) => true,
+            (StorageType::I16, _) => false,
+            (StorageType::ValType(a), StorageType::ValType(b)) => a.matches(b),
+            (StorageType::ValType(_), _) => false,
+        }
+    }
+
+    /// Is field type `a` precisely equal to field type `b`?
+    ///
+    /// Returns `false` even if `a` is a subtype of `b` or vice versa, if they
+    /// are not exactly the same field type.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either type is associated with a different engine from the
+    /// other.
+    pub fn eq(a: &Self, b: &Self) -> bool {
+        a.matches(b) && b.matches(a)
+    }
+
+    pub(crate) fn from_wasm_storage_type(engine: &Engine, ty: &WasmStorageType) -> Self {
+        match ty {
+            WasmStorageType::I8 => Self::I8,
+            WasmStorageType::I16 => Self::I16,
+            WasmStorageType::Val(v) => ValType::from_wasm_type(engine, &v).into(),
+        }
+    }
+
+    pub(crate) fn to_wasm_storage_type(&self) -> WasmStorageType {
+        match self {
+            Self::I8 => WasmStorageType::I8,
+            Self::I16 => WasmStorageType::I16,
+            Self::ValType(v) => WasmStorageType::Val(v.to_wasm_type()),
+        }
+    }
+}
+
+/// The type of a `struct` field or an `array`'s elements.
+///
+/// This is a pair of both the field's storage type and its mutability
+/// (i.e. whether the field can be updated or not).
+#[derive(Clone, Hash)]
+pub struct FieldType {
+    mutability: Mutability,
+    element_type: StorageType,
+}
+
+impl FieldType {
+    /// Construct a new field type from the given parts.
+    #[inline]
+    pub fn new(mutability: Mutability, element_type: StorageType) -> Self {
+        Self {
+            mutability,
+            element_type,
+        }
+    }
+
+    /// Get whether or not this field type is mutable.
+    #[inline]
+    pub fn mutability(&self) -> Mutability {
+        self.mutability
+    }
+
+    /// Get this field type's storage type.
+    #[inline]
+    pub fn element_type(&self) -> &StorageType {
+        &self.element_type
+    }
+
+    /// Does this field type match the other field type?
+    ///
+    /// That is, is this field type a subtype of the other field type?
+    ///
+    /// # Panics
+    ///
+    /// Panics if either type is associated with a different engine from the
+    /// other.
+    pub fn matches(&self, other: &Self) -> bool {
+        (other.mutability == Mutability::Var || self.mutability == Mutability::Const)
+            && self.element_type.matches(&other.element_type)
+    }
+
+    /// Is field type `a` precisely equal to field type `b`?
+    ///
+    /// Returns `false` even if `a` is a subtype of `b` or vice versa, if they
+    /// are not exactly the same field type.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either type is associated with a different engine from the
+    /// other.
+    pub fn eq(a: &Self, b: &Self) -> bool {
+        a.matches(b) && b.matches(a)
+    }
+
+    pub(crate) fn from_wasm_field_type(engine: &Engine, ty: &WasmFieldType) -> Self {
+        Self {
+            mutability: if ty.mutable {
+                Mutability::Var
+            } else {
+                Mutability::Const
+            },
+            element_type: StorageType::from_wasm_storage_type(engine, &ty.element_type),
+        }
+    }
+
+    pub(crate) fn to_wasm_field_type(&self) -> WasmFieldType {
+        WasmFieldType {
+            element_type: self.element_type.to_wasm_storage_type(),
+            mutable: matches!(self.mutability, Mutability::Var),
+        }
+    }
+}
+
+/// The type of a WebAssembly array.
+///
+/// WebAssembly arrays are dynamically-sized, but not resizable. They contain
+/// either unpacked [`Val`][crate::Val]s or packed 8-/16-bit integers.
+///
+/// # Subtyping and Equality
+///
+/// `ArrayType` does not implement `Eq`, because reference types have a
+/// subtyping relationship, and so 99.99% of the time you actually want to check
+/// whether one type matches (i.e. is a subtype of) another type. You can use
+/// the [`ArrayType::matches`] method to perform these types of checks. If,
+/// however, you are in that 0.01% scenario where you need to check precise
+/// equality between types, you can use the [`ArrayType::eq`] method.
+//
+// TODO: Once we have array values, update above docs with a reference to the
+// future `Array::matches_ty` method
+#[derive(Debug, Clone, Hash)]
+pub struct ArrayType {
+    registered_type: RegisteredType,
+}
+
+impl ArrayType {
+    /// Construct a new `ArrayType` with the given field type's mutability and
+    /// storage type.
+    ///
+    /// The result will be associated with the given engine, and attempts to use
+    /// it with other engines will panic (for example, checking whether it is a
+    /// subtype of another array type that is associated with a different
+    /// engine).
+    pub fn new(engine: &Engine, field_type: FieldType) -> Self {
+        // Same as in `FuncType::new`: we must prevent any `RegisteredType` in
+        // `field_type` from being reclaimed while constructing this array type.
+        let _registration = field_type
+            .element_type
+            .as_val_type()
+            .and_then(|v| v.as_ref())
+            .and_then(|r| r.heap_type().as_registered_type());
+
+        let wasm_ty = WasmArrayType(field_type.to_wasm_field_type());
+        Self::from_wasm_array_type(engine, wasm_ty)
+    }
+
+    /// Get the engine that this array type is associated with.
+    pub fn engine(&self) -> &Engine {
+        self.registered_type.engine()
+    }
+
+    /// Get this array's underlying field type.
+    ///
+    /// The field type contains information about both this array type's
+    /// mutability and the storage type used for its elements.
+    pub fn field_type(&self) -> FieldType {
+        FieldType::from_wasm_field_type(self.engine(), &self.as_wasm_array_type().0)
+    }
+
+    /// Get this array type's mutability and whether its instances' elements can
+    /// be updated or not.
+    ///
+    /// This is a convenience method providing a short-hand for
+    /// `my_array_type.field_type().mutability()`.
+    pub fn mutability(&self) -> Mutability {
+        if self.as_wasm_array_type().0.mutable {
+            Mutability::Var
+        } else {
+            Mutability::Const
+        }
+    }
+
+    /// Get the storage type used for this array type's elements.
+    ///
+    /// This is a convenience method providing a short-hand for
+    /// `my_array_type.field_type().element_type()`.
+    pub fn element_type(&self) -> StorageType {
+        StorageType::from_wasm_storage_type(
+            self.engine(),
+            &self.registered_type.unwrap_array().0.element_type,
+        )
+    }
+
+    /// Does this array type match the other array type?
+    ///
+    /// That is, is this function type a subtype of the other array type?
+    ///
+    /// # Panics
+    ///
+    /// Panics if either type is associated with a different engine from the
+    /// other.
+    pub fn matches(&self, other: &ArrayType) -> bool {
+        assert!(self.comes_from_same_engine(other.engine()));
+
+        // Avoid matching on structure for subtyping checks when we have
+        // precisely the same type.
+        if self.type_index() == other.type_index() {
+            return true;
+        }
+
+        self.field_type().matches(&other.field_type())
+    }
+
+    /// Is array type `a` precisely equal to array type `b`?
+    ///
+    /// Returns `false` even if `a` is a subtype of `b` or vice versa, if they
+    /// are not exactly the same array type.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either type is associated with a different engine from the
+    /// other.
+    pub fn eq(a: &ArrayType, b: &ArrayType) -> bool {
+        assert!(a.comes_from_same_engine(b.engine()));
+        a.type_index() == b.type_index()
+    }
+
+    pub(crate) fn comes_from_same_engine(&self, engine: &Engine) -> bool {
+        Engine::same(self.registered_type.engine(), engine)
+    }
+
+    pub(crate) fn type_index(&self) -> VMSharedTypeIndex {
+        self.registered_type.index()
+    }
+
+    pub(crate) fn as_wasm_array_type(&self) -> &WasmArrayType {
+        self.registered_type.unwrap_array()
+    }
+
+    /// Construct a `ArrayType` from a `WasmArrayType`.
+    ///
+    /// This method should only be used when something has already registered --
+    /// and is *keeping registered* -- any other concrete Wasm types referenced
+    /// by the given `WasmArrayType`.
+    ///
+    /// For example, this method may be called to convert an array type from
+    /// within a Wasm module's `ModuleTypes` since the Wasm module itself is
+    /// holding a strong reference to all of its types, including any `(ref null
+    /// <index>)` types used as the element type for this array type.
+    pub(crate) fn from_wasm_array_type(engine: &Engine, ty: WasmArrayType) -> ArrayType {
+        let ty = RegisteredType::new(
+            engine,
+            WasmSubType {
+                // TODO:
+                //
+                // is_final: true,
+                // supertype: None,
+                composite_type: WasmCompositeType::Array(ty),
+            },
+        );
+        Self {
+            registered_type: ty,
+        }
+    }
+
+    pub(crate) fn from_shared_type_index(engine: &Engine, index: VMSharedTypeIndex) -> ArrayType {
+        let ty = RegisteredType::root(engine, index).expect(
+            "VMSharedTypeIndex is not registered in the Engine! Wrong \
+             engine? Didn't root the index somewhere?",
+        );
+        assert!(ty.is_array());
+        Self {
+            registered_type: ty,
+        }
     }
 }
 
@@ -890,12 +1366,12 @@ impl FuncType {
         // the only thing keeping a type in the registry, we don't want to
         // unregister it when we convert the `ValType` into a `WasmValType` just
         // before we register our new `WasmFuncType` that will reference it.
-        let mut registrations = vec![];
+        let mut registrations = smallvec::SmallVec::<[_; 4]>::new();
 
         let mut to_wasm_type = |ty: ValType| {
             if let Some(r) = ty.as_ref() {
-                if let Some(c) = r.heap_type().as_concrete() {
-                    registrations.push(c.registered_type.clone());
+                if let Some(r) = r.heap_type().as_registered_type() {
+                    registrations.push(r.clone());
                 }
             }
             ty.to_wasm_type()
@@ -921,7 +1397,7 @@ impl FuncType {
     pub fn param(&self, i: usize) -> Option<ValType> {
         let engine = self.engine();
         self.registered_type
-            .unwrap_function()
+            .unwrap_func()
             .params()
             .get(i)
             .map(|ty| ValType::from_wasm_type(engine, ty))
@@ -932,7 +1408,7 @@ impl FuncType {
     pub fn params(&self) -> impl ExactSizeIterator<Item = ValType> + '_ {
         let engine = self.engine();
         self.registered_type
-            .unwrap_function()
+            .unwrap_func()
             .params()
             .iter()
             .map(|ty| ValType::from_wasm_type(engine, ty))
@@ -944,7 +1420,7 @@ impl FuncType {
     pub fn result(&self, i: usize) -> Option<ValType> {
         let engine = self.engine();
         self.registered_type
-            .unwrap_function()
+            .unwrap_func()
             .returns()
             .get(i)
             .map(|ty| ValType::from_wasm_type(engine, ty))
@@ -955,7 +1431,7 @@ impl FuncType {
     pub fn results(&self) -> impl ExactSizeIterator<Item = ValType> + '_ {
         let engine = self.engine();
         self.registered_type
-            .unwrap_function()
+            .unwrap_func()
             .returns()
             .iter()
             .map(|ty| ValType::from_wasm_type(engine, ty))
@@ -1016,7 +1492,7 @@ impl FuncType {
     }
 
     pub(crate) fn as_wasm_func_type(&self) -> &WasmFuncType {
-        &self.registered_type.unwrap_function()
+        self.registered_type.unwrap_func()
     }
 
     pub(crate) fn into_registered_type(self) -> RegisteredType {
@@ -1034,7 +1510,16 @@ impl FuncType {
     /// holding a strong reference to all of its types, including any `(ref null
     /// <index>)` types used in the function's parameters and results.
     pub(crate) fn from_wasm_func_type(engine: &Engine, ty: WasmFuncType) -> FuncType {
-        let ty = RegisteredType::new(engine, WasmDefType::Func(ty));
+        let ty = RegisteredType::new(
+            engine,
+            WasmSubType {
+                // TODO:
+                //
+                // is_final: true,
+                // supertype: None,
+                composite_type: WasmCompositeType::Func(ty),
+            },
+        );
         Self {
             registered_type: ty,
         }
@@ -1045,6 +1530,57 @@ impl FuncType {
             "VMSharedTypeIndex is not registered in the Engine! Wrong \
              engine? Didn't root the index somewhere?",
         );
+        assert!(ty.is_func());
+        Self {
+            registered_type: ty,
+        }
+    }
+}
+
+// Continuation types
+/// A WebAssembly continuation descriptor.
+#[derive(Debug, Clone, Hash)]
+pub struct ContType {
+    registered_type: RegisteredType,
+}
+
+impl ContType {
+    /// Get the engine that this function type is associated with.
+    pub fn engine(&self) -> &Engine {
+        self.registered_type.engine()
+    }
+
+    pub(crate) fn comes_from_same_engine(&self, engine: &Engine) -> bool {
+        Engine::same(self.registered_type.engine(), engine)
+    }
+
+    pub(crate) fn type_index(&self) -> VMSharedTypeIndex {
+        self.registered_type.index()
+    }
+
+    /// Does this continuation type match the other continuation type?
+    ///
+    /// That is, is this continuation type a subtype of the other continuation type?
+    ///
+    /// # Panics
+    ///
+    /// Panics if either type is associated with a different engine from the
+    /// other.
+    pub fn matches(&self, other: &ContType) -> bool {
+        assert!(self.comes_from_same_engine(other.engine()));
+
+        // Avoid matching on structure for subtyping checks when we have
+        // precisely the same type.
+        // TODO(dhil): Implement subtype check later.
+        self.type_index() == other.type_index()
+    }
+
+    pub(crate) fn from_shared_type_index(engine: &Engine, index: VMSharedTypeIndex) -> ContType {
+        let ty = RegisteredType::root(engine, index).expect(
+            "VMSharedTypeIndex is not registered in the Engine! Wrong \
+             engine? Didn't root the index somewhere?",
+        );
+        assert!(ty.is_cont());
         Self {
             registered_type: ty,
         }

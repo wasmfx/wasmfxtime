@@ -78,13 +78,9 @@ macro_rules! accessors {
 
 impl Val {
     /// Returns the null reference for the given heap type.
-    pub fn null_ref(heap_type: HeapType) -> Val {
-        match heap_type {
-            HeapType::Func | HeapType::NoFunc | HeapType::Concrete(_) => Val::FuncRef(None),
-            HeapType::Extern => Val::ExternRef(None),
-            HeapType::Any | HeapType::I31 | HeapType::None => Val::AnyRef(None),
-            HeapType::Cont | HeapType::NoCont => todo!(), // TODO(dhil): Revisit later.
-        }
+    #[inline]
+    pub fn null_ref(heap_type: &HeapType) -> Val {
+        Ref::null(&heap_type).into()
     }
 
     /// Returns the null function reference value.
@@ -130,9 +126,10 @@ impl Val {
             Val::V128(_) => ValType::V128,
             Val::ExternRef(_) => ValType::EXTERNREF,
             Val::FuncRef(None) => ValType::NULLFUNCREF,
-            Val::FuncRef(Some(f)) => {
-                ValType::Ref(RefType::new(false, HeapType::Concrete(f.load_ty(store))))
-            }
+            Val::FuncRef(Some(f)) => ValType::Ref(RefType::new(
+                false,
+                HeapType::ConcreteFunc(f.load_ty(store)),
+            )),
             Val::AnyRef(None) => ValType::NULLREF,
             Val::AnyRef(Some(_)) => {
                 assert!(VMGcRef::ONLY_EXTERN_REF_AND_I31);
@@ -243,15 +240,25 @@ impl Val {
             ValType::V128 => Val::V128(raw.get_v128().into()),
             ValType::Ref(ref_ty) => {
                 let ref_ = match ref_ty.heap_type() {
-                    HeapType::Func | HeapType::Concrete(_) => {
+                    HeapType::Func | HeapType::ConcreteFunc(_) => {
                         Func::from_raw(store, raw.get_funcref()).into()
                     }
+
                     HeapType::NoFunc => Ref::Func(None),
-                    HeapType::NoCont | HeapType::Cont => unimplemented!(), // TODO(dhil): Need to do this for the embedder API.
+
+                    HeapType::NoCont | HeapType::ConcreteCont(_) | HeapType::Cont => {
+                        unimplemented!()
+                    } // TODO(dhil): Need to do this for the embedder API.
+
                     HeapType::Extern => ExternRef::from_raw(store, raw.get_externref()).into(),
-                    HeapType::Any | HeapType::I31 => {
+
+                    HeapType::Any
+                    | HeapType::I31
+                    | HeapType::Array
+                    | HeapType::ConcreteArray(_) => {
                         AnyRef::from_raw(store, raw.get_anyref()).into()
                     }
+
                     HeapType::None => Ref::Any(None),
                 };
                 assert!(
@@ -624,6 +631,17 @@ impl From<Option<Rooted<AnyRef>>> for Ref {
 }
 
 impl Ref {
+    /// Create a null reference to the given heap type.
+    #[inline]
+    pub fn null(heap_type: &HeapType) -> Self {
+        match heap_type.top() {
+            HeapType::Any => Ref::Any(None),
+            HeapType::Extern => Ref::Extern(None),
+            HeapType::Func => Ref::Func(None),
+            ty => unreachable!("not a heap type: {ty:?}"),
+        }
+    }
+
     /// Is this a null reference?
     #[inline]
     pub fn is_null(&self) -> bool {
@@ -759,7 +777,7 @@ impl Ref {
                 // NB: We choose the most-specific heap type we can here and let
                 // subtyping do its thing if callers are matching against a
                 // `HeapType::Func`.
-                Ref::Func(Some(f)) => HeapType::Concrete(f.load_ty(store)),
+                Ref::Func(Some(f)) => HeapType::ConcreteFunc(f.load_ty(store)),
                 Ref::Func(None) => HeapType::NoFunc,
 
                 Ref::Any(Some(_)) => {
@@ -793,8 +811,8 @@ impl Ref {
             (Ref::Extern(_), _) => false,
 
             (Ref::Func(_), HeapType::Func) => true,
-            (Ref::Func(None), HeapType::NoFunc | HeapType::Concrete(_)) => true,
-            (Ref::Func(Some(f)), HeapType::Concrete(func_ty)) => f._matches_ty(store, func_ty),
+            (Ref::Func(None), HeapType::NoFunc | HeapType::ConcreteFunc(_)) => true,
+            (Ref::Func(Some(f)), HeapType::ConcreteFunc(func_ty)) => f._matches_ty(store, func_ty),
             (Ref::Func(_), _) => false,
 
             (Ref::Any(_), HeapType::Any) => true,
@@ -839,7 +857,7 @@ impl Ref {
         self.ensure_matches_ty(&store, &ty)
             .context("type mismatch: value does not match table element type")?;
 
-        match (self, ty.heap_type().top(store.engine())) {
+        match (self, ty.heap_type().top()) {
             (Ref::Func(None), HeapType::Func) => {
                 assert!(ty.is_nullable());
                 Ok(TableElement::FuncRef(ptr::null_mut()))
@@ -925,7 +943,7 @@ mod tests {
         // Should panic.
         let _ = Val::FuncRef(Some(f)).matches_ty(
             &s1,
-            &ValType::Ref(RefType::new(true, HeapType::Concrete(t2))),
+            &ValType::Ref(RefType::new(true, HeapType::ConcreteFunc(t2))),
         );
     }
 
@@ -942,6 +960,6 @@ mod tests {
         let f = Func::new(&mut s1, t1.clone(), |_caller, _args, _results| Ok(()));
 
         // Should panic.
-        let _ = Ref::Func(Some(f)).matches_ty(&s1, &RefType::new(true, HeapType::Concrete(t2)));
+        let _ = Ref::Func(Some(f)).matches_ty(&s1, &RefType::new(true, HeapType::ConcreteFunc(t2)));
     }
 }

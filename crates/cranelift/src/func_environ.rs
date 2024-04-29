@@ -13,13 +13,13 @@ use cranelift_frontend::Variable;
 use cranelift_wasm::{
     EngineOrModuleTypeIndex, FuncIndex, FuncTranslationState, GlobalIndex, GlobalVariable, Heap,
     HeapData, HeapStyle, MemoryIndex, TableData, TableIndex, TableSize, TagIndex,
-    TargetEnvironment, TypeIndex, WasmHeapType, WasmResult, WasmValType,
+    TargetEnvironment, TypeIndex, WasmHeapTopType, WasmHeapType, WasmResult, WasmValType,
 };
 use std::mem;
 use wasmparser::Operator;
 use wasmtime_environ::{
-    BuiltinFunctionIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation, ModuleType,
-    ModuleTypesBuilder, PtrSize, TableStyle, Tunables, TypeConvert, VMOffsets, WASM_PAGE_SIZE,
+    BuiltinFunctionIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation, ModuleTypesBuilder,
+    PtrSize, TableStyle, Tunables, TypeConvert, VMOffsets, WASM_PAGE_SIZE,
 };
 use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
@@ -540,12 +540,9 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
     }
 
     #[cfg(feature = "wmemcheck")]
-    fn hook_malloc_exit(&mut self, builder: &mut FunctionBuilder, retvals: &[Value]) {
-        let check_malloc_sig = self.builtin_functions.check_malloc(builder.func);
-        let (vmctx, check_malloc) = self.translate_load_builtin_function_address(
-            &mut builder.cursor(),
-            BuiltinFunctionIndex::check_malloc(),
-        );
+    fn hook_malloc_exit(&mut self, builder: &mut FunctionBuilder, retvals: &[ir::Value]) {
+        let check_malloc = self.builtin_functions.check_malloc(builder.func);
+        let vmctx = self.vmctx_val(&mut builder.cursor());
         let func_args = builder
             .func
             .dfg
@@ -562,18 +559,13 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         } else {
             retvals[0]
         };
-        builder
-            .ins()
-            .call_indirect(check_malloc_sig, check_malloc, &[vmctx, retval, len]);
+        builder.ins().call(check_malloc, &[vmctx, retval, len]);
     }
 
     #[cfg(feature = "wmemcheck")]
     fn hook_free_exit(&mut self, builder: &mut FunctionBuilder) {
-        let check_free_sig = self.builtin_functions.check_free(builder.func);
-        let (vmctx, check_free) = self.translate_load_builtin_function_address(
-            &mut builder.cursor(),
-            BuiltinFunctionIndex::check_free(),
-        );
+        let check_free = self.builtin_functions.check_free(builder.func);
+        let vmctx = self.vmctx_val(&mut builder.cursor());
         let func_args = builder
             .func
             .dfg
@@ -585,9 +577,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             // first argument is a pointer to memory.
             func_args[2]
         };
-        builder
-            .ins()
-            .call_indirect(check_free_sig, check_free, &[vmctx, ptr]);
+        builder.ins().call(check_free, &[vmctx, ptr]);
     }
 
     fn epoch_ptr(&mut self, builder: &mut FunctionBuilder<'_>) -> ir::Value {
@@ -779,7 +769,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         };
 
         let table = &self.module.table_plans[index].table;
-        let element_size = if table.wasm_ty.is_gc_heap_type() {
+        let element_size = if table.wasm_ty.is_vmgcref_type() {
             // For GC-managed references, tables store `Option<VMGcRef>`s.
             ir::types::I32.bytes()
         } else {
@@ -881,32 +871,22 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
 
     #[cfg(feature = "wmemcheck")]
     fn check_malloc_start(&mut self, builder: &mut FunctionBuilder) {
-        let malloc_start_sig = self.builtin_function_signatures.malloc_start(builder.func);
-        let (vmctx, malloc_start) = self.translate_load_builtin_function_address(
-            &mut builder.cursor(),
-            BuiltinFunctionIndex::malloc_start(),
-        );
-        builder
-            .ins()
-            .call_indirect(malloc_start_sig, malloc_start, &[vmctx]);
+        let malloc_start = self.builtin_functions.malloc_start(builder.func);
+        let vmctx = self.vmctx_val(&mut builder.cursor());
+        builder.ins().call(malloc_start, &[vmctx]);
     }
 
     #[cfg(feature = "wmemcheck")]
     fn check_free_start(&mut self, builder: &mut FunctionBuilder) {
-        let free_start_sig = self.builtin_function_signatures.free_start(builder.func);
-        let (vmctx, free_start) = self.translate_load_builtin_function_address(
-            &mut builder.cursor(),
-            BuiltinFunctionIndex::free_start(),
-        );
-        builder
-            .ins()
-            .call_indirect(free_start_sig, free_start, &[vmctx]);
+        let free_start = self.builtin_functions.free_start(builder.func);
+        let vmctx = self.vmctx_val(&mut builder.cursor());
+        builder.ins().call(free_start, &[vmctx]);
     }
 
     #[cfg(feature = "wmemcheck")]
     fn current_func_name(&self, builder: &mut FunctionBuilder) -> Option<&str> {
         let func_index = match &builder.func.name {
-            UserFuncName::User(user) => FuncIndex::from_u32(user.index),
+            ir::UserFuncName::User(user) => FuncIndex::from_u32(user.index),
             _ => {
                 panic!("function name not a UserFuncName::User as expected")
             }
@@ -1210,19 +1190,15 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             // Functions that have a statically known type are either going to
             // always succeed or always fail. Figure out by inspecting the types
             // further.
-            WasmHeapType::Concrete(EngineOrModuleTypeIndex::Module(table_ty)) => {
+            WasmHeapType::ConcreteFunc(EngineOrModuleTypeIndex::Module(table_ty)) => {
                 // If `ty_index` matches `table_ty`, then this call is
                 // statically known to have the right type, so no checks are
                 // necessary.
-                match self.env.module.types[ty_index] {
-                    ModuleType::Function(specified_ty) => {
-                        if specified_ty == table_ty {
-                            return CheckIndirectCallTypeSignature::StaticMatch {
-                                may_be_null: table.table.wasm_ty.nullable,
-                            };
-                        }
-                    }
-                    ModuleType::Continuation(_) => todo!(),
+                let specified_ty = self.env.module.types[ty_index];
+                if specified_ty == table_ty {
+                    return CheckIndirectCallTypeSignature::StaticMatch {
+                        may_be_null: table.table.wasm_ty.nullable,
+                    };
                 }
 
                 // Otherwise if the types don't match then either (a) this is a
@@ -1257,16 +1233,19 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             // Engine-indexed types don't show up until runtime and it's a wasm
             // validation error to perform a call through a non-function table,
             // so these cases are dynamically not reachable.
-            WasmHeapType::Concrete(EngineOrModuleTypeIndex::Engine(_))
-            | WasmHeapType::Concrete(EngineOrModuleTypeIndex::RecGroup(_))
+            WasmHeapType::ConcreteFunc(EngineOrModuleTypeIndex::Engine(_))
+            | WasmHeapType::ConcreteFunc(EngineOrModuleTypeIndex::RecGroup(_))
             | WasmHeapType::Extern
             | WasmHeapType::Any
             | WasmHeapType::I31
+            | WasmHeapType::Array
+            | WasmHeapType::ConcreteArray(_)
             | WasmHeapType::None => {
                 unreachable!()
             }
 
             WasmHeapType::NoCont => todo!(),
+            WasmHeapType::ConcreteCont(_) => todo!(),
             WasmHeapType::Cont => todo!(),
         }
 
@@ -1284,14 +1263,8 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             i32::try_from(self.env.offsets.vmctx_type_ids_array()).unwrap(),
         );
         let sig_index = self.env.module.types[ty_index];
-        let offset = i32::try_from(
-            sig_index
-                .unwrap_function()
-                .as_u32()
-                .checked_mul(sig_id_type.bytes())
-                .unwrap(),
-        )
-        .unwrap();
+        let offset =
+            i32::try_from(sig_index.as_u32().checked_mul(sig_id_type.bytes()).unwrap()).unwrap();
         let caller_sig_id = self
             .builder
             .ins()
@@ -1461,16 +1434,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         delta: ir::Value,
         init_value: ir::Value,
     ) -> WasmResult<ir::Value> {
-        let grow = match self.module.table_plans[table_index].table.wasm_ty.heap_type {
-            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => {
-                self.builtin_functions.table_grow_func_ref(&mut pos.func)
-            }
-            WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
-
-            ty @ WasmHeapType::Any
-            | ty @ WasmHeapType::I31
-            | ty @ WasmHeapType::None
-            | ty @ WasmHeapType::Extern => gc::gc_ref_table_grow_builtin(ty, self, &mut pos.func)?,
+        let ty = self.module.table_plans[table_index].table.wasm_ty.heap_type;
+        let grow = if ty.is_vmgcref_type() {
+            gc::gc_ref_table_grow_builtin(ty, self, &mut pos.func)?
+        } else {
+            debug_assert_eq!(ty.top(), WasmHeapTopType::Func);
+            self.builtin_functions.table_grow_func_ref(&mut pos.func)
         };
 
         let vmctx = self.vmctx_val(&mut pos);
@@ -1492,9 +1461,22 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let plan = &self.module.table_plans[table_index];
         self.ensure_table_exists(builder.func, table_index);
         let table_data = self.tables[table_index].as_ref().unwrap();
-        match plan.table.wasm_ty.heap_type {
+        let heap_ty = plan.table.wasm_ty.heap_type;
+        match heap_ty.top() {
+            // `i31ref`s never need barriers, and therefore don't need to go
+            // through the GC compiler.
+            WasmHeapTopType::Any if heap_ty == WasmHeapType::I31 => {
+                let (src, flags) = table_data.prepare_table_addr(
+                    builder,
+                    index,
+                    self.pointer_type(),
+                    self.isa.flags().enable_table_access_spectre_mitigation(),
+                );
+                gc::unbarriered_load_gc_ref(self, builder, WasmHeapType::I31, src, flags)
+            }
+
             // GC-managed types.
-            WasmHeapType::Any | WasmHeapType::Extern | WasmHeapType::None => {
+            WasmHeapTopType::Any | WasmHeapTopType::Extern => {
                 let (src, flags) = table_data.prepare_table_addr(
                     builder,
                     index,
@@ -1510,29 +1492,15 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 )
             }
 
-            // `i31ref`s never need barriers, and therefore don't need to go
-            // through the GC compiler.
-            WasmHeapType::I31 => {
-                let (src, flags) = table_data.prepare_table_addr(
-                    builder,
-                    index,
-                    self.pointer_type(),
-                    self.isa.flags().enable_table_access_spectre_mitigation(),
-                );
-                gc::unbarriered_load_gc_ref(self, builder, WasmHeapType::I31, src, flags)
-            }
-
             // Function types.
-            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => {
-                match plan.style {
-                    TableStyle::CallerChecksSignature => {
-                        Ok(self.get_or_init_func_ref_table_elem(builder, table_index, index))
-                    }
+            WasmHeapTopType::Func => match plan.style {
+                TableStyle::CallerChecksSignature => {
+                    Ok(self.get_or_init_func_ref_table_elem(builder, table_index, index))
                 }
-            }
+            },
 
             // Continuation types.
-            WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): Revisit later.
+            WasmHeapTopType::Cont => todo!(), // TODO(dhil): Revisit later.
         }
     }
 
@@ -1547,9 +1515,22 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let plan = &self.module.table_plans[table_index];
         self.ensure_table_exists(builder.func, table_index);
         let table_data = self.tables[table_index].as_ref().unwrap();
-        match plan.table.wasm_ty.heap_type {
+        let heap_ty = plan.table.wasm_ty.heap_type;
+        match heap_ty.top() {
+            // `i31ref`s never need GC barriers, and therefore don't need to go
+            // through the GC compiler.
+            WasmHeapTopType::Any if heap_ty == WasmHeapType::I31 => {
+                let (addr, flags) = table_data.prepare_table_addr(
+                    builder,
+                    index,
+                    self.pointer_type(),
+                    self.isa.flags().enable_table_access_spectre_mitigation(),
+                );
+                gc::unbarriered_store_gc_ref(self, builder, WasmHeapType::I31, addr, value, flags)
+            }
+
             // GC-managed types.
-            WasmHeapType::Any | WasmHeapType::Extern | WasmHeapType::None => {
+            WasmHeapTopType::Any | WasmHeapTopType::Extern => {
                 let (dst, flags) = table_data.prepare_table_addr(
                     builder,
                     index,
@@ -1566,20 +1547,8 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 )
             }
 
-            // `i31ref`s never need GC barriers, and therefore don't need to go
-            // through the GC compiler.
-            WasmHeapType::I31 => {
-                let (addr, flags) = table_data.prepare_table_addr(
-                    builder,
-                    index,
-                    self.pointer_type(),
-                    self.isa.flags().enable_table_access_spectre_mitigation(),
-                );
-                gc::unbarriered_store_gc_ref(self, builder, WasmHeapType::I31, addr, value, flags)
-            }
-
             // Function types.
-            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => {
+            WasmHeapTopType::Func => {
                 match plan.style {
                     TableStyle::CallerChecksSignature => {
                         let (elem_addr, flags) = table_data.prepare_table_addr(
@@ -1603,7 +1572,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             }
 
             // Continuation types.
-            WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): Revisit later.
+            WasmHeapTopType::Cont => todo!(), // TODO(dhil): Revisit later.
         }
     }
 
@@ -1615,16 +1584,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         val: ir::Value,
         len: ir::Value,
     ) -> WasmResult<()> {
-        let libcall = match self.module.table_plans[table_index].table.wasm_ty.heap_type {
-            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => {
-                self.builtin_functions.table_fill_func_ref(&mut pos.func)
-            }
-            WasmHeapType::Cont | WasmHeapType::NoCont => todo!(), // TODO(dhil): revisit this later.
-
-            ty @ WasmHeapType::Extern
-            | ty @ WasmHeapType::Any
-            | ty @ WasmHeapType::I31
-            | ty @ WasmHeapType::None => gc::gc_ref_table_fill_builtin(ty, self, &mut pos.func)?,
+        let ty = self.module.table_plans[table_index].table.wasm_ty.heap_type;
+        let libcall = if ty.is_vmgcref_type() {
+            gc::gc_ref_table_fill_builtin(ty, self, &mut pos.func)?
+        } else {
+            debug_assert_eq!(ty.top(), WasmHeapTopType::Func);
+            self.builtin_functions.table_fill_func_ref(&mut pos.func)
         };
 
         let vmctx = self.vmctx_val(&mut pos);
@@ -1676,14 +1641,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         mut pos: cranelift_codegen::cursor::FuncCursor,
         ht: WasmHeapType,
     ) -> WasmResult<ir::Value> {
-        Ok(match ht {
-            WasmHeapType::Func | WasmHeapType::Concrete(_) | WasmHeapType::NoFunc => {
-                pos.ins().iconst(self.pointer_type(), 0)
-            }
-            WasmHeapType::Cont | WasmHeapType::NoCont => {
-                pos.ins().iconst(self.pointer_type(), 0) // TODO(dhil): I haven't really thought this through.
-            }
-            WasmHeapType::Extern | WasmHeapType::Any | WasmHeapType::I31 | WasmHeapType::None => {
+        Ok(match ht.top() {
+            WasmHeapTopType::Func => pos.ins().iconst(self.pointer_type(), 0),
+            WasmHeapTopType::Cont => pos.ins().iconst(self.pointer_type(), 0),
+            WasmHeapTopType::Any | WasmHeapTopType::Extern => {
                 pos.ins().null(self.reference_type(ht))
             }
         })
@@ -2038,11 +1999,8 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         index: TypeIndex,
     ) -> WasmResult<ir::SigRef> {
         let index = self.module.types[index];
-        let sig = crate::wasm_call_signature(
-            self.isa,
-            &self.types[index.unwrap_function()].unwrap_function(),
-            &self.tunables,
-        );
+        let sig =
+            crate::wasm_call_signature(self.isa, self.types[index].unwrap_func(), &self.tunables);
         Ok(func.import_signature(sig))
     }
 
@@ -2052,11 +2010,8 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         index: FuncIndex,
     ) -> WasmResult<ir::FuncRef> {
         let sig = self.module.functions[index].signature;
-        let sig = crate::wasm_call_signature(
-            self.isa,
-            &self.types[sig].unwrap_function(),
-            &self.tunables,
-        );
+        let sig =
+            crate::wasm_call_signature(self.isa, self.types[sig].unwrap_func(), &self.tunables);
         let signature = func.import_signature(sig);
         let name =
             ir::ExternalName::User(func.declare_imported_user_function(ir::UserExternalName {
@@ -2652,33 +2607,27 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     }
 
     fn continuation_arguments(&self, index: u32) -> &[WasmValType] {
-        let idx = self.module.types[TypeIndex::from_u32(index)].unwrap_continuation();
-        self.types[self.types[idx]
-            .unwrap_continuation()
-            .clone()
-            .interned_type_index()]
-        .unwrap_function()
-        .params()
+        let idx = self.module.types[TypeIndex::from_u32(index)];
+        self.types[self.types[idx].unwrap_cont().clone().interned_type_index()]
+            .unwrap_func()
+            .params()
     }
 
     fn continuation_returns(&self, index: u32) -> &[WasmValType] {
-        let idx = self.module.types[TypeIndex::from_u32(index)].unwrap_continuation();
-        self.types[self.types[idx]
-            .unwrap_continuation()
-            .clone()
-            .interned_type_index()]
-        .unwrap_function()
-        .returns()
+        let idx = self.module.types[TypeIndex::from_u32(index)];
+        self.types[self.types[idx].unwrap_cont().clone().interned_type_index()]
+            .unwrap_func()
+            .returns()
     }
 
     fn tag_params(&self, tag_index: u32) -> &[WasmValType] {
         let idx = self.module.tags[TagIndex::from_u32(tag_index)].signature;
-        self.types[idx].unwrap_function().params()
+        self.types[idx].unwrap_func().params()
     }
 
     fn tag_returns(&self, tag_index: u32) -> &[WasmValType] {
         let idx = self.module.tags[TagIndex::from_u32(tag_index)].signature;
-        self.types[idx].unwrap_function().returns()
+        self.types[idx].unwrap_func().returns()
     }
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {
@@ -2698,7 +2647,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     }
 
     #[cfg(feature = "wmemcheck")]
-    fn handle_before_return(&mut self, retvals: &[Value], builder: &mut FunctionBuilder) {
+    fn handle_before_return(&mut self, retvals: &[ir::Value], builder: &mut FunctionBuilder) {
         if self.wmemcheck {
             let func_name = self.current_func_name(builder);
             if func_name == Some("malloc") {
@@ -2718,18 +2667,13 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         offset: u64,
     ) {
         if self.wmemcheck {
-            let check_load_sig = self.builtin_function_signatures.check_load(builder.func);
-            let (vmctx, check_load) = self.translate_load_builtin_function_address(
-                &mut builder.cursor(),
-                BuiltinFunctionIndex::check_load(),
-            );
+            let check_load = self.builtin_functions.check_load(builder.func);
+            let vmctx = self.vmctx_val(&mut builder.cursor());
             let num_bytes = builder.ins().iconst(I32, val_size as i64);
             let offset_val = builder.ins().iconst(I64, offset as i64);
-            builder.ins().call_indirect(
-                check_load_sig,
-                check_load,
-                &[vmctx, num_bytes, addr, offset_val],
-            );
+            builder
+                .ins()
+                .call(check_load, &[vmctx, num_bytes, addr, offset_val]);
         }
     }
 
@@ -2742,18 +2686,13 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         offset: u64,
     ) {
         if self.wmemcheck {
-            let check_store_sig = self.builtin_function_signatures.check_store(builder.func);
-            let (vmctx, check_store) = self.translate_load_builtin_function_address(
-                &mut builder.cursor(),
-                BuiltinFunctionIndex::check_store(),
-            );
+            let check_store = self.builtin_functions.check_store(builder.func);
+            let vmctx = self.vmctx_val(&mut builder.cursor());
             let num_bytes = builder.ins().iconst(I32, val_size as i64);
             let offset_val = builder.ins().iconst(I64, offset as i64);
-            builder.ins().call_indirect(
-                check_store_sig,
-                check_store,
-                &[vmctx, num_bytes, addr, offset_val],
-            );
+            builder
+                .ins()
+                .call(check_store, &[vmctx, num_bytes, addr, offset_val]);
         }
     }
 
@@ -2767,18 +2706,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         if self.wmemcheck {
             if global_index == 0 {
                 // We are making the assumption that global 0 is the auxiliary stack pointer.
-                let update_stack_pointer_sig = self
-                    .builtin_function_signatures
-                    .update_stack_pointer(builder.func);
-                let (vmctx, update_stack_pointer) = self.translate_load_builtin_function_address(
-                    &mut builder.cursor(),
-                    BuiltinFunctionIndex::update_stack_pointer(),
-                );
-                builder.ins().call_indirect(
-                    update_stack_pointer_sig,
-                    update_stack_pointer,
-                    &[vmctx, value],
-                );
+                let update_stack_pointer =
+                    self.builtin_functions.update_stack_pointer(builder.func);
+                let vmctx = self.vmctx_val(&mut builder.cursor());
+                builder.ins().call(update_stack_pointer, &[vmctx, value]);
             }
         }
     }
@@ -2791,16 +2722,9 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         mem_index: MemoryIndex,
     ) {
         if self.wmemcheck && mem_index.as_u32() == 0 {
-            let update_mem_size_sig = self
-                .builtin_function_signatures
-                .update_mem_size(builder.func);
-            let (vmctx, update_mem_size) = self.translate_load_builtin_function_address(
-                &mut builder.cursor(),
-                BuiltinFunctionIndex::update_mem_size(),
-            );
-            builder
-                .ins()
-                .call_indirect(update_mem_size_sig, update_mem_size, &[vmctx, num_pages]);
+            let update_mem_size = self.builtin_functions.update_mem_size(builder.func);
+            let vmctx = self.vmctx_val(&mut builder.cursor());
+            builder.ins().call(update_mem_size, &[vmctx, num_pages]);
         }
     }
 }

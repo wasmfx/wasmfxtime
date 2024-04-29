@@ -11,7 +11,9 @@ use cranelift_codegen::{
     settings, FinalizedMachReloc, FinalizedRelocTarget, MachTrap,
 };
 use cranelift_entity::PrimaryMap;
-use cranelift_wasm::{DefinedFuncIndex, FuncIndex, WasmFuncType, WasmHeapType, WasmValType};
+use cranelift_wasm::{
+    DefinedFuncIndex, FuncIndex, WasmFuncType, WasmHeapTopType, WasmHeapType, WasmValType,
+};
 
 use target_lexicon::Architecture;
 use wasmtime_environ::{
@@ -229,6 +231,12 @@ fn wasm_call_signature(
                 Architecture::S390x,
                 "https://github.com/bytecodealliance/wasmtime/issues/6530"
             );
+
+            assert!(
+                !tunables.winch_callable,
+                "Winch doesn't support the WebAssembly tail call proposal",
+            );
+
             CallConv::Tail
         }
 
@@ -261,19 +269,13 @@ fn wasm_call_signature(
 
 /// Returns the reference type to use for the provided wasm type.
 fn reference_type(wasm_ht: WasmHeapType, pointer_type: ir::Type) -> ir::Type {
-    match wasm_ht {
-        cranelift_wasm::WasmHeapType::Func
-        | cranelift_wasm::WasmHeapType::Concrete(_)
-        | cranelift_wasm::WasmHeapType::NoFunc
-        | cranelift_wasm::WasmHeapType::Cont
-        | cranelift_wasm::WasmHeapType::NoCont => pointer_type,
-        WasmHeapType::Extern | WasmHeapType::Any | WasmHeapType::I31 | WasmHeapType::None => {
-            match pointer_type {
-                ir::types::I32 => ir::types::R32,
-                ir::types::I64 => ir::types::R64,
-                _ => panic!("unsupported pointer type"),
-            }
-        }
+    match wasm_ht.top() {
+        WasmHeapTopType::Func | WasmHeapTopType::Cont => pointer_type,
+        WasmHeapTopType::Any | WasmHeapTopType::Extern => match pointer_type {
+            ir::types::I32 => ir::types::R32,
+            ir::types::I64 => ir::types::R64,
+            _ => panic!("unsupported pointer type"),
+        },
     }
 }
 

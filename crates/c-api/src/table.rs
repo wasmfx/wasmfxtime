@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::anyhow;
 use std::mem::MaybeUninit;
-use wasmtime::{Extern, HeapType, Ref, RootScope, Table, TableType};
+use wasmtime::{Extern, Ref, RootScope, Table, TableType};
 
 #[derive(Clone)]
 #[repr(transparent)]
@@ -33,13 +33,8 @@ impl wasm_table_t {
 }
 
 fn option_wasm_ref_t_to_ref(r: Option<&wasm_ref_t>, table_ty: &TableType) -> Ref {
-    match (r.map(|r| r.r.clone()), table_ty.element().heap_type()) {
-        (None, HeapType::NoFunc | HeapType::Func | HeapType::Concrete(_)) => Ref::Func(None),
-        (None, HeapType::Extern) => Ref::Extern(None),
-        (None, HeapType::Any | HeapType::I31 | HeapType::None) => Ref::Any(None),
-        (Some(r), _) => r,
-        (_, HeapType::NoCont | HeapType::Cont) => unimplemented!(), // TODO(dhil): We need embedder API support in wasmtime first.
-    }
+    r.map(|r| r.r.clone())
+        .unwrap_or_else(|| Ref::null(table_ty.element().heap_type()))
 }
 
 #[no_mangle]

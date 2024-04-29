@@ -2,7 +2,9 @@ use super::GcCompiler;
 use crate::func_environ::FuncEnvironment;
 use cranelift_codegen::ir::{self, InstBuilder};
 use cranelift_frontend::FunctionBuilder;
-use cranelift_wasm::{TargetEnvironment, WasmHeapType, WasmRefType, WasmResult, WasmValType};
+use cranelift_wasm::{
+    TargetEnvironment, WasmHeapTopType, WasmHeapType, WasmRefType, WasmResult, WasmValType,
+};
 use wasmtime_environ::{I31_DISCRIMINANT, NON_NULL_NON_I31_MASK};
 
 /// Get the default GC compiler.
@@ -55,7 +57,7 @@ pub fn gc_ref_table_grow_builtin(
     func_env: &mut FuncEnvironment<'_>,
     func: &mut ir::Function,
 ) -> WasmResult<ir::FuncRef> {
-    debug_assert!(ty.is_gc_heap_type());
+    debug_assert!(ty.is_vmgcref_type_and_not_i31());
     Ok(func_env.builtin_functions.table_grow_gc_ref(func))
 }
 
@@ -64,7 +66,7 @@ pub fn gc_ref_table_fill_builtin(
     func_env: &mut FuncEnvironment<'_>,
     func: &mut ir::Function,
 ) -> WasmResult<ir::FuncRef> {
-    debug_assert!(ty.is_gc_heap_type());
+    debug_assert!(ty.is_vmgcref_type_and_not_i31());
     Ok(func_env.builtin_functions.table_fill_gc_ref(func))
 }
 
@@ -169,18 +171,11 @@ impl FuncEnvironment<'_> {
         ty: WasmRefType,
         gc_ref: ir::Value,
     ) -> ir::Value {
-        assert!(ty.is_gc_heap_type());
+        assert!(ty.is_vmgcref_type_and_not_i31());
 
-        let might_be_i31 = match ty.heap_type {
-            WasmHeapType::Any => true,
-            WasmHeapType::Extern | WasmHeapType::None | WasmHeapType::Concrete(_) => false,
-            WasmHeapType::Func
-            | WasmHeapType::NoFunc
-            | WasmHeapType::I31
-            | WasmHeapType::Cont
-            | WasmHeapType::NoCont => {
-                unreachable!("we don't manage instances of these types with the GC")
-            }
+        let might_be_i31 = match ty.heap_type.top() {
+            WasmHeapTopType::Any => true,
+            WasmHeapTopType::Extern | WasmHeapTopType::Func | WasmHeapTopType::Cont => false,
         };
 
         let ptr_ty = self.pointer_type();
@@ -321,7 +316,7 @@ impl GcCompiler for DrcCompiler {
         src: ir::Value,
         flags: ir::MemFlags,
     ) -> WasmResult<ir::Value> {
-        assert!(ty.is_gc_heap_type());
+        assert!(ty.is_vmgcref_type_and_not_i31());
 
         let reference_type = func_env.reference_type(ty.heap_type);
 
@@ -464,7 +459,7 @@ impl GcCompiler for DrcCompiler {
         new_val: ir::Value,
         flags: ir::MemFlags,
     ) -> WasmResult<()> {
-        assert!(ty.is_gc_heap_type());
+        assert!(ty.is_vmgcref_type_and_not_i31());
 
         let ref_ty = func_env.reference_type(ty.heap_type);
 

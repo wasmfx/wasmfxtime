@@ -117,7 +117,7 @@ impl Global {
                 ValType::V128 => Val::V128((*definition.as_u128()).into()),
                 ValType::Ref(ref_ty) => {
                     let reference: Ref = match ref_ty.heap_type() {
-                        HeapType::Func | HeapType::Concrete(_) => {
+                        HeapType::Func | HeapType::ConcreteFunc(_) => {
                             Func::_from_raw(&mut store, definition.as_func_ref().cast()).into()
                         }
 
@@ -132,17 +132,22 @@ impl Global {
                                 })
                                 .into(),
                         ),
-                        HeapType::NoCont | HeapType::Cont => todo!(
+                        HeapType::NoCont | HeapType::ConcreteCont(_) | HeapType::Cont => todo!(
                             "Embedder support for continuations has not yet been implemented!"
                         ),
 
-                        HeapType::Any | HeapType::I31 | HeapType::None => definition
+                        HeapType::Any
+                        | HeapType::I31
+                        | HeapType::Array
+                        | HeapType::ConcreteArray(_) => definition
                             .as_gc_ref()
                             .map(|r| {
                                 let r = store.unwrap_gc_store_mut().clone_gc_ref(r);
                                 AnyRef::from_cloned_gc_ref(&mut store, r)
                             })
                             .into(),
+
+                        HeapType::None => Ref::Any(None),
                     };
                     debug_assert!(
                         ref_ty.is_nullable() || !reference.is_null(),

@@ -167,19 +167,12 @@ impl Table {
                 }
 
                 runtime::TableElement::GcRef(None) => {
-                    match self._ty(&store).element().heap_type().top(store.engine()) {
-                        HeapType::Any => Some(Ref::Any(None)),
-                        HeapType::Extern => Some(Ref::Extern(None)),
-                        HeapType::Func => {
-                            unreachable!("never have TableElement::GcRef for func tables")
-                        }
-                        ty => unreachable!("not a top type: {ty:?}"),
-                    }
+                    Some(Ref::null(self._ty(&store).element().heap_type()))
                 }
 
                 #[cfg_attr(not(feature = "gc"), allow(unreachable_code, unused_variables))]
                 runtime::TableElement::GcRef(Some(x)) => {
-                    match self._ty(&store).element().heap_type().top(store.engine()) {
+                    match self._ty(&store).element().heap_type().top() {
                         HeapType::Any => {
                             let x = AnyRef::from_cloned_gc_ref(&mut store, x);
                             Some(x.into())

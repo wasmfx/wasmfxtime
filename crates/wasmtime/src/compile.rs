@@ -29,13 +29,14 @@ use std::{
     collections::{btree_map, BTreeMap, BTreeSet, HashMap, HashSet},
     mem,
 };
+
 #[cfg(feature = "component-model")]
 use wasmtime_environ::component::Translator;
 use wasmtime_environ::{
     BuiltinFunctionIndex, CompiledFunctionInfo, CompiledModuleInfo, Compiler, DefinedFuncIndex,
     FinishedObject, FunctionBodyData, ModuleEnvironment, ModuleInternedTypeIndex,
-    ModuleTranslation, ModuleType, ModuleTypes, ModuleTypesBuilder, ObjectKind, PrimaryMap,
-    RelocationTarget, StaticModuleIndex, WasmFunctionInfo,
+    ModuleTranslation, ModuleTypes, ModuleTypesBuilder, ObjectKind, PrimaryMap, RelocationTarget,
+    StaticModuleIndex, WasmFunctionInfo,
 };
 
 mod code_builder;
@@ -61,6 +62,7 @@ pub use self::runtime::finish_object;
 pub(crate) fn build_artifacts<T: FinishedObject>(
     engine: &Engine,
     wasm: &[u8],
+    dwarf_package: Option<&[u8]>,
 ) -> Result<(T, Option<(CompiledModuleInfo, ModuleTypes)>)> {
     let tunables = engine.tunables();
 
@@ -78,7 +80,6 @@ pub(crate) fn build_artifacts<T: FinishedObject>(
 
     let compile_inputs = CompileInputs::for_module(&types, &translation, functions);
     let unlinked_compile_outputs = compile_inputs.compile(engine)?;
-    let types = types.finish();
     let (compiled_funcs, function_indices) = unlinked_compile_outputs.pre_link();
 
     // Emplace all compiled functions into the object file with any other
@@ -97,13 +98,16 @@ pub(crate) fn build_artifacts<T: FinishedObject>(
     engine.append_bti(&mut object);
 
     let (mut object, compilation_artifacts) = function_indices.link_and_append_code(
+        &types,
         object,
         engine,
         compiled_funcs,
         std::iter::once(translation).collect(),
+        dwarf_package,
     )?;
 
     let info = compilation_artifacts.unwrap_as_module_info();
+    let types = types.finish();
     object.serialize_info(&(&info, &types));
     let result = T::finish_object(object)?;
 
@@ -118,9 +122,10 @@ pub(crate) fn build_artifacts<T: FinishedObject>(
 /// The output artifact here is the serialized object file contained within
 /// an owned mmap along with metadata about the compilation itself.
 #[cfg(feature = "component-model")]
-pub(crate) fn build_component_artifacts<T: FinishedObject>(
+pub(crate) fn build_component_artifacts<'a, T: FinishedObject>(
     engine: &Engine,
     binary: &[u8],
+    _dwarf_package: Option<&[u8]>,
 ) -> Result<(T, Option<wasmtime_environ::component::ComponentArtifacts>)> {
     use wasmtime_environ::component::{
         CompiledComponentInfo, ComponentArtifacts, ComponentTypesBuilder,
@@ -155,10 +160,12 @@ pub(crate) fn build_component_artifacts<T: FinishedObject>(
     engine.append_bti(&mut object);
 
     let (mut object, compilation_artifacts) = function_indices.link_and_append_code(
+        types.module_types_builder(),
         object,
         engine,
         compiled_funcs,
         module_translations,
+        None, // TODO: Support dwarf packages for components.
     )?;
     let (types, ty) = types.finish(
         &compilation_artifacts.modules,
@@ -396,8 +403,8 @@ impl<'a> CompileInputs<'a> {
         if component.component.num_resources > 0 {
             if let Some(sig) = types.find_resource_drop_signature() {
                 ret.push_input(move |compiler| {
-                    let trampoline = compiler
-                        .compile_wasm_to_native_trampoline(&types[sig].unwrap_function())?;
+                    let trampoline =
+                        compiler.compile_wasm_to_native_trampoline(types[sig].unwrap_func())?;
                     Ok(CompileOutput {
                         key: CompileKey::resource_drop_wasm_to_native_trampoline(),
                         symbol: "resource_drop_trampoline".to_string(),
@@ -484,28 +491,24 @@ impl<'a> CompileInputs<'a> {
                 }
             }
 
-            sigs.extend(translation.module.types.iter().map(|(_, ty)| match ty {
-                ModuleType::Function(ty) | ModuleType::Continuation(ty) => *ty,
-            }));
+            sigs.extend(translation.module.types.iter().map(|(_, ty)| *ty))
         }
 
         for signature in sigs {
-            if types.is_cont_type_index(signature) {
-                continue;
+            if let Some(wasm_func_ty) = types[signature].as_func() {
+                self.push_input(move |compiler| {
+                    let trampoline = compiler.compile_wasm_to_native_trampoline(wasm_func_ty)?;
+                    Ok(CompileOutput {
+                        key: CompileKey::wasm_to_native_trampoline(signature),
+                        symbol: format!(
+                            "signatures[{}]::wasm_to_native_trampoline",
+                            signature.as_u32()
+                        ),
+                        function: CompiledFunction::Function(trampoline),
+                        info: None,
+                    })
+                });
             }
-            self.push_input(move |compiler| {
-                let wasm_func_ty = &types[signature].unwrap_function();
-                let trampoline = compiler.compile_wasm_to_native_trampoline(wasm_func_ty)?;
-                Ok(CompileOutput {
-                    key: CompileKey::wasm_to_native_trampoline(signature),
-                    symbol: format!(
-                        "signatures[{}]::wasm_to_native_trampoline",
-                        signature.as_u32()
-                    ),
-                    function: CompiledFunction::Function(trampoline),
-                    info: None,
-                })
-            });
         }
     }
 
@@ -651,10 +654,12 @@ impl FunctionIndices {
     /// them to the given ELF file.
     fn link_and_append_code<'a>(
         mut self,
+        types: &ModuleTypesBuilder,
         mut obj: object::write::Object<'static>,
         engine: &'a Engine,
         compiled_funcs: Vec<(String, Box<dyn Any + Send>)>,
         translations: PrimaryMap<StaticModuleIndex, ModuleTranslation<'_>>,
+        dwarf_package_bytes: Option<&[u8]>,
     ) -> Result<(wasmtime_environ::ObjectBuilder<'a>, Artifacts)> {
         // Append all the functions to the ELF file.
         //
@@ -719,7 +724,13 @@ impl FunctionIndices {
                     })
                     .collect();
                 if !funcs.is_empty() {
-                    compiler.append_dwarf(&mut obj, translation, &funcs)?;
+                    compiler.append_dwarf(
+                        &mut obj,
+                        translation,
+                        &funcs,
+                        dwarf_package_bytes,
+                        tunables,
+                    )?;
                 }
             }
         }
@@ -831,10 +842,8 @@ impl FunctionIndices {
                     .module
                     .types
                     .iter()
-                    .filter_map(|(_, ty)| match ty {
-                        ModuleType::Function(ty) => Some(*ty),
-                        _ => None,
-                    })
+                    .map(|(_, ty)| *ty)
+                    .filter(|idx| types[*idx].is_func())
                     .collect::<BTreeSet<_>>();
                 let wasm_to_native_trampolines = unique_and_sorted_sigs
                     .iter()
