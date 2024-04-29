@@ -455,7 +455,7 @@ pub mod baseline {
     /// arguments buffer, and a return buffer.
     pub struct VMContRef {
         pub fiber: Box<ContinuationFiber>,
-        pub suspend: *const Yield,
+        pub suspend: *mut Yield,
         pub parent: *mut VMContRef,
         pub args: Vec<u128>,
         pub values: Vec<u128>,
@@ -504,14 +504,14 @@ pub mod baseline {
             let vals_ptr = values.as_mut_ptr();
             let fiber = Fiber::new(
                 stack,
-                move |instance: &mut Instance, suspend: &Yield| unsafe {
+                move |instance: &mut Instance, suspend: &mut Yield| unsafe {
                     let caller_ctx = VMOpaqueContext::from_vmcontext(instance.vmctx());
                     // NOTE(dhil): The cast `suspend as *const Yield`
                     // side-steps the need for mentioning the lifetime
                     // of `Yield`. In this case it is safe, because
                     // Yield lives as long as the object it is
                     // embedded in.
-                    (*get_current_continuation()).suspend = suspend as *const Yield;
+                    (*get_current_continuation()).suspend = suspend as *mut Yield;
                     let results = (func_ref.array_call)(
                         callee_ctx,
                         caller_ctx,
@@ -519,7 +519,7 @@ pub mod baseline {
                         capacity,
                     );
                     // As a precaution we null the suspender.
-                    (*get_current_continuation()).suspend = std::ptr::null();
+                    (*get_current_continuation()).suspend = std::ptr::null_mut();
                     return results;
                 },
             )
@@ -529,7 +529,7 @@ pub mod baseline {
 
         let contref = Box::new(VMContRef {
             parent: std::ptr::null_mut(),
-            suspend: std::ptr::null(),
+            suspend: std::ptr::null_mut(),
             fiber,
             args: Vec::with_capacity(param_count),
             values,
@@ -608,7 +608,7 @@ pub mod baseline {
         let contref = unsafe { cc.as_mut().unwrap() };
         let parent = mem::replace(&mut contref.parent, std::ptr::null_mut());
         set_current_continuation(parent);
-        unsafe { contref.suspend.as_ref().unwrap().suspend(tag_index) };
+        unsafe { contref.suspend.as_mut().unwrap().suspend(tag_index) };
         Ok(())
     }
 
