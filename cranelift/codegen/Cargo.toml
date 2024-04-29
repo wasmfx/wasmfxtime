@@ -16,7 +16,7 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-anyhow = { workspace = true, optional = true }
+anyhow = { workspace = true, optional = true, features = ['std'] }
 bumpalo = "3"
 capstone = { workspace = true, optional = true }
 cranelift-codegen-shared = { path = "./shared", version = "0.108.0" }
@@ -28,7 +28,7 @@ target-lexicon = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, optional = true }
 serde_derive = { workspace = true, optional = true }
-bincode = { workspace = true, optional = true }
+postcard = { workspace = true, optional = true }
 gimli = { workspace = true, features = ["write"], optional = true }
 smallvec = { workspace = true }
 regalloc2 = { workspace = true, features = ["checker", "trace-log"] }
@@ -40,7 +40,7 @@ sha2 = { version = "0.10.2", optional = true }
 # accomodated in `tests`.
 
 [dev-dependencies]
-criterion = { version = "0.5.0", features = ["html_reports"] }
+criterion = { workspace = true }
 similar = "2.1.0"
 
 [build-dependencies]
@@ -100,7 +100,7 @@ enable-serde = [
 # Enable the incremental compilation cache for hot-reload use cases.
 incremental-cache = [
     "enable-serde",
-    "bincode",
+    "postcard",
     "sha2"
 ]
 

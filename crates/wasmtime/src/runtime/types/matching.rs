@@ -1,8 +1,8 @@
 use crate::{linker::DefinitionType, Engine, FuncType};
 use anyhow::{anyhow, bail, Result};
 use wasmtime_environ::{
-    EntityType, Global, Memory, ModuleTypes, Table, TypeTrace, VMSharedTypeIndex, WasmDefType,
-    WasmFuncType, WasmHeapType, WasmRefType, WasmValType,
+    EntityType, Global, Memory, ModuleTypes, Table, TypeTrace, VMSharedTypeIndex,
+    WasmCompositeType, WasmHeapType, WasmRefType, WasmSubType, WasmValType,
 };
 
 pub struct MatchCx<'a> {
@@ -36,7 +36,7 @@ impl MatchCx<'_> {
             None => panic!("{actual:?} is not registered"),
         };
 
-        Err(ty_mismatch(msg, &expected, &actual))
+        Err(concrete_type_mismatch(msg, &expected, &actual))
     }
 
     /// Validates that the `expected` type matches the type of `actual`
@@ -91,13 +91,12 @@ pub fn entity_ty(
         },
         EntityType::Function(expected) => match actual {
             EntityType::Function(actual) => {
-                let expected =
-                    &expected_types[expected.unwrap_module_type_index()].unwrap_function();
-                let actual = &actual_types[actual.unwrap_module_type_index()].unwrap_function();
+                let expected = &expected_types[expected.unwrap_module_type_index()];
+                let actual = &actual_types[actual.unwrap_module_type_index()];
                 if expected == actual {
                     Ok(())
                 } else {
-                    Err(func_ty_mismatch(
+                    Err(concrete_type_mismatch(
                         "function types incompatible",
                         expected,
                         actual,
@@ -110,59 +109,56 @@ pub fn entity_ty(
     }
 }
 
-fn ty_mismatch(msg: &str, expected: &WasmDefType, actual: &WasmDefType) -> anyhow::Error {
-    let render = |ty: &WasmDefType| {
-        match ty {
-            WasmDefType::Func(ty) => {
-                let params = ty
-                    .params()
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let returns = ty
-                    .returns()
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("`({}) -> ({})`", params, returns)
-            }
-            WasmDefType::Cont(ty) => {
-                format!("{:?}", ty) // TODO(dhil): do some pretty rendering later.
-            }
-        }
-    };
-    match (expected, actual) {
-        (WasmDefType::Func(a), WasmDefType::Func(b)) => func_ty_mismatch(msg, a, b),
-        (_, _) => {
-            anyhow!(
-                "{msg}: expected type {}, found type {}",
-                render(expected),
-                render(actual)
+fn concrete_type_mismatch(
+    msg: &str,
+    expected: &WasmSubType,
+    actual: &WasmSubType,
+) -> anyhow::Error {
+    let render = |ty: &WasmSubType| match &ty.composite_type {
+        WasmCompositeType::Array(ty) => {
+            format!(
+                "(array {})",
+                if ty.0.mutable {
+                    format!("(mut {})", ty.0.element_type)
+                } else {
+                    ty.0.element_type.to_string()
+                }
             )
         }
-    }
-}
-
-fn func_ty_mismatch(msg: &str, expected: &WasmFuncType, actual: &WasmFuncType) -> anyhow::Error {
-    let render = |ty: &WasmFuncType| {
-        let params = ty
-            .params()
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let returns = ty
-            .returns()
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("`({}) -> ({})`", params, returns)
+        WasmCompositeType::Func(ty) => {
+            let params = if ty.params().is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " (param {})",
+                    ty.params()
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            };
+            let returns = if ty.returns().is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " (result {})",
+                    ty.returns()
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            };
+            format!("(func{params}{returns})")
+        }
+        WasmCompositeType::Cont(c) => {
+            format!("(cont {:?}", c)
+        }
     };
+
     anyhow!(
-        "{msg}: expected func of type {}, found func of type {}",
+        "{msg}: expected type `{}`, found type `{}`",
         render(expected),
         render(actual)
     )
@@ -233,37 +229,40 @@ fn match_heap(expected: WasmHeapType, actual: WasmHeapType, desc: &str) -> Resul
     let result = match (actual, expected) {
         // TODO: Wasm GC introduces subtyping between function types, so it will
         // no longer suffice to check whether canonicalized type IDs are equal.
-        (H::Concrete(actual), H::Concrete(expected)) => actual == expected,
+        (H::ConcreteFunc(actual), H::ConcreteFunc(expected)) => actual == expected,
+        (H::ConcreteArray(actual), H::ConcreteArray(expected)) => actual == expected,
+        (H::ConcreteCont(actual), H::ConcreteCont(expected)) => actual == expected,
 
         (H::NoFunc, H::NoFunc) => true,
         (_, H::NoFunc) => false,
 
-        (H::NoFunc, H::Concrete(_)) => true,
-        (_, H::Concrete(_)) => false,
+        (H::NoFunc, H::ConcreteFunc(_)) => true,
+        (_, H::ConcreteFunc(_)) => false,
 
-        (H::NoFunc | H::Concrete(_) | H::Func, H::Func) => true,
+        (H::NoFunc | H::ConcreteFunc(_) | H::Func, H::Func) => true,
         (_, H::Func) => false,
 
         (H::Extern, H::Extern) => true,
         (_, H::Extern) => false,
 
-        (H::NoCont | H::Concrete(_) | H::Cont, H::Cont) => {
-            // TODO(dhil): We should really check that Concrete
-            // points to a continuation type.
-            if let H::Concrete(_idx) = actual {
-                println!("TODO(dhil): [match_heap] has matched an Concrete against a Cont, however, we haven't checked that Concrete points to a continuation object. Tread carefully, here may be bugs!");
-            }
-            true
-        }
+        (H::NoCont | H::ConcreteCont(_) | H::Cont, H::Cont) => true,
         (_, H::Cont) => false,
+        (H::NoCont, H::ConcreteCont(_)) => true,
         (H::NoCont, H::NoCont) => true,
         (_, H::NoCont) => false,
+        (_, H::ConcreteCont(_)) => false,
 
-        (H::Any | H::I31 | H::None, H::Any) => true,
+        (H::Any | H::I31 | H::Array | H::ConcreteArray(_) | H::None, H::Any) => true,
         (_, H::Any) => false,
 
         (H::I31 | H::None, H::I31) => true,
         (_, H::I31) => false,
+
+        (H::Array | H::ConcreteArray(_) | H::None, H::Array) => true,
+        (_, H::Array) => false,
+
+        (H::None, H::ConcreteArray(_)) => true,
+        (_, H::ConcreteArray(_)) => false,
 
         (H::None, H::None) => true,
         (_, H::None) => false,

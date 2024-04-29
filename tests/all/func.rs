@@ -1600,7 +1600,7 @@ fn typed_concrete_param() -> anyhow::Result<()> {
     assert!(e.contains("argument type mismatch for reference to concrete type"));
     assert!(e.contains(
         "type mismatch: expected (type (func)), \
-         found (type (func (param (ref null (concrete VMSharedTypeIndex(0))))))"
+         found (type (func (param (ref null (concrete func VMSharedTypeIndex(0))))))"
     ));
 
     // And dynamic checks also work with a non-nullable super type.
@@ -1614,7 +1614,7 @@ fn typed_concrete_param() -> anyhow::Result<()> {
     assert!(e.contains("argument type mismatch for reference to concrete type"));
     assert!(e.contains(
         "type mismatch: expected (type (func)), \
-         found (type (func (param (ref null (concrete VMSharedTypeIndex(0))))))"
+         found (type (func (param (ref null (concrete func VMSharedTypeIndex(0))))))"
     ));
 
     // Calling `typed` with a type that is not a supertype nor a subtype fails
@@ -1671,7 +1671,7 @@ fn typed_concrete_result() -> anyhow::Result<()> {
     let e = format!("{e:?}");
     assert!(e.contains("type mismatch with results"));
     assert!(e.contains(
-        "type mismatch: expected (ref nofunc), found (ref (concrete VMSharedTypeIndex(0)))"
+        "type mismatch: expected (ref nofunc), found (ref (concrete func VMSharedTypeIndex(0)))"
     ));
 
     // Nor some unrelated type that it is neither a subtype or supertype of.
@@ -1679,7 +1679,7 @@ fn typed_concrete_result() -> anyhow::Result<()> {
     let e = format!("{e:?}");
     assert!(e.contains("type mismatch with results"));
     assert!(e.contains(
-        "type mismatch: expected (ref extern), found (ref (concrete VMSharedTypeIndex(0)))"
+        "type mismatch: expected (ref extern), found (ref (concrete func VMSharedTypeIndex(0)))"
     ));
 
     Ok(())
@@ -1773,7 +1773,10 @@ fn call_wasm_passing_subtype_func_param() -> anyhow::Result<()> {
     let h_ty = FuncType::new(
         &engine,
         None,
-        Some(ValType::Ref(RefType::new(true, HeapType::Concrete(g_ty)))),
+        Some(ValType::Ref(RefType::new(
+            true,
+            HeapType::ConcreteFunc(g_ty),
+        ))),
     );
     let h = Func::new(&mut store, h_ty, move |_caller, _params, results| {
         results[0] = Val::FuncRef(Some(g.clone()));

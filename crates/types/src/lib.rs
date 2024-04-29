@@ -1,6 +1,7 @@
 //! Internal dependency of Wasmtime and Cranelift that defines types for
 //! WebAssembly.
 
+use smallvec::SmallVec;
 pub use wasmparser;
 
 use cranelift_entity::entity_impl;
@@ -190,20 +191,24 @@ impl TypeTrace for WasmValType {
 }
 
 impl WasmValType {
+    /// Is this a type that is represented as a `VMGcRef`?
+    #[inline]
     pub fn is_vmgcref_type(&self) -> bool {
-        self.is_gc_heap_type()
-            || matches!(
-                self,
-                WasmValType::Ref(WasmRefType {
-                    heap_type: WasmHeapType::I31,
-                    nullable: _,
-                })
-            )
+        match self {
+            WasmValType::Ref(r) => r.is_vmgcref_type(),
+            _ => false,
+        }
     }
 
-    pub fn is_gc_heap_type(&self) -> bool {
+    /// Is this a type that is represented as a `VMGcRef` and is additionally
+    /// not an `i31`?
+    ///
+    /// That is, is this a a type that actually refers to an object allocated in
+    /// a GC heap?
+    #[inline]
+    pub fn is_vmgcref_type_and_not_i31(&self) -> bool {
         match self {
-            WasmValType::Ref(r) => r.is_gc_heap_type(),
+            WasmValType::Ref(r) => r.is_vmgcref_type_and_not_i31(),
             _ => false,
         }
     }
@@ -242,10 +247,20 @@ impl WasmRefType {
         heap_type: WasmHeapType::Func,
     };
 
-    /// Is this a GC type that is allocated within the GC heap? (As opposed to
-    /// `i31ref` which is a GC type that is not allocated on the GC heap.)
-    pub fn is_gc_heap_type(&self) -> bool {
-        self.heap_type.is_gc_heap_type()
+    /// Is this a type that is represented as a `VMGcRef`?
+    #[inline]
+    pub fn is_vmgcref_type(&self) -> bool {
+        self.heap_type.is_vmgcref_type()
+    }
+
+    /// Is this a type that is represented as a `VMGcRef` and is additionally
+    /// not an `i31`?
+    ///
+    /// That is, is this a a type that actually refers to an object allocated in
+    /// a GC heap?
+    #[inline]
+    pub fn is_vmgcref_type_and_not_i31(&self) -> bool {
+        self.heap_type.is_vmgcref_type_and_not_i31()
     }
 }
 
@@ -364,14 +379,32 @@ impl EngineOrModuleTypeIndex {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WasmHeapType {
     Extern,
+
     Cont,
+    ConcreteCont(EngineOrModuleTypeIndex),
     NoCont,
+
     Func,
-    Concrete(EngineOrModuleTypeIndex),
+    ConcreteFunc(EngineOrModuleTypeIndex),
     NoFunc,
+
     Any,
     I31,
+    Array,
+    ConcreteArray(EngineOrModuleTypeIndex),
     None,
+}
+
+impl From<WasmHeapTopType> for WasmHeapType {
+    #[inline]
+    fn from(value: WasmHeapTopType) -> Self {
+        match value {
+            WasmHeapTopType::Extern => Self::Extern,
+            WasmHeapTopType::Any => Self::Any,
+            WasmHeapTopType::Func => Self::Func,
+            WasmHeapTopType::Cont => Self::Cont,
+        }
+    }
 }
 
 impl fmt::Display for WasmHeapType {
@@ -379,12 +412,15 @@ impl fmt::Display for WasmHeapType {
         match self {
             Self::Extern => write!(f, "extern"),
             Self::Cont => write!(f, "cont"),
+            Self::ConcreteCont(i) => write!(f, "cont {i}"),
             Self::NoCont => write!(f, "nocont"),
             Self::Func => write!(f, "func"),
-            Self::Concrete(i) => write!(f, "{i}"),
+            Self::ConcreteFunc(i) => write!(f, "func {i}"),
             Self::NoFunc => write!(f, "nofunc"),
             Self::Any => write!(f, "any"),
             Self::I31 => write!(f, "i31"),
+            Self::Array => write!(f, "array"),
+            Self::ConcreteArray(i) => write!(f, "array {i}"),
             Self::None => write!(f, "none"),
         }
     }
@@ -396,7 +432,9 @@ impl TypeTrace for WasmHeapType {
         F: FnMut(EngineOrModuleTypeIndex) -> Result<(), E>,
     {
         match *self {
-            Self::Concrete(i) => func(i),
+            Self::ConcreteArray(i) => func(i),
+            Self::ConcreteFunc(i) => func(i),
+            Self::ConcreteCont(i) => func(i),
             _ => Ok(()),
         }
     }
@@ -406,41 +444,74 @@ impl TypeTrace for WasmHeapType {
         F: FnMut(&mut EngineOrModuleTypeIndex) -> Result<(), E>,
     {
         match self {
-            Self::Concrete(i) => func(i),
+            Self::ConcreteArray(i) => func(i),
+            Self::ConcreteFunc(i) => func(i),
+            Self::ConcreteCont(i) => func(i),
             _ => Ok(()),
         }
     }
 }
 
 impl WasmHeapType {
-    /// Is this a GC type that is allocated within the GC heap? (As opposed to
-    /// `i31ref` which is a GC type that is not allocated on the GC heap.)
-    pub fn is_gc_heap_type(&self) -> bool {
-        // All `t <: (ref null any)` and `t <: (ref null extern)` that are
-        // not `(ref null? i31)` are GC-managed references.
-        match self {
-            // These types are managed by the GC.
-            Self::Extern | Self::Any => true,
+    /// Is this a type that is represented as a `VMGcRef`?
+    #[inline]
+    pub fn is_vmgcref_type(&self) -> bool {
+        match self.top() {
+            // All `t <: (ref null any)` and `t <: (ref null extern)` are
+            // represented as `VMGcRef`s.
+            WasmHeapTopType::Any | WasmHeapTopType::Extern => true,
 
-            // TODO: Once we support concrete struct and array types, we will
-            // need to look at the payload to determine whether the type is
-            // GC-managed or not.
-            Self::Concrete(_) => false,
+            // All `t <: (ref null func)` are not.
+            WasmHeapTopType::Func => false,
 
-            // These are compatible with GC references, but don't actually point
-            // to GC objects.
-            Self::I31 => false,
-
-            // These are a subtype of GC-managed types, but are uninhabited, so
-            // can never actually point to a GC object. Again, we could return
-            // `true` here but there is no need.
-            Self::None => false,
-
-            // These types are not managed by the GC.
-            Self::Func | Self::NoFunc => false,
-            Self::Cont | Self::NoCont => false,
+            WasmHeapTopType::Cont => false,
         }
     }
+
+    /// Is this a type that is represented as a `VMGcRef` and is additionally
+    /// not an `i31`?
+    ///
+    /// That is, is this a a type that actually refers to an object allocated in
+    /// a GC heap?
+    #[inline]
+    pub fn is_vmgcref_type_and_not_i31(&self) -> bool {
+        self.is_vmgcref_type() && *self != Self::I31
+    }
+
+    /// Get this type's top type.
+    #[inline]
+    pub fn top(&self) -> WasmHeapTopType {
+        match self {
+            WasmHeapType::Extern => WasmHeapTopType::Extern,
+
+            WasmHeapType::Func | WasmHeapType::ConcreteFunc(_) | WasmHeapType::NoFunc => {
+                WasmHeapTopType::Func
+            }
+
+            WasmHeapType::Cont | WasmHeapType::ConcreteCont(_) | WasmHeapType::NoCont => {
+                WasmHeapTopType::Cont
+            }
+
+            WasmHeapType::Any
+            | WasmHeapType::I31
+            | WasmHeapType::Array
+            | WasmHeapType::ConcreteArray(_)
+            | WasmHeapType::None => WasmHeapTopType::Any,
+        }
+    }
+}
+
+/// A top heap type.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum WasmHeapTopType {
+    /// The common supertype of all external references.
+    Extern,
+    /// The common supertype of all internal references.
+    Any,
+    /// The common supertype of all function references.
+    Func,
+    /// The common supertype of all continuation references.
+    Cont,
 }
 
 /// WebAssembly function type -- equivalent of `wasmparser`'s FuncType.
@@ -483,8 +554,14 @@ impl TypeTrace for WasmFuncType {
 impl WasmFuncType {
     #[inline]
     pub fn new(params: Box<[WasmValType]>, returns: Box<[WasmValType]>) -> Self {
-        let non_i31_gc_ref_params_count = params.iter().filter(|p| p.is_gc_heap_type()).count();
-        let non_i31_gc_ref_returns_count = returns.iter().filter(|r| r.is_gc_heap_type()).count();
+        let non_i31_gc_ref_params_count = params
+            .iter()
+            .filter(|p| p.is_vmgcref_type_and_not_i31())
+            .count();
+        let non_i31_gc_ref_returns_count = returns
+            .iter()
+            .filter(|r| r.is_vmgcref_type_and_not_i31())
+            .count();
         WasmFuncType {
             params,
             non_i31_gc_ref_params_count,
@@ -552,44 +629,35 @@ impl TypeTrace for WasmContType {
     }
 }
 
-/// WebAssembly defined type
+/// Represents storage types introduced in the GC spec for array and struct fields.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub enum WasmDefType {
-    Func(WasmFuncType),
-    Cont(WasmContType),
+pub enum WasmStorageType {
+    /// The storage type is i8.
+    I8,
+    /// The storage type is i16.
+    I16,
+    /// The storage type is a value type.
+    Val(WasmValType),
 }
 
-impl WasmDefType {
-    pub fn unwrap_function(&self) -> &WasmFuncType {
+impl fmt::Display for WasmStorageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Func(ft) => ft,
-            _ => panic!("attempt to unwrap non-function type."),
-        }
-    }
-
-    pub fn unwrap_function_mut(&mut self) -> &mut WasmFuncType {
-        match self {
-            Self::Func(ft) => ft,
-            _ => panic!("attempt to unwrap non-function type."),
-        }
-    }
-
-    pub fn unwrap_continuation(&self) -> &WasmContType {
-        match self {
-            Self::Cont(ct) => ct,
-            _ => panic!("attempt to unwrap non-continuation type."),
+            WasmStorageType::I8 => write!(f, "i8"),
+            WasmStorageType::I16 => write!(f, "i16"),
+            WasmStorageType::Val(v) => fmt::Display::fmt(v, f),
         }
     }
 }
 
-impl TypeTrace for WasmDefType {
+impl TypeTrace for WasmStorageType {
     fn trace<F, E>(&self, func: &mut F) -> Result<(), E>
     where
         F: FnMut(EngineOrModuleTypeIndex) -> Result<(), E>,
     {
         match self {
-            Self::Func(f) => f.trace(func),
-            Self::Cont(c) => c.trace(func),
+            WasmStorageType::I8 | WasmStorageType::I16 => Ok(()),
+            WasmStorageType::Val(v) => v.trace(func),
         }
     }
 
@@ -598,9 +666,216 @@ impl TypeTrace for WasmDefType {
         F: FnMut(&mut EngineOrModuleTypeIndex) -> Result<(), E>,
     {
         match self {
-            Self::Func(f) => f.trace_mut(func),
-            Self::Cont(c) => c.trace_mut(func),
+            WasmStorageType::I8 | WasmStorageType::I16 => Ok(()),
+            WasmStorageType::Val(v) => v.trace_mut(func),
         }
+    }
+}
+
+/// The type of a struct field or array element.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct WasmFieldType {
+    /// The field's element type.
+    pub element_type: WasmStorageType,
+
+    /// Whether this field can be mutated or not.
+    pub mutable: bool,
+}
+
+impl TypeTrace for WasmFieldType {
+    fn trace<F, E>(&self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        self.element_type.trace(func)
+    }
+
+    fn trace_mut<F, E>(&mut self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(&mut EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        self.element_type.trace_mut(func)
+    }
+}
+
+/// A concrete array type.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct WasmArrayType(pub WasmFieldType);
+
+impl TypeTrace for WasmArrayType {
+    fn trace<F, E>(&self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        self.0.trace(func)
+    }
+
+    fn trace_mut<F, E>(&mut self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(&mut EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        self.0.trace_mut(func)
+    }
+}
+
+/// A function, array, or struct type.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum WasmCompositeType {
+    Array(WasmArrayType),
+    Func(WasmFuncType),
+    //
+    // TODO: struct types.
+    Cont(WasmContType),
+}
+
+impl WasmCompositeType {
+    #[inline]
+    pub fn is_func(&self) -> bool {
+        matches!(self, Self::Func(_))
+    }
+
+    #[inline]
+    pub fn as_func(&self) -> Option<&WasmFuncType> {
+        match self {
+            WasmCompositeType::Func(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn unwrap_func(&self) -> &WasmFuncType {
+        self.as_func().unwrap()
+    }
+
+    #[inline]
+    pub fn is_array(&self) -> bool {
+        matches!(self, Self::Array(_))
+    }
+
+    #[inline]
+    pub fn as_array(&self) -> Option<&WasmArrayType> {
+        match self {
+            WasmCompositeType::Array(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn unwrap_array(&self) -> &WasmArrayType {
+        self.as_array().unwrap()
+    }
+
+    #[inline]
+    pub fn is_cont(&self) -> bool {
+        matches!(self, Self::Cont(_))
+    }
+
+    #[inline]
+    pub fn as_cont(&self) -> Option<&WasmContType> {
+        match self {
+            WasmCompositeType::Cont(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn unwrap_cont(&self) -> &WasmContType {
+        self.as_cont().unwrap()
+    }
+}
+
+impl TypeTrace for WasmCompositeType {
+    fn trace<F, E>(&self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        match self {
+            WasmCompositeType::Array(a) => a.trace(func),
+            WasmCompositeType::Func(f) => f.trace(func),
+            WasmCompositeType::Cont(c) => c.trace(func),
+        }
+    }
+
+    fn trace_mut<F, E>(&mut self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(&mut EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        match self {
+            WasmCompositeType::Array(a) => a.trace_mut(func),
+            WasmCompositeType::Func(f) => f.trace_mut(func),
+            WasmCompositeType::Cont(c) => c.trace_mut(func),
+        }
+    }
+}
+
+/// A concrete, user-defined (or host-defined) Wasm type.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct WasmSubType {
+    // TODO: is_final, supertype
+    //
+    /// The array, function, or struct that is defined.
+    pub composite_type: WasmCompositeType,
+}
+
+impl WasmSubType {
+    #[inline]
+    pub fn is_func(&self) -> bool {
+        self.composite_type.is_func()
+    }
+
+    #[inline]
+    pub fn as_func(&self) -> Option<&WasmFuncType> {
+        self.composite_type.as_func()
+    }
+
+    #[inline]
+    pub fn unwrap_func(&self) -> &WasmFuncType {
+        self.composite_type.unwrap_func()
+    }
+
+    #[inline]
+    pub fn is_array(&self) -> bool {
+        self.composite_type.is_array()
+    }
+
+    #[inline]
+    pub fn as_array(&self) -> Option<&WasmArrayType> {
+        self.composite_type.as_array()
+    }
+
+    #[inline]
+    pub fn unwrap_array(&self) -> &WasmArrayType {
+        self.composite_type.unwrap_array()
+    }
+
+    pub fn is_cont(&self) -> bool {
+        self.composite_type.is_cont()
+    }
+
+    #[inline]
+    pub fn as_cont(&self) -> Option<&WasmContType> {
+        self.composite_type.as_cont()
+    }
+
+    #[inline]
+    pub fn unwrap_cont(&self) -> &WasmContType {
+        self.composite_type.unwrap_cont()
+    }
+}
+
+impl TypeTrace for WasmSubType {
+    fn trace<F, E>(&self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        self.composite_type.trace(func)
+    }
+
+    fn trace_mut<F, E>(&mut self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(&mut EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        self.composite_type.trace_mut(func)
     }
 }
 
@@ -617,7 +892,7 @@ impl TypeTrace for WasmDefType {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct WasmRecGroup {
     /// The types inside of this recgroup.
-    pub types: Box<[WasmDefType]>,
+    pub types: Box<[WasmSubType]>,
 }
 
 impl TypeTrace for WasmRecGroup {
@@ -947,27 +1222,103 @@ impl TypeTrace for Global {
     }
 }
 
-/// Globals are initialized via the `const` operators or by referring to another import.
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
-pub enum GlobalInit {
-    /// An `i32.const`.
+/// A constant expression.
+///
+/// These are used to initialize globals, table elements, etc...
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct ConstExpr {
+    ops: SmallVec<[ConstOp; 2]>,
+}
+
+impl ConstExpr {
+    /// Create a new const expression from the given opcodes.
+    ///
+    /// Does not do any validation that the const expression is well-typed.
+    ///
+    /// Panics if given zero opcodes.
+    pub fn new(ops: impl IntoIterator<Item = ConstOp>) -> Self {
+        let ops = ops.into_iter().collect::<SmallVec<[ConstOp; 2]>>();
+        assert!(!ops.is_empty());
+        ConstExpr { ops }
+    }
+
+    /// Create a new const expression from a `wasmparser` const expression.
+    ///
+    /// Returns the new const expression as well as the escaping function
+    /// indices that appeared in `ref.func` instructions, if any.
+    pub fn from_wasmparser(
+        expr: wasmparser::ConstExpr<'_>,
+    ) -> WasmResult<(Self, SmallVec<[FuncIndex; 1]>)> {
+        let mut iter = expr
+            .get_operators_reader()
+            .into_iter_with_offsets()
+            .peekable();
+
+        let mut ops = SmallVec::<[ConstOp; 2]>::new();
+        let mut escaped = SmallVec::<[FuncIndex; 1]>::new();
+        while let Some(res) = iter.next() {
+            let (op, offset) = res?;
+
+            // If we reach an `end` instruction, and there are no more
+            // instructions after that, then we are done reading this const
+            // expression.
+            if matches!(op, wasmparser::Operator::End) && iter.peek().is_none() {
+                break;
+            }
+
+            // Track any functions that appear in `ref.func` so that callers can
+            // make sure to flag them as escaping.
+            if let wasmparser::Operator::RefFunc { function_index } = &op {
+                escaped.push(FuncIndex::from_u32(*function_index));
+            }
+
+            ops.push(ConstOp::from_wasmparser(op, offset)?);
+        }
+        Ok((Self { ops }, escaped))
+    }
+
+    /// Get the opcodes that make up this const expression.
+    pub fn ops(&self) -> &[ConstOp] {
+        &self.ops
+    }
+}
+
+/// The subset of Wasm opcodes that are constant.
+#[allow(missing_docs)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum ConstOp {
     I32Const(i32),
-    /// An `i64.const`.
     I64Const(i64),
-    /// An `f32.const`.
     F32Const(u32),
-    /// An `f64.const`.
     F64Const(u64),
-    /// A `vconst`.
     V128Const(u128),
-    /// A `global.get` of another global.
-    GetGlobal(GlobalIndex),
-    /// A `(ref.i31 (global.get N))` initializer.
-    RefI31Const(i32),
-    /// A `ref.null`.
-    RefNullConst,
-    /// A `ref.func <index>`.
+    GlobalGet(GlobalIndex),
+    RefI31,
+    RefNull,
     RefFunc(FuncIndex),
+}
+
+impl ConstOp {
+    /// Convert a `wasmparser::Operator` to a `ConstOp`.
+    pub fn from_wasmparser(op: wasmparser::Operator<'_>, offset: usize) -> WasmResult<Self> {
+        use wasmparser::Operator as O;
+        Ok(match op {
+            O::I32Const { value } => Self::I32Const(value),
+            O::I64Const { value } => Self::I64Const(value),
+            O::F32Const { value } => Self::F32Const(value.bits()),
+            O::F64Const { value } => Self::F64Const(value.bits()),
+            O::V128Const { value } => Self::V128Const(u128::from_le_bytes(*value.bytes())),
+            O::RefNull { hty: _ } => Self::RefNull,
+            O::RefFunc { function_index } => Self::RefFunc(FuncIndex::from_u32(function_index)),
+            O::GlobalGet { global_index } => Self::GlobalGet(GlobalIndex::from_u32(global_index)),
+            O::RefI31 => Self::RefI31,
+            op => {
+                return Err(wasm_unsupported!(
+                    "unsupported opcode in const expression at offset {offset:#x}: {op:?}",
+                ));
+            }
+        })
+    }
 }
 
 /// WebAssembly table.
@@ -1067,6 +1418,52 @@ pub trait TypeConvert {
         }
     }
 
+    fn convert_sub_type(&self, ty: &wasmparser::SubType) -> WasmResult<WasmSubType> {
+        if ty.supertype_idx.is_some() {
+            return Err(wasm_unsupported!("wasm gc: explicit subtyping"));
+        }
+        let composite_type = self.convert_composite_type(&ty.composite_type)?;
+        Ok(WasmSubType { composite_type })
+    }
+
+    fn convert_composite_type(
+        &self,
+        ty: &wasmparser::CompositeType,
+    ) -> WasmResult<WasmCompositeType> {
+        match ty {
+            wasmparser::CompositeType::Func(f) => {
+                Ok(WasmCompositeType::Func(self.convert_func_type(f)))
+            }
+            wasmparser::CompositeType::Array(a) => {
+                Ok(WasmCompositeType::Array(self.convert_array_type(a)))
+            }
+            wasmparser::CompositeType::Struct(_) => Err(wasm_unsupported!("wasm gc: struct types")),
+
+            wasmparser::CompositeType::Cont(c) => {
+                Ok(WasmCompositeType::Cont(self.convert_cont_type(c)))
+            }
+        }
+    }
+
+    fn convert_array_type(&self, ty: &wasmparser::ArrayType) -> WasmArrayType {
+        WasmArrayType(self.convert_field_type(&ty.0))
+    }
+
+    fn convert_field_type(&self, ty: &wasmparser::FieldType) -> WasmFieldType {
+        WasmFieldType {
+            element_type: self.convert_storage_type(&ty.element_type),
+            mutable: ty.mutable,
+        }
+    }
+
+    fn convert_storage_type(&self, ty: &wasmparser::StorageType) -> WasmStorageType {
+        match ty {
+            wasmparser::StorageType::I8 => WasmStorageType::I8,
+            wasmparser::StorageType::I16 => WasmStorageType::I16,
+            wasmparser::StorageType::Val(v) => WasmStorageType::Val(self.convert_valtype(*v)),
+        }
+    }
+
     /// Converts a wasmparser function type to a wasmtime type
     fn convert_func_type(&self, ty: &wasmparser::FuncType) -> WasmFuncType {
         let params = ty
@@ -1084,7 +1481,7 @@ pub trait TypeConvert {
 
     /// Converts a wasmparser continuation type to a wasmtime type
     fn convert_cont_type(&self, ty: &wasmparser::ContType) -> WasmContType {
-        if let WasmHeapType::Concrete(sigidx) = self.lookup_heap_type(ty.0) {
+        if let WasmHeapType::ConcreteFunc(sigidx) = self.lookup_heap_type(ty.0) {
             WasmContType::new(sigidx)
         } else {
             panic!("Failed to extract signature index for continuation type.")
@@ -1122,14 +1519,14 @@ pub trait TypeConvert {
             wasmparser::HeapType::Concrete(i) => self.lookup_heap_type(i),
             wasmparser::HeapType::Any => WasmHeapType::Any,
             wasmparser::HeapType::I31 => WasmHeapType::I31,
+            wasmparser::HeapType::Array => WasmHeapType::Array,
             wasmparser::HeapType::None => WasmHeapType::None,
 
             wasmparser::HeapType::Exn
             | wasmparser::HeapType::NoExn
             | wasmparser::HeapType::NoExtern
             | wasmparser::HeapType::Eq
-            | wasmparser::HeapType::Struct
-            | wasmparser::HeapType::Array => {
+            | wasmparser::HeapType::Struct => {
                 unimplemented!("unsupported heap type {ty:?}");
             }
         }

@@ -418,17 +418,8 @@ pub enum TableInitialValue {
         /// case the elements are initialized to null.
         precomputed: Vec<FuncIndex>,
     },
-
-    /// Initialize each table element to the function reference given
-    /// by the `FuncIndex`.
-    FuncRef(FuncIndex),
-
-    /// At instantiation time this global is loaded and the funcref value is
-    /// used to initialize the table.
-    GlobalGet(GlobalIndex),
-
-    /// Initialize the table element to an `i31ref` of the given value.
-    I31Ref(i32),
+    /// An arbitrary const expression.
+    Expr(ConstExpr),
 }
 
 /// A WebAssembly table initializer segment.
@@ -452,7 +443,7 @@ pub enum TableSegmentElements {
     /// indicates a null function.
     Functions(Box<[FuncIndex]>),
     /// Arbitrary expressions, aka either functions, null or a load of a global.
-    Expressions(Box<[TableElementExpression]>),
+    Expressions(Box<[ConstExpr]>),
 }
 
 impl TableSegmentElements {
@@ -461,48 +452,6 @@ impl TableSegmentElements {
         match self {
             Self::Functions(s) => s.len() as u32,
             Self::Expressions(s) => s.len() as u32,
-        }
-    }
-}
-
-/// Different kinds of expression that can initialize table elements.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum TableElementExpression {
-    /// `ref.func $f`
-    Function(FuncIndex),
-    /// `global.get $g`
-    GlobalGet(GlobalIndex),
-    /// `ref.null $ty`
-    Null,
-}
-
-/// Different types that can appear in a module.
-///
-/// Note that each of these variants are intended to index further into a
-/// separate table.
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-#[allow(missing_docs)]
-pub enum ModuleType {
-    Continuation(ModuleInternedTypeIndex),
-    Function(ModuleInternedTypeIndex),
-}
-
-impl ModuleType {
-    /// Asserts this is a `ModuleType::Function`, returning the underlying
-    /// `SignatureIndex`.
-    pub fn unwrap_function(&self) -> ModuleInternedTypeIndex {
-        match self {
-            ModuleType::Function(f) => *f,
-            ModuleType::Continuation(_) => panic!("Attempt to unwrap non-function."),
-        }
-    }
-
-    /// Assert his is a `ModuleType::Continuation`, returning the
-    /// underlying `TypeIndex`.
-    pub fn unwrap_continuation(&self) -> ModuleInternedTypeIndex {
-        match self {
-            ModuleType::Continuation(f) => *f,
-            _ => panic!("Attempt to unwrap non-continuation."),
         }
     }
 }
@@ -539,7 +488,7 @@ pub struct Module {
     pub passive_data_map: BTreeMap<DataIndex, Range<u32>>,
 
     /// Types declared in the wasm module.
-    pub types: PrimaryMap<TypeIndex, ModuleType>,
+    pub types: PrimaryMap<TypeIndex, ModuleInternedTypeIndex>,
 
     /// Number of imported or aliased functions in the module.
     pub num_imported_funcs: usize,
@@ -572,11 +521,11 @@ pub struct Module {
     /// WebAssembly global variables.
     pub globals: PrimaryMap<GlobalIndex, Global>,
 
-    /// WebAssembly global initializers for locally-defined globals.
-    pub global_initializers: PrimaryMap<DefinedGlobalIndex, GlobalInit>,
-
     /// WebAssembly exceptions and typed control tags.
     pub tags: PrimaryMap<TagIndex, FunctionType>,
+
+    /// WebAssembly global initializers for locally-defined globals.
+    pub global_initializers: PrimaryMap<DefinedGlobalIndex, ConstExpr>,
 }
 
 /// Initialization routines for creating an instance, encompassing imports,
@@ -748,22 +697,10 @@ impl Module {
     /// Appends a new function to this module with the given type information,
     /// used for functions that either don't escape or aren't certain whether
     /// they escape yet.
-    pub fn push_function(&mut self, signature: ModuleType) -> FuncIndex {
+    pub fn push_function(&mut self, signature: ModuleInternedTypeIndex) -> FuncIndex {
         self.functions.push(FunctionType {
-            signature: signature.unwrap_function(),
+            signature: signature,
             func_ref: FuncRefIndex::reserved_value(),
-        })
-    }
-
-    /// Appends a new function to this module with the given type information.
-    pub fn push_escaped_function(
-        &mut self,
-        signature: ModuleInternedTypeIndex,
-        func_ref: FuncRefIndex,
-    ) -> FuncIndex {
-        self.functions.push(FunctionType {
-            signature,
-            func_ref,
         })
     }
 

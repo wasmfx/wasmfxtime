@@ -3,7 +3,7 @@ use crate::{
     from_valtype, into_valtype, wasm_ref_t, wasm_valkind_t, wasmtime_anyref_t,
     wasmtime_externref_t, wasmtime_valkind_t, WasmtimeStoreContextMut, WASM_I32,
 };
-use std::mem::{self, ManuallyDrop, MaybeUninit};
+use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ptr;
 use wasmtime::{AsContextMut, Func, HeapType, Ref, RootScope, Val, ValType};
 
@@ -144,8 +144,8 @@ pub union wasmtime_val_union {
     pub i64: i64,
     pub f32: u32,
     pub f64: u64,
-    pub anyref: *mut wasmtime_anyref_t,
-    pub externref: *mut wasmtime_externref_t,
+    pub anyref: ManuallyDrop<wasmtime_anyref_t>,
+    pub externref: ManuallyDrop<wasmtime_externref_t>,
     pub funcref: wasmtime_func_t,
     pub v128: [u8; 16],
 }
@@ -171,9 +171,28 @@ where
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct wasmtime_func_t {
-    pub store_id: u64,
-    pub index: usize,
+pub union wasmtime_func_t {
+    store_id: u64,
+    func: Func,
+}
+
+impl wasmtime_func_t {
+    unsafe fn as_wasmtime(&self) -> Option<Func> {
+        if self.store_id == 0 {
+            None
+        } else {
+            Some(self.func)
+        }
+    }
+}
+
+impl From<Option<Func>> for wasmtime_func_t {
+    fn from(func: Option<Func>) -> wasmtime_func_t {
+        match func {
+            Some(func) => wasmtime_func_t { func },
+            None => wasmtime_func_t { store_id: 0 },
+        }
+    }
 }
 
 impl wasmtime_val_t {
@@ -215,29 +234,21 @@ impl wasmtime_val_t {
             Val::AnyRef(a) => wasmtime_val_t {
                 kind: crate::WASMTIME_ANYREF,
                 of: wasmtime_val_union {
-                    anyref: a
-                        .and_then(|a| Some(Box::into_raw(Box::new(a.to_manually_rooted(cx).ok()?))))
-                        .unwrap_or(ptr::null_mut()),
+                    anyref: ManuallyDrop::new(a.and_then(|a| a.to_manually_rooted(cx).ok()).into()),
                 },
             },
             Val::ExternRef(e) => wasmtime_val_t {
                 kind: crate::WASMTIME_EXTERNREF,
                 of: wasmtime_val_union {
-                    externref: e
-                        .and_then(|e| Some(Box::into_raw(Box::new(e.to_manually_rooted(cx).ok()?))))
-                        .unwrap_or(ptr::null_mut()),
+                    externref: ManuallyDrop::new(
+                        e.and_then(|e| e.to_manually_rooted(cx).ok()).into(),
+                    ),
                 },
             },
             Val::FuncRef(func) => wasmtime_val_t {
                 kind: crate::WASMTIME_FUNCREF,
                 of: wasmtime_val_union {
-                    funcref: match func {
-                        None => wasmtime_func_t {
-                            store_id: 0,
-                            index: 0,
-                        },
-                        Some(func) => unsafe { mem::transmute::<Func, wasmtime_func_t>(func) },
-                    },
+                    funcref: func.into(),
                 },
             },
             Val::V128(val) => wasmtime_val_t {
@@ -271,63 +282,44 @@ impl wasmtime_val_t {
             crate::WASMTIME_F32 => Val::F32(self.of.f32),
             crate::WASMTIME_F64 => Val::F64(self.of.f64),
             crate::WASMTIME_V128 => Val::V128(u128::from_le_bytes(self.of.v128).into()),
-            crate::WASMTIME_ANYREF => Val::AnyRef(self.of.anyref.as_ref().map(|a| a.to_rooted(cx))),
+            crate::WASMTIME_ANYREF => {
+                Val::AnyRef(self.of.anyref.as_wasmtime().map(|a| a.to_rooted(cx)))
+            }
             crate::WASMTIME_EXTERNREF => {
-                Val::ExternRef(self.of.externref.as_ref().map(|e| e.to_rooted(cx)))
+                Val::ExternRef(self.of.externref.as_wasmtime().map(|e| e.to_rooted(cx)))
             }
-            crate::WASMTIME_FUNCREF => {
-                let store = self.of.funcref.store_id;
-                let index = self.of.funcref.index;
-                Val::FuncRef(if store == 0 && index == 0 {
-                    None
-                } else {
-                    Some(mem::transmute::<wasmtime_func_t, Func>(self.of.funcref))
-                })
-            }
+            crate::WASMTIME_FUNCREF => Val::FuncRef(self.of.funcref.as_wasmtime()),
             other => panic!("unknown wasmtime_valkind_t: {}", other),
         }
     }
 }
 
-impl Drop for wasmtime_val_t {
-    fn drop(&mut self) {
-        unsafe {
-            match self.kind {
-                crate::WASMTIME_ANYREF if !self.of.anyref.is_null() => {
-                    let _ = Box::from_raw(self.of.anyref);
-                }
-                crate::WASMTIME_EXTERNREF if !self.of.externref.is_null() => {
-                    let _ = Box::from_raw(self.of.externref);
-                }
-                _ => {}
+#[no_mangle]
+pub unsafe extern "C" fn wasmtime_val_unroot(
+    cx: WasmtimeStoreContextMut<'_>,
+    val: &mut MaybeUninit<wasmtime_val_t>,
+) {
+    let val = val.assume_init_read();
+    match val.kind {
+        crate::WASMTIME_ANYREF => {
+            if let Some(val) = ManuallyDrop::into_inner(val.of.anyref).as_wasmtime() {
+                val.unroot(cx);
             }
         }
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn wasmtime_val_delete(
-    cx: WasmtimeStoreContextMut<'_>,
-    val: &mut ManuallyDrop<wasmtime_val_t>,
-) {
-    match val.kind {
-        crate::WASMTIME_ANYREF if !val.of.anyref.is_null() => {
-            let _ = ptr::read(val.of.anyref).unroot(cx);
-        }
-        crate::WASMTIME_EXTERNREF if !val.of.externref.is_null() => {
-            let _ = ptr::read(val.of.externref).unroot(cx);
+        crate::WASMTIME_EXTERNREF => {
+            if let Some(val) = ManuallyDrop::into_inner(val.of.externref).as_wasmtime() {
+                val.unroot(cx);
+            }
         }
         _ => {}
     }
-
-    ManuallyDrop::drop(val)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn wasmtime_val_copy(
+pub unsafe extern "C" fn wasmtime_val_clone(
     cx: WasmtimeStoreContextMut<'_>,
-    dst: &mut MaybeUninit<wasmtime_val_t>,
     src: &wasmtime_val_t,
+    dst: &mut MaybeUninit<wasmtime_val_t>,
 ) {
     let mut scope = RootScope::new(cx);
     let val = src.to_val(&mut scope);

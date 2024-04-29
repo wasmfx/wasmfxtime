@@ -37,6 +37,7 @@ mod table;
 mod threads;
 mod traps;
 mod typed_continuations;
+mod types;
 mod wait_notify;
 mod wasi_testsuite;
 mod wast;

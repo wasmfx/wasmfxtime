@@ -316,8 +316,6 @@ impl<T> Linker<T> {
         &mut self,
         module: &Module,
     ) -> anyhow::Result<()> {
-        use crate::HeapType;
-
         for import in module.imports() {
             if let Err(import_err) = self._get_by_import(&import) {
                 if let ExternType::Func(func_ty) = import_err.ty() {
@@ -343,17 +341,7 @@ impl<T> Linker<T> {
                                     ValType::V128 => Val::V128(0_u128.into()),
                                     ValType::Ref(r) => {
                                         debug_assert!(r.is_nullable());
-                                        match r.heap_type() {
-                                            HeapType::Func
-                                            | HeapType::Concrete(_)
-                                            | HeapType::NoFunc => Val::null_func_ref(),
-                                            HeapType::Extern => Val::null_extern_ref(),
-                                            // TODO(dhil): We should probably do the same as for function, i.e. return a null ref.
-                                            HeapType::Cont | HeapType::NoCont => todo!("Linker support for continuations has not yet been implemented!"),
-                                            HeapType::Any | HeapType::I31 | HeapType::None => {
-                                                Val::null_any_ref()
-                                            }
-                                        }
+                                        Val::null_ref(r.heap_type())
                                     }
                                 };
                             }

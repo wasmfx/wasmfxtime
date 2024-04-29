@@ -14,8 +14,8 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-anyhow = { workspace = true }
-bincode = { workspace = true }
+anyhow = { workspace = true, features = ['std'] }
+postcard = { workspace = true }
 cpp_demangle = { version = "0.4.3", optional = true }
 cranelift-entity = { workspace = true }
 wasmtime-types = { workspace = true }
@@ -53,3 +53,4 @@ demangle = ['dep:rustc-demangle', 'dep:cpp_demangle']
 gc = []
 compile = ['gimli/write', 'object/write_core']
 threads = []
+wmemcheck = []

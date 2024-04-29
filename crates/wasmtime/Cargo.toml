@@ -45,7 +45,7 @@ wat = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_derive = { workspace = true }
 serde_json = { workspace = true }
-bincode = { workspace = true }
+postcard = { workspace = true }
 indexmap = { workspace = true }
 paste = "1.0.3"
 once_cell = { workspace = true }
@@ -60,6 +60,7 @@ gimli = { workspace = true }
 # debugging information.
 addr2line = { version = "0.21.0", default-features = false, optional = true }
 semver = { version = "1.0.17", optional = true }
+smallvec = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies.windows-sys]
 workspace = true
@@ -176,7 +177,12 @@ coredump = ["dep:wasm-encoder", "runtime", "wasmtime-runtime/coredump"]
 debug-builtins = ["wasmtime-runtime?/debug-builtins"]
 
 # Enable support for executing compiled Wasm modules.
-runtime = ["dep:wasmtime-runtime", "dep:wasmtime-jit-icache-coherence", "dep:wasmtime-slab"]
+runtime = [
+  "dep:wasmtime-runtime",
+  "dep:wasmtime-jit-icache-coherence",
+  "dep:wasmtime-slab",
+  "dep:smallvec",
+]
 
 # Enable support for garbage collection-related things.
 #

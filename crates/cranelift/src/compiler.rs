@@ -133,7 +133,7 @@ impl wasmtime_environ::Compiler for Compiler {
         let module = &translation.module;
         let func_index = module.func_index(func_index);
         let sig = translation.module.functions[func_index].signature;
-        let wasm_func_ty = &types[sig].unwrap_function();
+        let wasm_func_ty = types[sig].unwrap_func();
 
         let mut compiler = self.function_compiler();
 
@@ -241,7 +241,7 @@ impl wasmtime_environ::Compiler for Compiler {
     ) -> Result<Box<dyn Any + Send>, CompileError> {
         let func_index = translation.module.func_index(def_func_index);
         let sig = translation.module.functions[func_index].signature;
-        let wasm_func_ty = &types[sig].unwrap_function();
+        let wasm_func_ty = types[sig].unwrap_func();
 
         let isa = &*self.isa;
         let pointer_type = isa.pointer_type();
@@ -309,7 +309,7 @@ impl wasmtime_environ::Compiler for Compiler {
     ) -> Result<Box<dyn Any + Send>, CompileError> {
         let func_index = translation.module.func_index(def_func_index);
         let sig = translation.module.functions[func_index].signature;
-        let wasm_func_ty = &types[sig].unwrap_function();
+        let wasm_func_ty = types[sig].unwrap_func();
 
         let isa = &*self.isa;
         let pointer_type = isa.pointer_type();
@@ -536,6 +536,8 @@ impl wasmtime_environ::Compiler for Compiler {
         obj: &mut Object<'_>,
         translation: &ModuleTranslation<'_>,
         funcs: &PrimaryMap<DefinedFuncIndex, (SymbolId, &(dyn Any + Send))>,
+        dwarf_package_bytes: Option<&[u8]>,
+        tunables: &Tunables,
     ) -> Result<()> {
         let ofs = VMOffsets::new(
             self.isa
@@ -578,6 +580,8 @@ impl wasmtime_environ::Compiler for Compiler {
             &translation.debuginfo,
             &functions_info,
             &memory_offset,
+            dwarf_package_bytes,
+            tunables,
         )
         .with_context(|| "failed to emit DWARF debug information")?;
 

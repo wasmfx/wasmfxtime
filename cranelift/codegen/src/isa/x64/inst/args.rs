@@ -86,6 +86,15 @@ macro_rules! newtype_of_reg {
             }
         }
 
+        /// If you know what you're doing, you can explicitly mutably borrow the
+        /// underlying `Reg`. Don't make it point to the wrong type of register
+        /// please.
+        impl AsMut<Reg> for $newtype_reg {
+            fn as_mut(&mut self) -> &mut Reg {
+                &mut self.0
+            }
+        }
+
         /// Writable Gpr.
         pub type $newtype_writable_reg = Writable<$newtype_reg>;
 
@@ -158,7 +167,7 @@ macro_rules! newtype_of_reg {
 
                 #[allow(dead_code)] // Used by some newtypes and not others.
                 pub(crate) fn get_operands<F: Fn(VReg) -> VReg>(
-                    &self,
+                    &mut self,
                     collector: &mut OperandCollector<'_, F>,
                 ) {
                     self.0.get_operands(collector);
@@ -226,7 +235,7 @@ macro_rules! newtype_of_reg {
 
                 #[allow(dead_code)] // Used by some newtypes and not others.
                 pub(crate) fn get_operands<F: Fn(VReg) -> VReg>(
-                    &self,
+                    &mut self,
                     collector: &mut OperandCollector<'_, F>,
                 ) {
                     self.0.get_operands(collector);
@@ -263,10 +272,16 @@ macro_rules! newtype_of_reg {
                 }
             }
 
-            /// Convert this newtype into its underlying `Imm8Reg`.
+            /// Borrow this newtype as its underlying `Imm8Reg`.
             #[allow(dead_code)] // Used by some newtypes and not others.
-            pub fn to_imm8_reg(self) -> Imm8Reg {
-                self.0
+            pub fn as_imm8_reg(&self) -> &Imm8Reg {
+                &self.0
+            }
+
+            /// Borrow this newtype as its underlying `Imm8Reg`.
+            #[allow(dead_code)] // Used by some newtypes and not others.
+            pub fn as_imm8_reg_mut(&mut self) -> &mut Imm8Reg {
+                &mut self.0
             }
         }
     };
@@ -356,22 +371,22 @@ impl Amode {
 
     /// Add the registers mentioned by `self` to `collector`.
     pub(crate) fn get_operands<F: Fn(VReg) -> VReg>(
-        &self,
+        &mut self,
         collector: &mut OperandCollector<'_, F>,
     ) {
         match self {
             Amode::ImmReg { base, .. } => {
                 if *base != regs::rbp() && *base != regs::rsp() {
-                    collector.reg_use(*base);
+                    collector.reg_use(base);
                 }
             }
             Amode::ImmRegRegShift { base, index, .. } => {
                 debug_assert_ne!(base.to_reg(), regs::rbp());
                 debug_assert_ne!(base.to_reg(), regs::rsp());
-                collector.reg_use(base.to_reg());
+                collector.reg_use(base);
                 debug_assert_ne!(index.to_reg(), regs::rbp());
                 debug_assert_ne!(index.to_reg(), regs::rsp());
-                collector.reg_use(index.to_reg());
+                collector.reg_use(index);
             }
             Amode::RipRelative { .. } => {
                 // RIP isn't involved in regalloc.
@@ -381,16 +396,16 @@ impl Amode {
 
     /// Same as `get_operands`, but add the registers in the "late" phase.
     pub(crate) fn get_operands_late<F: Fn(VReg) -> VReg>(
-        &self,
+        &mut self,
         collector: &mut OperandCollector<'_, F>,
     ) {
         match self {
             Amode::ImmReg { base, .. } => {
-                collector.reg_late_use(*base);
+                collector.reg_late_use(base);
             }
             Amode::ImmRegRegShift { base, index, .. } => {
-                collector.reg_late_use(base.to_reg());
-                collector.reg_late_use(index.to_reg());
+                collector.reg_late_use(base);
+                collector.reg_late_use(index);
             }
             Amode::RipRelative { .. } => {
                 // RIP isn't involved in regalloc.
@@ -521,7 +536,7 @@ impl SyntheticAmode {
 
     /// Add the registers mentioned by `self` to `collector`.
     pub(crate) fn get_operands<F: Fn(VReg) -> VReg>(
-        &self,
+        &mut self,
         collector: &mut OperandCollector<'_, F>,
     ) {
         match self {
@@ -538,7 +553,7 @@ impl SyntheticAmode {
 
     /// Same as `get_operands`, but add the register in the "late" phase.
     pub(crate) fn get_operands_late<F: Fn(VReg) -> VReg>(
-        &self,
+        &mut self,
         collector: &mut OperandCollector<'_, F>,
     ) {
         match self {
@@ -672,11 +687,11 @@ impl RegMemImm {
 
     /// Add the regs mentioned by `self` to `collector`.
     pub(crate) fn get_operands<F: Fn(VReg) -> VReg>(
-        &self,
+        &mut self,
         collector: &mut OperandCollector<'_, F>,
     ) {
         match self {
-            Self::Reg { reg } => collector.reg_use(*reg),
+            Self::Reg { reg } => collector.reg_use(reg),
             Self::Mem { addr } => addr.get_operands(collector),
             Self::Imm { .. } => {}
         }
@@ -782,11 +797,11 @@ impl RegMem {
     }
     /// Add the regs mentioned by `self` to `collector`.
     pub(crate) fn get_operands<F: Fn(VReg) -> VReg>(
-        &self,
+        &mut self,
         collector: &mut OperandCollector<'_, F>,
     ) {
         match self {
-            RegMem::Reg { reg } => collector.reg_use(*reg),
+            RegMem::Reg { reg } => collector.reg_use(reg),
             RegMem::Mem { addr, .. } => addr.get_operands(collector),
         }
     }
