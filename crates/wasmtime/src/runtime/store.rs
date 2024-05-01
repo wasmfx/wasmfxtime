@@ -79,6 +79,13 @@
 use crate::instance::InstanceData;
 use crate::linker::Definition;
 use crate::module::{BareModuleInfo, RegisteredModuleId};
+use crate::runtime::vm::continuation::{StackChain, StackChainCell, StackLimits};
+use crate::runtime::vm::mpk::{self, ProtectionKey, ProtectionMask};
+use crate::runtime::vm::{
+    Backtrace, ExportGlobal, GcHeapAllocationIndex, GcRootsList, GcStore,
+    InstanceAllocationRequest, InstanceAllocator, InstanceHandle, OnDemandInstanceAllocator,
+    SignalHandler, StoreBox, StorePtr, VMContext, VMFuncRef, VMGcRef, VMRuntimeLimits, WasmFault,
+};
 use crate::trampoline::VMHostGlobalContext;
 use crate::RootSet;
 use crate::{module::ModuleRegistry, Engine, Module, Trap, Val, ValRaw};
@@ -98,13 +105,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use wasmtime_continuations::WasmFXConfig;
-use wasmtime_runtime::continuation::{StackChain, StackChainCell, StackLimits};
-use wasmtime_runtime::mpk::{self, ProtectionKey, ProtectionMask};
-use wasmtime_runtime::{
-    Backtrace, ExportGlobal, GcHeapAllocationIndex, GcRootsList, GcStore,
-    InstanceAllocationRequest, InstanceAllocator, InstanceHandle, OnDemandInstanceAllocator,
-    SignalHandler, StoreBox, StorePtr, VMContext, VMFuncRef, VMGcRef, VMRuntimeLimits, WasmFault,
-};
 
 mod context;
 pub use self::context::*;
@@ -390,9 +390,9 @@ pub struct StoreOpaque {
     /// and calls. These also interact with the `ResourceAny` type and its
     /// internal representation.
     #[cfg(feature = "component-model")]
-    component_host_table: wasmtime_runtime::component::ResourceTable,
+    component_host_table: crate::runtime::vm::component::ResourceTable,
     #[cfg(feature = "component-model")]
-    component_calls: wasmtime_runtime::component::CallContexts,
+    component_calls: crate::runtime::vm::component::CallContexts,
     #[cfg(feature = "component-model")]
     host_resource_data: crate::component::HostResourceData,
 }
@@ -577,8 +577,8 @@ impl<T> Store<T> {
             // throughout Wasmtime.
             unsafe {
                 let traitobj = std::mem::transmute::<
-                    *mut (dyn wasmtime_runtime::Store + '_),
-                    *mut (dyn wasmtime_runtime::Store + 'static),
+                    *mut (dyn crate::runtime::vm::Store + '_),
+                    *mut (dyn crate::runtime::vm::Store + 'static),
                 >(&mut *inner);
                 instance.set_store(traitobj);
             }
@@ -1506,7 +1506,7 @@ impl StoreOpaque {
             } else {
                 (
                     GcHeapAllocationIndex::default(),
-                    wasmtime_runtime::disabled_gc_heap(),
+                    crate::runtime::vm::disabled_gc_heap(),
                 )
             };
             Ok(GcStore::new(index, heap))
@@ -1516,7 +1516,7 @@ impl StoreOpaque {
         fn allocate_gc_store(_engine: &Engine) -> Result<GcStore> {
             Ok(GcStore::new(
                 GcHeapAllocationIndex::default(),
-                wasmtime_runtime::disabled_gc_heap(),
+                crate::runtime::vm::disabled_gc_heap(),
             ))
         }
     }
@@ -1651,7 +1651,7 @@ impl StoreOpaque {
 
     #[cfg(all(feature = "async", feature = "gc"))]
     async fn trace_roots_async(&mut self, gc_roots_list: &mut GcRootsList) {
-        use wasmtime_runtime::Yield;
+        use crate::runtime::vm::Yield;
 
         log::trace!("Begin trace GC roots");
 
@@ -1671,7 +1671,7 @@ impl StoreOpaque {
     fn trace_wasm_stack_roots(&mut self, gc_roots_list: &mut GcRootsList) {
         use std::ptr::NonNull;
 
-        use wasmtime_runtime::{ModuleInfoLookup, SendSyncPtr};
+        use crate::runtime::vm::{ModuleInfoLookup, SendSyncPtr};
 
         log::trace!("Begin trace GC roots :: Wasm stack");
 
@@ -1835,7 +1835,7 @@ impl StoreOpaque {
     /// executing on a fiber. This will yield execution back to the caller once.
     #[cfg(feature = "async")]
     fn async_yield_impl(&mut self) -> Result<()> {
-        use wasmtime_runtime::Yield;
+        use crate::runtime::vm::Yield;
 
         let mut future = Yield::new();
 
@@ -1883,7 +1883,7 @@ impl StoreOpaque {
         self.default_caller.vmctx()
     }
 
-    pub fn traitobj(&self) -> *mut dyn wasmtime_runtime::Store {
+    pub fn traitobj(&self) -> *mut dyn crate::runtime::vm::Store {
         self.default_caller.store()
     }
 
@@ -2013,8 +2013,8 @@ at https://bytecodealliance.org/security.
     pub(crate) fn component_resource_state(
         &mut self,
     ) -> (
-        &mut wasmtime_runtime::component::CallContexts,
-        &mut wasmtime_runtime::component::ResourceTable,
+        &mut crate::runtime::vm::component::CallContexts,
+        &mut crate::runtime::vm::component::ResourceTable,
         &mut crate::component::HostResourceData,
     ) {
         (
@@ -2094,7 +2094,7 @@ impl<T> StoreContextMut<'_, T> {
                 fiber,
                 current_poll_cx,
                 engine,
-                state: Some(wasmtime_runtime::AsyncWasmCallState::new()),
+                state: Some(crate::runtime::vm::AsyncWasmCallState::new()),
             }
         };
         future.await?;
@@ -2106,7 +2106,7 @@ impl<T> StoreContextMut<'_, T> {
             current_poll_cx: *mut *mut Context<'static>,
             engine: Engine,
             // See comments in `FiberFuture::resume` for this
-            state: Option<wasmtime_runtime::AsyncWasmCallState>,
+            state: Option<crate::runtime::vm::AsyncWasmCallState>,
         }
 
         // This is surely the most dangerous `unsafe impl Send` in the entire
@@ -2203,7 +2203,7 @@ impl<T> StoreContextMut<'_, T> {
 
                 struct Restore<'a, 'b> {
                     fiber: &'a mut FiberFuture<'b>,
-                    state: Option<wasmtime_runtime::PreviousAsyncWasmCallState>,
+                    state: Option<crate::runtime::vm::PreviousAsyncWasmCallState>,
                 }
 
                 impl Drop for Restore<'_, '_> {
@@ -2266,7 +2266,7 @@ impl<T> StoreContextMut<'_, T> {
                         // Wasmtime is incorrect.
                         Err(()) => {
                             if let Some(range) = self.fiber.stack().range() {
-                                wasmtime_runtime::AsyncWasmCallState::assert_current_state_not_in_range(range);
+                                crate::runtime::vm::AsyncWasmCallState::assert_current_state_not_in_range(range);
                             }
                             Poll::Pending
                         }
@@ -2397,7 +2397,7 @@ impl AsyncCx {
     }
 }
 
-unsafe impl<T> wasmtime_runtime::Store for StoreInner<T> {
+unsafe impl<T> crate::runtime::vm::Store for StoreInner<T> {
     fn vmruntime_limits(&self) -> *mut VMRuntimeLimits {
         <StoreOpaque>::vmruntime_limits(self)
     }
@@ -2597,7 +2597,7 @@ unsafe impl<T> wasmtime_runtime::Store for StoreInner<T> {
     }
 
     #[cfg(feature = "component-model")]
-    fn component_calls(&mut self) -> &mut wasmtime_runtime::component::CallContexts {
+    fn component_calls(&mut self) -> &mut crate::runtime::vm::component::CallContexts {
         &mut self.component_calls
     }
 }
@@ -2713,8 +2713,8 @@ impl Drop for StoreOpaque {
     }
 }
 
-impl wasmtime_runtime::ModuleInfoLookup for ModuleRegistry {
-    fn lookup(&self, pc: usize) -> Option<&dyn wasmtime_runtime::ModuleInfo> {
+impl crate::runtime::vm::ModuleInfoLookup for ModuleRegistry {
+    fn lookup(&self, pc: usize) -> Option<&dyn crate::runtime::vm::ModuleInfo> {
         self.lookup_module_info(pc)
     }
 }
