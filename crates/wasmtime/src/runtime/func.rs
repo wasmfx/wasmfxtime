@@ -1,3 +1,7 @@
+use crate::runtime::vm::{
+    ExportFunction, SendSyncPtr, StoreBox, VMArrayCallHostFuncContext, VMContext, VMFuncRef,
+    VMFunctionImport, VMNativeCallHostFuncContext, VMOpaqueContext,
+};
 use crate::runtime::Uninhabited;
 use crate::store::{AutoAssertNoGc, StoreData, StoreOpaque, Stored};
 use crate::type_registry::RegisteredType;
@@ -14,10 +18,6 @@ use std::pin::Pin;
 use std::ptr::{self, NonNull};
 use std::sync::Arc;
 use wasmtime_environ::VMSharedTypeIndex;
-use wasmtime_runtime::{
-    ExportFunction, SendSyncPtr, StoreBox, VMArrayCallHostFuncContext, VMContext, VMFuncRef,
-    VMFunctionImport, VMNativeCallHostFuncContext, VMOpaqueContext,
-};
 
 /// A reference to the abstract `nofunc` heap value.
 ///
@@ -1595,7 +1595,7 @@ pub(crate) fn invoke_wasm_and_catch_traps<T>(
             // functions from within a host function (e.g., calling `f.call()`
             // while within a host call, where `f` is the result from wrapping a
             // Rust function inside a `Func`).
-            if wasmtime_runtime::first_wasm_state_on_fiber_stack() {
+            if crate::runtime::vm::first_wasm_state_on_fiber_stack() {
                 return Err(anyhow::anyhow!(
                     "Re-entering wasm while already executing on a continuation stack"
                 ));
@@ -1608,7 +1608,7 @@ pub(crate) fn invoke_wasm_and_catch_traps<T>(
             exit_wasm(store, exit);
             return Err(trap);
         }
-        let result = wasmtime_runtime::catch_traps(
+        let result = crate::runtime::vm::catch_traps(
             store.0.signal_handler(),
             store.0.engine().config().wasm_backtrace,
             store.0.engine().config().coredump_on_trap,
@@ -1657,7 +1657,7 @@ fn enter_wasm<T>(store: &mut StoreContextMut<'_, T>) -> Option<usize> {
         return None;
     }
 
-    let stack_pointer = wasmtime_runtime::get_stack_pointer();
+    let stack_pointer = crate::runtime::vm::get_stack_pointer();
 
     // Determine the stack pointer where, after which, any wasm code will
     // immediately trap. This is checked on the entry to all wasm functions.
@@ -2025,7 +2025,7 @@ pub trait IntoFunc<T, Params, Results>: Send + Sync + 'static {
 /// recommended to use this type.
 pub struct Caller<'a, T> {
     pub(crate) store: StoreContextMut<'a, T>,
-    caller: &'a wasmtime_runtime::Instance,
+    caller: &'a crate::runtime::vm::Instance,
 }
 
 impl<T> Caller<'_, T> {
@@ -2038,7 +2038,7 @@ impl<T> Caller<'_, T> {
         R: 'static,
     {
         assert!(!caller.is_null());
-        wasmtime_runtime::Instance::from_vmctx(caller, |instance| {
+        crate::runtime::vm::Instance::from_vmctx(caller, |instance| {
             let store = StoreContextMut::from_raw(instance.store());
             let gc_lifo_scope = store.0.gc_roots().enter_lifo_scope();
 
@@ -2281,7 +2281,7 @@ macro_rules! impl_into_func {
 
                     // With nothing else on the stack move `run` into this
                     // closure and then run it as part of `Caller::with`.
-                    let result = wasmtime_runtime::catch_unwind_and_longjmp(move || {
+                    let result = crate::runtime::vm::catch_unwind_and_longjmp(move || {
                         let caller_vmctx = VMContext::from_opaque(caller_vmctx);
                         Caller::with(caller_vmctx, run)
                     });
@@ -2580,9 +2580,8 @@ use self::rooted::*;
 /// `RootedHostFunc` instead of accidentally safely allowing access to its
 /// constructor.
 mod rooted {
-    use wasmtime_runtime::{SendSyncPtr, VMFuncRef};
-
     use super::HostFunc;
+    use crate::runtime::vm::{SendSyncPtr, VMFuncRef};
     use std::ptr::NonNull;
     use std::sync::Arc;
 
