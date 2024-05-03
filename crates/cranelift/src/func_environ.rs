@@ -1438,8 +1438,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let grow = if ty.is_vmgcref_type() {
             gc::gc_ref_table_grow_builtin(ty, self, &mut pos.func)?
         } else {
-            debug_assert_eq!(ty.top(), WasmHeapTopType::Func);
-            self.builtin_functions.table_grow_func_ref(&mut pos.func)
+            //debug_assert_eq!(ty.top(), WasmHeapTopType::Func);
+            match ty.top() {
+                WasmHeapTopType::Func => self.builtin_functions.table_grow_func_ref(&mut pos.func),
+                WasmHeapTopType::Cont => self.builtin_functions.table_grow_func_ref(&mut pos.func), // TODO(dhil): temporary hack.
+                _ => panic!("unsupported table type."),
+            }
         };
 
         let vmctx = self.vmctx_val(&mut pos);
@@ -1500,7 +1504,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             },
 
             // Continuation types.
-            WasmHeapTopType::Cont => todo!(), // TODO(dhil): Revisit later.
+            WasmHeapTopType::Cont => match plan.style {
+                // TODO(dhil): Just copied from above...
+                TableStyle::CallerChecksSignature => {
+                    Ok(self.get_or_init_func_ref_table_elem(builder, table_index, index))
+                }
+            },
         }
     }
 
@@ -1572,7 +1581,29 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             }
 
             // Continuation types.
-            WasmHeapTopType::Cont => todo!(), // TODO(dhil): Revisit later.
+            WasmHeapTopType::Cont => {
+                // TODO(dhil): Just copied from above...
+                match plan.style {
+                    TableStyle::CallerChecksSignature => {
+                        let (elem_addr, flags) = table_data.prepare_table_addr(
+                            builder,
+                            index,
+                            pointer_type,
+                            self.isa.flags().enable_table_access_spectre_mitigation(),
+                        );
+                        // Set the "initialized bit". See doc-comment on
+                        // `FUNCREF_INIT_BIT` in
+                        // crates/environ/src/ref_bits.rs for details.
+                        let value_with_init_bit = builder
+                            .ins()
+                            .bor_imm(value, Imm64::from(FUNCREF_INIT_BIT as i64));
+                        builder
+                            .ins()
+                            .store(flags, value_with_init_bit, elem_addr, 0);
+                        Ok(())
+                    }
+                }
+            }
         }
     }
 
