@@ -271,21 +271,31 @@ pub fn drop_cont_ref(contref: *mut VMContRef) {
     // parent fields here.
 
     let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
-    unsafe {
-        let _: Vec<u128> = Vec::from_raw_parts(
-            contref.args.data,
-            contref.args.length as usize,
-            contref.args.capacity as usize,
-        );
-    };
+    if contref.args.data.is_null() {
+        debug_assert!(contref.args.length as usize == 0);
+        debug_assert!(contref.args.capacity as usize == 0);
+    } else {
+        unsafe {
+            let _: Vec<u128> = Vec::from_raw_parts(
+                contref.args.data,
+                contref.args.length as usize,
+                contref.args.capacity as usize,
+            );
+        };
+    }
     let payloads = &contref.tag_return_values;
-    let _: Vec<u128> = unsafe {
-        Vec::from_raw_parts(
-            payloads.data,
-            payloads.length as usize,
-            payloads.capacity as usize,
-        )
-    };
+    if payloads.data.is_null() {
+        debug_assert!(payloads.length as usize == 0);
+        debug_assert!(payloads.capacity as usize == 0);
+    } else {
+        let _: Vec<u128> = unsafe {
+            Vec::from_raw_parts(
+                payloads.data,
+                payloads.length as usize,
+                payloads.capacity as usize,
+            )
+        };
+    }
 }
 
 /// TODO
@@ -308,8 +318,9 @@ pub fn cont_new(
     let red_zone_size = wasmfx_config.red_zone_size;
 
     let fiber = {
-        let stack = FiberStack::malloc(stack_size)
-            .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+        let stack = FiberStack::malloc(stack_size).map_err(|_error| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!("Fiber stack allocation failed!"))
+        })?;
         Fiber::new(
             stack,
             func.cast::<VMFuncRef>(),
@@ -317,7 +328,9 @@ pub fn cont_new(
             payload.data as *mut ValRaw,
             payload.capacity as usize,
         )
-        .map_err(|error| TrapReason::user_without_backtrace(error.into()))?
+        .map_err(|_error| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!("Fiber construction failed!"))
+        })?
     };
 
     let tsp = fiber.stack().top().unwrap();
