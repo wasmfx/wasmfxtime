@@ -525,9 +525,9 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
             ),
             size(typed_continuations_stack_chain)
                 = ret.ptr.size(),
-            align(std::mem::align_of::<wasmtime_continuations::Payloads>() as u32),
+            align(core::mem::align_of::<wasmtime_continuations::Payloads>() as u32),
             size(typed_continuations_payloads) =
-                std::mem::size_of::<wasmtime_continuations::Payloads>() as u32,
+                core::mem::size_of::<wasmtime_continuations::Payloads>() as u32,
 
             align(16), // TODO(dhil): This could probably be done more
                        // efficiently by packing the pointer into the above 16 byte
