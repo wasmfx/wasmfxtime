@@ -1,4 +1,6 @@
-use std::ptr;
+#![no_std]
+use core::{ptr, convert::From, marker::{Send, Sync}, default::Default};
+extern crate alloc;
 
 /// Default size for continuation stacks
 pub const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
@@ -103,7 +105,7 @@ impl Payloads {
         let data = if capacity == 0 {
             ptr::null_mut()
         } else {
-            let mut args = Vec::with_capacity(capacity as usize);
+            let mut args = alloc::vec::Vec::with_capacity(capacity as usize);
             let args_ptr = args.as_mut_ptr();
             args.leak();
             args_ptr
@@ -242,7 +244,7 @@ impl From<SwitchDirection> for u64 {
     fn from(val: SwitchDirection) -> u64 {
         // TODO(frank-emrich) This assumes little endian data layout. Should
         // make this more explicit.
-        unsafe { std::mem::transmute::<SwitchDirection, u64>(val) }
+        unsafe { core::mem::transmute::<SwitchDirection, u64>(val) }
     }
 }
 
@@ -259,7 +261,7 @@ impl From<u64> for SwitchDirection {
         }
         // TODO(frank-emrich) This assumes little endian data layout. Should
         // make this more explicit.
-        unsafe { std::mem::transmute::<u64, SwitchDirection>(val) }
+        unsafe { core::mem::transmute::<u64, SwitchDirection>(val) }
     }
 }
 
@@ -286,15 +288,15 @@ pub mod offsets {
         /// Offset of `limits` field
         pub const LIMITS: usize = 0;
         /// Offset of `parent_chain` field
-        pub const PARENT_CHAIN: usize = LIMITS + 4 * std::mem::size_of::<usize>();
+        pub const PARENT_CHAIN: usize = LIMITS + 4 * core::mem::size_of::<usize>();
         /// Offset of `fiber` field
-        pub const FIBER: usize = PARENT_CHAIN + 2 * std::mem::size_of::<usize>();
+        pub const FIBER: usize = PARENT_CHAIN + 2 * core::mem::size_of::<usize>();
         /// Offset of `args` field
         pub const ARGS: usize = FIBER + super::CONTINUATION_FIBER_SIZE;
         /// Offset of `tag_return_values` field
-        pub const TAG_RETURN_VALUES: usize = ARGS + std::mem::size_of::<Payloads>();
+        pub const TAG_RETURN_VALUES: usize = ARGS + core::mem::size_of::<Payloads>();
         /// Offset of `state` field
-        pub const STATE: usize = TAG_RETURN_VALUES + std::mem::size_of::<Payloads>();
+        pub const STATE: usize = TAG_RETURN_VALUES + core::mem::size_of::<Payloads>();
     }
 
     pub mod stack_limits {
@@ -309,9 +311,9 @@ pub mod offsets {
 
     /// Size of wasmtime_runtime::continuation::ContinuationFiber.
     /// We test there that this value is correct.
-    pub const CONTINUATION_FIBER_SIZE: usize = 4 * std::mem::size_of::<usize>();
+    pub const CONTINUATION_FIBER_SIZE: usize = 4 * core::mem::size_of::<usize>();
 
     /// Size of type `wasmtime_runtime::continuation::StackChain`.
     /// We test there that this value is correct.
-    pub const STACK_CHAIN_SIZE: usize = 2 * std::mem::size_of::<usize>();
+    pub const STACK_CHAIN_SIZE: usize = 2 * core::mem::size_of::<usize>();
 }
