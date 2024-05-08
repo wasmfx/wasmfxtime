@@ -3,16 +3,16 @@
 
 mod vm_host_func_context;
 
+pub use self::vm_host_func_context::{VMArrayCallHostFuncContext, VMNativeCallHostFuncContext};
 use crate::runtime::vm::{GcStore, VMGcRef};
+use core::cell::UnsafeCell;
+use core::ffi::c_void;
+use core::fmt;
+use core::marker;
+use core::mem;
+use core::ptr::{self, NonNull};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use sptr::Strict;
-use std::cell::UnsafeCell;
-use std::ffi::c_void;
-use std::marker;
-use std::mem;
-use std::ptr::{self, NonNull};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::u32;
-pub use vm_host_func_context::{VMArrayCallHostFuncContext, VMNativeCallHostFuncContext};
 use wasmtime_environ::{
     BuiltinFunctionIndex, DefinedMemoryIndex, Unsigned, VMSharedTypeIndex, WasmHeapTopType,
     WasmValType, VMCONTEXT_MAGIC,
@@ -909,6 +909,53 @@ mod test_vmruntime_limits {
     }
 }
 
+/// One call-indirect cache entry.
+///
+/// It consists of the last observed function-pointer index, and the
+/// direct code pointer (with the same vmctx, i.e., in the same
+/// instance) to call if this index matches.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // not actually used in Rust runtime code; only in generated code.
+#[repr(C)]
+pub struct VMCallIndirectCache {
+    /// Function pointer for this funcref if being called via the Wasm
+    /// calling convention.
+    pub wasm_call: NonNull<VMWasmCallFunction>,
+
+    /// Table index corresponding to the above function pointer.
+    pub index: usize,
+    // If more elements are added here, remember to add offset_of tests below!
+}
+
+unsafe impl Send for VMCallIndirectCache {}
+unsafe impl Sync for VMCallIndirectCache {}
+
+#[cfg(test)]
+mod test_vm_call_indirect_cache {
+    use super::VMCallIndirectCache;
+    use memoffset::offset_of;
+    use std::mem::size_of;
+    use wasmtime_environ::{Module, PtrSize, VMOffsets};
+
+    #[test]
+    fn check_vm_call_indirect_cache_offsets() {
+        let module = Module::new();
+        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        assert_eq!(
+            size_of::<VMCallIndirectCache>(),
+            usize::from(offsets.ptr.size_of_vmcall_indirect_cache())
+        );
+        assert_eq!(
+            offset_of!(VMCallIndirectCache, wasm_call),
+            usize::from(offsets.ptr.vmcall_indirect_cache_wasm_call())
+        );
+        assert_eq!(
+            offset_of!(VMCallIndirectCache, index),
+            usize::from(offsets.ptr.vmcall_indirect_cache_index())
+        );
+    }
+}
+
 /// The VM "context", which is pointed to by the `vmctx` arg in Cranelift.
 /// This has information about globals, memories, tables, and other runtime
 /// state associated with the current instance.
@@ -1065,8 +1112,8 @@ pub union ValRaw {
 // are some simple assertions about the shape of the type which are additionally
 // matched in C.
 const _: () = {
-    assert!(std::mem::size_of::<ValRaw>() == 16);
-    assert!(std::mem::align_of::<ValRaw>() == 8);
+    assert!(mem::size_of::<ValRaw>() == 16);
+    assert!(mem::align_of::<ValRaw>() == 8);
 };
 
 // This type is just a bag-of-bits so it's up to the caller to figure out how
@@ -1074,12 +1121,12 @@ const _: () = {
 unsafe impl Send for ValRaw {}
 unsafe impl Sync for ValRaw {}
 
-impl std::fmt::Debug for ValRaw {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for ValRaw {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct Hex<T>(T);
-        impl<T: std::fmt::LowerHex> std::fmt::Debug for Hex<T> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let bytes = std::mem::size_of::<T>();
+        impl<T: fmt::LowerHex> fmt::Debug for Hex<T> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let bytes = mem::size_of::<T>();
                 let hex_digits_per_byte = 2;
                 let hex_digits = bytes * hex_digits_per_byte;
                 write!(f, "0x{:0width$x}", self.0, width = hex_digits)

@@ -312,13 +312,14 @@ impl TypeConvert for WasmparserTypeConverter<'_> {
                         WasmCompositeType::Array(_) => WasmHeapType::ConcreteArray(index),
                         WasmCompositeType::Func(_) => WasmHeapType::ConcreteFunc(index),
                         WasmCompositeType::Cont(_) => WasmHeapType::ConcreteCont(index),
+                        WasmCompositeType::Struct(_) => WasmHeapType::ConcreteStruct(index),
                     }
                 } else if let Some((wasmparser_types, _)) = self.rec_group_context.as_ref() {
                     match &wasmparser_types[id].composite_type {
                         wasmparser::CompositeType::Array(_) => WasmHeapType::ConcreteArray(index),
                         wasmparser::CompositeType::Func(_) => WasmHeapType::ConcreteFunc(index),
-                        wasmparser::CompositeType::Struct(_) => unreachable!(),
                         wasmparser::CompositeType::Cont(_) => WasmHeapType::ConcreteCont(index),
+                        wasmparser::CompositeType::Struct(_) => WasmHeapType::ConcreteStruct(index),
                     }
                 } else {
                     panic!("forward reference to type outside of rec group?")
@@ -340,6 +341,7 @@ impl TypeConvert for WasmparserTypeConverter<'_> {
                         WasmCompositeType::Array(_) => WasmHeapType::ConcreteArray(index),
                         WasmCompositeType::Func(_) => WasmHeapType::ConcreteFunc(index),
                         WasmCompositeType::Cont(_) => WasmHeapType::ConcreteCont(index),
+                        WasmCompositeType::Struct(_) => WasmHeapType::ConcreteStruct(index),
                     }
                 } else if let Some((parser_types, rec_group)) = self.rec_group_context.as_ref() {
                     let rec_group_index = interned.index() - self.types.types.len_types();
@@ -350,8 +352,8 @@ impl TypeConvert for WasmparserTypeConverter<'_> {
                     match &parser_types[id].composite_type {
                         wasmparser::CompositeType::Array(_) => WasmHeapType::ConcreteArray(index),
                         wasmparser::CompositeType::Func(_) => WasmHeapType::ConcreteFunc(index),
-                        wasmparser::CompositeType::Struct(_) => unreachable!(),
                         wasmparser::CompositeType::Cont(_) => WasmHeapType::ConcreteCont(index),
+                        wasmparser::CompositeType::Struct(_) => WasmHeapType::ConcreteStruct(index),
                     }
                 } else {
                     panic!("forward reference to type outside of rec group?")

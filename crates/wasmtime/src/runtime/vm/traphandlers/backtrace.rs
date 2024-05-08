@@ -21,13 +21,14 @@
 //! exit FP and stopping once we reach the entry SP (meaning that the next older
 //! frame is a host frame).
 
+use crate::prelude::*;
 use crate::runtime::vm::arch;
 use crate::runtime::vm::continuation::StackChain;
 use crate::runtime::vm::{
     traphandlers::{tls, CallThreadState},
     VMRuntimeLimits,
 };
-use std::ops::ControlFlow;
+use core::ops::ControlFlow;
 
 /// A WebAssembly stack trace.
 #[derive(Debug)]
@@ -132,7 +133,7 @@ impl Backtrace {
             // trampoline did not get a chance to save the last Wasm PC and FP,
             // and we need to use the plumbed-through values instead.
             Some((pc, fp)) => {
-                assert!(std::ptr::eq(limits, state.limits));
+                assert!(core::ptr::eq(limits, state.limits));
                 assert!(first_wasm_state.is_some());
                 (pc, fp)
             }
@@ -156,7 +157,7 @@ impl Backtrace {
         // chain. This is justified because only the most recent execution of
         // wasm may execute off the main stack (see comments in
         // `wasmtime::invoke_wasm_and_catch_traps` for details).
-        let activations = std::iter::once((
+        let activations = core::iter::once((
             first_wasm_state_stack_chain,
             last_wasm_exit_pc,
             last_wasm_exit_fp,
@@ -166,7 +167,7 @@ impl Backtrace {
             first_wasm_state
                 .iter()
                 .flat_map(|state| state.iter())
-                .filter(|state| std::ptr::eq(limits, state.limits))
+                .filter(|state| core::ptr::eq(limits, state.limits))
                 .map(|state| {
                     (
                         None,

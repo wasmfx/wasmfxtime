@@ -6,7 +6,8 @@ use crate::{
     AsContext, AsContextMut, GcRefImpl, GcRootIndex, HeapType, ManuallyRooted, RefType, Result,
     RootSet, Rooted, ValRaw, ValType, WasmTy, I31,
 };
-use std::num::NonZeroU64;
+use core::mem;
+use core::num::NonZeroU64;
 
 /// An `anyref` GC reference.
 ///
@@ -96,7 +97,7 @@ unsafe impl GcRefImpl for AnyRef {
     #[allow(private_interfaces)]
     fn transmute_ref(index: &GcRootIndex) -> &Self {
         // Safety: `AnyRef` is a newtype of a `GcRootIndex`.
-        let me: &Self = unsafe { std::mem::transmute(index) };
+        let me: &Self = unsafe { mem::transmute(index) };
 
         // Assert we really are just a newtype of a `GcRootIndex`.
         assert!(matches!(
@@ -264,11 +265,6 @@ unsafe impl WasmTy for Rooted<AnyRef> {
     }
 
     #[inline]
-    fn is_non_i31_gc_ref(&self) -> bool {
-        true
-    }
-
-    #[inline]
     unsafe fn abi_from_raw(raw: *mut ValRaw) -> Self::Abi {
         let raw = (*raw).get_externref();
         debug_assert_ne!(raw, 0);
@@ -319,8 +315,8 @@ unsafe impl WasmTy for Option<Rooted<AnyRef>> {
     }
 
     #[inline]
-    fn is_non_i31_gc_ref(&self) -> bool {
-        true
+    fn is_vmgcref_and_points_to_object(&self) -> bool {
+        self.is_some()
     }
 
     #[inline]
@@ -368,11 +364,6 @@ unsafe impl WasmTy for ManuallyRooted<AnyRef> {
     #[inline]
     fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &HeapType) -> Result<()> {
         unreachable!()
-    }
-
-    #[inline]
-    fn is_non_i31_gc_ref(&self) -> bool {
-        true
     }
 
     #[inline]
@@ -431,8 +422,8 @@ unsafe impl WasmTy for Option<ManuallyRooted<AnyRef>> {
     }
 
     #[inline]
-    fn is_non_i31_gc_ref(&self) -> bool {
-        true
+    fn is_vmgcref_and_points_to_object(&self) -> bool {
+        self.is_some()
     }
 
     #[inline]

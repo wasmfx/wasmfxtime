@@ -673,7 +673,7 @@ impl Inst {
 // Instructions: printing
 
 impl PrettyPrint for Inst {
-    fn pretty_print(&self, _size: u8, allocs: &mut AllocationConsumer<'_>) -> String {
+    fn pretty_print(&self, _size: u8, allocs: &mut AllocationConsumer) -> String {
         fn ljustify(s: String) -> String {
             let w = 7;
             if s.len() >= w {
@@ -1465,7 +1465,6 @@ impl PrettyPrint for Inst {
             }
 
             Inst::MovFromPReg { src, dst } => {
-                allocs.next_fixed_nonallocatable(*src);
                 let src: Reg = (*src).into();
                 let src = regs::show_ireg_sized(src, 8);
                 let dst = pretty_print_reg(dst.to_reg().to_reg(), 8, allocs);
@@ -1475,7 +1474,6 @@ impl PrettyPrint for Inst {
 
             Inst::MovToPReg { src, dst } => {
                 let src = pretty_print_reg(src.to_reg(), 8, allocs);
-                allocs.next_fixed_nonallocatable(*dst);
                 let dst: Reg = (*dst).into();
                 let dst = regs::show_ireg_sized(dst, 8);
                 let op = ljustify("movq".to_string());

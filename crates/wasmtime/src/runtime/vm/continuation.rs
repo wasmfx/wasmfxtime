@@ -5,11 +5,12 @@ use crate::runtime::vm::{
     vmcontext::{VMFuncRef, ValRaw},
     Instance, TrapReason,
 };
-use std::cell::UnsafeCell;
-use std::cmp;
-use std::mem;
+use core::cell::UnsafeCell;
+use core::cmp;
+use core::mem;
 use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
 pub use wasmtime_continuations::{Payloads, StackLimits, State, SwitchDirection};
+use wasmtime_environ::prelude::*;
 
 /// Fibers used for continuations
 pub type ContinuationFiber = Fiber;
@@ -441,8 +442,9 @@ pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason
 #[cfg(feature = "typed_continuations_baseline_implementation")]
 pub mod baseline {
     use crate::runtime::vm::{Instance, TrapReason, VMFuncRef, VMOpaqueContext, ValRaw};
-    use std::{cell::Cell, cell::RefCell, cmp, mem};
+    use core::{cell::Cell, cell::RefCell, cmp, mem};
     use wasmtime_continuations::DEFAULT_FIBER_SIZE;
+    use wasmtime_environ::prelude::*;
     use wasmtime_fiber::{Fiber, Suspend};
 
     type ContinuationFiber = Fiber<'static, &'static mut Instance, u32, ()>;
@@ -460,7 +462,7 @@ pub mod baseline {
         pub parent: *mut VMContRef,
         pub args: Vec<u128>,
         pub values: Vec<u128>,
-        pub _marker: std::marker::PhantomPinned,
+        pub _marker: core::marker::PhantomPinned,
     }
 
     // We use thread local state to simulate the VMContext. The use of
@@ -469,7 +471,7 @@ pub mod baseline {
     thread_local! {
         // The current continuation, i.e. the currently executing
         // continuation.
-        static CC: Cell<*mut VMContRef> = Cell::new(std::ptr::null_mut());
+        static CC: Cell<*mut VMContRef> = Cell::new(core::ptr::null_mut());
         // A buffer to help propagate tag payloads across
         // continuations.
         static SUSPEND_PAYLOADS: RefCell<Vec<u128>> = RefCell::new(vec![]);
@@ -487,54 +489,53 @@ pub mod baseline {
         param_count: usize,
         result_count: usize,
     ) -> Result<*mut VMContRef, TrapReason> {
-        let func_ref = unsafe {
-            func.cast::<VMFuncRef>().as_ref().ok_or_else(|| {
-                TrapReason::user_without_backtrace(anyhow::anyhow!(
-                    "Attempt to dereference null VMFuncRef"
-                ))
-            })?
-        };
-
         let capacity = cmp::max(param_count, result_count);
         let mut values: Vec<u128> = Vec::with_capacity(capacity);
 
         let fiber = {
-            let callee_ctx = func_ref.vmctx;
             let stack = wasmtime_fiber::FiberStack::new(DEFAULT_FIBER_SIZE)
                 .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
-            let vals_ptr = values.as_mut_ptr();
-            let fiber = Fiber::new(
-                stack,
-                move |instance: &mut Instance, suspend: &mut Yield| unsafe {
-                    let caller_ctx = VMOpaqueContext::from_vmcontext(instance.vmctx());
-                    // NOTE(dhil): The cast `suspend as *mut Yield`
-                    // side-steps the need for mentioning the lifetime
-                    // of `Yield`. In this case it is safe, because
-                    // Yield lives as long as the object it is
-                    // embedded in.
-                    (*get_current_continuation()).suspend = suspend as *mut Yield;
-                    let results = (func_ref.array_call)(
-                        callee_ctx,
-                        caller_ctx,
-                        vals_ptr.cast::<ValRaw>(),
-                        capacity,
-                    );
-                    // As a precaution we null the suspender.
-                    (*get_current_continuation()).suspend = std::ptr::null_mut();
-                    return results;
-                },
-            )
-            .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
-            Box::new(fiber)
+            let fiber = match unsafe { func.cast::<VMFuncRef>().as_ref() } {
+                None => Fiber::new(stack, |_instance: &mut Instance, _suspend: &mut Yield| {
+                    panic!("Attempt to invoke null VMFuncRef!");
+                }),
+                Some(func_ref) => {
+                    let callee_ctx = func_ref.vmctx;
+
+                    let vals_ptr = values.as_mut_ptr();
+                    Fiber::new(
+                        stack,
+                        move |instance: &mut Instance, suspend: &mut Yield| unsafe {
+                            let caller_ctx = VMOpaqueContext::from_vmcontext(instance.vmctx());
+                            // NOTE(dhil): The cast `suspend as *mut Yield`
+                            // side-steps the need for mentioning the lifetime
+                            // of `Yield`. In this case it is safe, because
+                            // Yield lives as long as the object it is
+                            // embedded in.
+                            (*get_current_continuation()).suspend = suspend as *mut Yield;
+                            let results = (func_ref.array_call)(
+                                callee_ctx,
+                                caller_ctx,
+                                vals_ptr.cast::<ValRaw>(),
+                                capacity,
+                            );
+                            // As a precaution we null the suspender.
+                            (*get_current_continuation()).suspend = core::ptr::null_mut();
+                            return results;
+                        },
+                    )
+                }
+            };
+            Box::new(fiber.map_err(|error| TrapReason::user_without_backtrace(error.into()))?)
         };
 
         let contref = Box::new(VMContRef {
-            parent: std::ptr::null_mut(),
-            suspend: std::ptr::null_mut(),
+            parent: core::ptr::null_mut(),
+            suspend: core::ptr::null_mut(),
             fiber,
             args: Vec::with_capacity(param_count),
             values,
-            _marker: std::marker::PhantomPinned,
+            _marker: core::marker::PhantomPinned,
         });
 
         // TODO(dhil): we need memory clean up of
@@ -607,7 +608,7 @@ pub mod baseline {
             return Err(trap);
         }
         let contref = unsafe { cc.as_mut().unwrap() };
-        let parent = mem::replace(&mut contref.parent, std::ptr::null_mut());
+        let parent = mem::replace(&mut contref.parent, core::ptr::null_mut());
         set_current_continuation(parent);
         unsafe { contref.suspend.as_mut().unwrap().suspend(tag_index) };
         Ok(())
@@ -843,8 +844,8 @@ fn offset_and_size_constants() {
     assert_eq!(memoffset::offset_of!(VMContRef, state), vm_cont_ref::STATE);
 
     assert_eq!(
-        std::mem::size_of::<ContinuationFiber>(),
+        core::mem::size_of::<ContinuationFiber>(),
         CONTINUATION_FIBER_SIZE
     );
-    assert_eq!(std::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
+    assert_eq!(core::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
 }

@@ -11,4 +11,5 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true, features = ['std'] }
 libloading = "0.8"
-object = { workspace = true }
+object = { workspace = true, features = ['std'] }
+wasmtime = { workspace = true, features = ['cranelift', 'wat'] }

@@ -39,21 +39,22 @@ cfg_if::cfg_if! {
     }
 }
 
+use self::memory_pool::MemoryPool;
+use self::table_pool::TablePool;
 use super::{
     InstanceAllocationRequest, InstanceAllocatorImpl, MemoryAllocationIndex, TableAllocationIndex,
 };
+use crate::prelude::*;
 use crate::runtime::vm::{
     instance::Instance,
     mpk::{self, MpkEnabled, ProtectionKey, ProtectionMask},
     CompiledModuleId, Memory, Table,
 };
 use anyhow::{bail, Result};
-use memory_pool::MemoryPool;
 use std::{
     mem,
     sync::atomic::{AtomicU64, Ordering},
 };
-use table_pool::TablePool;
 use wasmtime_environ::{
     DefinedMemoryIndex, DefinedTableIndex, HostPtr, MemoryPlan, Module, TablePlan, Tunables,
     VMOffsets,
@@ -156,7 +157,9 @@ impl Default for InstanceLimits {
             total_stacks: 1000,
             core_instance_size: 1 << 20, // 1 MiB
             max_tables_per_module: 1,
-            table_elements: 10_000,
+            // NB: in #8504 it was seen that a C# module in debug module can
+            // have 10k+ elements.
+            table_elements: 20_000,
             max_memories_per_module: 1,
             memory_pages: 160,
             #[cfg(feature = "gc")]

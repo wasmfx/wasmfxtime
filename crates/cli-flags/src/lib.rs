@@ -101,6 +101,17 @@ wasmtime_option_group! {
         /// The maximum number of WebAssembly stacks which can be created with
         /// the pooling allocator.
         pub pooling_total_stacks: Option<u32>,
+
+        /// Whether to enable call-indirect caching.
+        pub cache_call_indirects: Option<bool>,
+
+        /// The maximum call-indirect cache slot count.
+        ///
+        /// One slot is allocated per indirect callsite; if the module
+        /// has more indirect callsites than this limit, then the
+        /// first callsites in linear order in the code section, up to
+        /// the limit, will receive a cache slot.
+        pub max_call_indirect_cache_slots: Option<usize>,
     }
 
     enum Optimize {
@@ -431,7 +442,11 @@ impl CommonOptions {
         Ok(())
     }
 
-    pub fn config(&mut self, target: Option<&str>) -> Result<Config> {
+    pub fn config(
+        &mut self,
+        target: Option<&str>,
+        pooling_allocator_default: Option<bool>,
+    ) -> Result<Config> {
         self.configure();
         let mut config = Config::new();
 
@@ -554,6 +569,12 @@ impl CommonOptions {
         if let Some(enable) = self.opts.memory_init_cow {
             config.memory_init_cow(enable);
         }
+        if let Some(enable) = self.opts.cache_call_indirects {
+            config.cache_call_indirects(enable);
+        }
+        if let Some(max) = self.opts.max_call_indirect_cache_slots {
+            config.max_call_indirect_cache_slots(max);
+        }
 
         if let Some(wasmfx_stack_size) = self.wasm.wasmfx_stack_size {
             config.wasmfx_stack_size(wasmfx_stack_size);
@@ -563,7 +584,7 @@ impl CommonOptions {
         }
 
         match_feature! {
-            ["pooling-allocator" : self.opts.pooling_allocator]
+            ["pooling-allocator" : self.opts.pooling_allocator.or(pooling_allocator_default)]
             enable => {
                 if enable {
                     let mut cfg = wasmtime::PoolingAllocationConfig::default();

@@ -97,7 +97,6 @@
 //!
 //! See the docs for [`bindgen!`] for more information on how to use it.
 
-#![cfg_attr(docsrs, doc(cfg(feature = "component-model")))]
 // rustdoc appears to lie about a warning above, so squelch it for now.
 #![allow(rustdoc::redundant_explicit_links)]
 
@@ -138,6 +137,9 @@ pub mod __internal {
     pub use super::matching::InstanceType;
     pub use crate::map_maybe_uninit;
     pub use crate::store::StoreOpaque;
+    pub use alloc::boxed::Box;
+    pub use alloc::string::String;
+    pub use alloc::vec::Vec;
     pub use anyhow;
     #[cfg(feature = "async")]
     pub use async_trait::async_trait;

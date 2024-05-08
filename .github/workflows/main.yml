@@ -249,7 +249,7 @@ jobs:
         submodules: true
     - uses: ./.github/actions/install-rust
       with:
-        toolchain: nightly-2024-04-19
+        toolchain: wasmtime-ci-pinned-nightly
 
     # Build C API documentation
     - run: curl -L https://sourceforge.net/projects/doxygen/files/rel-1.9.3/doxygen-1.9.3.linux.bin.tar.gz/download | tar xzf -
@@ -323,6 +323,7 @@ jobs:
     - run: cargo check -p wasmtime --no-default-features --features pooling-allocator
     - run: cargo check -p wasmtime --no-default-features --features cranelift
     - run: cargo check -p wasmtime --no-default-features --features component-model
+    - run: cargo check -p wasmtime --no-default-features --features runtime,component-model
     - run: cargo check -p wasmtime --no-default-features --features cranelift,wat,async,cache
     - run: cargo check -p wasmtime --no-default-features --features winch
     - run: cargo check -p wasmtime --no-default-features --features wmemcheck
@@ -363,16 +364,7 @@ jobs:
     # Checks for no_std support, ensure that crates can build on a no_std
     # target
     - run: rustup target add x86_64-unknown-none
-    - run: cargo check -p wasmtime-jit-icache-coherence
-      env:
-        CARGO_BUILD_TARGET: x86_64-unknown-none
-    - run: cargo check -p wasmtime-component-util
-      env:
-        CARGO_BUILD_TARGET: x86_64-unknown-none
-    - run: cargo check -p wasmtime-asm-macros
-      env:
-        CARGO_BUILD_TARGET: x86_64-unknown-none
-    - run: cargo check -p wasmtime-slab
+    - run: cargo check -p wasmtime --no-default-features --features gc,component-model
       env:
         CARGO_BUILD_TARGET: x86_64-unknown-none
 
@@ -475,7 +467,7 @@ jobs:
     # happen upstream. This is periodically updated through a PR.
     - uses: ./.github/actions/install-rust
       with:
-        toolchain: nightly-2024-04-19
+        toolchain: wasmtime-ci-pinned-nightly
 
     # Ensure that fuzzers still build.
     #
@@ -488,16 +480,6 @@ jobs:
     - run: cargo fuzz build --dev -s none
     - run: cargo fuzz build --dev -s none --fuzz-dir ./cranelift/isle/fuzz
     - run: cargo fuzz build --dev -s none --fuzz-dir ./crates/environ/fuzz --features component-model
-
-    # Verify the "min platform" example still works.
-    #
-    # Afterwards make sure the generated header file is up to date by ensuring
-    # that the regeneration process didn't change anything in-tree.
-    - run: cargo install cbindgen --vers "^0.26" --locked
-    - run: rustup component add rust-src
-    - run: ./build.sh ./embedding/x86_64-unknown-unknown.json
-      working-directory: ./examples/min-platform
-    - run: git diff --exit-code
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
@@ -714,6 +696,38 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
 
+  # Verify the "min platform" example still works.
+  test-min-platform-example:
+    name: Test the min-platform example
+    needs: determine
+    if: needs.determine.outputs.run-full
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - uses: ./.github/actions/install-rust
+    - run: cargo install cbindgen --vers "^0.26" --locked
+    - run: rustup target add x86_64-unknown-none
+    - run: ./build.sh x86_64-unknown-none
+      working-directory: ./examples/min-platform
+
+    # Afterwards make sure the generated header file is up to date by ensuring
+    # that the regeneration process didn't change anything in-tree.
+    - run: git diff --exit-code
+
+    # Add the `wasmtime-platform.h` file as a release artifact
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wasmtime-platform-header
+        path: examples/min-platform/embedding/wasmtime-platform.h
+
+    # common logic to cancel the entire run if this job fails
+    - run: gh run cancel ${{ github.run_id }}
+      if: failure() && github.event_name != 'pull_request'
+      env:
+        GH_TOKEN: ${{ github.token }}
+
 
   build-wasmtime-target-wasm32:
     name: Build wasmtime-target-wasm32
@@ -824,7 +838,7 @@ jobs:
         submodules: true
     - uses: ./.github/actions/install-rust
       with:
-        toolchain: nightly-2024-03-21
+        toolchain: wasmtime-ci-pinned-nightly
     - run: rustup component add rust-src miri
     - uses: actions/cache@v4
       with:
@@ -935,6 +949,7 @@ jobs:
       - miri
       - build-preview1-component-adapter
       - build-wasmtime-target-wasm32
+      - test-min-platform-example
     if: always()
     steps:
     - name: Successful test and build

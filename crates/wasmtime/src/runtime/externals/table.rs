@@ -1,10 +1,11 @@
-use std::ptr::NonNull;
-
+use crate::prelude::*;
 use crate::runtime::vm::{self as runtime};
 use crate::store::{AutoAssertNoGc, StoreData, StoreOpaque, Stored};
 use crate::trampoline::generate_table_export;
 use crate::{AnyRef, AsContext, AsContextMut, ExternRef, Func, HeapType, Ref, TableType};
 use anyhow::{anyhow, bail, Context, Result};
+use core::iter;
+use core::ptr::NonNull;
 use runtime::{GcRootsList, SendSyncPtr};
 use wasmtime_environ::TypeTrace;
 
@@ -77,7 +78,6 @@ impl Table {
         Table::_new(store.as_context_mut().0, ty, init)
     }
 
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     /// Async variant of [`Table::new`]. You must use this variant with
     /// [`Store`](`crate::Store`)s which have a
     /// [`ResourceLimiterAsync`](`crate::ResourceLimiterAsync`).
@@ -110,8 +110,10 @@ impl Table {
         let init = init.into_table_element(store, ty.element())?;
         unsafe {
             let table = Table::from_wasmtime_table(wasmtime_export, store);
-            let wasmtime_table = table.wasmtime_table(store, std::iter::empty());
-            (*wasmtime_table).fill(store.gc_store_mut()?, 0, init, ty.minimum())?;
+            let wasmtime_table = table.wasmtime_table(store, iter::empty());
+            (*wasmtime_table)
+                .fill(store.gc_store_mut()?, 0, init, ty.minimum())
+                .err2anyhow()?;
             Ok(table)
         }
     }
@@ -154,7 +156,7 @@ impl Table {
     /// Panics if `store` does not own this table.
     pub fn get(&self, mut store: impl AsContextMut, index: u32) -> Option<Ref> {
         let mut store = AutoAssertNoGc::new(store.as_context_mut().0);
-        let table = self.wasmtime_table(&mut store, std::iter::once(index));
+        let table = self.wasmtime_table(&mut store, iter::once(index));
         unsafe {
             match (*table).get(store.unwrap_gc_store_mut(), index)? {
                 runtime::TableElement::FuncRef(f) => {
@@ -206,7 +208,7 @@ impl Table {
         let store = store.as_context_mut().0;
         let ty = self.ty(&store);
         let val = val.into_table_element(store, ty.element())?;
-        let table = self.wasmtime_table(store, std::iter::empty());
+        let table = self.wasmtime_table(store, iter::empty());
         unsafe {
             (*table)
                 .set(index, val)
@@ -252,7 +254,7 @@ impl Table {
         let store = store.as_context_mut().0;
         let ty = self.ty(&store);
         let init = init.into_table_element(store, ty.element())?;
-        let table = self.wasmtime_table(store, std::iter::empty());
+        let table = self.wasmtime_table(store, iter::empty());
         unsafe {
             match (*table).grow(delta, init, store)? {
                 Some(size) => {
@@ -265,7 +267,6 @@ impl Table {
         }
     }
 
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     /// Async variant of [`Table::grow`]. Required when using a
     /// [`ResourceLimiterAsync`](`crate::ResourceLimiterAsync`).
     ///
@@ -325,7 +326,7 @@ impl Table {
                  destination table's element type",
             )?;
 
-        let dst_table = dst_table.wasmtime_table(store, std::iter::empty());
+        let dst_table = dst_table.wasmtime_table(store, iter::empty());
         let src_range = src_index..(src_index.checked_add(len).unwrap_or(u32::MAX));
         let src_table = src_table.wasmtime_table(store, src_range);
         unsafe {
@@ -336,7 +337,8 @@ impl Table {
                 dst_index,
                 src_index,
                 len,
-            )?;
+            )
+            .err2anyhow()?;
         }
         Ok(())
     }
@@ -362,20 +364,26 @@ impl Table {
         let ty = self.ty(&store);
         let val = val.into_table_element(store, ty.element())?;
 
-        let table = self.wasmtime_table(store, std::iter::empty());
+        let table = self.wasmtime_table(store, iter::empty());
         unsafe {
-            (*table).fill(store.gc_store_mut()?, dst, val, len)?;
+            (*table)
+                .fill(store.gc_store_mut()?, dst, val, len)
+                .err2anyhow()?;
         }
 
         Ok(())
     }
 
     pub(crate) fn trace_roots(&self, store: &mut StoreOpaque, gc_roots_list: &mut GcRootsList) {
-        if !self._ty(store).element().is_gc_heap_type() {
+        if !self
+            ._ty(store)
+            .element()
+            .is_vmgcref_type_and_points_to_object()
+        {
             return;
         }
 
-        let table = self.wasmtime_table(store, std::iter::empty());
+        let table = self.wasmtime_table(store, iter::empty());
         for gc_ref in unsafe { (*table).gc_refs_mut() } {
             if let Some(gc_ref) = gc_ref {
                 let gc_ref = NonNull::from(gc_ref);
@@ -423,7 +431,7 @@ impl Table {
     /// `StoreData` multiple times and becomes multiple `wasmtime::Table`s,
     /// this hash key will be consistent across all of these tables.
     #[allow(dead_code)] // Not used yet, but added for consistency.
-    pub(crate) fn hash_key(&self, store: &StoreOpaque) -> impl std::hash::Hash + Eq {
+    pub(crate) fn hash_key(&self, store: &StoreOpaque) -> impl core::hash::Hash + Eq {
         store[self.0].definition as usize
     }
 }

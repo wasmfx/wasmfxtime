@@ -3,24 +3,25 @@
 //! Helps implement fast indirect call signature checking, reference type
 //! downcasting, and etc...
 
+use crate::prelude::*;
+use crate::sync::RwLock;
 use crate::Engine;
-use std::{
+use alloc::sync::Arc;
+use core::iter;
+use core::{
     borrow::Borrow,
-    collections::{HashMap, HashSet},
-    fmt::Debug,
+    fmt::{self, Debug},
     hash::{Hash, Hasher},
     ops::Range,
-    sync::{
-        atomic::{
-            AtomicUsize,
-            Ordering::{AcqRel, Acquire},
-        },
-        Arc, RwLock,
+    sync::atomic::{
+        AtomicUsize,
+        Ordering::{AcqRel, Acquire},
     },
 };
+use hashbrown::{HashMap, HashSet};
 use wasmtime_environ::{
     iter_entity_range, EngineOrModuleTypeIndex, ModuleInternedTypeIndex, ModuleTypes, PrimaryMap,
-    TypeTrace, VMSharedTypeIndex, WasmRecGroup, WasmSubType,
+    SecondaryMap, TypeTrace, VMSharedTypeIndex, WasmRecGroup, WasmSubType,
 };
 use wasmtime_slab::{Id as SlabId, Slab};
 
@@ -88,7 +89,7 @@ pub struct TypeCollection {
 }
 
 impl Debug for TypeCollection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let TypeCollection {
             engine: _,
             rec_groups,
@@ -107,7 +108,7 @@ impl TypeCollection {
     pub fn new_for_module(engine: &Engine, types: &ModuleTypes) -> Self {
         let engine = engine.clone();
         let registry = engine.signatures();
-        let (rec_groups, types) = registry.0.write().unwrap().register_module_types(types);
+        let (rec_groups, types) = registry.0.write().register_module_types(types);
         let reverse_types = types.iter().map(|(k, v)| (*v, k)).collect();
 
         Self {
@@ -146,7 +147,6 @@ impl Drop for TypeCollection {
                 .signatures()
                 .0
                 .write()
-                .unwrap()
                 .unregister_type_collection(self);
         }
     }
@@ -178,7 +178,7 @@ pub struct RegisteredType {
 }
 
 impl Debug for RegisteredType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let RegisteredType {
             engine: _,
             entry: _,
@@ -211,13 +211,12 @@ impl Drop for RegisteredType {
                 .signatures()
                 .0
                 .write()
-                .unwrap()
                 .unregister_entry(self.entry.clone());
         }
     }
 }
 
-impl std::ops::Deref for RegisteredType {
+impl core::ops::Deref for RegisteredType {
     type Target = WasmSubType;
 
     fn deref(&self) -> &Self::Target {
@@ -258,7 +257,7 @@ impl RegisteredType {
         let (entry, index, ty) = {
             log::trace!("RegisteredType::new({ty:?})");
 
-            let mut inner = engine.signatures().0.write().unwrap();
+            let mut inner = engine.signatures().0.write();
 
             // It shouldn't be possible for users to construct non-canonical
             // types via the embedding API, and the only other types they can
@@ -290,10 +289,10 @@ impl RegisteredType {
     pub fn root(engine: &Engine, index: VMSharedTypeIndex) -> Option<RegisteredType> {
         let (entry, ty) = {
             let id = shared_type_index_to_slab_id(index);
-            let inner = engine.signatures().0.read().unwrap();
+            let inner = engine.signatures().0.read();
 
             let ty = inner.types.get(id)?.clone();
-            let entry = inner.type_to_rec_group[&index].clone();
+            let entry = inner.type_to_rec_group[index].clone().unwrap();
 
             // NB: make sure to incref while the lock is held to prevent:
             //
@@ -349,10 +348,10 @@ impl RegisteredType {
 struct RecGroupEntry(Arc<RecGroupEntryInner>);
 
 impl Debug for RecGroupEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct Ptr<'a, P>(&'a P);
-        impl<P: std::fmt::Pointer> Debug for Ptr<'_, P> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        impl<P: fmt::Pointer> Debug for Ptr<'_, P> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "{:#p}", *self.0)
             }
         }
@@ -436,7 +435,7 @@ struct TypeRegistryInner {
 
     // A map that lets you walk backwards from a `VMSharedTypeIndex` to its
     // `RecGroupEntry`.
-    type_to_rec_group: HashMap<VMSharedTypeIndex, RecGroupEntry>,
+    type_to_rec_group: SecondaryMap<VMSharedTypeIndex, Option<RecGroupEntry>>,
 
     // An explicit stack of entries that we are in the middle of dropping. Used
     // to avoid recursion when dropping a type that is holding the last
@@ -543,7 +542,7 @@ impl TypeRegistryInner {
         // while this rec group is still alive.
         hash_consing_key
             .trace_engine_indices::<_, ()>(&mut |index| {
-                let entry = &self.type_to_rec_group[&index];
+                let entry = &self.type_to_rec_group[index].as_ref().unwrap();
                 entry.incref(
                     "new cross-group type reference to existing type in `register_rec_group`",
                 );
@@ -583,11 +582,11 @@ impl TypeRegistryInner {
         let is_new_entry = self.hash_consing_map.insert(entry.clone());
         debug_assert!(is_new_entry);
 
-        // Now that we've construct the entry, we can update the reverse
+        // Now that we've constructed the entry, we can update the reverse
         // type-to-rec-group map.
-        for ty in entry.0.shared_type_indices.iter() {
-            let old_entry = self.type_to_rec_group.insert(*ty, entry.clone());
-            debug_assert!(old_entry.is_none());
+        for ty in entry.0.shared_type_indices.iter().copied() {
+            debug_assert!(self.type_to_rec_group[ty].is_none());
+            self.type_to_rec_group[ty] = Some(entry.clone());
         }
 
         entry
@@ -662,7 +661,7 @@ impl TypeRegistryInner {
         let range = ModuleInternedTypeIndex::from_bits(u32::MAX - 1)
             ..ModuleInternedTypeIndex::from_bits(u32::MAX);
 
-        self.register_rec_group(&map, range, std::iter::once(ty))
+        self.register_rec_group(&map, range, iter::once(ty))
     }
 
     /// Unregister all of a type collection's rec groups.
@@ -714,12 +713,12 @@ impl TypeRegistryInner {
                 .0
                 .hash_consing_key
                 .trace_engine_indices::<_, ()>(&mut |other_index| {
-                    let other_entry = self.type_to_rec_group[&other_index].clone();
+                    let other_entry = self.type_to_rec_group[other_index].as_ref().unwrap();
                     if other_entry.decref(
                         "referenced by dropped entry in \
                          `TypeCollection::unregister_entry`",
                     ) {
-                        self.drop_stack.push(other_entry);
+                        self.drop_stack.push(other_entry.clone());
                     }
                     Ok(())
                 })
@@ -734,13 +733,13 @@ impl TypeRegistryInner {
 
             // Similarly, remove the rec group's types from the registry, as
             // well as their entries from the reverse type-to-rec-group map.
-            for ty in entry.0.shared_type_indices.iter() {
+            for ty in entry.0.shared_type_indices.iter().copied() {
                 log::trace!("removing {ty:?} from registry");
 
-                let removed_entry = self.type_to_rec_group.remove(ty);
+                let removed_entry = self.type_to_rec_group[ty].take();
                 debug_assert_eq!(removed_entry.unwrap(), entry);
 
-                let id = shared_type_index_to_slab_id(*ty);
+                let id = shared_type_index_to_slab_id(ty);
                 self.types.dealloc(id);
             }
 
@@ -769,7 +768,7 @@ impl Drop for TypeRegistryInner {
             "type registry not empty: types slab is not empty"
         );
         assert!(
-            type_to_rec_group.is_empty(),
+            type_to_rec_group.is_empty() || type_to_rec_group.values().all(|x| x.is_none()),
             "type registry not empty: type-to-rec-group map is not empty"
         );
         assert!(
@@ -802,7 +801,7 @@ impl TypeRegistry {
     /// other mechanism already keeping the type registered.
     pub fn borrow(&self, index: VMSharedTypeIndex) -> Option<Arc<WasmSubType>> {
         let id = shared_type_index_to_slab_id(index);
-        let inner = self.0.read().unwrap();
+        let inner = self.0.read();
         inner.types.get(id).cloned()
     }
 }

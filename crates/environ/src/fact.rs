@@ -24,6 +24,7 @@ use crate::component::{
     StringEncoding, Transcode, TypeFuncIndex,
 };
 use crate::fact::transcode::Transcoder;
+use crate::prelude::*;
 use crate::{EntityRef, FuncIndex, GlobalIndex, MemoryIndex, PrimaryMap};
 use std::collections::HashMap;
 use wasm_encoder::*;

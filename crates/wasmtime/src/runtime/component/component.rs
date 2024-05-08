@@ -1,5 +1,6 @@
 use crate::component::matching::InstanceType;
 use crate::component::types;
+use crate::prelude::*;
 use crate::runtime::vm::component::ComponentRuntimeInfo;
 use crate::runtime::vm::{
     VMArrayCallFunction, VMFuncRef, VMFunctionBody, VMNativeCallFunction, VMWasmCallFunction,
@@ -9,12 +10,14 @@ use crate::{
     ResourcesRequired,
 };
 use crate::{FuncType, ValType};
+use alloc::sync::Arc;
 use anyhow::Result;
-use std::mem;
-use std::ops::Range;
+use core::any::Any;
+use core::mem;
+use core::ops::Range;
+use core::ptr::NonNull;
+#[cfg(feature = "std")]
 use std::path::Path;
-use std::ptr::NonNull;
-use std::sync::Arc;
 use wasmtime_environ::component::{
     AllCallFunc, CompiledComponentInfo, ComponentArtifacts, ComponentTypes, GlobalInitializer,
     InstantiateModule, StaticModuleIndex, TrampolineIndex, TypeComponentIndex, VMComponentOffsets,
@@ -78,7 +81,7 @@ struct ComponentInner {
     /// A cached handle to the `wasmtime::FuncType` for the canonical ABI's
     /// `realloc`, to avoid the need to look up types in the registry and take
     /// locks when calling `realloc` via `TypedFunc::call_raw`.
-    realloc_func_type: Arc<dyn std::any::Any + Send + Sync>,
+    realloc_func_type: Arc<dyn Any + Send + Sync>,
 }
 
 pub(crate) struct AllCallFuncPointers {
@@ -147,7 +150,6 @@ impl Component {
     /// # Ok(())
     /// # }
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub fn new(engine: &Engine, bytes: impl AsRef<[u8]>) -> Result<Component> {
         crate::CodeBuilder::new(engine)
             .wasm(bytes.as_ref(), None)?
@@ -159,8 +161,7 @@ impl Component {
     ///
     /// This is a convenience function for reading the contents of `file` on
     /// disk and then calling [`Component::new`].
-    #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
+    #[cfg(all(feature = "std", any(feature = "cranelift", feature = "winch")))]
     pub fn from_file(engine: &Engine, file: impl AsRef<Path>) -> Result<Component> {
         crate::CodeBuilder::new(engine)
             .wasm_file(file.as_ref())?
@@ -177,7 +178,6 @@ impl Component {
     ///
     /// For more information on semantics and errors see [`Component::new`].
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub fn from_binary(engine: &Engine, binary: &[u8]) -> Result<Component> {
         crate::CodeBuilder::new(engine)
             .wasm(binary, None)?
@@ -218,6 +218,7 @@ impl Component {
     /// [`Module::deserialize_file`] method.
     ///
     /// [`Module::deserialize_file`]: crate::Module::deserialize_file
+    #[cfg(feature = "std")]
     pub unsafe fn deserialize_file(engine: &Engine, path: impl AsRef<Path>) -> Result<Component> {
         let code = engine.load_code_file(path.as_ref(), ObjectKind::Component)?;
         Component::from_parts(engine, code, None)
@@ -374,7 +375,7 @@ impl Component {
             static_modules,
         } = match artifacts {
             Some(artifacts) => artifacts,
-            None => postcard::from_bytes(code_memory.wasmtime_info())?,
+            None => postcard::from_bytes(code_memory.wasmtime_info()).err2anyhow()?,
         };
 
         // Validate that the component can be used with the current instance
@@ -623,7 +624,7 @@ impl ComponentRuntimeInfo for ComponentInner {
         }
     }
 
-    fn realloc_func_type(&self) -> &Arc<dyn std::any::Any + Send + Sync> {
+    fn realloc_func_type(&self) -> &Arc<dyn Any + Send + Sync> {
         &self.realloc_func_type
     }
 }
