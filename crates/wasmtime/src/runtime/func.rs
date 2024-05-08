@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use crate::runtime::vm::{
     ExportFunction, SendSyncPtr, StoreBox, VMArrayCallHostFuncContext, VMContext, VMFuncRef,
     VMFunctionImport, VMNativeCallHostFuncContext, VMOpaqueContext,
@@ -9,14 +10,14 @@ use crate::{
     AsContext, AsContextMut, CallHook, Engine, Extern, FuncType, Instance, Module, Ref,
     StoreContext, StoreContextMut, Val, ValRaw, ValType,
 };
+use alloc::sync::Arc;
 use anyhow::{bail, Context as _, Error, Result};
-use std::ffi::c_void;
-use std::future::Future;
-use std::mem;
-use std::num::NonZeroUsize;
-use std::pin::Pin;
-use std::ptr::{self, NonNull};
-use std::sync::Arc;
+use core::ffi::c_void;
+use core::future::Future;
+use core::mem;
+use core::num::NonZeroUsize;
+use core::pin::Pin;
+use core::ptr::{self, NonNull};
 use wasmtime_environ::VMSharedTypeIndex;
 
 /// A reference to the abstract `nofunc` heap value.
@@ -89,12 +90,14 @@ impl NoFunc {
 
     /// Get the null `(ref null nofunc)` (aka `nullfuncref`) reference as a
     /// [`Ref`].
+    #[inline]
     pub fn null_ref() -> Ref {
         Ref::Func(None)
     }
 
     /// Get the null `(ref null nofunc)` (aka `nullfuncref`) reference as a
     /// [`Val`].
+    #[inline]
     pub fn null_val() -> Val {
         Val::FuncRef(None)
     }
@@ -368,7 +371,6 @@ macro_rules! generate_wrap_async_func {
         /// This function will panic if called with a non-asynchronous store.
         #[allow(non_snake_case)]
         #[cfg(feature = "async")]
-        #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
         pub fn [<wrap $num _async>]<T, $($args,)* R>(
             store: impl AsContextMut<Data = T>,
             func: impl for<'a> Fn(Caller<'a, T>, $($args),*) -> Box<dyn Future<Output = R> + Send + 'a> + Send + Sync + 'static,
@@ -445,7 +447,6 @@ impl Func {
     /// Panics if the given function type is not associated with this store's
     /// engine.
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub fn new<T>(
         store: impl AsContextMut<Data = T>,
         ty: FuncType,
@@ -489,7 +490,6 @@ impl Func {
     /// Panics if the given function type is not associated with this store's
     /// engine.
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub unsafe fn new_unchecked<T>(
         mut store: impl AsContextMut<Data = T>,
         ty: FuncType,
@@ -574,7 +574,6 @@ impl Func {
     /// # }
     /// ```
     #[cfg(all(feature = "async", feature = "cranelift"))]
-    #[cfg_attr(docsrs, doc(cfg(all(feature = "async", feature = "cranelift"))))]
     pub fn new_async<T, F>(store: impl AsContextMut<Data = T>, ty: FuncType, func: F) -> Func
     where
         F: for<'a> Fn(
@@ -623,25 +622,27 @@ impl Func {
     /// function being called is known statically so the type signature can
     /// be inferred. Rust types will map to WebAssembly types as follows:
     ///
-    /// | Rust Argument Type                | WebAssembly Type                      |
-    /// |-----------------------------------|---------------------------------------|
-    /// | `i32`                             | `i32`                                 |
-    /// | `u32`                             | `i32`                                 |
-    /// | `i64`                             | `i64`                                 |
-    /// | `u64`                             | `i64`                                 |
-    /// | `f32`                             | `f32`                                 |
-    /// | `f64`                             | `f64`                                 |
-    /// | `V128` on x86-64 and aarch64 only | `v128`                                |
-    /// | `Option<Func>`                    | `funcref` aka `(ref null func)`       |
-    /// | `Func`                            | `(ref func)`                          |
-    /// | `Option<Nofunc>`                  | `nullfuncref` aka `(ref null nofunc)` |
-    /// | `NoFunc`                          | `(ref nofunc)`                        |
-    /// | `Option<ExternRef>`               | `externref` aka `(ref null extern)`   |
-    /// | `ExternRef`                       | `(ref extern)`                        |
-    /// | `Option<AnyRef>`                  | `anyref` aka `(ref null any)`         |
-    /// | `AnyRef`                          | `(ref any)`                           |
-    /// | `Option<I31>`                     | `i31ref` aka `(ref null i31)`         |
-    /// | `I31`                             | `(ref i31)`                           |
+    /// | Rust Argument Type                | WebAssembly Type                          |
+    /// |-----------------------------------|-------------------------------------------|
+    /// | `i32`                             | `i32`                                     |
+    /// | `u32`                             | `i32`                                     |
+    /// | `i64`                             | `i64`                                     |
+    /// | `u64`                             | `i64`                                     |
+    /// | `f32`                             | `f32`                                     |
+    /// | `f64`                             | `f64`                                     |
+    /// | `V128` on x86-64 and aarch64 only | `v128`                                    |
+    /// | `Option<Func>`                    | `funcref` aka `(ref null func)`           |
+    /// | `Func`                            | `(ref func)`                              |
+    /// | `Option<Nofunc>`                  | `nullfuncref` aka `(ref null nofunc)`     |
+    /// | `NoFunc`                          | `(ref nofunc)`                            |
+    /// | `Option<ExternRef>`               | `externref` aka `(ref null extern)`       |
+    /// | `ExternRef`                       | `(ref extern)`                            |
+    /// | `Option<NoExtern>`                | `nullexternref` aka `(ref null noextern)` |
+    /// | `NoExtern`                        | `(ref noextern)`                          |
+    /// | `Option<AnyRef>`                  | `anyref` aka `(ref null any)`             |
+    /// | `AnyRef`                          | `(ref any)`                               |
+    /// | `Option<I31>`                     | `i31ref` aka `(ref null i31)`             |
+    /// | `I31`                             | `(ref i31)`                               |
     ///
     /// Any of the Rust types can be returned from the closure as well, in
     /// addition to some extra types
@@ -1117,7 +1118,6 @@ impl Func {
     /// only works with functions defined within an asynchronous store. Also
     /// panics if `store` does not own this function.
     #[cfg(feature = "async")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     pub async fn call_async<T>(
         &self,
         mut store: impl AsContextMut<Data = T>,
@@ -1400,25 +1400,27 @@ impl Func {
     ///
     /// Translation between Rust types and WebAssembly types looks like:
     ///
-    /// | WebAssembly                           | Rust                                  |
-    /// |---------------------------------------|---------------------------------------|
-    /// | `i32`                                 | `i32` or `u32`                        |
-    /// | `i64`                                 | `i64` or `u64`                        |
-    /// | `f32`                                 | `f32`                                 |
-    /// | `f64`                                 | `f64`                                 |
-    /// | `externref` aka `(ref null extern)`   | `Option<ExternRef>`                   |
-    /// | `(ref extern)`                        | `ExternRef`                           |
-    /// | `anyref` aka `(ref null any)`         | `Option<AnyRef>`                      |
-    /// | `(ref any)`                           | `AnyRef`                              |
-    /// | `i31ref` aka `(ref null i31)`         | `Option<I31>`                         |
-    /// | `(ref i31)`                           | `I31`                                 |
-    /// | `funcref` aka `(ref null func)`       | `Option<Func>`                        |
-    /// | `(ref func)`                          | `Func`                                |
-    /// | `(ref null <func type index>)`        | `Option<Func>`                        |
-    /// | `(ref <func type index>)`             | `Func`                                |
-    /// | `nullfuncref` aka `(ref null nofunc)` | `Option<NoFunc>`                      |
-    /// | `(ref nofunc)`                        | `NoFunc`                              |
-    /// | `v128`                                | `V128` on `x86-64` and `aarch64` only |
+    /// | WebAssembly                               | Rust                                  |
+    /// |-------------------------------------------|---------------------------------------|
+    /// | `i32`                                     | `i32` or `u32`                        |
+    /// | `i64`                                     | `i64` or `u64`                        |
+    /// | `f32`                                     | `f32`                                 |
+    /// | `f64`                                     | `f64`                                 |
+    /// | `externref` aka `(ref null extern)`       | `Option<ExternRef>`                   |
+    /// | `(ref extern)`                            | `ExternRef`                           |
+    /// | `(ref noextern)`                          | `NoExtern`                            |
+    /// | `nullexternref` aka `(ref null noextern)` | `Option<NoExtern>`                    |
+    /// | `anyref` aka `(ref null any)`             | `Option<AnyRef>`                      |
+    /// | `(ref any)`                               | `AnyRef`                              |
+    /// | `i31ref` aka `(ref null i31)`             | `Option<I31>`                         |
+    /// | `(ref i31)`                               | `I31`                                 |
+    /// | `funcref` aka `(ref null func)`           | `Option<Func>`                        |
+    /// | `(ref func)`                              | `Func`                                |
+    /// | `(ref null <func type index>)`            | `Option<Func>`                        |
+    /// | `(ref <func type index>)`                 | `Func`                                |
+    /// | `nullfuncref` aka `(ref null nofunc)`     | `Option<NoFunc>`                      |
+    /// | `(ref nofunc)`                            | `NoFunc`                              |
+    /// | `v128`                                    | `V128` on `x86-64` and `aarch64` only |
     ///
     /// (Note that this mapping is the same as that of [`Func::wrap`]).
     ///
@@ -1549,7 +1551,7 @@ impl Func {
     /// multiple times and becomes multiple `wasmtime::Func`s, this hash key
     /// will be consistent across all of these functions.
     #[allow(dead_code)] // Not used yet, but added for consistency.
-    pub(crate) fn hash_key(&self, store: &mut StoreOpaque) -> impl std::hash::Hash + Eq {
+    pub(crate) fn hash_key(&self, store: &mut StoreOpaque) -> impl core::hash::Hash + Eq {
         self.vm_func_ref(store).as_ptr() as usize
     }
 }
@@ -1977,7 +1979,7 @@ macro_rules! impl_host_abi {
             unsafe fn call(f: impl FnOnce(Self::Retptr) -> Self::Abi) -> Self {
                 // Create space to store all the return values and then invoke
                 // the function.
-                let mut space = std::mem::MaybeUninit::uninit();
+                let mut space = core::mem::MaybeUninit::uninit();
                 let t = f(space.as_mut_ptr());
                 let space = space.assume_init();
 
@@ -2121,7 +2123,6 @@ impl<T> Caller<'_, T> {
     ///
     /// Same as [`Store::gc`](crate::Store::gc).
     #[cfg(feature = "gc")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "gc")))]
     pub fn gc(&mut self) {
         self.store.gc()
     }
@@ -2130,7 +2131,6 @@ impl<T> Caller<'_, T> {
     ///
     /// Same as [`Store::gc_async`](crate::Store::gc_async).
     #[cfg(all(feature = "async", feature = "gc"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "gc")))]
     pub async fn gc_async(&mut self)
     where
         T: Send,
@@ -2582,8 +2582,8 @@ use self::rooted::*;
 mod rooted {
     use super::HostFunc;
     use crate::runtime::vm::{SendSyncPtr, VMFuncRef};
-    use std::ptr::NonNull;
-    use std::sync::Arc;
+    use alloc::sync::Arc;
+    use core::ptr::NonNull;
 
     /// A variant of a pointer-to-a-host-function used in `FuncKind::RootedHost`
     /// above.

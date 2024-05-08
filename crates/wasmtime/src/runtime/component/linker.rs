@@ -5,14 +5,15 @@ use crate::component::types;
 use crate::component::{
     Component, ComponentNamedList, Instance, InstancePre, Lift, Lower, ResourceType, Val,
 };
+use crate::prelude::*;
 use crate::{AsContextMut, Engine, Module, StoreContextMut};
+use alloc::sync::Arc;
 use anyhow::{bail, Context, Result};
+use core::future::Future;
+use core::marker;
+use core::pin::Pin;
+use hashbrown::hash_map::{Entry, HashMap};
 use semver::Version;
-use std::collections::hash_map::{Entry, HashMap};
-use std::future::Future;
-use std::marker;
-use std::pin::Pin;
-use std::sync::Arc;
 use wasmtime_environ::PrimaryMap;
 
 /// A type used to instantiate [`Component`]s.
@@ -319,7 +320,6 @@ impl<T> Linker<T> {
     /// can return an error if something goes wrong during instantiation such as
     /// a runtime trap or a runtime limit being exceeded.
     #[cfg(feature = "async")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     pub async fn instantiate_async(
         &self,
         store: impl AsContextMut<Data = T>,
@@ -384,7 +384,6 @@ impl<T> LinkerInstance<'_, T> {
     /// This is exactly like [`Self::func_wrap`] except it takes an async
     /// host function.
     #[cfg(feature = "async")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     pub fn func_wrap_async<Params, Return, F>(&mut self, name: &str, f: F) -> Result<()>
     where
         F: for<'a> Fn(
@@ -522,7 +521,6 @@ impl<T> LinkerInstance<'_, T> {
     /// This is exactly like [`Self::func_new`] except it takes an async
     /// host function.
     #[cfg(feature = "async")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     pub fn func_new_async<F>(&mut self, name: &str, f: F) -> Result<()>
     where
         F: for<'a> Fn(
@@ -644,7 +642,7 @@ impl NameMap {
         let (alternate_name, _version) = alternate_lookup_key(name)?;
         let alternate_key = strings.lookup(alternate_name)?;
         let (exact_key, _version) = self.alternate_lookups.get(&alternate_key)?;
-        self.definitions.get(&exact_key)
+        self.definitions.get(exact_key)
     }
 
     /// Inserts the `name` specified into this map.

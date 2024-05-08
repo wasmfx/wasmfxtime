@@ -5,7 +5,7 @@ use crate::{
     ValType, V128,
 };
 use anyhow::{bail, Context, Result};
-use std::ptr;
+use core::ptr;
 
 pub use crate::runtime::vm::ValRaw;
 
@@ -252,10 +252,15 @@ impl Val {
 
                     HeapType::Extern => ExternRef::from_raw(store, raw.get_externref()).into(),
 
+                    HeapType::NoExtern => Ref::Extern(None),
+
                     HeapType::Any
+                    | HeapType::Eq
                     | HeapType::I31
                     | HeapType::Array
-                    | HeapType::ConcreteArray(_) => {
+                    | HeapType::ConcreteArray(_)
+                    | HeapType::Struct
+                    | HeapType::ConcreteStruct(_) => {
                         AnyRef::from_raw(store, raw.get_anyref()).into()
                     }
 

@@ -7,6 +7,7 @@ mod code_too_large;
 mod component_model;
 mod coredump;
 mod debug;
+mod defaults;
 mod epoch_interruption;
 mod externals;
 mod fuel;
@@ -27,6 +28,7 @@ mod memory_creator;
 mod module;
 mod module_serialize;
 mod name;
+mod noextern;
 mod piped_tests;
 mod pooling_allocator;
 mod relocs;
@@ -101,7 +103,6 @@ pub(crate) fn small_pool_config() -> wasmtime::PoolingAllocationConfig {
         config.memory_protection_keys(wasmtime::MpkEnabled::Enable);
     }
 
-    #[cfg(feature = "async")]
     config.total_stacks(1);
 
     config

@@ -2,6 +2,7 @@ use crate::module::{
     FuncRefIndex, Initializer, MemoryInitialization, MemoryInitializer, MemoryPlan, Module,
     TablePlan, TableSegment, TableSegmentElements,
 };
+use crate::prelude::*;
 use crate::{
     DataIndex, DefinedFuncIndex, ElemIndex, EntityIndex, EntityType, FuncIndex, GlobalIndex,
     InitMemory, MemoryIndex, ModuleTypesBuilder, PrimaryMap, StaticMemoryInitializer, TableIndex,
@@ -10,6 +11,7 @@ use crate::{
 };
 use anyhow::{bail, Result};
 use cranelift_entity::packed_option::ReservedValue;
+use cranelift_entity::EntityRef;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::mem;
@@ -20,7 +22,7 @@ use wasmparser::{
     FuncToValidate, FunctionBody, NameSectionReader, Naming, Operator, Parser, Payload, TypeRef,
     Validator, ValidatorResources, WasmFeatures,
 };
-use wasmtime_types::{ConstExpr, ConstOp, ModuleInternedTypeIndex};
+use wasmtime_types::{ConstExpr, ConstOp, ModuleInternedTypeIndex, WasmHeapTopType};
 
 /// Object containing the standalone environment information.
 pub struct ModuleEnvironment<'a, 'data> {
@@ -114,6 +116,8 @@ pub struct FunctionBodyData<'a> {
     pub body: FunctionBody<'a>,
     /// Validator for the function body
     pub validator: FuncToValidate<ValidatorResources>,
+    /// The start index for call-indirects in this body.
+    pub call_indirect_start: usize,
 }
 
 #[derive(Debug, Default)]
@@ -442,6 +446,9 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                         // this never gets past validation
                         ExternalKind::Tag => unreachable!(),
                     };
+                    if let EntityIndex::Table(table) = entity {
+                        self.flag_written_table(table);
+                    }
                     self.result
                         .module
                         .exports
@@ -507,6 +514,10 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                             let (offset, escaped) = ConstExpr::from_wasmparser(offset_expr)?;
                             debug_assert!(escaped.is_empty());
 
+                            if !offset.provably_nonzero_i32() {
+                                self.flag_table_possibly_non_null_zero_element(table_index);
+                            }
+
                             self.result
                                 .module
                                 .table_initialization
@@ -542,9 +553,12 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
 
             Payload::CodeSectionEntry(mut body) => {
                 let validator = self.validator.code_section_entry(&body)?;
+                body.allow_memarg64(self.validator.features().contains(WasmFeatures::MEMORY64));
                 let func_index =
                     self.result.code_index + self.result.module.num_imported_funcs as u32;
                 let func_index = FuncIndex::from_u32(func_index);
+
+                let call_indirect_start = self.result.module.num_call_indirect_caches;
 
                 if self.tunables.generate_native_debuginfo {
                     let sig_index = self.result.module.functions[func_index].signature;
@@ -564,10 +578,13 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                             params: sig.params().into(),
                         });
                 }
+                self.prescan_code_section(&body)?;
                 body.allow_memarg64(self.validator.features().contains(WasmFeatures::MEMORY64));
-                self.result
-                    .function_body_inputs
-                    .push(FunctionBodyData { validator, body });
+                self.result.function_body_inputs.push(FunctionBodyData {
+                    validator,
+                    body,
+                    call_indirect_start,
+                });
                 self.result.code_index += 1;
             }
 
@@ -612,24 +629,11 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                         } => {
                             let range = mk_range(&mut self.result.total_data)?;
                             let memory_index = MemoryIndex::from_u32(memory_index);
-                            let mut offset_expr_reader = offset_expr.get_binary_reader();
-                            let (base, offset) = match offset_expr_reader.read_operator()? {
-                                Operator::I32Const { value } => (None, value.unsigned().into()),
-                                Operator::I64Const { value } => (None, value.unsigned()),
-                                Operator::GlobalGet { global_index } => {
-                                    (Some(GlobalIndex::from_u32(global_index)), 0)
-                                }
-                                s => {
-                                    bail!(WasmError::Unsupported(format!(
-                                        "unsupported init expr in data section: {:?}",
-                                        s
-                                    )));
-                                }
-                            };
+                            let (offset, escaped) = ConstExpr::from_wasmparser(offset_expr)?;
+                            debug_assert!(escaped.is_empty());
 
                             initializers.push(MemoryInitializer {
                                 memory_index,
-                                base,
                                 offset,
                                 data: range,
                             });
@@ -694,6 +698,83 @@ and for re-adding support for interface types you can see this issue:
             other => {
                 self.validator.payload(&other)?;
                 panic!("unimplemented section in wasm file {:?}", other);
+            }
+        }
+        Ok(())
+    }
+
+    /// Check various properties in function bodies in a "pre-pass" as
+    /// needed, before we actually generate code. Currently this is
+    /// used for:
+    ///
+    /// - Call-indirect caching: we need to know whether a table is
+    ///   "immutable", i.e., there are opcodes that could update its
+    ///   entries. If this is the case then the optimization isn't
+    ///   applicable. We can check this by simply scanning all functions
+    ///   for the relevant opcodes.
+    ///
+    ///   We also need to know how many `call_indirect` opcodes are in
+    ///   the whole module so that we know how large a `vmctx` struct
+    ///   to reserve and what its layout will be; and the starting
+    ///   index in this count for each function, so we can generate
+    ///   its code (with accesses to its own `call_indirect` callsite
+    ///   caches) in parallel.
+    fn prescan_code_section(&mut self, body: &FunctionBody<'_>) -> Result<()> {
+        if self.tunables.cache_call_indirects {
+            for op in body.get_operators_reader()? {
+                let op = op?;
+                match op {
+                    // Check whether a table may be mutated by any
+                    // opcode. (Note that we separately check for
+                    // table exports so we can detect mutations from
+                    // the outside; here we are only concerned with
+                    // mutations by our own module's code.)
+                    Operator::TableSet { table }
+                    | Operator::TableFill { table }
+                    | Operator::TableInit { table, .. }
+                    | Operator::TableCopy {
+                        dst_table: table, ..
+                    } => {
+                        // We haven't yet validated the body during
+                        // this pre-scan, so we need to check that
+                        // `dst_table` is in bounds. Ignore if not:
+                        // we'll catch the error later.
+                        let table = TableIndex::from_u32(table);
+                        if table.index() < self.result.module.table_plans.len() {
+                            self.flag_written_table(table);
+                        }
+                    }
+                    // Count the `call_indirect` sites so we can
+                    // assign them unique slots.
+                    //
+                    // We record the value of this counter as a
+                    // start-index as we start to scan each function,
+                    // and that function's compilation (which is
+                    // normally a separate parallel task) counts on
+                    // its own from that start index.
+                    Operator::CallIndirect { .. } => {
+                        self.result.module.num_call_indirect_caches += 1;
+
+                        // Cap the `num_call_indirect_caches` counter
+                        // at `max_call_indirect_cache_slots` so that
+                        // we don't allocate more than that amount of
+                        // space in the VMContext struct.
+                        //
+                        // Note that we also separately check against
+                        // this limit when emitting code for each
+                        // individual slot because we may cross the
+                        // limit in the middle of a function; also
+                        // once we hit the limit, the start-index for
+                        // each subsequent function will be saturated
+                        // at the limit.
+                        self.result.module.num_call_indirect_caches = core::cmp::min(
+                            self.result.module.num_call_indirect_caches,
+                            self.tunables.max_call_indirect_cache_slots,
+                        );
+                    }
+
+                    _ => {}
+                }
             }
         }
         Ok(())
@@ -809,6 +890,14 @@ and for re-adding support for interface types you can see this issue:
         let index = self.result.module.num_escaped_funcs as u32;
         ty.func_ref = FuncRefIndex::from_u32(index);
         self.result.module.num_escaped_funcs += 1;
+    }
+
+    fn flag_written_table(&mut self, table: TableIndex) {
+        self.result.module.table_plans[table].written = true;
+    }
+
+    fn flag_table_possibly_non_null_zero_element(&mut self, table: TableIndex) {
+        self.result.module.table_plans[table].non_null_zero = true;
     }
 
     /// Parses the Name section of the wasm module.
@@ -947,11 +1036,27 @@ impl ModuleTranslation<'_> {
                 segments: Vec::new(),
             });
         }
-        let mut idx = 0;
-        let ok = self.module.memory_initialization.init_memory(
-            &mut (),
-            InitMemory::CompileTime(&self.module),
-            |(), memory, init| {
+
+        struct InitMemoryAtCompileTime<'a> {
+            module: &'a Module,
+            info: &'a mut PrimaryMap<MemoryIndex, Memory>,
+            idx: usize,
+        }
+        impl InitMemory for InitMemoryAtCompileTime<'_> {
+            fn memory_size_in_pages(&mut self, memory_index: MemoryIndex) -> u64 {
+                self.module.memory_plans[memory_index].memory.minimum
+            }
+
+            fn eval_offset(&mut self, memory_index: MemoryIndex, expr: &ConstExpr) -> Option<u64> {
+                let mem64 = self.module.memory_plans[memory_index].memory.memory64;
+                match expr.ops() {
+                    &[ConstOp::I32Const(offset)] if !mem64 => Some(offset.unsigned().into()),
+                    &[ConstOp::I64Const(offset)] if mem64 => Some(offset.unsigned()),
+                    _ => None,
+                }
+            }
+
+            fn write(&mut self, memory: MemoryIndex, init: &StaticMemoryInitializer) -> bool {
                 // Currently `Static` only applies to locally-defined memories,
                 // so if a data segment references an imported memory then
                 // transitioning to a `Static` memory initializer is not
@@ -959,18 +1064,26 @@ impl ModuleTranslation<'_> {
                 if self.module.defined_memory_index(memory).is_none() {
                     return false;
                 };
-                let info = &mut info[memory];
+                let info = &mut self.info[memory];
                 let data_len = u64::from(init.data.end - init.data.start);
                 if data_len > 0 {
                     info.data_size += data_len;
                     info.min_addr = info.min_addr.min(init.offset);
                     info.max_addr = info.max_addr.max(init.offset + data_len);
-                    info.segments.push((idx, init.clone()));
+                    info.segments.push((self.idx, init.clone()));
                 }
-                idx += 1;
+                self.idx += 1;
                 true
-            },
-        );
+            }
+        }
+        let ok = self
+            .module
+            .memory_initialization
+            .init_memory(&mut InitMemoryAtCompileTime {
+                idx: 0,
+                module: &self.module,
+                info: &mut info,
+            });
         if !ok {
             return;
         }
@@ -1184,20 +1297,16 @@ impl ModuleTranslation<'_> {
                 .table
                 .wasm_ty
                 .heap_type
+                .top()
             {
-                WasmHeapType::Func | WasmHeapType::ConcreteFunc(_) | WasmHeapType::NoFunc => {}
+                WasmHeapTopType::Func => {}
                 // If this is not a funcref table, then we can't support a
                 // pre-computed table of function indices. Technically this
                 // initializer won't trap so we could continue processing
                 // segments, but that's left as a future optimization if
                 // necessary.
-                WasmHeapType::Cont | WasmHeapType::ConcreteCont(_) | WasmHeapType::NoCont => {} // TODO(dhil): Cannot be precomputed as continuations are dynamic.
-                WasmHeapType::Extern
-                | WasmHeapType::Any
-                | WasmHeapType::I31
-                | WasmHeapType::Array
-                | WasmHeapType::ConcreteArray(_)
-                | WasmHeapType::None => break,
+                WasmHeapTopType::Any | WasmHeapTopType::Extern => break,
+                WasmHeapTopType::Cont => break,
             }
 
             // Function indices can be optimized here, but fully general

@@ -6,11 +6,11 @@ use crate::{
     ValRaw, ValType,
 };
 use anyhow::{bail, Context, Result};
-use std::marker;
-use std::mem::{self, MaybeUninit};
-use std::num::NonZeroUsize;
-use std::os::raw::c_void;
-use std::ptr::{self, NonNull};
+use core::ffi::c_void;
+use core::marker;
+use core::mem::{self, MaybeUninit};
+use core::num::NonZeroUsize;
+use core::ptr::{self, NonNull};
 use wasmtime_environ::VMSharedTypeIndex;
 
 /// A statically typed WebAssembly function.
@@ -125,7 +125,6 @@ where
     ///
     /// [`Trap`]: crate::Trap
     #[cfg(feature = "async")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     pub async fn call_async<T>(
         &self,
         mut store: impl AsContextMut<Data = T>,
@@ -155,7 +154,7 @@ where
         #[cfg(feature = "gc")]
         {
             // See the comment in `Func::call_impl_check_args`.
-            let num_gc_refs = _params.non_i31_gc_refs_count();
+            let num_gc_refs = _params.vmgcref_pointing_to_object_count();
             if let Some(num_gc_refs) = NonZeroUsize::new(num_gc_refs) {
                 return _store
                     .unwrap_gc_store()
@@ -338,9 +337,18 @@ pub unsafe trait WasmTy: Send {
         actual: &HeapType,
     ) -> Result<()>;
 
-    // Is this an externref?
+    // Is this a GC-managed reference that actually points to a GC object? That
+    // is, `self` is *not* an `i31`, null reference, or uninhabited type.
+    //
+    // Note that it is okay if this returns false positives (i.e. `true` for
+    // `Rooted<AnyRef>` without actually looking up the rooted `anyref` in the
+    // store and reflecting on it to determine whether it is actually an
+    // `i31`). However, it is not okay if this returns false negatives.
     #[doc(hidden)]
-    fn is_non_i31_gc_ref(&self) -> bool;
+    #[inline]
+    fn is_vmgcref_and_points_to_object(&self) -> bool {
+        Self::valtype().is_vmgcref_type_and_points_to_object()
+    }
 
     // Construct a `Self::Abi` from the given `ValRaw`.
     #[doc(hidden)]
@@ -403,10 +411,6 @@ macro_rules! integers {
                 unreachable!()
             }
             #[inline]
-            fn is_non_i31_gc_ref(&self) -> bool {
-                false
-            }
-            #[inline]
             unsafe fn abi_from_raw(raw: *mut ValRaw) -> $primitive {
                 (*raw).$get_primitive()
             }
@@ -449,10 +453,6 @@ macro_rules! floats {
             #[inline]
             fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &HeapType) -> Result<()> {
                 unreachable!()
-            }
-            #[inline]
-            fn is_non_i31_gc_ref(&self) -> bool {
-                false
             }
             #[inline]
             unsafe fn abi_from_raw(raw: *mut ValRaw) -> $float {
@@ -499,7 +499,7 @@ unsafe impl WasmTy for NoFunc {
     }
 
     #[inline]
-    fn is_non_i31_gc_ref(&self) -> bool {
+    fn is_vmgcref_and_points_to_object(&self) -> bool {
         match self._inner {}
     }
 
@@ -553,11 +553,6 @@ unsafe impl WasmTy for Option<NoFunc> {
     }
 
     #[inline]
-    fn is_non_i31_gc_ref(&self) -> bool {
-        false
-    }
-
-    #[inline]
     unsafe fn abi_from_raw(_raw: *mut ValRaw) -> Self::Abi {
         ptr::null_mut()
     }
@@ -601,11 +596,6 @@ unsafe impl WasmTy for Func {
         let expected = expected.unwrap_concrete_func();
         self.ensure_matches_ty(store, expected)
             .context("argument type mismatch for reference to concrete type")
-    }
-
-    #[inline]
-    fn is_non_i31_gc_ref(&self) -> bool {
-        false
     }
 
     #[inline]
@@ -666,11 +656,6 @@ unsafe impl WasmTy for Option<Func> {
     }
 
     #[inline]
-    fn is_non_i31_gc_ref(&self) -> bool {
-        false
-    }
-
-    #[inline]
     unsafe fn abi_from_raw(raw: *mut ValRaw) -> Self::Abi {
         (*raw).get_funcref() as Self::Abi
     }
@@ -712,7 +697,7 @@ pub unsafe trait WasmParams: Send {
     ) -> Result<()>;
 
     #[doc(hidden)]
-    fn non_i31_gc_refs_count(&self) -> usize;
+    fn vmgcref_pointing_to_object_count(&self) -> usize;
 
     #[doc(hidden)]
     fn into_abi(self, store: &mut AutoAssertNoGc<'_>, func_ty: &FuncType) -> Result<Self::Abi>;
@@ -743,8 +728,8 @@ where
     }
 
     #[inline]
-    fn non_i31_gc_refs_count(&self) -> usize {
-        T::is_non_i31_gc_ref(self) as usize
+    fn vmgcref_pointing_to_object_count(&self) -> usize {
+        T::is_vmgcref_and_points_to_object(self) as usize
     }
 
     #[inline]
@@ -795,10 +780,10 @@ macro_rules! impl_wasm_params {
             }
 
             #[inline]
-            fn non_i31_gc_refs_count(&self) -> usize {
+            fn vmgcref_pointing_to_object_count(&self) -> usize {
                 let ($(ref $t,)*) = self;
                 0 $(
-                    + $t.is_non_i31_gc_ref() as usize
+                    + $t.is_vmgcref_and_points_to_object() as usize
                 )*
             }
 

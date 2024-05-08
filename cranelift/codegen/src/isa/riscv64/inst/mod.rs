@@ -46,8 +46,8 @@ pub(crate) type VecU8 = Vec<u8>;
 // Instructions (top level): definition
 
 pub use crate::isa::riscv64::lower::isle::generated_code::{
-    AluOPRRI, AluOPRRR, AtomicOP, CsrImmOP, CsrRegOP, FClassResult, FFlagsException, FloatRoundOP,
-    FpuOPRR, FpuOPRRR, FpuOPRRRR, LoadOP, MInst as Inst, StoreOP, CSR, FRM,
+    AluOPRRI, AluOPRRR, AtomicOP, CsrImmOP, CsrRegOP, FClassResult, FFlagsException, FpuOPRR,
+    FpuOPRRR, FpuOPRRRR, LoadOP, MInst as Inst, StoreOP, CSR, FRM,
 };
 use crate::isa::riscv64::lower::isle::generated_code::{CjOp, MInst, VecAluOpRRImm5, VecAluOpRRR};
 
@@ -569,18 +569,6 @@ fn riscv64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
         Inst::DummyUse { reg } => {
             collector.reg_use(reg);
         }
-        Inst::FloatRound {
-            rd,
-            int_tmp,
-            f_tmp,
-            rs,
-            ..
-        } => {
-            collector.reg_use(rs);
-            collector.reg_early_def(int_tmp);
-            collector.reg_early_def(f_tmp);
-            collector.reg_early_def(rd);
-        }
         Inst::Popcnt {
             sum, step, rs, tmp, ..
         } => {
@@ -940,30 +928,26 @@ pub fn reg_name(reg: Reg) -> String {
 }
 
 impl Inst {
-    fn print_with_state(
-        &self,
-        _state: &mut EmitState,
-        allocs: &mut AllocationConsumer<'_>,
-    ) -> String {
-        let format_reg = |reg: Reg, allocs: &mut AllocationConsumer<'_>| -> String {
+    fn print_with_state(&self, _state: &mut EmitState, allocs: &mut AllocationConsumer) -> String {
+        let format_reg = |reg: Reg, allocs: &mut AllocationConsumer| -> String {
             let reg = allocs.next(reg);
             reg_name(reg)
         };
 
-        let format_vec_amode = |amode: &VecAMode, allocs: &mut AllocationConsumer<'_>| -> String {
+        let format_vec_amode = |amode: &VecAMode, _allocs: &mut AllocationConsumer| -> String {
             match amode {
-                VecAMode::UnitStride { base } => base.to_string_with_alloc(allocs),
+                VecAMode::UnitStride { base } => base.to_string(),
             }
         };
 
-        let format_mask = |mask: &VecOpMasking, allocs: &mut AllocationConsumer<'_>| -> String {
+        let format_mask = |mask: &VecOpMasking, allocs: &mut AllocationConsumer| -> String {
             match mask {
                 VecOpMasking::Enabled { reg } => format!(",{}.t", format_reg(*reg, allocs)),
                 VecOpMasking::Disabled => format!(""),
             }
         };
 
-        let format_regs = |regs: &[Reg], allocs: &mut AllocationConsumer<'_>| -> String {
+        let format_regs = |regs: &[Reg], allocs: &mut AllocationConsumer| -> String {
             let mut x = if regs.len() > 1 {
                 String::from("[")
             } else {
@@ -1020,28 +1004,6 @@ impl Inst {
                 format!(
                     "inline_stack_probe##guard_size={} probe_count={} tmp={}",
                     guard_size, probe_count, tmp
-                )
-            }
-            &Inst::FloatRound {
-                op,
-                rd,
-                int_tmp,
-                f_tmp,
-                rs,
-                ty,
-            } => {
-                let rs = format_reg(rs, allocs);
-                let int_tmp = format_reg(int_tmp.to_reg(), allocs);
-                let f_tmp = format_reg(f_tmp.to_reg(), allocs);
-                let rd = format_reg(rd.to_reg(), allocs);
-                format!(
-                    "{} {},{}##int_tmp={} f_tmp={} ty={}",
-                    op.op_name(),
-                    rd,
-                    rs,
-                    int_tmp,
-                    f_tmp,
-                    ty
                 )
             }
             &Inst::AtomicStore { src, ty, p } => {
@@ -1384,7 +1346,7 @@ impl Inst {
                 from,
                 flags: _flags,
             } => {
-                let base = from.to_string_with_alloc(allocs);
+                let base = from.to_string();
                 let rd = format_reg(rd.to_reg(), allocs);
                 format!("{} {},{}", op.op_name(), rd, base,)
             }
@@ -1394,7 +1356,7 @@ impl Inst {
                 op,
                 flags: _flags,
             } => {
-                let base = to.to_string_with_alloc(allocs);
+                let base = to.to_string();
                 let src = format_reg(src, allocs);
                 format!("{} {},{}", op.op_name(), src, base,)
             }
@@ -1535,7 +1497,7 @@ impl Inst {
                 format!("elf_tls_get_addr {rd},{}", name.display(None))
             }
             &MInst::LoadAddr { ref rd, ref mem } => {
-                let rs = mem.to_string_with_alloc(allocs);
+                let rs = mem.to_string();
                 let rd = format_reg(rd.to_reg(), allocs);
                 format!("load_addr {},{}", rd, rs)
             }

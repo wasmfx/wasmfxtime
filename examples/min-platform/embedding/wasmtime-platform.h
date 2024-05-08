@@ -1,3 +1,23 @@
+// Platform support for Wasmtime's `no_std` build.
+//
+// This header file is what Wasmtime will rely on when it does not otherwise
+// have support for the native platform. This can happen with `no_std` binaries
+// for example where the traditional Unix-or-Windows implementation is not
+// suitable.
+//
+// Embedders are expected to implement the symbols defined in this header file.
+// These symbols can be defined either in C/C++ or in Rust (using
+// `#[no_mangle]`).
+//
+// Some more information about this header can additionally be found at
+// <https://docs.wasmtime.dev/stability-platform-support.html>.
+
+
+#ifndef _WASMTIME_PLATFORM_H
+#define _WASMTIME_PLATFORM_H
+
+/* Generated with cbindgen:0.26.0 */
+
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -217,6 +237,23 @@ extern int32_t wasmtime_memory_image_map_at(struct wasmtime_memory_image *image,
  */
 extern void wasmtime_memory_image_free(struct wasmtime_memory_image *image);
 
+/**
+ * Wasmtime requires a single pointer's space of TLS to be used at runtime,
+ * and this function returns the current value of the TLS variable.
+ *
+ * This value should default to `NULL`.
+ */
+extern uint8_t *wasmtime_tls_get(void);
+
+/**
+ * Sets the current TLS value for Wasmtime to the provided value.
+ *
+ * This value should be returned when later calling `wasmtime_tls_get`.
+ */
+extern void wasmtime_tls_set(uint8_t *ptr);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif // __cplusplus
+
+#endif /* _WASMTIME_PLATFORM_H */

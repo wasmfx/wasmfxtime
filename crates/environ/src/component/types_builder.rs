@@ -1,11 +1,11 @@
 use crate::component::*;
+use crate::prelude::*;
 use crate::{
     CompiledModuleInfo, EntityType, Module, ModuleTypes, ModuleTypesBuilder, PrimaryMap,
     TypeConvert, WasmHeapType, WasmValType,
 };
 use anyhow::{bail, Result};
 use cranelift_entity::EntityRef;
-use indexmap::{IndexMap, IndexSet};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::Index;
@@ -173,14 +173,12 @@ impl ComponentTypesBuilder {
     pub fn find_resource_drop_signature(&self) -> Option<ModuleInternedTypeIndex> {
         self.module_types
             .wasm_types()
-            .find(|(_, ty)| match &ty.composite_type {
-                wasmtime_types::WasmCompositeType::Cont(_) => false,
-                wasmtime_types::WasmCompositeType::Array(_) => false,
-                wasmtime_types::WasmCompositeType::Func(sig) => {
+            .find(|(_, ty)| {
+                ty.as_func().map_or(false, |sig| {
                     sig.params().len() == 1
                         && sig.returns().len() == 0
                         && sig.params()[0] == WasmValType::I32
-                }
+                })
             })
             .map(|(i, _)| i)
     }

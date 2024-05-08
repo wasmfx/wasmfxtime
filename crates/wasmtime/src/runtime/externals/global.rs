@@ -6,8 +6,8 @@ use crate::{
     RootedGcRefImpl, Val, ValType,
 };
 use anyhow::{bail, Context, Result};
-use std::ptr;
-use std::ptr::NonNull;
+use core::ptr;
+use core::ptr::NonNull;
 use wasmtime_environ::TypeTrace;
 
 /// A WebAssembly `global` value which can be read and written to.
@@ -136,8 +136,13 @@ impl Global {
                             "Embedder support for continuations has not yet been implemented!"
                         ),
 
+                        HeapType::NoExtern => Ref::Extern(None),
+
                         HeapType::Any
+                        | HeapType::Eq
                         | HeapType::I31
+                        | HeapType::Struct
+                        | HeapType::ConcreteStruct(_)
                         | HeapType::Array
                         | HeapType::ConcreteArray(_) => definition
                             .as_gc_ref()
@@ -214,7 +219,7 @@ impl Global {
 
     pub(crate) fn trace_root(&self, store: &mut StoreOpaque, gc_roots_list: &mut GcRootsList) {
         if let Some(ref_ty) = self._ty(store).content().as_ref() {
-            if !ref_ty.is_gc_heap_type() {
+            if !ref_ty.is_vmgcref_type_and_points_to_object() {
                 return;
             }
 
@@ -259,7 +264,7 @@ impl Global {
     /// Even if the same underlying global definition is added to the
     /// `StoreData` multiple times and becomes multiple `wasmtime::Global`s,
     /// this hash key will be consistent across all of these globals.
-    pub(crate) fn hash_key(&self, store: &StoreOpaque) -> impl std::hash::Hash + Eq {
+    pub(crate) fn hash_key(&self, store: &StoreOpaque) -> impl core::hash::Hash + Eq {
         store[self.0].definition as usize
     }
 }

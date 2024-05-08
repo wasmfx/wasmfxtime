@@ -6,8 +6,8 @@
 use crate::runtime::vm::V128Abi;
 use crate::store::{AutoAssertNoGc, StoreOpaque};
 use crate::{Result, ValRaw, ValType, WasmTy};
-use std::cmp::Ordering;
-use std::fmt;
+use core::cmp::Ordering;
+use core::fmt;
 
 /// Representation of a 128-bit vector type, `v128`, for WebAssembly.
 ///
@@ -102,11 +102,6 @@ unsafe impl WasmTy for V128 {
         _: &crate::HeapType,
     ) -> anyhow::Result<()> {
         unreachable!()
-    }
-
-    #[inline]
-    fn is_non_i31_gc_ref(&self) -> bool {
-        false
     }
 
     #[inline]

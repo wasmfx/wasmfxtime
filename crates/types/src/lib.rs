@@ -1,12 +1,22 @@
 //! Internal dependency of Wasmtime and Cranelift that defines types for
 //! WebAssembly.
 
-use smallvec::SmallVec;
+#![no_std]
+
+extern crate alloc;
+#[cfg(feature = "std")]
+extern crate std;
+
 pub use wasmparser;
 
+#[doc(hidden)]
+pub use alloc::format as __format;
+
+use alloc::boxed::Box;
+use core::{fmt, ops::Range};
 use cranelift_entity::entity_impl;
 use serde_derive::{Deserialize, Serialize};
-use std::{fmt, ops::Range};
+use smallvec::SmallVec;
 
 mod error;
 pub use error::*;
@@ -378,20 +388,28 @@ impl EngineOrModuleTypeIndex {
 /// WebAssembly heap type -- equivalent of `wasmparser`'s HeapType
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WasmHeapType {
+    // External types.
     Extern,
+    NoExtern,
 
+    // Continuation types.
     Cont,
     ConcreteCont(EngineOrModuleTypeIndex),
     NoCont,
 
+    // Function types.
     Func,
     ConcreteFunc(EngineOrModuleTypeIndex),
     NoFunc,
 
+    // Internal types.
     Any,
+    Eq,
     I31,
     Array,
     ConcreteArray(EngineOrModuleTypeIndex),
+    Struct,
+    ConcreteStruct(EngineOrModuleTypeIndex),
     None,
 }
 
@@ -414,13 +432,17 @@ impl fmt::Display for WasmHeapType {
             Self::Cont => write!(f, "cont"),
             Self::ConcreteCont(i) => write!(f, "cont {i}"),
             Self::NoCont => write!(f, "nocont"),
+            Self::NoExtern => write!(f, "noextern"),
             Self::Func => write!(f, "func"),
             Self::ConcreteFunc(i) => write!(f, "func {i}"),
             Self::NoFunc => write!(f, "nofunc"),
             Self::Any => write!(f, "any"),
+            Self::Eq => write!(f, "eq"),
             Self::I31 => write!(f, "i31"),
             Self::Array => write!(f, "array"),
             Self::ConcreteArray(i) => write!(f, "array {i}"),
+            Self::Struct => write!(f, "struct"),
+            Self::ConcreteStruct(i) => write!(f, "struct {i}"),
             Self::None => write!(f, "none"),
         }
     }
@@ -435,6 +457,7 @@ impl TypeTrace for WasmHeapType {
             Self::ConcreteArray(i) => func(i),
             Self::ConcreteFunc(i) => func(i),
             Self::ConcreteCont(i) => func(i),
+            Self::ConcreteStruct(i) => func(i),
             _ => Ok(()),
         }
     }
@@ -447,6 +470,7 @@ impl TypeTrace for WasmHeapType {
             Self::ConcreteArray(i) => func(i),
             Self::ConcreteFunc(i) => func(i),
             Self::ConcreteCont(i) => func(i),
+            Self::ConcreteStruct(i) => func(i),
             _ => Ok(()),
         }
     }
@@ -482,7 +506,7 @@ impl WasmHeapType {
     #[inline]
     pub fn top(&self) -> WasmHeapTopType {
         match self {
-            WasmHeapType::Extern => WasmHeapTopType::Extern,
+            WasmHeapType::Extern | WasmHeapType::NoExtern => WasmHeapTopType::Extern,
 
             WasmHeapType::Func | WasmHeapType::ConcreteFunc(_) | WasmHeapType::NoFunc => {
                 WasmHeapTopType::Func
@@ -493,9 +517,12 @@ impl WasmHeapType {
             }
 
             WasmHeapType::Any
+            | WasmHeapType::Eq
             | WasmHeapType::I31
             | WasmHeapType::Array
             | WasmHeapType::ConcreteArray(_)
+            | WasmHeapType::Struct
+            | WasmHeapType::ConcreteStruct(_)
             | WasmHeapType::None => WasmHeapTopType::Any,
         }
     }
@@ -718,17 +745,62 @@ impl TypeTrace for WasmArrayType {
     }
 }
 
+/// A concrete struct type.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct WasmStructType {
+    pub fields: Box<[WasmFieldType]>,
+}
+
+impl TypeTrace for WasmStructType {
+    fn trace<F, E>(&self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        for f in self.fields.iter() {
+            f.trace(func)?;
+        }
+        Ok(())
+    }
+
+    fn trace_mut<F, E>(&mut self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(&mut EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        for f in self.fields.iter_mut() {
+            f.trace_mut(func)?;
+        }
+        Ok(())
+    }
+}
+
 /// A function, array, or struct type.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum WasmCompositeType {
     Array(WasmArrayType),
     Func(WasmFuncType),
-    //
-    // TODO: struct types.
     Cont(WasmContType),
+    Struct(WasmStructType),
 }
 
 impl WasmCompositeType {
+    #[inline]
+    pub fn is_array(&self) -> bool {
+        matches!(self, Self::Array(_))
+    }
+
+    #[inline]
+    pub fn as_array(&self) -> Option<&WasmArrayType> {
+        match self {
+            WasmCompositeType::Array(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn unwrap_array(&self) -> &WasmArrayType {
+        self.as_array().unwrap()
+    }
+
     #[inline]
     pub fn is_func(&self) -> bool {
         matches!(self, Self::Func(_))
@@ -748,21 +820,21 @@ impl WasmCompositeType {
     }
 
     #[inline]
-    pub fn is_array(&self) -> bool {
-        matches!(self, Self::Array(_))
+    pub fn is_struct(&self) -> bool {
+        matches!(self, Self::Struct(_))
     }
 
     #[inline]
-    pub fn as_array(&self) -> Option<&WasmArrayType> {
+    pub fn as_struct(&self) -> Option<&WasmStructType> {
         match self {
-            WasmCompositeType::Array(f) => Some(f),
+            WasmCompositeType::Struct(f) => Some(f),
             _ => None,
         }
     }
 
     #[inline]
-    pub fn unwrap_array(&self) -> &WasmArrayType {
-        self.as_array().unwrap()
+    pub fn unwrap_struct(&self) -> &WasmStructType {
+        self.as_struct().unwrap()
     }
 
     #[inline]
@@ -793,6 +865,7 @@ impl TypeTrace for WasmCompositeType {
             WasmCompositeType::Array(a) => a.trace(func),
             WasmCompositeType::Func(f) => f.trace(func),
             WasmCompositeType::Cont(c) => c.trace(func),
+            WasmCompositeType::Struct(a) => a.trace(func),
         }
     }
 
@@ -804,6 +877,7 @@ impl TypeTrace for WasmCompositeType {
             WasmCompositeType::Array(a) => a.trace_mut(func),
             WasmCompositeType::Func(f) => f.trace_mut(func),
             WasmCompositeType::Cont(c) => c.trace_mut(func),
+            WasmCompositeType::Struct(a) => a.trace_mut(func),
         }
     }
 }
@@ -860,6 +934,21 @@ impl WasmSubType {
     #[inline]
     pub fn unwrap_cont(&self) -> &WasmContType {
         self.composite_type.unwrap_cont()
+    }
+
+    #[inline]
+    pub fn is_struct(&self) -> bool {
+        self.composite_type.is_struct()
+    }
+
+    #[inline]
+    pub fn as_struct(&self) -> Option<&WasmStructType> {
+        self.composite_type.as_struct()
+    }
+
+    #[inline]
+    pub fn unwrap_struct(&self) -> &WasmStructType {
+        self.composite_type.unwrap_struct()
     }
 }
 
@@ -1059,6 +1148,12 @@ entity_impl!(TagIndex);
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct StaticModuleIndex(u32);
 entity_impl!(StaticModuleIndex);
+
+/// Index of a `call_indirect` instruction in a module, used for
+/// caching that callsite's target in the VMContext.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub struct CallIndirectSiteIndex(u32);
+entity_impl!(CallIndirectSiteIndex);
 
 /// An index of an entity.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -1281,6 +1376,34 @@ impl ConstExpr {
     pub fn ops(&self) -> &[ConstOp] {
         &self.ops
     }
+
+    /// Is this ConstExpr a provably nonzero integer value?
+    ///
+    /// This must be conservative: if the expression *might* be zero,
+    /// it must return `false`. It is always allowed to return `false`
+    /// for some expression kind that we don't support. However, if it
+    /// returns `true`, the expression must be actually nonzero.
+    ///
+    /// We use this for certain table optimizations that rely on
+    /// knowing for sure that index 0 is not referenced.
+    pub fn provably_nonzero_i32(&self) -> bool {
+        assert!(self.ops.len() > 0);
+        if self.ops.len() > 1 {
+            // Compound expressions not yet supported: conservatively
+            // return `false` (we can't prove nonzero).
+            return false;
+        }
+        // Exactly one op at this point.
+        match self.ops[0] {
+            // An actual zero value -- definitely not nonzero!
+            ConstOp::I32Const(0) => false,
+            // Any other constant value -- provably nonzero, if above
+            // did not match.
+            ConstOp::I32Const(_) => true,
+            // Anything else: we can't prove anything.
+            _ => false,
+        }
+    }
 }
 
 /// The subset of Wasm opcodes that are constant.
@@ -1437,11 +1560,22 @@ pub trait TypeConvert {
             wasmparser::CompositeType::Array(a) => {
                 Ok(WasmCompositeType::Array(self.convert_array_type(a)))
             }
-            wasmparser::CompositeType::Struct(_) => Err(wasm_unsupported!("wasm gc: struct types")),
-
             wasmparser::CompositeType::Cont(c) => {
                 Ok(WasmCompositeType::Cont(self.convert_cont_type(c)))
             }
+            wasmparser::CompositeType::Struct(s) => {
+                Ok(WasmCompositeType::Struct(self.convert_struct_type(s)))
+            }
+        }
+    }
+
+    fn convert_struct_type(&self, ty: &wasmparser::StructType) -> WasmStructType {
+        WasmStructType {
+            fields: ty
+                .fields
+                .iter()
+                .map(|f| self.convert_field_type(f))
+                .collect(),
         }
     }
 
@@ -1514,19 +1648,18 @@ pub trait TypeConvert {
             wasmparser::HeapType::Extern => WasmHeapType::Extern,
             wasmparser::HeapType::Cont => WasmHeapType::Cont,
             wasmparser::HeapType::NoCont => WasmHeapType::NoCont,
+            wasmparser::HeapType::NoExtern => WasmHeapType::NoExtern,
             wasmparser::HeapType::Func => WasmHeapType::Func,
             wasmparser::HeapType::NoFunc => WasmHeapType::NoFunc,
             wasmparser::HeapType::Concrete(i) => self.lookup_heap_type(i),
             wasmparser::HeapType::Any => WasmHeapType::Any,
+            wasmparser::HeapType::Eq => WasmHeapType::Eq,
             wasmparser::HeapType::I31 => WasmHeapType::I31,
             wasmparser::HeapType::Array => WasmHeapType::Array,
+            wasmparser::HeapType::Struct => WasmHeapType::Struct,
             wasmparser::HeapType::None => WasmHeapType::None,
 
-            wasmparser::HeapType::Exn
-            | wasmparser::HeapType::NoExn
-            | wasmparser::HeapType::NoExtern
-            | wasmparser::HeapType::Eq
-            | wasmparser::HeapType::Struct => {
+            wasmparser::HeapType::Exn | wasmparser::HeapType::NoExn => {
                 unimplemented!("unsupported heap type {ty:?}");
             }
         }

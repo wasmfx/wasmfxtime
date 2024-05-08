@@ -1,11 +1,12 @@
+use crate::prelude::*;
+use alloc::sync::Arc;
 use anyhow::{bail, ensure, Result};
+use core::fmt;
+use core::str::FromStr;
+use hashbrown::{HashMap, HashSet};
 use serde_derive::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::fmt;
 #[cfg(any(feature = "cache", feature = "cranelift", feature = "winch"))]
 use std::path::Path;
-use std::str::FromStr;
-use std::sync::Arc;
 use target_lexicon::Architecture;
 use wasmparser::WasmFeatures;
 #[cfg(feature = "cache")]
@@ -86,8 +87,8 @@ impl Default for ModuleVersionStrategy {
     }
 }
 
-impl std::hash::Hash for ModuleVersionStrategy {
-    fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+impl core::hash::Hash for ModuleVersionStrategy {
+    fn hash<H: core::hash::Hasher>(&self, hasher: &mut H) {
         match self {
             Self::WasmtimeVersion => env!("CARGO_PKG_VERSION").hash(hasher),
             Self::Custom(s) => s.hash(hasher),
@@ -141,6 +142,7 @@ pub struct Config {
     pub(crate) wmemcheck: bool,
     pub(crate) coredump_on_trap: bool,
     pub(crate) macos_use_mach_ports: bool,
+    pub(crate) detect_host_feature: Option<fn(&str) -> Option<bool>>,
 }
 
 #[derive(Default, Clone)]
@@ -159,6 +161,8 @@ struct ConfigTunables {
     debug_adapter_modules: Option<bool>,
     relaxed_simd_deterministic: Option<bool>,
     tail_callable: Option<bool>,
+    cache_call_indirects: Option<bool>,
+    max_call_indirect_cache_slots: Option<usize>,
 }
 
 /// User-provided configuration for the compiler.
@@ -261,6 +265,10 @@ impl Config {
             wmemcheck: false,
             coredump_on_trap: false,
             macos_use_mach_ports: !cfg!(miri),
+            #[cfg(feature = "std")]
+            detect_host_feature: Some(detect_host_feature),
+            #[cfg(not(feature = "std"))]
+            detect_host_feature: None,
         };
         #[cfg(any(feature = "cranelift", feature = "winch"))]
         {
@@ -313,7 +321,6 @@ impl Config {
     ///
     /// This method will error if the given target triple is not supported.
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub fn target(&mut self, target: &str) -> Result<&mut Self> {
         self.compiler_config.target =
             Some(target_lexicon::Triple::from_str(target).map_err(|e| anyhow::anyhow!(e))?);
@@ -424,7 +431,6 @@ impl Config {
     /// it. If Wasmtime doesn't support exactly what you'd like just yet, please
     /// feel free to open an issue!
     #[cfg(feature = "async")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     pub fn async_support(&mut self, enable: bool) -> &mut Self {
         self.async_support = enable;
         self
@@ -481,8 +487,10 @@ impl Config {
     /// filename/line number for each wasm frame in the stack trace.
     ///
     /// By default this option is `WasmBacktraceDetails::Environment`, meaning
-    /// that wasm will read `WASMTIME_BACKTRACE_DETAILS` to indicate whether details
-    /// should be parsed.
+    /// that wasm will read `WASMTIME_BACKTRACE_DETAILS` to indicate whether
+    /// details should be parsed. Note that the `std` feature of this crate must
+    /// be active to read environment variables, otherwise this is disabled by
+    /// default.
     pub fn wasm_backtrace_details(&mut self, enable: WasmBacktraceDetails) -> &mut Self {
         self.wasm_backtrace_details_env_used = false;
         self.tunables.parse_wasm_debuginfo = match enable {
@@ -490,9 +498,16 @@ impl Config {
             WasmBacktraceDetails::Disable => Some(false),
             WasmBacktraceDetails::Environment => {
                 self.wasm_backtrace_details_env_used = true;
-                std::env::var("WASMTIME_BACKTRACE_DETAILS")
-                    .map(|s| Some(s == "1"))
-                    .unwrap_or(Some(false))
+                #[cfg(feature = "std")]
+                {
+                    std::env::var("WASMTIME_BACKTRACE_DETAILS")
+                        .map(|s| Some(s == "1"))
+                        .unwrap_or(Some(false))
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    Some(false)
+                }
             }
         };
         self
@@ -701,7 +716,6 @@ impl Config {
     /// The `Engine::new` method will fail if the value for this option is
     /// smaller than the [`Config::max_wasm_stack`] option.
     #[cfg(feature = "async")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     pub fn async_stack_size(&mut self, size: usize) -> &mut Self {
         self.async_stack_size = size;
         self
@@ -755,7 +769,6 @@ impl Config {
     /// [threads]: https://github.com/webassembly/threads
     /// [wasi-threads]: https://github.com/webassembly/wasi-threads
     #[cfg(feature = "threads")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
     pub fn wasm_threads(&mut self, enable: bool) -> &mut Self {
         self.features.set(WasmFeatures::THREADS, enable);
         self
@@ -778,7 +791,6 @@ impl Config {
     ///
     /// [proposal]: https://github.com/webassembly/reference-types
     #[cfg(feature = "gc")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "gc")))]
     pub fn wasm_reference_types(&mut self, enable: bool) -> &mut Self {
         self.features.set(WasmFeatures::REFERENCE_TYPES, enable);
         self
@@ -798,7 +810,6 @@ impl Config {
     ///
     /// [proposal]: https://github.com/WebAssembly/function-references
     #[cfg(feature = "gc")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "gc")))]
     pub fn wasm_function_references(&mut self, enable: bool) -> &mut Self {
         self.features.set(WasmFeatures::FUNCTION_REFERENCES, enable);
         self
@@ -820,7 +831,6 @@ impl Config {
     ///
     /// [proposal]: https://github.com/WebAssembly/gc
     #[cfg(feature = "gc")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "gc")))]
     pub fn wasm_gc(&mut self, enable: bool) -> &mut Self {
         self.features.set(WasmFeatures::GC, enable);
         self
@@ -1000,6 +1010,57 @@ impl Config {
         self
     }
 
+    /// Configures whether we enable the "indirect call cache" optimization.
+    ///
+    /// This feature adds, for each `call_indirect` instruction in a
+    /// Wasm module (i.e., a function-pointer call in guest code), a
+    /// one-entry cache that speeds up the translation from a table
+    /// index to the actual machine code. By default, the VM's
+    /// implementation of this translation requires several
+    /// indirections and checks (table bounds-check, function
+    /// signature-check, table lazy-initialization logic). The intent
+    /// of this feature is to speed up indirect calls substantially
+    /// when they are repeated frequently in hot code.
+    ///
+    /// While it accelerates repeated calls, this feature has the
+    /// potential to slow down instantiation slightly, because it adds
+    /// additional state (the cache storage -- usually 16 bytes per
+    /// `call_indirect` instruction for each instance) that has to be
+    /// initialized. In practice, we have not seen
+    /// measurable/statistically-significant impact from this, though.
+    ///
+    /// Until we have further experience with this feature, it will
+    /// remain off: it is `false` by default.
+    pub fn cache_call_indirects(&mut self, enable: bool) -> &mut Self {
+        self.tunables.cache_call_indirects = Some(enable);
+        self
+    }
+
+    /// Configures the "indirect call cache" maximum capacity.
+    ///
+    /// If the [`Config::cache_call_indirects`] configuration option
+    /// is enabled, the engine allocates "cache slots" directly in its
+    /// per-instance state struct for each `call_indirect` in the
+    /// module's code. We place a limit on this count in order to
+    /// avoid inflating the state too much with very large modules. If
+    /// a module exceeds the limit, the first `max` indirect
+    /// call-sites will still have a one-entry cache, but any indirect
+    /// call-sites beyond the limit (in linear order in the module's
+    /// code section) do not participate in the caching, as if the
+    /// option were turned off.
+    ///
+    /// There is also an internal hard cap to this limit:
+    /// configurations with `max` beyond `50_000` will effectively cap
+    /// the limit at `50_000`. This is so that instance state does not
+    /// become unreasonably large.
+    ///
+    /// This is `50_000` by default.
+    pub fn max_call_indirect_cache_slots(&mut self, max: usize) -> &mut Self {
+        const HARD_CAP: usize = 50_000; // See doc-comment above.
+        self.tunables.max_call_indirect_cache_slots = Some(core::cmp::min(max, HARD_CAP));
+        self
+    }
+
     /// Configures which compilation strategy will be used for wasm modules.
     ///
     /// This method can be used to configure which compiler is used for wasm
@@ -1008,7 +1069,6 @@ impl Config {
     ///
     /// The default value for this is `Strategy::Auto`.
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub fn strategy(&mut self, strategy: Strategy) -> &mut Self {
         self.compiler_config.strategy = strategy;
         self
@@ -1042,7 +1102,6 @@ impl Config {
     ///
     /// The default value for this is `false`
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub fn cranelift_debug_verifier(&mut self, enable: bool) -> &mut Self {
         let val = if enable { "true" } else { "false" };
         self.compiler_config
@@ -1059,7 +1118,6 @@ impl Config {
     ///
     /// The default value for this is `OptLevel::None`.
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub fn cranelift_opt_level(&mut self, level: OptLevel) -> &mut Self {
         let val = match level {
             OptLevel::None => "none",
@@ -1086,7 +1144,6 @@ impl Config {
     ///
     /// The default value for this is `false`
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub fn cranelift_nan_canonicalization(&mut self, enable: bool) -> &mut Self {
         let val = if enable { "true" } else { "false" };
         self.compiler_config
@@ -1109,7 +1166,6 @@ impl Config {
     /// over a trail of "breadcrumbs" or facts at each intermediate
     /// value. Thus, it is appropriate to enable in production.
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub fn cranelift_pcc(&mut self, enable: bool) -> &mut Self {
         let val = if enable { "true" } else { "false" };
         self.compiler_config
@@ -1135,7 +1191,6 @@ impl Config {
     /// cause `Engine::new` fail if the flag's name does not exist, or the value is not appropriate
     /// for the flag type.
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub unsafe fn cranelift_flag_enable(&mut self, flag: &str) -> &mut Self {
         self.compiler_config.flags.insert(flag.to_string());
         self
@@ -1161,7 +1216,6 @@ impl Config {
     /// For example, feature `wasm_backtrace` will set `unwind_info` to `true`, but if it's
     /// manually set to false then it will fail.
     #[cfg(any(feature = "cranelift", feature = "winch"))]
-    #[cfg_attr(docsrs, doc(cfg(any(feature = "cranelift", feature = "winch"))))]
     pub unsafe fn cranelift_flag_set(&mut self, name: &str, value: &str) -> &mut Self {
         self.compiler_config
             .settings
@@ -1188,7 +1242,6 @@ impl Config {
     ///
     /// [docs]: https://bytecodealliance.github.io/wasmtime/cli-cache.html
     #[cfg(feature = "cache")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "cache")))]
     pub fn cache_config_load(&mut self, path: impl AsRef<Path>) -> Result<&mut Self> {
         self.cache_config = CacheConfig::from_file(Some(path.as_ref()))?;
         Ok(self)
@@ -1205,7 +1258,6 @@ impl Config {
     /// This method is only available when the `cache` feature of this crate is
     /// enabled.
     #[cfg(feature = "cache")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "cache")))]
     pub fn disable_cache(&mut self) -> &mut Self {
         self.cache_config = CacheConfig::new_cache_disabled();
         self
@@ -1233,7 +1285,6 @@ impl Config {
     ///
     /// [docs]: https://bytecodealliance.github.io/wasmtime/cli-cache.html
     #[cfg(feature = "cache")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "cache")))]
     pub fn cache_config_load_default(&mut self) -> Result<&mut Self> {
         self.cache_config = CacheConfig::from_file(None)?;
         Ok(self)
@@ -1254,7 +1305,6 @@ impl Config {
     /// Custom memory creators are used when creating creating async instance stacks for
     /// the on-demand instance allocation strategy.
     #[cfg(feature = "async")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     pub fn with_host_stack(&mut self, stack_creator: Arc<dyn StackCreator>) -> &mut Self {
         self.stack_creator = Some(Arc::new(StackCreatorProxy(stack_creator)));
         self
@@ -1566,7 +1616,6 @@ impl Config {
     ///
     /// By default parallel compilation is enabled.
     #[cfg(feature = "parallel-compilation")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "parallel-compilation")))]
     pub fn parallel_compilation(&mut self, parallel: bool) -> &mut Self {
         self.parallel_compilation = parallel;
         self
@@ -1670,7 +1719,6 @@ impl Config {
     ///
     /// This option is disabled by default.
     #[cfg(feature = "coredump")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "coredump")))]
     pub fn coredump_on_trap(&mut self, enable: bool) -> &mut Self {
         self.coredump_on_trap = enable;
         self
@@ -1724,6 +1772,24 @@ impl Config {
     pub fn memory_guaranteed_dense_image_size(&mut self, size_in_bytes: u64) -> &mut Self {
         self.memory_guaranteed_dense_image_size = size_in_bytes;
         self
+    }
+
+    pub(crate) fn conditionally_enable_defaults(&mut self) {
+        // If tail calls were not explicitly enabled/disabled (i.e. tail_callable is None), enable
+        // them if we are targeting a backend that supports them. Currently the Cranelift
+        // compilation strategy is the only one that supports tail calls, but not targeting s390x.
+        if self.tunables.tail_callable.is_none() {
+            #[cfg(feature = "cranelift")]
+            let default_tail_calls = self.compiler_config.strategy == Strategy::Cranelift
+                && self.compiler_config.target.as_ref().map_or_else(
+                    || target_lexicon::Triple::host().architecture,
+                    |triple| triple.architecture,
+                ) != Architecture::S390x;
+            #[cfg(not(feature = "cranelift"))]
+            let default_tail_calls = false;
+
+            self.wasm_tail_call(default_tail_calls);
+        }
     }
 
     pub(crate) fn validate(&self) -> Result<Tunables> {
@@ -1796,6 +1862,8 @@ impl Config {
             debug_adapter_modules
             relaxed_simd_deterministic
             tail_callable
+            cache_call_indirects
+            max_call_indirect_cache_slots
         }
 
         // If we're going to compile with winch, we must use the winch calling convention.
@@ -2036,6 +2104,43 @@ impl Config {
     /// This option defaults to `true`, using Mach ports by default.
     pub fn macos_use_mach_ports(&mut self, mach_ports: bool) -> &mut Self {
         self.macos_use_mach_ports = mach_ports;
+        self
+    }
+
+    /// Configures an embedder-provided function, `detect`, which is used to
+    /// determine if an ISA-specific feature is available on the current host.
+    ///
+    /// This function is used to verify that any features enabled for a compiler
+    /// backend, such as AVX support on x86\_64, are also available on the host.
+    /// It is undefined behavior to execute an AVX instruction on a host that
+    /// doesn't support AVX instructions, for example.
+    ///
+    /// When the `std` feature is active on this crate then this function is
+    /// configured to a default implementation that uses the standard library's
+    /// feature detection. When the `std` feature is disabled then there is no
+    /// default available and this method must be called to configure a feature
+    /// probing function.
+    ///
+    /// The `detect` function provided is given a string name of an ISA feature.
+    /// The function should then return:
+    ///
+    /// * `Some(true)` - indicates that the feature was found on the host and it
+    ///   is supported.
+    /// * `Some(false)` - the feature name was recognized but it was not
+    ///   detected on the host, for example the CPU is too old.
+    /// * `None` - the feature name was not recognized and it's not known
+    ///   whether it's on the host or not.
+    ///
+    /// Feature names passed to `detect` match the same feature name used in the
+    /// Rust standard library. For example `"sse4.2"` is used on x86\_64.
+    ///
+    /// # Unsafety
+    ///
+    /// This function is `unsafe` because it is undefined behavior to execute
+    /// instructions that a host does not support. This means that the result of
+    /// `detect` must be correct for memory safe execution at runtime.
+    pub unsafe fn detect_host_feature(&mut self, detect: fn(&str) -> Option<bool>) -> &mut Self {
+        self.detect_host_feature = Some(detect);
         self
     }
 }
@@ -2368,7 +2473,6 @@ impl PoolingAllocationConfig {
     ///
     /// [`call_async`]: crate::TypedFunc::call_async
     #[cfg(feature = "async")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     pub fn async_stack_zeroing(&mut self, enable: bool) -> &mut Self {
         self.config.async_stack_zeroing = enable;
         self
@@ -2386,7 +2490,6 @@ impl PoolingAllocationConfig {
     /// Note that when using this option the memory with async stacks will
     /// never be decommitted.
     #[cfg(feature = "async")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
     pub fn async_stack_keep_resident(&mut self, size: usize) -> &mut Self {
         let size = round_up_to_pages(size as u64) as usize;
         self.config.async_stack_keep_resident = size;
@@ -2641,7 +2744,7 @@ impl PoolingAllocationConfig {
     }
 
     /// The maximum table elements for any table defined in a module (default is
-    /// `10000`).
+    /// `20000`).
     ///
     /// If a table's minimum element limit is greater than this value, the
     /// module will fail to instantiate.
@@ -2766,7 +2869,6 @@ impl PoolingAllocationConfig {
     /// entry in the pool contains the space needed for each GC heap used by a
     /// store.
     #[cfg(feature = "gc")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "gc")))]
     pub fn total_gc_heaps(&mut self, count: u32) -> &mut Self {
         self.config.limits.total_gc_heaps = count;
         self
@@ -2778,4 +2880,73 @@ pub(crate) fn probestack_supported(arch: Architecture) -> bool {
         arch,
         Architecture::X86_64 | Architecture::Aarch64(_) | Architecture::Riscv64(_)
     )
+}
+
+#[cfg(feature = "std")]
+fn detect_host_feature(feature: &str) -> Option<bool> {
+    #[cfg(target_arch = "aarch64")]
+    {
+        return match feature {
+            "lse" => Some(std::arch::is_aarch64_feature_detected!("lse")),
+            "paca" => Some(std::arch::is_aarch64_feature_detected!("paca")),
+
+            _ => None,
+        };
+    }
+
+    // There is no is_s390x_feature_detected macro yet, so for now
+    // we use getauxval from the libc crate directly.
+    #[cfg(all(target_arch = "s390x", target_os = "linux"))]
+    {
+        let v = unsafe { libc::getauxval(libc::AT_HWCAP) };
+        const HWCAP_S390X_VXRS_EXT2: libc::c_ulong = 32768;
+
+        return match feature {
+            // There is no separate HWCAP bit for mie2, so assume
+            // that any machine with vxrs_ext2 also has mie2.
+            "vxrs_ext2" | "mie2" => Some((v & HWCAP_S390X_VXRS_EXT2) != 0),
+
+            _ => None,
+        };
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    {
+        return match feature {
+            // due to `is_riscv64_feature_detected` is not stable.
+            // we cannot use it. For now lie and say all features are always
+            // found to keep tests working.
+            _ => Some(true),
+        };
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        return match feature {
+            "sse3" => Some(std::is_x86_feature_detected!("sse3")),
+            "ssse3" => Some(std::is_x86_feature_detected!("ssse3")),
+            "sse4.1" => Some(std::is_x86_feature_detected!("sse4.1")),
+            "sse4.2" => Some(std::is_x86_feature_detected!("sse4.2")),
+            "popcnt" => Some(std::is_x86_feature_detected!("popcnt")),
+            "avx" => Some(std::is_x86_feature_detected!("avx")),
+            "avx2" => Some(std::is_x86_feature_detected!("avx2")),
+            "fma" => Some(std::is_x86_feature_detected!("fma")),
+            "bmi1" => Some(std::is_x86_feature_detected!("bmi1")),
+            "bmi2" => Some(std::is_x86_feature_detected!("bmi2")),
+            "avx512bitalg" => Some(std::is_x86_feature_detected!("avx512bitalg")),
+            "avx512dq" => Some(std::is_x86_feature_detected!("avx512dq")),
+            "avx512f" => Some(std::is_x86_feature_detected!("avx512f")),
+            "avx512vl" => Some(std::is_x86_feature_detected!("avx512vl")),
+            "avx512vbmi" => Some(std::is_x86_feature_detected!("avx512vbmi")),
+            "lzcnt" => Some(std::is_x86_feature_detected!("lzcnt")),
+
+            _ => None,
+        };
+    }
+
+    #[allow(unreachable_code)]
+    {
+        let _ = feature;
+        return None;
+    }
 }

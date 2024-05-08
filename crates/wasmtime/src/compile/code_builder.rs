@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use crate::Engine;
 use anyhow::{anyhow, bail, Context, Result};
 use std::borrow::Cow;
@@ -239,7 +240,6 @@ impl<'a> CodeBuilder<'a> {
     /// compiles a serialized [`Component`](crate::component::Component)
     /// instead of a module.
     #[cfg(feature = "component-model")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "component-model")))]
     pub fn compile_component_serialized(&self) -> Result<Vec<u8>> {
         let bytes = self.wasm_binary()?;
         let (v, _) = super::build_component_artifacts(self.engine, &bytes, None)?;
