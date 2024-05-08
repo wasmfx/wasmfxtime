@@ -700,7 +700,8 @@ jobs:
   test-min-platform-example:
     name: Test the min-platform example
     needs: determine
-    if: needs.determine.outputs.run-full
+    # TODO(dhil): This step is disabled as the platform is currently unsupported.
+    if: github.repository == 'bytecodealliance/wasmtime' && needs.determine.outputs.run-full
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
