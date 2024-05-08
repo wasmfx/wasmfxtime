@@ -40,6 +40,8 @@ mod allocator;
 
 pub use allocator::*;
 
+use allocator::wasmfx_allocator::WasmFXAllocator;
+
 /// A type that roughly corresponds to a WebAssembly instance, but is also used
 /// for host-defined objects.
 ///
@@ -149,6 +151,9 @@ pub struct Instance {
     #[cfg(feature = "wmemcheck")]
     pub(crate) wmemcheck_state: Option<Wmemcheck>,
 
+    /// WasmFX allocator
+    wasmfx_allocator: Option<WasmFXAllocator>,
+
     /// Additional context used by compiled wasm code. This field is last, and
     /// represents a dynamically-sized array that extends beyond the nominal
     /// end of the struct (similar to a flexible array member).
@@ -189,6 +194,7 @@ impl Instance {
                 tables,
                 dropped_elements,
                 dropped_data,
+                wasmfx_allocator: None,
                 host_state: req.host_state,
                 vmctx_self_reference: SendSyncPtr::new(NonNull::new(ptr.add(1).cast()).unwrap()),
                 vmctx: VMContext {
@@ -1321,6 +1327,31 @@ impl Instance {
         unsafe {
             self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_stack_chain())
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_typed_continuations_stack_chain(&mut self, chain: *mut *mut StackChainCell) {
+        unsafe {
+            let ptr =
+                self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_stack_chain());
+            *ptr = chain;
+        }
+    }
+
+    // TODO
+    pub(crate) fn wasmfx_allocate_stack(&mut self) -> Result<wasmfx_allocator::FiberStack, Error> {
+        match &self.wasmfx_allocator {
+            Some(allocator) => allocator.allocate(),
+            None => {
+                let wasmfx_config = unsafe { &*(*self.store()).wasmfx_config() };
+                self.wasmfx_allocator = Some(WasmFXAllocator::new(wasmfx_config));
+                self.wasmfx_allocator.as_ref().unwrap().allocate()
+            }
+        }
+    }
+
+    pub(crate) fn wasmfx_deallocate_stack(&mut self, stack: &wasmfx_allocator::FiberStack) {
+        self.wasmfx_allocator.as_ref().unwrap().deallocate(stack)
     }
 }
 

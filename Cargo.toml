@@ -387,6 +387,11 @@ wasmfx_baseline = [
   "wasmtime/wasmfx_baseline"
 ]
 
+# Toggle the WasmFX pooling allocator
+wasmfx_pooling_allocator = [
+  "wasmtime/wasmfx_pooling_allocator"
+]
+
 # ========================================
 # On-by-default features
 #
