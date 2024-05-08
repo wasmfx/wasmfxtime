@@ -1,5 +1,10 @@
 #![no_std]
-use core::{ptr, convert::From, marker::{Send, Sync}, default::Default};
+use core::{
+    convert::From,
+    default::Default,
+    marker::{Send, Sync},
+    ptr,
+};
 extern crate alloc;
 
 /// Default size for continuation stacks
