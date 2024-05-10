@@ -4,7 +4,7 @@
 #![allow(missing_docs)]
 
 cfg_if::cfg_if! {
-    if #[cfg(not(feature = "typed_continuations_baseline_implementation"))] {
+    if #[cfg(not(feature = "wasmfx_baseline"))] {
 
         use std::cell::Cell;
         use std::io;

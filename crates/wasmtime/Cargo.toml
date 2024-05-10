@@ -270,4 +270,4 @@ std = [
 unsafe_disable_continuation_linearity_check = []
 
 # Toggle the baseline implementation of WasmFX
-typed_continuations_baseline_implementation = ["async"]
+wasmfx_baseline = ["async"]

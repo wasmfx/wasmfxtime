@@ -104,7 +104,7 @@ impl Backtrace {
         trap_pc_and_fp: Option<(usize, usize)>,
         mut f: impl FnMut(Frame) -> ControlFlow<()>,
     ) {
-        if cfg!(feature = "typed_continuations_baseline_implementation") {
+        if cfg!(feature = "wasmfx_baseline") {
             if crate::runtime::vm::continuation::baseline::has_ever_run_continuation() {
                 log::info!("Backtrace generation not supported in baseline implementation once a continuation has been invoked");
                 return;

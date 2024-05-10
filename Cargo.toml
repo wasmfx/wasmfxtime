@@ -410,9 +410,9 @@ unsafe_disable_continuation_linearity_check = [
 ]
 
 # The following toggles the baseline implementation of typed continuations.
-typed_continuations_baseline_implementation = [
-  "wasmtime-cranelift/typed_continuations_baseline_implementation",
-  "wasmtime/typed_continuations_baseline_implementation"
+wasmfx_baseline = [
+  "wasmtime-cranelift/wasmfx_baseline",
+  "wasmtime/wasmfx_baseline"
 ]
 
 # CLI subcommands for the `wasmtime` executable. See `wasmtime $cmd --help`

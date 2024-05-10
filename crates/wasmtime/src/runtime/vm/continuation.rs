@@ -1,7 +1,7 @@
 //! Continuations TODO
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "typed_continuations_baseline_implementation")] {
+    if #[cfg(feature = "wasmfx_baseline")] {
         pub use baseline as imp;
     } else {
         pub use optimized as imp;
@@ -15,7 +15,7 @@ cfg_if::cfg_if! {
 #[repr(C)]
 pub struct VMContObj(pub Option<*mut imp::VMContRef>);
 
-#[cfg(not(feature = "typed_continuations_baseline_implementation"))]
+#[cfg(not(feature = "wasmfx_baseline"))]
 pub mod optimized {
     use super::stack_chain::StackChain;
     use crate::runtime::vm::{
@@ -90,7 +90,7 @@ pub mod optimized {
 
     /// TODO
     #[inline(always)]
-    pub fn drop_cont_ref(contref: *mut VMContRef) {
+    pub fn drop_cont_ref(_instance: &mut Instance, contref: *mut VMContRef) {
         // Note that continuation references do not own their parents, hence we ignore
         // parent fields here.
 
@@ -283,7 +283,7 @@ pub mod optimized {
 //
 // Baseline implementation
 //
-#[cfg(feature = "typed_continuations_baseline_implementation")]
+#[cfg(feature = "wasmfx_baseline")]
 pub mod baseline {
     use super::stack_chain::{StackChain, StackLimits};
     use crate::runtime::vm::{Instance, TrapReason, VMFuncRef, VMOpaqueContext, ValRaw};
@@ -584,7 +584,7 @@ pub mod stack_chain {
     pub use wasmtime_continuations::StackLimits;
 
     cfg_if::cfg_if! {
-        if #[cfg(feature = "typed_continuations_baseline_implementation")] {
+        if #[cfg(feature = "wasmfx_baseline")] {
             use super::baseline::VMContRef;
         } else {
             use super::optimized::VMContRef;
@@ -739,7 +739,7 @@ pub mod stack_chain {
 //
 
 #[allow(missing_docs)]
-#[cfg(feature = "typed_continuations_baseline_implementation")]
+#[cfg(feature = "wasmfx_baseline")]
 pub mod optimized {
     use crate::runtime::vm::{Instance, TrapReason};
     pub use wasmtime_continuations::{StackLimits, SwitchDirection};
@@ -784,7 +784,7 @@ pub mod optimized {
 }
 
 #[allow(missing_docs)]
-#[cfg(not(feature = "typed_continuations_baseline_implementation"))]
+#[cfg(not(feature = "wasmfx_baseline"))]
 pub mod baseline {
     use crate::runtime::vm::{Instance, TrapReason};
 

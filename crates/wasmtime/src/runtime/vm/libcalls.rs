@@ -920,8 +920,9 @@ fn tc_cont_ref_forward_tag_return_values_buffer(
     )
 }
 
-fn tc_drop_cont_ref(_instance: &mut Instance, contref: *mut u8) {
+fn tc_drop_cont_ref(instance: &mut Instance, contref: *mut u8) {
     crate::vm::continuation::optimized::drop_cont_ref(
+        instance,
         contref.cast::<crate::vm::continuation::optimized::VMContRef>(),
     )
 }
