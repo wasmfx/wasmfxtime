@@ -278,6 +278,35 @@ pub mod optimized {
         let payload = SwitchDirection::suspend(tag_index);
         Ok(suspend.switch(payload))
     }
+
+    // Tests
+    #[test]
+    fn offset_and_size_constants() {
+        use memoffset;
+        use wasmtime_continuations::offsets::*;
+
+        assert_eq!(
+            memoffset::offset_of!(VMContRef, limits),
+            vm_cont_ref::LIMITS
+        );
+        assert_eq!(
+            memoffset::offset_of!(VMContRef, parent_chain),
+            vm_cont_ref::PARENT_CHAIN
+        );
+        assert_eq!(memoffset::offset_of!(VMContRef, fiber), vm_cont_ref::FIBER);
+        assert_eq!(memoffset::offset_of!(VMContRef, args), vm_cont_ref::ARGS);
+        assert_eq!(
+            memoffset::offset_of!(VMContRef, tag_return_values),
+            vm_cont_ref::TAG_RETURN_VALUES
+        );
+        assert_eq!(memoffset::offset_of!(VMContRef, state), vm_cont_ref::STATE);
+
+        assert_eq!(
+            core::mem::size_of::<ContinuationFiber>(),
+            CONTINUATION_FIBER_SIZE
+        );
+        assert_eq!(core::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
+    }
 }
 
 //
@@ -876,36 +905,4 @@ pub mod baseline {
     pub fn has_ever_run_continuation() -> bool {
         panic!("attempt to execute continuation::baseline::has_ever_run_continuation without `typed_continuation_baseline_implementation` toggled!")
     }
-}
-
-//
-// Tests
-//
-
-#[test]
-fn offset_and_size_constants() {
-    use memoffset;
-    use wasmtime_continuations::offsets::*;
-
-    assert_eq!(
-        memoffset::offset_of!(VMContRef, limits),
-        vm_cont_ref::LIMITS
-    );
-    assert_eq!(
-        memoffset::offset_of!(VMContRef, parent_chain),
-        vm_cont_ref::PARENT_CHAIN
-    );
-    assert_eq!(memoffset::offset_of!(VMContRef, fiber), vm_cont_ref::FIBER);
-    assert_eq!(memoffset::offset_of!(VMContRef, args), vm_cont_ref::ARGS);
-    assert_eq!(
-        memoffset::offset_of!(VMContRef, tag_return_values),
-        vm_cont_ref::TAG_RETURN_VALUES
-    );
-    assert_eq!(memoffset::offset_of!(VMContRef, state), vm_cont_ref::STATE);
-
-    assert_eq!(
-        core::mem::size_of::<ContinuationFiber>(),
-        CONTINUATION_FIBER_SIZE
-    );
-    assert_eq!(core::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
 }
