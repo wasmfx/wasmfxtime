@@ -18,8 +18,8 @@
 //! item is stored in its own separate pool: [`memory_pool`], [`table_pool`],
 //! [`stack_pool`]. See those modules for more details.
 
+pub(crate) mod index_allocator;
 mod decommit_queue;
-mod index_allocator;
 mod memory_pool;
 mod table_pool;
 
@@ -81,7 +81,7 @@ use wasmtime_environ::{
     StaticModuleIndex,
 };
 
-fn round_up_to_pow2(n: usize, to: usize) -> usize {
+pub(crate) fn round_up_to_pow2(n: usize, to: usize) -> usize {
     debug_assert!(to > 0);
     debug_assert!(to.is_power_of_two());
     (n + to - 1) & !(to - 1)

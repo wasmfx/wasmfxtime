@@ -1344,7 +1344,7 @@ impl Instance {
             Some(allocator) => allocator.allocate(),
             None => {
                 let wasmfx_config = unsafe { &*(*self.store()).wasmfx_config() };
-                self.wasmfx_allocator = Some(WasmFXAllocator::new(wasmfx_config));
+                self.wasmfx_allocator = Some(WasmFXAllocator::new(wasmfx_config)?);
                 self.wasmfx_allocator.as_ref().unwrap().allocate()
             }
         }

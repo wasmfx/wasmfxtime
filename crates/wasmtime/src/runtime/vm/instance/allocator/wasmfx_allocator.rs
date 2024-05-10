@@ -4,7 +4,6 @@
 // * pooling: preallocates a chunk of memory eagerly
 //
 
-use anyhow::Error;
 use anyhow::Result;
 use wasmtime_continuations::WasmFXConfig;
 
@@ -18,28 +17,28 @@ cfg_if::cfg_if! {
 
 pub type FiberStack = fiber_impl::FiberStack;
 
-#[cfg(not(features = "wasmfx_pooling_allocator"))]
-mod wasmfx_on_demand {
+#[cfg(not(feature = "wasmfx_pooling_allocator"))]
+pub mod wasmfx_on_demand {
     use super::*;
 
-    #[derive(Clone, Debug)]
+    #[derive(Debug)]
     pub struct InnerAllocator {
         stack_size: usize,
     }
 
     impl InnerAllocator {
-        pub fn new(stack_size: usize) -> Self {
-            InnerAllocator {
-                stack_size: stack_size,
-            }
+        pub fn new(config: &WasmFXConfig) -> Result<Self> {
+            Ok(InnerAllocator {
+                stack_size: config.stack_size,
+            })
         }
 
-        pub fn allocate(&self) -> Result<FiberStack, Error> {
+        pub fn allocate(&self) -> Result<FiberStack> {
             cfg_if::cfg_if! {
-                if #[cfg(feature = "wasmfx_baseline")] {
-                    Ok(fiber_impl::FiberStack::new(self.stack_size)?)
-                } else {
+                if #[cfg(all(feature = "unsafe_wasmfx_stacks", not(feature = "wasmfx_baseline")))] {
                     Ok(fiber_impl::FiberStack::malloc(self.stack_size)?)
+                } else {
+                    Ok(fiber_impl::FiberStack::new(self.stack_size)?)
                 }
             }
         }
@@ -50,16 +49,16 @@ mod wasmfx_on_demand {
     }
 }
 
-#[cfg(features = "wasmfx_pooling_allocator")]
-mod wasmfx_pooling {
+#[cfg(feature = "wasmfx_pooling_allocator")]
+pub mod wasmfx_pooling {
     use super::*;
 
-    use crate::sys::vm::{commit_stack_pages, reset_stack_pages_to_zero};
-    use crate::{
+    use crate::runtime::vm::instance::allocator::pooling::{
         index_allocator::{SimpleIndexAllocator, SlotId},
         round_up_to_pow2,
     };
-    use crate::{Mmap, PoolingInstanceAllocatorConfig};
+    use crate::runtime::vm::sys::vm::{commit_pages, decommit_pages};
+    use crate::vm::{Mmap, PoolingInstanceAllocatorConfig};
     use anyhow::{anyhow, bail, Context, Result};
 
     /// Represents a pool of execution stacks (used for the async fiber implementation).
@@ -84,18 +83,18 @@ mod wasmfx_pooling {
     }
 
     impl InnerAllocator {
-        pub fn new(stack_size: usize) -> Result<Self> {
+        pub fn new(config: &WasmFXConfig) -> Result<Self> {
             use rustix::mm::{mprotect, MprotectFlags};
 
-            let total_stacks = 10000 /* total amount of stacks */;
+            let total_stacks = 1024 /* total amount of stacks */;
 
-            let page_size = crate::page_size();
+            let page_size = crate::vm::page_size();
 
             // Add a page to the stack size for the guard page when using fiber stacks
-            let stack_size = if stack_size == 0 {
+            let stack_size = if config.stack_size == 0 {
                 0
             } else {
-                round_up_to_pow2(stack_size, page_size)
+                round_up_to_pow2(config.stack_size, page_size)
                     .checked_add(page_size)
                     .ok_or_else(|| anyhow!("stack size exceeds addressable memory"))?
             };
@@ -127,15 +126,10 @@ mod wasmfx_pooling {
                 max_stacks,
                 page_size,
                 async_stack_zeroing: false,
-                async_stack_keep_resident: true,
+                async_stack_keep_resident: 0,
                 index_allocator: SimpleIndexAllocator::new(total_stacks),
             })
         }
-
-        // /// Are there zero slots in use right now?
-        // pub fn is_empty(&self) -> bool {
-        //     self.index_allocator.is_empty()
-        // }
 
         /// Allocate a new fiber.
         pub fn allocate(&self) -> Result<FiberStack> {
@@ -166,9 +160,9 @@ mod wasmfx_pooling {
                     .add((index * self.stack_size) + self.page_size)
                     .cast_mut();
 
-                commit_stack_pages(bottom_of_stack, size_without_guard)?;
+                commit_pages(bottom_of_stack, size_without_guard)?;
 
-                let stack = FiberStack::from_raw_parts(bottom_of_stack, size_without_guard)?;
+                let stack = super::FiberStack::from_raw_parts(bottom_of_stack, size_without_guard)?;
                 Ok(stack)
             }
         }
@@ -225,37 +219,43 @@ mod wasmfx_pooling {
                 );
 
                 // Use the system to reset remaining stack pages to zero.
-                reset_stack_pages_to_zero(bottom as _, size - size_to_memset).unwrap();
+                decommit_pages(bottom as _, size - size_to_memset).unwrap();
             }
         }
     }
 }
 
 cfg_if::cfg_if! {
-    if #[cfg(features = "wasmfx_pooling_allocator")] {
+    if #[cfg(feature = "wasmfx_pooling_allocator")] {
         use wasmfx_pooling as imp;
     } else {
         use wasmfx_on_demand as imp;
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct WasmFXAllocator {
     inner: imp::InnerAllocator,
 }
 
 impl WasmFXAllocator {
-    pub fn new(config: &WasmFXConfig) -> Self {
-        Self {
-            inner: imp::InnerAllocator::new(config.stack_size),
-        }
+    pub fn new(config: &WasmFXConfig) -> Result<Self> {
+        Ok(Self {
+            inner: imp::InnerAllocator::new(config)?,
+        })
     }
 
-    pub fn allocate(&self) -> Result<FiberStack, Error> {
+    pub fn allocate(&self) -> Result<FiberStack> {
         self.inner.allocate()
     }
 
     pub fn deallocate(&self, stack: &FiberStack) {
-        self.inner.deallocate(stack)
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "wasmfx_pooling_allocator")] {
+                unsafe { self.inner.deallocate(stack) }
+            } else {
+                self.inner.deallocate(stack)
+            }
+        }
     }
 }

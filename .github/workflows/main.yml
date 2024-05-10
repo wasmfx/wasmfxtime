@@ -748,6 +748,17 @@ jobs:
       env:
         RUST_BACKTRACE: 1
 
+    # Test WasmFX allocators
+    - name: WasmFX pooling allocator
+      run: cargo test --features=default,wasmfx_pooling_allocator
+      env:
+        RUST_BACKTRACE: 1
+
+    - name: WasmFX pooling allocator (baseline)
+      run: cargo test --features=default,wasmfx_baseline,wasmfx_pooling_allocator
+      env:
+        RUST_BACKTRACE: 1
+
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
       if: failure() && github.event_name != 'pull_request'
