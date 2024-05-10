@@ -152,7 +152,7 @@ pub struct Instance {
     pub(crate) wmemcheck_state: Option<Wmemcheck>,
 
     /// WasmFX allocator
-    wasmfx_allocator: Option<WasmFXAllocator>,
+    wasmfx_allocator: Option<Box<WasmFXAllocator>>,
 
     /// Additional context used by compiled wasm code. This field is last, and
     /// represents a dynamically-sized array that extends beyond the nominal
@@ -1344,7 +1344,7 @@ impl Instance {
             Some(allocator) => allocator.allocate(),
             None => {
                 let wasmfx_config = unsafe { &*(*self.store()).wasmfx_config() };
-                self.wasmfx_allocator = Some(WasmFXAllocator::new(wasmfx_config)?);
+                self.wasmfx_allocator = Some(Box::new(WasmFXAllocator::new(wasmfx_config)?));
                 self.wasmfx_allocator.as_ref().unwrap().allocate()
             }
         }

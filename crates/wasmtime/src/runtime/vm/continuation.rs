@@ -20,7 +20,6 @@ pub mod optimized {
     use super::stack_chain::StackChain;
     use crate::runtime::vm::{
         fibre::Fiber,
-        fibre::FiberStack,
         vmcontext::{VMFuncRef, ValRaw},
         Instance, TrapReason,
     };
@@ -318,7 +317,6 @@ pub mod baseline {
     use super::stack_chain::{StackChain, StackLimits};
     use crate::runtime::vm::{Instance, TrapReason, VMFuncRef, VMOpaqueContext, ValRaw};
     use core::{cell::Cell, cell::RefCell, cmp, mem};
-    use wasmtime_continuations::DEFAULT_FIBER_SIZE;
     use wasmtime_environ::prelude::*;
     use wasmtime_fiber::{Fiber, Suspend};
 

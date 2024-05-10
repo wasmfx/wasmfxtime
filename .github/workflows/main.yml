@@ -748,16 +748,19 @@ jobs:
       env:
         RUST_BACKTRACE: 1
 
+    # TODO(dhil): Before testing the pooling allocator, we need to
+    # modify the test runner to control the space for continuation,
+    # otherwise the virtual memory system errors.
     # Test WasmFX allocators
-    - name: WasmFX pooling allocator
-      run: cargo test --features=default,wasmfx_pooling_allocator
-      env:
-        RUST_BACKTRACE: 1
+    # - name: WasmFX pooling allocator
+    #   run: cargo test --features=default,wasmfx_pooling_allocator
+    #   env:
+    #     RUST_BACKTRACE: 1
 
-    - name: WasmFX pooling allocator (baseline)
-      run: cargo test --features=default,wasmfx_baseline,wasmfx_pooling_allocator
-      env:
-        RUST_BACKTRACE: 1
+    # - name: WasmFX pooling allocator (baseline)
+    #   run: cargo test --features=default,wasmfx_baseline,wasmfx_pooling_allocator
+    #   env:
+    #     RUST_BACKTRACE: 1
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}

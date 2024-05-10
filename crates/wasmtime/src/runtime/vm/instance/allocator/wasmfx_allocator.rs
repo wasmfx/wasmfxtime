@@ -58,7 +58,7 @@ pub mod wasmfx_pooling {
         round_up_to_pow2,
     };
     use crate::runtime::vm::sys::vm::{commit_pages, decommit_pages};
-    use crate::vm::{Mmap, PoolingInstanceAllocatorConfig};
+    use crate::vm::Mmap;
     use anyhow::{anyhow, bail, Context, Result};
 
     /// Represents a pool of execution stacks (used for the async fiber implementation).
@@ -212,7 +212,7 @@ pub mod wasmfx_pooling {
             // * most threads probably don't use most of the stack anyway
             let size_to_memset = size.min(self.async_stack_keep_resident);
             unsafe {
-                std::ptr::write_bytes(
+                core::ptr::write_bytes(
                     (bottom + size - size_to_memset) as *mut u8,
                     0,
                     size_to_memset,
