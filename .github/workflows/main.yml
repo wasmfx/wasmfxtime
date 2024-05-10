@@ -366,8 +366,8 @@ jobs:
     # NOTE(dhil): Currently, we only support x86_64 Linux.
     #- run: rustup target add x86_64-unknown-none
     - run: cargo check -p wasmtime --no-default-features --features runtime,gc,component-model
-      env:
-        CARGO_BUILD_TARGET: x86_64-unknown-none
+    #  env:
+    #    CARGO_BUILD_TARGET: x86_64-unknown-none
 
     # Check that wasmtime compiles with panic=abort since there's some `#[cfg]`
     # for specifically panic=abort there.
