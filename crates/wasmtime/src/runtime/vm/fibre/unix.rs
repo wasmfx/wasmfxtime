@@ -291,6 +291,9 @@ impl Suspend {
         }
     }
 
+    // NOTE(dhil): This function is never applied when using the
+    // baseline implementation.
+    #[allow(dead_code)]
     pub fn from_top_ptr(ptr: *mut u8) -> Self {
         Suspend(ptr)
     }
