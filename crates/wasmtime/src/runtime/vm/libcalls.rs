@@ -900,12 +900,12 @@ fn tc_drop_cont_ref(_instance: &mut Instance, contref: *mut u8) {
 fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> Result<*mut u8, TrapReason> {
     debug_assert!(size > 0);
     let layout =
-        std::alloc::Layout::from_size_align(size as usize, align as usize).map_err(|_error| {
+        alloc::alloc::Layout::from_size_align(size as usize, align as usize).map_err(|_error| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
                 "Continuation layout construction failed!"
             ))
         })?;
-    let ptr = unsafe { std::alloc::alloc(layout) };
+    let ptr = unsafe { alloc::alloc::alloc(layout) };
     // TODO(dhil): We can consider making this a debug-build only
     // check.
     if ptr.is_null() {
@@ -925,12 +925,12 @@ fn tc_deallocate(
 ) -> Result<(), TrapReason> {
     debug_assert!(size > 0);
     let layout =
-        std::alloc::Layout::from_size_align(size as usize, align as usize).map_err(|_error| {
+        alloc::alloc::Layout::from_size_align(size as usize, align as usize).map_err(|_error| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
                 "Continuation layout construction failed!"
             ))
         })?;
-    Ok(unsafe { std::alloc::dealloc(ptr, layout) })
+    Ok(unsafe { alloc::alloc::dealloc(ptr, layout) })
 }
 
 fn tc_reallocate(
@@ -950,8 +950,8 @@ fn tc_reallocate(
 }
 
 fn tc_print_str(_instance: &mut Instance, s: *const u8, len: u64) {
-    let str = unsafe { std::slice::from_raw_parts(s, len as usize) };
-    let s = std::str::from_utf8(str).unwrap();
+    let str = unsafe { alloc::slice::from_raw_parts(s, len as usize) };
+    let s = alloc::str::from_utf8(str).unwrap();
     print!("{}", s);
 }
 

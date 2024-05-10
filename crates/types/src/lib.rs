@@ -12,6 +12,7 @@ pub use wasmparser;
 #[doc(hidden)]
 pub use alloc::format as __format;
 
+use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use core::{fmt, ops::Range};
 use cranelift_entity::entity_impl;
@@ -220,6 +221,20 @@ impl WasmValType {
         match self {
             WasmValType::Ref(r) => r.is_vmgcref_type_and_not_i31(),
             _ => false,
+        }
+    }
+
+    fn trampoline_type(&self) -> Self {
+        match self {
+            WasmValType::Ref(r) => WasmValType::Ref(WasmRefType {
+                nullable: true,
+                heap_type: r.heap_type.top().into(),
+            }),
+            WasmValType::I32
+            | WasmValType::I64
+            | WasmValType::F32
+            | WasmValType::F64
+            | WasmValType::V128 => self.clone(),
         }
     }
 }
@@ -619,6 +634,48 @@ impl WasmFuncType {
     #[inline]
     pub fn non_i31_gc_ref_returns_count(&self) -> usize {
         self.non_i31_gc_ref_returns_count
+    }
+
+    /// Is this function type compatible with trampoline usage in Wasmtime?
+    pub fn is_trampoline_type(&self) -> bool {
+        self.params().iter().all(|p| *p == p.trampoline_type())
+            && self.returns().iter().all(|r| *r == r.trampoline_type())
+    }
+
+    /// Get the version of this function type that is suitable for usage as a
+    /// trampoline in Wasmtime.
+    ///
+    /// If this function is suitable for trampoline usage as-is, then a borrowed
+    /// `Cow` is returned. If it must be tweaked for trampoline usage, then an
+    /// owned `Cow` is returned.
+    ///
+    /// ## What is a trampoline type?
+    ///
+    /// All reference types in parameters and results are mapped to their
+    /// nullable top type, e.g. `(ref $my_struct_type)` becomes `(ref null
+    /// any)`.
+    ///
+    /// This allows us to share trampolines between functions whose signatures
+    /// both map to the same trampoline type. It also allows the host to satisfy
+    /// a Wasm module's function import of type `S` with a function of type `T`
+    /// where `T <: S`, even when the Wasm module never defines the type `T`
+    /// (and might never even be able to!)
+    ///
+    /// The flip side is that this adds a constraint to our trampolines: they
+    /// can only pass references around (e.g. move a reference from one calling
+    /// convention's location to another's) and may not actually inspect the
+    /// references themselves (unless the trampolines start doing explicit,
+    /// fallible downcasts, but if we ever need that, then we might want to
+    /// redesign this stuff).
+    pub fn trampoline_type(&self) -> Cow<'_, Self> {
+        if self.is_trampoline_type() {
+            return Cow::Borrowed(self);
+        }
+
+        Cow::Owned(Self::new(
+            self.params().iter().map(|p| p.trampoline_type()).collect(),
+            self.returns().iter().map(|r| r.trampoline_type()).collect(),
+        ))
     }
 }
 
@@ -1533,12 +1590,15 @@ pub trait TypeConvert {
     }
 
     /// Converts a wasmparser table type into a wasmtime type
-    fn convert_table_type(&self, ty: &wasmparser::TableType) -> Table {
-        Table {
-            wasm_ty: self.convert_ref_type(ty.element_type),
-            minimum: ty.initial,
-            maximum: ty.maximum,
+    fn convert_table_type(&self, ty: &wasmparser::TableType) -> WasmResult<Table> {
+        if ty.table64 {
+            return Err(wasm_unsupported!("wasm memory64: 64-bit table type"));
         }
+        Ok(Table {
+            wasm_ty: self.convert_ref_type(ty.element_type),
+            minimum: ty.initial.try_into().unwrap(),
+            maximum: ty.maximum.map(|i| i.try_into().unwrap()),
+        })
     }
 
     fn convert_sub_type(&self, ty: &wasmparser::SubType) -> WasmResult<WasmSubType> {
