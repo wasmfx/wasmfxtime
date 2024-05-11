@@ -144,7 +144,6 @@ pub mod optimized {
         let fiber = {
             let stack = instance
                 .wasmfx_allocate_stack()
-                // let stack = FiberStack::malloc(stack_size)
                 .map_err(|_error| {
                     TrapReason::user_without_backtrace(anyhow::anyhow!(
                         "Fiber stack allocation failed!"
