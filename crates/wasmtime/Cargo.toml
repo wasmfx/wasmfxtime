@@ -272,7 +272,10 @@ unsafe_disable_continuation_linearity_check = [
 ]
 
 # Toggle the baseline implementation of WasmFX
-wasmfx_baseline = ["async", "wasmtime-cranelift?/wasmfx_baseline"]
+wasmfx_baseline = [
+  "async",
+  "wasmtime-cranelift?/wasmfx_baseline"
+]
 
 # Toggle the WasmFX stack pooling allocator
 wasmfx_pooling_allocator = []

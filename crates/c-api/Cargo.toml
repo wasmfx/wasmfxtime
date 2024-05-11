@@ -59,10 +59,15 @@ winch = ['wasmtime/winch']
 unsafe_disable_continuation_linearity_check = ["wasmtime/unsafe_disable_continuation_linearity_check"]
 
 # Toggle the baseline implementation of WasmFX
-wasmfx_baseline = ["wasmtime/wasmfx_baseline"]
+wasmfx_baseline = [
+  "wasmtime/wasmfx_baseline"
+]
 
 # Toggle the WasmFX stack pooling allocator
-wasmfx_pooling_allocator = ["wasmtime/wasmfx_pooling_allocator"]
+wasmfx_pooling_allocator = [
+  "wasmtime/wasmfx_pooling_allocator",
+  "wasmtime/pooling-allocator"
+]
 
 # Enable the old-style unsafe malloc'd stacks
 unsafe_wasmfx_stacks = ["wasmtime/unsafe_wasmfx_stacks"]
