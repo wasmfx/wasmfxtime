@@ -142,13 +142,11 @@ pub mod optimized {
         let red_zone_size = wasmfx_config.red_zone_size;
 
         let fiber = {
-            let stack = instance
-                .wasmfx_allocate_stack()
-                .map_err(|_error| {
-                    TrapReason::user_without_backtrace(anyhow::anyhow!(
-                        "Fiber stack allocation failed!"
-                    ))
-                })?;
+            let stack = instance.wasmfx_allocate_stack().map_err(|_error| {
+                TrapReason::user_without_backtrace(anyhow::anyhow!(
+                    "Fiber stack allocation failed!"
+                ))
+            })?;
             Fiber::new(
                 stack,
                 func.cast::<VMFuncRef>(),
