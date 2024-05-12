@@ -109,14 +109,21 @@ use wasmtime_continuations::SwitchDirection;
 use crate::runtime::vm::{VMContext, VMFuncRef, VMOpaqueContext, ValRaw};
 
 #[derive(Debug)]
+pub enum Allocator {
+    Malloc,
+    Mmap,
+    Custom,
+}
+
+#[derive(Debug)]
 pub struct FiberStack {
     // The top of the stack; for stacks allocated by the fiber implementation itself,
     // the base address of the allocation will be `top.sub(len.unwrap())`
     top: *mut u8,
     // The length of the stack
     len: usize,
-    // whether or not this stack was mmap'd
-    mmap: bool,
+    // allocation strategy
+    allocator: Allocator,
 }
 
 impl FiberStack {
@@ -149,7 +156,7 @@ impl FiberStack {
             Ok(Self {
                 top: mmap.cast::<u8>().add(mmap_len),
                 len: mmap_len,
-                mmap: true,
+                allocator: Allocator::Mmap,
             })
         }
     }
@@ -158,7 +165,11 @@ impl FiberStack {
         unsafe {
             let layout = Layout::array::<u8>(size).unwrap();
             let base = alloc(layout);
-            FiberStack::from_raw_parts(base, size)
+            Ok(Self {
+                top: base.add(size),
+                len: size,
+                allocator: Allocator::Malloc,
+            })
         }
     }
 
@@ -167,7 +178,7 @@ impl FiberStack {
         Ok(Self {
             top: base.add(len),
             len,
-            mmap: false,
+            allocator: Allocator::Custom,
         })
     }
 
@@ -184,12 +195,16 @@ impl FiberStack {
 impl Drop for FiberStack {
     fn drop(&mut self) {
         unsafe {
-            if self.mmap {
-                let ret = rustix::mm::munmap(self.top.sub(self.len) as _, self.len);
-                debug_assert!(ret.is_ok());
-            } else {
-                let layout = Layout::array::<u8>(self.len).unwrap();
-                dealloc(self.top.sub(self.len), layout);
+            match self.allocator {
+                Allocator::Mmap => {
+                    let ret = rustix::mm::munmap(self.top.sub(self.len) as _, self.len);
+                    debug_assert!(ret.is_ok());
+                }
+                Allocator::Malloc => {
+                    let layout = Layout::array::<u8>(self.len).unwrap();
+                    dealloc(self.top.sub(self.len), layout);
+                }
+                Allocator::Custom => {} // It's the creator's responsibility to reclaim the memory.
             }
         }
     }
