@@ -18,8 +18,8 @@
 //! item is stored in its own separate pool: [`memory_pool`], [`table_pool`],
 //! [`stack_pool`]. See those modules for more details.
 
-pub(crate) mod index_allocator;
 mod decommit_queue;
+pub(crate) mod index_allocator;
 mod memory_pool;
 mod table_pool;
 
