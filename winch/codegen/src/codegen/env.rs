@@ -394,6 +394,14 @@ impl TypeConvert for TypeConverter<'_, '_> {
         wasmtime_environ::WasmparserTypeConverter::new(self.types, &self.translation.module)
             .lookup_heap_type(idx)
     }
+
+    fn lookup_type_index(
+        &self,
+        index: wasmparser::UnpackedIndex,
+    ) -> wasmtime_environ::EngineOrModuleTypeIndex {
+        wasmtime_environ::WasmparserTypeConverter::new(self.types, &self.translation.module)
+            .lookup_type_index(index)
+    }
 }
 
 impl<'a, 'data> TypeConverter<'a, 'data> {
@@ -405,12 +413,12 @@ impl<'a, 'data> TypeConverter<'a, 'data> {
 fn heap_style_and_offset_guard_size(plan: &MemoryPlan) -> (HeapStyle, u64) {
     match plan {
         MemoryPlan {
-            style: MemoryStyle::Static { bound },
+            style: MemoryStyle::Static { byte_reservation },
             offset_guard_size,
             ..
         } => (
             HeapStyle::Static {
-                bound: bound * u64::from(WASM_PAGE_SIZE),
+                bound: *byte_reservation,
             },
             *offset_guard_size,
         ),
