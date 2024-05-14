@@ -6,7 +6,6 @@ use crate::isa::s390x::inst::*;
 use crate::isa::s390x::settings as s390x_settings;
 use crate::trace;
 use cranelift_control::ControlPlane;
-use regalloc2::Allocation;
 
 /// Debug macro for testing that a regpair is valid: that the high register is even, and the low
 /// register is one higher than the high register.
@@ -181,7 +180,7 @@ pub fn mem_emit(
         },
     );
     for inst in mem_insts.into_iter() {
-        inst.emit(&[], sink, emit_info, state);
+        inst.emit(sink, emit_info, state);
     }
 
     if add_trap {
@@ -244,7 +243,7 @@ pub fn mem_rs_emit(
         },
     );
     for inst in mem_insts.into_iter() {
-        inst.emit(&[], sink, emit_info, state);
+        inst.emit(sink, emit_info, state);
     }
 
     if add_trap {
@@ -295,7 +294,7 @@ pub fn mem_imm8_emit(
         },
     );
     for inst in mem_insts.into_iter() {
-        inst.emit(&[], sink, emit_info, state);
+        inst.emit(sink, emit_info, state);
     }
 
     if add_trap {
@@ -342,7 +341,7 @@ pub fn mem_imm16_emit(
         },
     );
     for inst in mem_insts.into_iter() {
-        inst.emit(&[], sink, emit_info, state);
+        inst.emit(sink, emit_info, state);
     }
 
     if add_trap {
@@ -412,7 +411,7 @@ pub fn mem_vrx_emit(
         },
     );
     for inst in mem_insts.into_iter() {
-        inst.emit(&[], sink, emit_info, state);
+        inst.emit(sink, emit_info, state);
     }
 
     if add_trap {
@@ -1364,27 +1363,18 @@ impl MachInstEmit for Inst {
     type State = EmitState;
     type Info = EmitInfo;
 
-    fn emit(
-        &self,
-        allocs: &[Allocation],
-        sink: &mut MachBuffer<Inst>,
-        emit_info: &Self::Info,
-        state: &mut EmitState,
-    ) {
-        let mut allocs = AllocationConsumer::new(allocs);
-        self.emit_with_alloc_consumer(&mut allocs, sink, emit_info, state)
+    fn emit(&self, sink: &mut MachBuffer<Inst>, emit_info: &Self::Info, state: &mut EmitState) {
+        self.emit_with_alloc_consumer(sink, emit_info, state)
     }
 
-    fn pretty_print_inst(&self, allocs: &[Allocation], state: &mut EmitState) -> String {
-        let mut allocs = AllocationConsumer::new(allocs);
-        self.print_with_state(state, &mut allocs)
+    fn pretty_print_inst(&self, state: &mut EmitState) -> String {
+        self.print_with_state(state)
     }
 }
 
 impl Inst {
     fn emit_with_alloc_consumer(
         &self,
-        allocs: &mut AllocationConsumer,
         sink: &mut MachBuffer<Inst>,
         emit_info: &EmitInfo,
         state: &mut EmitState,
@@ -1453,7 +1443,7 @@ impl Inst {
                         ri: rn,
                         rm,
                     };
-                    inst.emit(&[], sink, emit_info, state);
+                    inst.emit(sink, emit_info, state);
                 } else {
                     put(sink, &enc_rrf_ab(opcode, rd.to_reg(), rn, rm, 0));
                 }
@@ -1471,7 +1461,7 @@ impl Inst {
                         ri: rn,
                         imm,
                     };
-                    inst.emit(&[], sink, emit_info, state);
+                    inst.emit(sink, emit_info, state);
                 } else {
                     let opcode = match alu_op {
                         ALUOp::Add32 => 0xecd8, // AHIK
@@ -2046,9 +2036,9 @@ impl Inst {
                                 target: done_label,
                                 cond: *cond,
                             };
-                            inst.emit_with_alloc_consumer(allocs, sink, emit_info, state);
+                            inst.emit_with_alloc_consumer(sink, emit_info, state);
                         }
-                        _ => inst.emit_with_alloc_consumer(allocs, sink, emit_info, state),
+                        _ => inst.emit_with_alloc_consumer(sink, emit_info, state),
                     };
                 }
 
@@ -2056,7 +2046,7 @@ impl Inst {
                     target: loop_label,
                     cond,
                 };
-                inst.emit(&[], sink, emit_info, state);
+                inst.emit(sink, emit_info, state);
 
                 // Emit label at the end of the loop.
                 sink.bind_label(done_label, &mut state.ctrl_plane);
@@ -2243,7 +2233,7 @@ impl Inst {
             &Inst::MovPReg { rd, rm } => {
                 let rm: Reg = rm.into();
                 debug_assert!([regs::gpr(0), regs::gpr(14), regs::gpr(15)].contains(&rm));
-                Inst::Mov64 { rd, rm }.emit(&[], sink, emit_info, state);
+                Inst::Mov64 { rd, rm }.emit(sink, emit_info, state);
             }
             &Inst::Mov32 { rd, rm } => {
                 let opcode = 0x18; // LR
@@ -2363,7 +2353,7 @@ impl Inst {
                     rd,
                     mem: MemArg::reg(reg, MemFlags::trusted()),
                 };
-                inst.emit(&[], sink, emit_info, state);
+                inst.emit(sink, emit_info, state);
             }
 
             &Inst::FpuMove32 { rd, rn } => {
@@ -2425,7 +2415,7 @@ impl Inst {
                     mem: MemArg::reg(reg, MemFlags::trusted()),
                     lane_imm: 0,
                 };
-                inst.emit(&[], sink, emit_info, state);
+                inst.emit(sink, emit_info, state);
             }
             &Inst::LoadFpuConst64 { rd, const_data } => {
                 let opcode = 0xa75; // BRAS
@@ -2438,7 +2428,7 @@ impl Inst {
                     mem: MemArg::reg(reg, MemFlags::trusted()),
                     lane_imm: 0,
                 };
-                inst.emit(&[], sink, emit_info, state);
+                inst.emit(sink, emit_info, state);
             }
             &Inst::FpuRR { fpu_op, rd, rn } => {
                 let (opcode, m3, m4, m5, opcode_fpr) = match fpu_op {
@@ -2849,7 +2839,7 @@ impl Inst {
                     rn,
                     rm,
                 };
-                inst.emit(&[], sink, emit_info, state);
+                inst.emit(sink, emit_info, state);
             }
 
             &Inst::VecLoad { rd, ref mem }
@@ -2942,7 +2932,7 @@ impl Inst {
                     rd,
                     mem: MemArg::reg(reg, MemFlags::trusted()),
                 };
-                inst.emit(&[], sink, emit_info, state);
+                inst.emit(sink, emit_info, state);
             }
             &Inst::VecLoadConstReplicate {
                 size,
@@ -2960,7 +2950,7 @@ impl Inst {
                     rd,
                     mem: MemArg::reg(reg, MemFlags::trusted()),
                 };
-                inst.emit(&[], sink, emit_info, state);
+                inst.emit(sink, emit_info, state);
             }
             &Inst::VecImmByteMask { rd, mask } => {
                 let opcode = 0xe744; // VGBM
@@ -3359,7 +3349,7 @@ impl Inst {
                         target: table_label,
                     },
                 };
-                inst.emit(&[], sink, emit_info, state);
+                inst.emit(sink, emit_info, state);
 
                 // Set temp to target address by adding the value of the jump table entry.
                 let inst = Inst::AluRX {
@@ -3368,7 +3358,7 @@ impl Inst {
                     ri: rtmp.to_reg(),
                     mem: MemArg::reg_plus_reg(rtmp.to_reg(), ridx, MemFlags::trusted()),
                 };
-                inst.emit(&[], sink, emit_info, state);
+                inst.emit(sink, emit_info, state);
 
                 // Branch to computed address. (`targets` here is only used for successor queries
                 // and is not needed for emission.)
@@ -3376,7 +3366,7 @@ impl Inst {
                     rn: rtmp.to_reg(),
                     targets: vec![],
                 };
-                inst.emit(&[], sink, emit_info, state);
+                inst.emit(sink, emit_info, state);
 
                 // Emit jump table (table of 32-bit offsets).
                 sink.bind_label(table_label, &mut state.ctrl_plane);

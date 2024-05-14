@@ -2109,7 +2109,7 @@ impl<T> StoreContextMut<'_, T> {
             // wrap that in a custom future implementation which does the
             // translation from the future protocol to our fiber API.
             FiberFuture {
-                fiber,
+                fiber: Some(fiber),
                 current_poll_cx,
                 engine,
                 state: Some(crate::runtime::vm::AsyncWasmCallState::new()),
@@ -2120,7 +2120,7 @@ impl<T> StoreContextMut<'_, T> {
         return Ok(slot.unwrap());
 
         struct FiberFuture<'a> {
-            fiber: wasmtime_fiber::Fiber<'a, Result<()>, (), Result<()>>,
+            fiber: Option<wasmtime_fiber::Fiber<'a, Result<()>, (), Result<()>>>,
             current_poll_cx: *mut *mut Context<'static>,
             engine: Engine,
             // See comments in `FiberFuture::resume` for this
@@ -2191,6 +2191,10 @@ impl<T> StoreContextMut<'_, T> {
         unsafe impl Send for FiberFuture<'_> {}
 
         impl FiberFuture<'_> {
+            fn fiber(&self) -> &wasmtime_fiber::Fiber<'_, Result<()>, (), Result<()>> {
+                self.fiber.as_ref().unwrap()
+            }
+
             /// This is a helper function to call `resume` on the underlying
             /// fiber while correctly managing Wasmtime's thread-local data.
             ///
@@ -2216,7 +2220,7 @@ impl<T> StoreContextMut<'_, T> {
                         fiber: self,
                         state: Some(prev),
                     };
-                    return restore.fiber.fiber.resume(val);
+                    return restore.fiber.fiber().resume(val);
                 }
 
                 struct Restore<'a, 'b> {
@@ -2283,7 +2287,7 @@ impl<T> StoreContextMut<'_, T> {
                         // then that's a bug indicating that TLS management in
                         // Wasmtime is incorrect.
                         Err(()) => {
-                            if let Some(range) = self.fiber.stack().range() {
+                            if let Some(range) = self.fiber().stack().range() {
                                 crate::runtime::vm::AsyncWasmCallState::assert_current_state_not_in_range(range);
                             }
                             Poll::Pending
@@ -2310,7 +2314,7 @@ impl<T> StoreContextMut<'_, T> {
         // completion.
         impl Drop for FiberFuture<'_> {
             fn drop(&mut self) {
-                if !self.fiber.done() {
+                if !self.fiber().done() {
                     let result = self.resume(Err(anyhow!("future dropped")));
                     // This resumption with an error should always complete the
                     // fiber. While it's technically possible for host code to catch
@@ -2324,7 +2328,7 @@ impl<T> StoreContextMut<'_, T> {
                 unsafe {
                     self.engine
                         .allocator()
-                        .deallocate_fiber_stack(self.fiber.stack());
+                        .deallocate_fiber_stack(self.fiber.take().unwrap().into_stack());
                 }
             }
         }
