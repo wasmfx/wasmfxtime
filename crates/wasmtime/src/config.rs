@@ -147,7 +147,7 @@ pub struct Config {
 
 #[derive(Default, Clone)]
 struct ConfigTunables {
-    static_memory_bound: Option<u64>,
+    static_memory_reservation: Option<u64>,
     static_memory_offset_guard_size: Option<u64>,
     dynamic_memory_offset_guard_size: Option<u64>,
     dynamic_memory_growth_reserve: Option<u64>,
@@ -157,6 +157,7 @@ struct ConfigTunables {
     epoch_interruption: Option<bool>,
     static_memory_bound_is_maximum: Option<bool>,
     guard_before_linear_memory: Option<bool>,
+    table_lazy_init: Option<bool>,
     generate_address_map: Option<bool>,
     debug_adapter_modules: Option<bool>,
     relaxed_simd_deterministic: Option<bool>,
@@ -1418,8 +1419,7 @@ impl Config {
     /// for pooling allocation by using memory protection; see
     /// `PoolingAllocatorConfig::memory_protection_keys` for details.
     pub fn static_memory_maximum_size(&mut self, max_size: u64) -> &mut Self {
-        let max_pages = max_size / u64::from(wasmtime_environ::WASM_PAGE_SIZE);
-        self.tunables.static_memory_bound = Some(max_pages);
+        self.tunables.static_memory_reservation = Some(max_size);
         self
     }
 
@@ -1589,6 +1589,19 @@ impl Config {
     /// This value defaults to `true`.
     pub fn guard_before_linear_memory(&mut self, guard: bool) -> &mut Self {
         self.tunables.guard_before_linear_memory = Some(guard);
+        self
+    }
+
+    /// Indicates whether to initialize tables lazily, so that instantiation
+    /// is fast but indirect calls are a little slower. If false, tables
+    /// are initialized eagerly during instantiation from any active element
+    /// segments that apply to them.
+    ///
+    /// ## Default
+    ///
+    /// This value defaults to `true`.
+    pub fn table_lazy_init(&mut self, table_lazy_init: bool) -> &mut Self {
+        self.tunables.table_lazy_init = Some(table_lazy_init);
         self
     }
 
@@ -1851,7 +1864,7 @@ impl Config {
         }
 
         set_fields! {
-            static_memory_bound
+            static_memory_reservation
             static_memory_offset_guard_size
             dynamic_memory_offset_guard_size
             dynamic_memory_growth_reserve
@@ -1861,6 +1874,7 @@ impl Config {
             epoch_interruption
             static_memory_bound_is_maximum
             guard_before_linear_memory
+            table_lazy_init
             generate_address_map
             debug_adapter_modules
             relaxed_simd_deterministic
@@ -1880,6 +1894,10 @@ impl Config {
 
             if tunables.winch_callable && tunables.tail_callable {
                 bail!("Winch does not support the WebAssembly tail call proposal");
+            }
+
+            if tunables.winch_callable && !tunables.table_lazy_init {
+                bail!("Winch requires the table-lazy-init configuration option");
             }
         }
 
@@ -2210,11 +2228,8 @@ impl fmt::Debug for Config {
         if let Some(enable) = self.tunables.parse_wasm_debuginfo {
             f.field("parse_wasm_debuginfo", &enable);
         }
-        if let Some(size) = self.tunables.static_memory_bound {
-            f.field(
-                "static_memory_maximum_size",
-                &(u64::from(size) * u64::from(wasmtime_environ::WASM_PAGE_SIZE)),
-            );
+        if let Some(size) = self.tunables.static_memory_reservation {
+            f.field("static_memory_maximum_reservation", &size);
         }
         if let Some(size) = self.tunables.static_memory_offset_guard_size {
             f.field("static_memory_guard_size", &size);

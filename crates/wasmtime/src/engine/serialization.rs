@@ -25,9 +25,10 @@ use crate::prelude::*;
 use crate::{Engine, ModuleVersionStrategy, Precompiled};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use core::str::FromStr;
+use object::endian::NativeEndian;
 #[cfg(any(feature = "cranelift", feature = "winch"))]
 use object::write::{Object, StandardSegment};
-use object::{File, FileFlags, Object as _, ObjectSection, SectionKind};
+use object::{read::elf::ElfFile64, FileFlags, Object as _, ObjectSection, SectionKind};
 use serde_derive::{Deserialize, Serialize};
 use wasmtime_environ::obj;
 use wasmtime_environ::{FlagValue, ObjectKind, Tunables};
@@ -56,7 +57,7 @@ pub fn check_compatible(engine: &Engine, mmap: &[u8], expected: ObjectKind) -> R
     // structured well enough to make this easy and additionally it's not really
     // a perf issue right now so doing that is left for another day's
     // refactoring.
-    let obj = File::parse(mmap)
+    let obj = ElfFile64::<NativeEndian>::parse(mmap)
         .err2anyhow()
         .context("failed to parse precompiled artifact as an ELF")?;
     let expected_e_flags = match expected {
@@ -145,7 +146,7 @@ pub fn append_compiler_info(engine: &Engine, obj: &mut Object<'_>, metadata: &Me
 }
 
 fn detect_precompiled<'data, R: object::ReadRef<'data>>(
-    obj: File<'data, R>,
+    obj: ElfFile64<'data, NativeEndian, R>,
 ) -> Option<Precompiled> {
     match obj.flags() {
         FileFlags::Elf {
@@ -163,13 +164,13 @@ fn detect_precompiled<'data, R: object::ReadRef<'data>>(
 }
 
 pub fn detect_precompiled_bytes(bytes: &[u8]) -> Option<Precompiled> {
-    detect_precompiled(File::parse(bytes).ok()?)
+    detect_precompiled(ElfFile64::parse(bytes).ok()?)
 }
 
 #[cfg(feature = "std")]
 pub fn detect_precompiled_file(path: impl AsRef<std::path::Path>) -> Result<Option<Precompiled>> {
     let read_cache = object::ReadCache::new(std::fs::File::open(path)?);
-    let obj = File::parse(&read_cache)?;
+    let obj = ElfFile64::parse(&read_cache)?;
     Ok(detect_precompiled(obj))
 }
 
@@ -349,7 +350,7 @@ impl Metadata<'_> {
 
     fn check_tunables(&mut self, other: &Tunables) -> Result<()> {
         let Tunables {
-            static_memory_bound,
+            static_memory_reservation,
             static_memory_offset_guard_size,
             dynamic_memory_offset_guard_size,
             generate_native_debuginfo,
@@ -358,6 +359,7 @@ impl Metadata<'_> {
             epoch_interruption,
             static_memory_bound_is_maximum,
             guard_before_linear_memory,
+            table_lazy_init,
             relaxed_simd_deterministic,
             tail_callable,
             winch_callable,
@@ -378,9 +380,9 @@ impl Metadata<'_> {
         } = self.tunables;
 
         Self::check_int(
-            static_memory_bound,
-            other.static_memory_bound,
-            "static memory bound",
+            static_memory_reservation,
+            other.static_memory_reservation,
+            "static memory reservation",
         )?;
         Self::check_int(
             static_memory_offset_guard_size,
@@ -418,6 +420,7 @@ impl Metadata<'_> {
             other.guard_before_linear_memory,
             "guard before linear memory",
         )?;
+        Self::check_bool(table_lazy_init, other.table_lazy_init, "table lazy init")?;
         Self::check_bool(
             relaxed_simd_deterministic,
             other.relaxed_simd_deterministic,
