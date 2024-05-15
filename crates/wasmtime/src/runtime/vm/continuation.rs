@@ -609,16 +609,9 @@ pub mod baseline {
 // Stack chain
 //
 pub mod stack_chain {
+    use super::imp::VMContRef;
     use core::cell::UnsafeCell;
     pub use wasmtime_continuations::StackLimits;
-
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "wasmfx_baseline")] {
-            use super::baseline::VMContRef;
-        } else {
-            use super::optimized::VMContRef;
-        }
-    }
 
     /// This type represents a linked lists of stacks, additionally associating a
     /// `StackLimits` object with each element of the list. Here, a "stack" is
