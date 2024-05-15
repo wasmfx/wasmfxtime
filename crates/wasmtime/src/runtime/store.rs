@@ -80,7 +80,7 @@ use crate::instance::InstanceData;
 use crate::linker::Definition;
 use crate::module::{BareModuleInfo, RegisteredModuleId};
 use crate::prelude::*;
-use crate::runtime::vm::continuation::{StackChain, StackChainCell, StackLimits};
+use crate::runtime::vm::continuation::stack_chain::{StackChain, StackChainCell, StackLimits};
 use crate::runtime::vm::mpk::{self, ProtectionKey, ProtectionMask};
 use crate::runtime::vm::{
     Backtrace, ExportGlobal, GcHeapAllocationIndex, GcRootsList, GcStore,

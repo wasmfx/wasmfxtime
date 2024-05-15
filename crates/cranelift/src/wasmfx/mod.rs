@@ -7,14 +7,8 @@
 /// implementations.
 mod shared;
 
-#[cfg_attr(
-    not(feature = "typed_continuations_baseline_implementation"),
-    allow(dead_code)
-)]
+#[cfg_attr(not(feature = "wasmfx_baseline"), allow(dead_code))]
 pub(crate) mod baseline;
 
-#[cfg_attr(
-    feature = "typed_continuations_baseline_implementation",
-    allow(dead_code)
-)]
+#[cfg_attr(feature = "wasmfx_baseline", allow(dead_code))]
 pub(crate) mod optimized;

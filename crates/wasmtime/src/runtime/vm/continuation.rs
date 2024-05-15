@@ -1,187 +1,11 @@
 //! Continuations TODO
 
-use crate::runtime::vm::{
-    fibre::{Fiber, FiberStack},
-    vmcontext::{VMFuncRef, ValRaw},
-    Instance, TrapReason,
-};
-use core::cell::UnsafeCell;
-use core::cmp;
-use core::mem;
-use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
-pub use wasmtime_continuations::{Payloads, StackLimits, State, SwitchDirection};
-use wasmtime_environ::prelude::*;
-
-/// Fibers used for continuations
-pub type ContinuationFiber = Fiber;
-
-/// This type represents a linked lists of stacks, additionally associating a
-/// `StackLimits` object with each element of the list. Here, a "stack" is
-/// either a continuation or the main stack. Note that the linked list character
-/// arises from the fact that `StackChain::Continuation` variants have a pointer
-/// to have `VMContRef`, which in turn has a `parent_chain` value of
-/// type `StackChain`.
-///
-/// There are generally two uses of such chains:
-///
-/// 1. The `typed_continuations_chain` field in the VMContext contains such a
-/// chain of stacks, where the head of the list denotes the stack that is
-/// currently executing (either a continuation or the main stack), as well as
-/// the parent stacks, in case of a continuation currently running. Note that in
-/// this case, the linked list must contains 0 or more `Continuation` elements,
-/// followed by a final `MainStack` element. In particular, this list always
-/// ends with `MainStack` and never contains an `Absent` variant.
-///
-/// 2. When a continuation is suspended, its chain of parents eventually ends
-/// with an `Absent` variant in its `parent_chain` field. Note that a suspended
-/// continuation never appears in the stack chain in the VMContext!
-///
-///
-/// As mentioned before, each stack in a `StackChain` has a corresponding
-/// `StackLimits` object. For continuations, this is stored in the `limits`
-/// fields of the corresponding `VMContRef`. For the main stack, the
-/// `MainStack` variant contains a pointer to the
-/// `typed_continuations_main_stack_limits` field of the VMContext.
-///
-/// The following invariants hold for these `StackLimits` objects, and the data
-/// in `VMRuntimeLimits`.
-///
-/// Currently executing stack:
-/// For the currently executing stack (i.e., the stack that is at the head of
-/// the VMContext's `typed_continuations_chain` list), the associated
-/// `StackLimits` object contains stale/undefined data. Instead, the live data
-/// describing the limits for the currently executing stack is always maintained
-/// in `VMRuntimeLimits`. Note that as a general rule independently from any
-/// execution of continuations, the `last_wasm_exit*` fields in the
-/// `VMRuntimeLimits` contain undefined values while executing wasm.
-///
-/// Parents of currently executing stack:
-/// For stacks that appear in the tail of the VMContext's
-/// `typed_continuations_chain` list (i.e., stacks that are not currently
-/// executing themselves, but are a parent of the currently executing stack), we
-/// have the following: All the fields in the stack's StackLimits are valid,
-/// describing the stack's stack limit, and pointers where executing for that
-/// stack entered and exited WASM.
-///
-/// Suspended continuations:
-/// For suspended continuations (including their parents), we have the
-/// following. Note that the main stack can never be in this state. The
-/// `stack_limit` and `last_enter_wasm_sp` fields of the corresponding
-/// `StackLimits` object contain valid data, while the `last_exit_wasm_*` fields
-/// contain arbitrary values.
-/// There is only one exception to this: Note that a continuation that has been
-/// created with cont.new, but never been resumed so far, is considered
-/// "suspended". However, its `last_enter_wasm_sp` field contains undefined
-/// data. This is justified, because when resume-ing a continuation for the
-/// first time, a native-to-wasm trampoline is called, which sets up the
-/// `last_wasm_entry_sp` in the `VMRuntimeLimits` with the correct value, thus
-/// restoring the necessary invariant.
-#[derive(Debug, Clone, PartialEq)]
-#[repr(usize, C)]
-pub enum StackChain {
-    /// If stored in the VMContext, used to indicate that the MainStack entry
-    /// has not been set, yet. If stored in a VMContRef's parent_chain
-    /// field, means that there is currently no parent.
-    Absent = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT,
-    /// Represents the main stack.
-    MainStack(*mut StackLimits) = wasmtime_continuations::STACK_CHAIN_MAIN_STACK_DISCRIMINANT,
-    /// Represents a continuation's stack.
-    Continuation(*mut VMContRef) = wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT,
-}
-
-impl StackChain {
-    /// Indicates if `self` is a `MainStack` variant.
-    pub fn is_main_stack(&self) -> bool {
-        matches!(self, StackChain::MainStack(_))
+cfg_if::cfg_if! {
+    if #[cfg(feature = "wasmfx_baseline")] {
+        pub use baseline as imp;
+    } else {
+        pub use optimized as imp;
     }
-
-    /// Returns an iterator over the stacks in this chain.
-    /// We don't implement `IntoIterator` because our iterator is unsafe, so at
-    /// least this gives us some way of indicating this, even though the actual
-    /// unsafety lies in the `next` function.
-    ///
-    /// # Safety
-    ///
-    /// This function is not unsafe per see, but it returns an object
-    /// whose usage is unsafe.
-    pub unsafe fn into_iter(self) -> ContinuationChainIterator {
-        ContinuationChainIterator(self)
-    }
-}
-
-/// Iterator for stacks in a stack chain.
-/// Each stack is represented by a tuple `(co_opt, sl)`, where sl is a pointer
-/// to the stack's `StackLimits` object and `co_opt` is a pointer to the
-/// corresponding `VMContRef`, or None for the main stack.
-pub struct ContinuationChainIterator(StackChain);
-
-impl Iterator for ContinuationChainIterator {
-    type Item = (Option<*mut VMContRef>, *mut StackLimits);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.0 {
-            StackChain::Absent => None,
-            StackChain::MainStack(ms) => {
-                let next = (None, ms);
-                self.0 = StackChain::Absent;
-                Some(next)
-            }
-            StackChain::Continuation(ptr) => {
-                let continuation = unsafe { ptr.as_mut().unwrap() };
-                let next = (Some(ptr), (&mut continuation.limits) as *mut StackLimits);
-                self.0 = continuation.parent_chain.clone();
-                Some(next)
-            }
-        }
-    }
-}
-
-#[repr(transparent)]
-/// Wraps a `StackChain` in an `UnsafeCell`, in order to store it in a
-/// `StoreOpaque`.
-pub struct StackChainCell(pub UnsafeCell<StackChain>);
-
-impl StackChainCell {
-    /// Indicates if the underlying `StackChain` object has value `Absent`.
-    pub fn absent() -> Self {
-        StackChainCell(UnsafeCell::new(StackChain::Absent))
-    }
-}
-
-// Since `StackChainCell` objects appear in the `StoreOpaque`,
-// they need to be `Send` and `Sync`.
-// This is safe for the same reason it is for `VMRuntimeLimits` (see comment
-// there): Both types are pod-type with no destructor, and we don't access any
-// of their fields from other threads.
-unsafe impl Send for StackChainCell {}
-unsafe impl Sync for StackChainCell {}
-
-/// TODO
-#[repr(C)]
-pub struct VMContRef {
-    /// The limits of this continuation's stack.
-    pub limits: StackLimits,
-
-    /// The parent of this continuation, which may be another continuation, the
-    /// main stack, or absent (in case of a suspended continuation).
-    pub parent_chain: StackChain,
-
-    /// The underlying `Fiber`.
-    pub fiber: ContinuationFiber,
-
-    /// Used to store
-    /// 1. The arguments to the function passed to cont.new
-    /// 2. The return values of that function
-    /// Note that this is *not* used for tag payloads.
-    pub args: Payloads,
-
-    /// Once a continuation is suspended, this buffer is used to hold payloads
-    /// provided by cont.bind and resume and received at the suspend site.
-    /// In particular, this may only be Some when `state` is `Invoked`.
-    pub tag_return_values: Payloads,
-
-    /// Indicates the state of this continuation.
-    pub state: State,
 }
 
 /// M:1 Many-to-one mapping. A single VMContRef may be
@@ -189,271 +13,308 @@ pub struct VMContRef {
 /// VMContObj may hold a non-null reference to the object
 /// at a given time.
 #[repr(C)]
-pub struct VMContObj(pub Option<*mut VMContRef>);
+pub struct VMContObj(pub Option<*mut imp::VMContRef>);
 
-/// TODO
-#[inline(always)]
-pub fn cont_obj_get_cont_ref(contobj: *mut VMContObj) -> Result<*mut VMContRef, TrapReason> {
-    //FIXME rename to indicate that this invalidates the cont ref
+#[cfg(not(feature = "wasmfx_baseline"))]
+pub mod optimized {
+    use super::stack_chain::StackChain;
+    use crate::runtime::vm::{
+        fibre::Fiber,
+        fibre::FiberStack,
+        vmcontext::{VMFuncRef, ValRaw},
+        Instance, TrapReason,
+    };
+    use core::cmp;
+    use core::mem;
+    use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
+    pub use wasmtime_continuations::{Payloads, StackLimits, State, SwitchDirection};
+    use wasmtime_environ::prelude::*;
 
-    // If this is enabled, we should never call this function.
-    assert!(!cfg!(
-        feature = "unsafe_disable_continuation_linearity_check"
-    ));
+    /// Fibers used for continuations
+    pub type ContinuationFiber = Fiber;
 
-    let contopt = unsafe {
-        contobj
-            .as_mut()
-            .ok_or_else(|| {
+    /// TODO
+    #[repr(C)]
+    pub struct VMContRef {
+        /// The limits of this continuation's stack.
+        pub limits: StackLimits,
+
+        /// The parent of this continuation, which may be another continuation, the
+        /// main stack, or absent (in case of a suspended continuation).
+        pub parent_chain: StackChain,
+
+        /// The underlying `Fiber`.
+        pub fiber: ContinuationFiber,
+
+        /// Used to store
+        /// 1. The arguments to the function passed to cont.new
+        /// 2. The return values of that function
+        /// Note that this is *not* used for tag payloads.
+        pub args: Payloads,
+
+        /// Once a continuation is suspended, this buffer is used to hold payloads
+        /// provided by cont.bind and resume and received at the suspend site.
+        /// In particular, this may only be Some when `state` is `Invoked`.
+        pub tag_return_values: Payloads,
+
+        /// Indicates the state of this continuation.
+        pub state: State,
+    }
+
+    /// TODO
+    pub fn cont_ref_forward_tag_return_values_buffer(
+        parent: *mut VMContRef,
+        child: *mut VMContRef,
+    ) -> Result<(), TrapReason> {
+        let parent = unsafe {
+            parent.as_mut().ok_or_else(|| {
                 TrapReason::user_without_backtrace(anyhow::anyhow!(
-                    "Attempt to dereference null VMContObj!"
+                    "Attempt to dereference null (parent) VMContRef"
                 ))
             })?
-            .0
-    };
-    match contopt {
-        None => Err(TrapReason::user_without_backtrace(anyhow::Error::msg(
-            "continuation already consumed",
-        ))), // TODO(dhil): presumably we can set things up such that
-        // we always read from a non-null reference.
-        Some(contref) => {
+        };
+        let child = unsafe {
+            child.as_mut().ok_or_else(|| {
+                TrapReason::user_without_backtrace(anyhow::anyhow!(
+                    "Attempt to dereference null (child) VMContRef"
+                ))
+            })?
+        };
+        assert!(parent.state == State::Invoked);
+        assert!(child.state == State::Invoked);
+        assert!(child.tag_return_values.length == 0);
+
+        mem::swap(&mut child.tag_return_values, &mut parent.tag_return_values);
+        Ok(())
+    }
+
+    /// TODO
+    #[inline(always)]
+    pub fn drop_cont_ref(_instance: &mut Instance, contref: *mut VMContRef) {
+        // Note that continuation references do not own their parents, hence we ignore
+        // parent fields here.
+
+        let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
+        if contref.args.data.is_null() {
+            debug_assert!(contref.args.length as usize == 0);
+            debug_assert!(contref.args.capacity as usize == 0);
+        } else {
             unsafe {
-                *contobj = VMContObj(None);
-            }
-            Ok(contref.cast::<VMContRef>())
+                let _: Vec<u128> = Vec::from_raw_parts(
+                    contref.args.data,
+                    contref.args.length as usize,
+                    contref.args.capacity as usize,
+                );
+            };
+        }
+        let payloads = &contref.tag_return_values;
+        if payloads.data.is_null() {
+            debug_assert!(payloads.length as usize == 0);
+            debug_assert!(payloads.capacity as usize == 0);
+        } else {
+            let _: Vec<u128> = unsafe {
+                Vec::from_raw_parts(
+                    payloads.data,
+                    payloads.length as usize,
+                    payloads.capacity as usize,
+                )
+            };
         }
     }
-}
 
-/// TODO
-pub fn cont_ref_forward_tag_return_values_buffer(
-    parent: *mut VMContRef,
-    child: *mut VMContRef,
-) -> Result<(), TrapReason> {
-    let parent = unsafe {
-        parent.as_mut().ok_or_else(|| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null (parent) VMContRef"
-            ))
-        })?
-    };
-    let child = unsafe {
-        child.as_mut().ok_or_else(|| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null (child) VMContRef"
-            ))
-        })?
-    };
-    assert!(parent.state == State::Invoked);
-    assert!(child.state == State::Invoked);
-    assert!(child.tag_return_values.length == 0);
+    /// TODO
+    #[inline(always)]
+    pub fn cont_new(
+        instance: &mut Instance,
+        func: *mut u8,
+        param_count: u32,
+        result_count: u32,
+    ) -> Result<*mut VMContRef, TrapReason> {
+        let caller_vmctx = instance.vmctx();
 
-    mem::swap(&mut child.tag_return_values, &mut parent.tag_return_values);
-    Ok(())
-}
+        let capacity = cmp::max(param_count, result_count);
+        let payload = Payloads::new(capacity);
 
-/// TODO
-#[inline(always)]
-pub fn new_cont_obj(contref: *mut VMContRef) -> *mut VMContObj {
-    // If this is enabled, we should never call this function.
-    assert!(!cfg!(
-        feature = "unsafe_disable_continuation_linearity_check"
-    ));
+        let wasmfx_config = unsafe { &*(*instance.store()).wasmfx_config() };
+        // TODO(frank-emrich) Currently, the general `stack_limit` configuration
+        // option of wasmtime is unrelated to the stack size of our fiber stack.
+        let stack_size = wasmfx_config.stack_size;
+        let red_zone_size = wasmfx_config.red_zone_size;
 
-    let contobj = Box::new(VMContObj(Some(contref)));
-    Box::into_raw(contobj)
-}
-
-/// TODO
-#[inline(always)]
-pub fn drop_cont_ref(contref: *mut VMContRef) {
-    // Note that continuation references do not own their parents, hence we ignore
-    // parent fields here.
-
-    let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
-    if contref.args.data.is_null() {
-        debug_assert!(contref.args.length as usize == 0);
-        debug_assert!(contref.args.capacity as usize == 0);
-    } else {
-        unsafe {
-            let _: Vec<u128> = Vec::from_raw_parts(
-                contref.args.data,
-                contref.args.length as usize,
-                contref.args.capacity as usize,
-            );
-        };
-    }
-    let payloads = &contref.tag_return_values;
-    if payloads.data.is_null() {
-        debug_assert!(payloads.length as usize == 0);
-        debug_assert!(payloads.capacity as usize == 0);
-    } else {
-        let _: Vec<u128> = unsafe {
-            Vec::from_raw_parts(
-                payloads.data,
-                payloads.length as usize,
-                payloads.capacity as usize,
+        let fiber = {
+            let stack = FiberStack::malloc(stack_size).map_err(|_error| {
+                TrapReason::user_without_backtrace(anyhow::anyhow!(
+                    "Fiber stack allocation failed!"
+                ))
+            })?;
+            Fiber::new(
+                stack,
+                func.cast::<VMFuncRef>(),
+                caller_vmctx,
+                payload.data as *mut ValRaw,
+                payload.capacity as usize,
             )
+            .map_err(|_error| {
+                TrapReason::user_without_backtrace(anyhow::anyhow!("Fiber construction failed!"))
+            })?
         };
+
+        let tsp = fiber.stack().top().unwrap();
+        let stack_limit = unsafe { tsp.sub(stack_size - red_zone_size) } as usize;
+        let contref = Box::new(VMContRef {
+            limits: StackLimits::with_stack_limit(stack_limit),
+            fiber,
+            parent_chain: StackChain::Absent,
+            args: payload,
+            tag_return_values: Payloads::new(0),
+            state: State::Allocated,
+        });
+
+        // TODO(dhil): we need memory clean up of
+        // continuation reference objects.
+        let pointer = Box::into_raw(contref);
+        debug_println!("Created contref @ {:p}", pointer);
+        Ok(pointer)
     }
-}
 
-/// TODO
-#[inline(always)]
-pub fn cont_new(
-    instance: &mut Instance,
-    func: *mut u8,
-    param_count: u32,
-    result_count: u32,
-) -> Result<*mut VMContRef, TrapReason> {
-    let caller_vmctx = instance.vmctx();
+    /// TODO
+    #[inline(always)]
+    pub fn resume(
+        instance: &mut Instance,
+        contref: *mut VMContRef,
+        parent_stack_limits: *mut StackLimits,
+    ) -> Result<SwitchDirection, TrapReason> {
+        let cont = unsafe {
+            contref.as_ref().ok_or_else(|| {
+                TrapReason::user_without_backtrace(anyhow::anyhow!(
+                    "Attempt to dereference null VMContRef!"
+                ))
+            })?
+        };
+        assert!(cont.state == State::Allocated || cont.state == State::Invoked);
 
-    let capacity = cmp::max(param_count, result_count);
-    let payload = Payloads::new(capacity);
+        if ENABLE_DEBUG_PRINTING {
+            let chain = instance.typed_continuations_stack_chain();
+            // SAFETY: We maintain as an invariant that the stack chain field in the
+            // VMContext is non-null and contains a chain of zero or more
+            // StackChain::Continuation values followed by StackChain::Main.
+            match unsafe { (**chain).0.get_mut() } {
+                StackChain::Continuation(running_contref) => {
+                    debug_assert_eq!(contref, *running_contref);
+                    debug_println!(
+                        "Resuming contref @ {:p}, previously running contref is {:p}",
+                        contref,
+                        running_contref
+                    )
+                }
+                _ => {
+                    // Before calling this function as a libcall, we must have set
+                    // the parent of the to-be-resumed continuation to the
+                    // previously running one. Hence, we must see a
+                    // `StackChain::Continuation` variant.
+                    return Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
+                        "Invalid StackChain value in VMContext"
+                    )));
+                }
+            }
+        }
 
-    let wasmfx_config = unsafe { &*(*instance.store()).wasmfx_config() };
-    // TODO(frank-emrich) Currently, the general `stack_limit` configuration
-    // option of wasmtime is unrelated to the stack size of our fiber stack.
-    let stack_size = wasmfx_config.stack_size;
-    let red_zone_size = wasmfx_config.red_zone_size;
+        // See the comment on `wasmtime_continuations::StackChain` for a description
+        // of the invariants that we maintain for the various stack limits.
+        unsafe {
+            let runtime_limits = &**instance.runtime_limits();
 
-    let fiber = {
-        let stack = FiberStack::malloc(stack_size).map_err(|_error| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!("Fiber stack allocation failed!"))
-        })?;
-        Fiber::new(
-            stack,
-            func.cast::<VMFuncRef>(),
-            caller_vmctx,
-            payload.data as *mut ValRaw,
-            payload.capacity as usize,
-        )
-        .map_err(|_error| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!("Fiber construction failed!"))
-        })?
-    };
+            (*parent_stack_limits).stack_limit = *runtime_limits.stack_limit.get();
+            (*parent_stack_limits).last_wasm_entry_sp = *runtime_limits.last_wasm_entry_sp.get();
+            // These last two values were only just updated in the `runtime_limits`
+            // because we entered the current libcall.
+            (*parent_stack_limits).last_wasm_exit_fp = *runtime_limits.last_wasm_exit_fp.get();
+            (*parent_stack_limits).last_wasm_exit_pc = *runtime_limits.last_wasm_exit_pc.get();
 
-    let tsp = fiber.stack().top().unwrap();
-    let stack_limit = unsafe { tsp.sub(stack_size - red_zone_size) } as usize;
-    let contref = Box::new(VMContRef {
-        limits: StackLimits::with_stack_limit(stack_limit),
-        fiber,
-        parent_chain: StackChain::Absent,
-        args: payload,
-        tag_return_values: Payloads::new(0),
-        state: State::Allocated,
-    });
+            *runtime_limits.stack_limit.get() = (*contref).limits.stack_limit;
+            *runtime_limits.last_wasm_entry_sp.get() = (*contref).limits.last_wasm_entry_sp;
+        }
 
-    // TODO(dhil): we need memory clean up of
-    // continuation reference objects.
-    let pointer = Box::into_raw(contref);
-    debug_println!("Created contref @ {:p}", pointer);
-    Ok(pointer)
-}
+        Ok(cont.fiber.resume())
+    }
 
-/// TODO
-#[inline(always)]
-pub fn resume(
-    instance: &mut Instance,
-    contref: *mut VMContRef,
-    parent_stack_limits: *mut StackLimits,
-) -> Result<SwitchDirection, TrapReason> {
-    let cont = unsafe {
-        contref.as_ref().ok_or_else(|| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null VMContRef!"
-            ))
-        })?
-    };
-    assert!(cont.state == State::Allocated || cont.state == State::Invoked);
+    /// TODO
+    #[inline(always)]
+    pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {
+        let chain_ptr = instance.typed_continuations_stack_chain();
 
-    if ENABLE_DEBUG_PRINTING {
-        let chain = instance.typed_continuations_stack_chain();
+        // TODO(dhil): This should be handled in generated code.
         // SAFETY: We maintain as an invariant that the stack chain field in the
         // VMContext is non-null and contains a chain of zero or more
         // StackChain::Continuation values followed by StackChain::Main.
-        match unsafe { (**chain).0.get_mut() } {
-            StackChain::Continuation(running_contref) => {
-                debug_assert_eq!(contref, *running_contref);
-                debug_println!(
-                    "Resuming contref @ {:p}, previously running contref is {:p}",
-                    contref,
-                    running_contref
-                )
+        let chain = unsafe { (**chain_ptr).0.get_mut() };
+        let running = match chain {
+            StackChain::Absent => Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "Internal error: StackChain not initialised"
+            ))),
+            StackChain::MainStack { .. } => Err(TrapReason::user_without_backtrace(
+                anyhow::anyhow!("Calling suspend outside of a continuation"),
+            )),
+            StackChain::Continuation(running) => {
+                // SAFETY: See above.
+                Ok(unsafe { &**running })
             }
-            _ => {
-                // Before calling this function as a libcall, we must have set
-                // the parent of the to-be-resumed continuation to the
-                // previously running one. Hence, we must see a
-                // `StackChain::Continuation` variant.
-                return Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
-                    "Invalid StackChain value in VMContext"
-                )));
-            }
-        }
+        }?;
+
+        let fiber = &running.fiber;
+
+        let stack_ptr = fiber.stack().top().ok_or_else(|| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "Failed to retrieve stack top pointer!"
+            ))
+        })?;
+        debug_println!(
+            "Suspending while running {:p}, parent is {:?}",
+            running,
+            running.parent_chain
+        );
+
+        let suspend = crate::runtime::vm::fibre::unix::Suspend::from_top_ptr(stack_ptr);
+        let payload = SwitchDirection::suspend(tag_index);
+        Ok(suspend.switch(payload))
     }
 
-    // See the comment on `wasmtime_continuations::StackChain` for a description
-    // of the invariants that we maintain for the various stack limits.
-    unsafe {
-        let runtime_limits = &**instance.runtime_limits();
+    // Tests
+    #[test]
+    fn offset_and_size_constants() {
+        use memoffset;
+        use wasmtime_continuations::offsets::*;
 
-        (*parent_stack_limits).stack_limit = *runtime_limits.stack_limit.get();
-        (*parent_stack_limits).last_wasm_entry_sp = *runtime_limits.last_wasm_entry_sp.get();
-        // These last two values were only just updated in the `runtime_limits`
-        // because we entered the current libcall.
-        (*parent_stack_limits).last_wasm_exit_fp = *runtime_limits.last_wasm_exit_fp.get();
-        (*parent_stack_limits).last_wasm_exit_pc = *runtime_limits.last_wasm_exit_pc.get();
+        assert_eq!(
+            memoffset::offset_of!(VMContRef, limits),
+            vm_cont_ref::LIMITS
+        );
+        assert_eq!(
+            memoffset::offset_of!(VMContRef, parent_chain),
+            vm_cont_ref::PARENT_CHAIN
+        );
+        assert_eq!(memoffset::offset_of!(VMContRef, fiber), vm_cont_ref::FIBER);
+        assert_eq!(memoffset::offset_of!(VMContRef, args), vm_cont_ref::ARGS);
+        assert_eq!(
+            memoffset::offset_of!(VMContRef, tag_return_values),
+            vm_cont_ref::TAG_RETURN_VALUES
+        );
+        assert_eq!(memoffset::offset_of!(VMContRef, state), vm_cont_ref::STATE);
 
-        *runtime_limits.stack_limit.get() = (*contref).limits.stack_limit;
-        *runtime_limits.last_wasm_entry_sp.get() = (*contref).limits.last_wasm_entry_sp;
+        assert_eq!(
+            core::mem::size_of::<ContinuationFiber>(),
+            CONTINUATION_FIBER_SIZE
+        );
+        assert_eq!(core::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
     }
-
-    Ok(cont.fiber.resume())
 }
 
-/// TODO
-#[inline(always)]
-pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {
-    let chain_ptr = instance.typed_continuations_stack_chain();
-
-    // TODO(dhil): This should be handled in generated code.
-    // SAFETY: We maintain as an invariant that the stack chain field in the
-    // VMContext is non-null and contains a chain of zero or more
-    // StackChain::Continuation values followed by StackChain::Main.
-    let chain = unsafe { (**chain_ptr).0.get_mut() };
-    let running = match chain {
-        StackChain::Absent => Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
-            "Internal error: StackChain not initialised"
-        ))),
-        StackChain::MainStack { .. } => Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
-            "Calling suspend outside of a continuation"
-        ))),
-        StackChain::Continuation(running) => {
-            // SAFETY: See above.
-            Ok(unsafe { &**running })
-        }
-    }?;
-
-    let fiber = &running.fiber;
-
-    let stack_ptr = fiber.stack().top().ok_or_else(|| {
-        TrapReason::user_without_backtrace(anyhow::anyhow!("Failed to retrieve stack top pointer!"))
-    })?;
-    debug_println!(
-        "Suspending while running {:p}, parent is {:?}",
-        running,
-        running.parent_chain
-    );
-
-    let suspend = crate::runtime::vm::fibre::unix::Suspend::from_top_ptr(stack_ptr);
-    let payload = SwitchDirection::suspend(tag_index);
-    Ok(suspend.switch(payload))
-}
-
-#[allow(missing_docs)]
-#[cfg(feature = "typed_continuations_baseline_implementation")]
+//
+// Baseline implementation
+//
+#[cfg(feature = "wasmfx_baseline")]
 pub mod baseline {
+    use super::stack_chain::{StackChain, StackLimits};
     use crate::runtime::vm::{Instance, TrapReason, VMFuncRef, VMOpaqueContext, ValRaw};
     use core::{cell::Cell, cell::RefCell, cmp, mem};
     use wasmtime_continuations::DEFAULT_FIBER_SIZE;
@@ -472,6 +333,8 @@ pub mod baseline {
     pub struct VMContRef {
         pub fiber: Box<ContinuationFiber>,
         pub suspend: *mut Yield,
+        pub limits: StackLimits,
+        pub parent_chain: StackChain,
         pub parent: *mut VMContRef,
         pub args: Vec<u128>,
         pub values: Vec<u128>,
@@ -543,6 +406,8 @@ pub mod baseline {
         };
 
         let contref = Box::new(VMContRef {
+            limits: StackLimits::with_stack_limit(0),
+            parent_chain: StackChain::Absent,
             parent: core::ptr::null_mut(),
             suspend: core::ptr::null_mut(),
             fiber,
@@ -740,8 +605,208 @@ pub mod baseline {
     }
 }
 
+//
+// Stack chain
+//
+pub mod stack_chain {
+    use super::imp::VMContRef;
+    use core::cell::UnsafeCell;
+    pub use wasmtime_continuations::StackLimits;
+
+    /// This type represents a linked lists of stacks, additionally associating a
+    /// `StackLimits` object with each element of the list. Here, a "stack" is
+    /// either a continuation or the main stack. Note that the linked list character
+    /// arises from the fact that `StackChain::Continuation` variants have a pointer
+    /// to have `VMContRef`, which in turn has a `parent_chain` value of
+    /// type `StackChain`.
+    ///
+    /// There are generally two uses of such chains:
+    ///
+    /// 1. The `typed_continuations_chain` field in the VMContext contains such a
+    /// chain of stacks, where the head of the list denotes the stack that is
+    /// currently executing (either a continuation or the main stack), as well as
+    /// the parent stacks, in case of a continuation currently running. Note that in
+    /// this case, the linked list must contains 0 or more `Continuation` elements,
+    /// followed by a final `MainStack` element. In particular, this list always
+    /// ends with `MainStack` and never contains an `Absent` variant.
+    ///
+    /// 2. When a continuation is suspended, its chain of parents eventually ends
+    /// with an `Absent` variant in its `parent_chain` field. Note that a suspended
+    /// continuation never appears in the stack chain in the VMContext!
+    ///
+    ///
+    /// As mentioned before, each stack in a `StackChain` has a corresponding
+    /// `StackLimits` object. For continuations, this is stored in the `limits`
+    /// fields of the corresponding `VMContRef`. For the main stack, the
+    /// `MainStack` variant contains a pointer to the
+    /// `typed_continuations_main_stack_limits` field of the VMContext.
+    ///
+    /// The following invariants hold for these `StackLimits` objects, and the data
+    /// in `VMRuntimeLimits`.
+    ///
+    /// Currently executing stack:
+    /// For the currently executing stack (i.e., the stack that is at the head of
+    /// the VMContext's `typed_continuations_chain` list), the associated
+    /// `StackLimits` object contains stale/undefined data. Instead, the live data
+    /// describing the limits for the currently executing stack is always maintained
+    /// in `VMRuntimeLimits`. Note that as a general rule independently from any
+    /// execution of continuations, the `last_wasm_exit*` fields in the
+    /// `VMRuntimeLimits` contain undefined values while executing wasm.
+    ///
+    /// Parents of currently executing stack:
+    /// For stacks that appear in the tail of the VMContext's
+    /// `typed_continuations_chain` list (i.e., stacks that are not currently
+    /// executing themselves, but are a parent of the currently executing stack), we
+    /// have the following: All the fields in the stack's StackLimits are valid,
+    /// describing the stack's stack limit, and pointers where executing for that
+    /// stack entered and exited WASM.
+    ///
+    /// Suspended continuations:
+    /// For suspended continuations (including their parents), we have the
+    /// following. Note that the main stack can never be in this state. The
+    /// `stack_limit` and `last_enter_wasm_sp` fields of the corresponding
+    /// `StackLimits` object contain valid data, while the `last_exit_wasm_*` fields
+    /// contain arbitrary values.
+    /// There is only one exception to this: Note that a continuation that has been
+    /// created with cont.new, but never been resumed so far, is considered
+    /// "suspended". However, its `last_enter_wasm_sp` field contains undefined
+    /// data. This is justified, because when resume-ing a continuation for the
+    /// first time, a native-to-wasm trampoline is called, which sets up the
+    /// `last_wasm_entry_sp` in the `VMRuntimeLimits` with the correct value, thus
+    /// restoring the necessary invariant.
+    #[derive(Debug, Clone, PartialEq)]
+    #[repr(usize, C)]
+    pub enum StackChain {
+        /// If stored in the VMContext, used to indicate that the MainStack entry
+        /// has not been set, yet. If stored in a VMContRef's parent_chain
+        /// field, means that there is currently no parent.
+        Absent = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT,
+        /// Represents the main stack.
+        MainStack(*mut StackLimits) = wasmtime_continuations::STACK_CHAIN_MAIN_STACK_DISCRIMINANT,
+        /// Represents a continuation's stack.
+        Continuation(*mut VMContRef) =
+            wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT,
+    }
+
+    impl StackChain {
+        /// Indicates if `self` is a `MainStack` variant.
+        pub fn is_main_stack(&self) -> bool {
+            matches!(self, StackChain::MainStack(_))
+        }
+
+        /// Returns an iterator over the stacks in this chain.
+        /// We don't implement `IntoIterator` because our iterator is unsafe, so at
+        /// least this gives us some way of indicating this, even though the actual
+        /// unsafety lies in the `next` function.
+        ///
+        /// # Safety
+        ///
+        /// This function is not unsafe per see, but it returns an object
+        /// whose usage is unsafe.
+        pub unsafe fn into_iter(self) -> ContinuationChainIterator {
+            ContinuationChainIterator(self)
+        }
+    }
+
+    /// Iterator for stacks in a stack chain.
+    /// Each stack is represented by a tuple `(co_opt, sl)`, where sl is a pointer
+    /// to the stack's `StackLimits` object and `co_opt` is a pointer to the
+    /// corresponding `VMContRef`, or None for the main stack.
+    pub struct ContinuationChainIterator(StackChain);
+
+    impl Iterator for ContinuationChainIterator {
+        type Item = (Option<*mut VMContRef>, *mut StackLimits);
+
+        fn next(&mut self) -> Option<Self::Item> {
+            match self.0 {
+                StackChain::Absent => None,
+                StackChain::MainStack(ms) => {
+                    let next = (None, ms);
+                    self.0 = StackChain::Absent;
+                    Some(next)
+                }
+                StackChain::Continuation(ptr) => {
+                    let continuation = unsafe { ptr.as_mut().unwrap() };
+                    let next = (Some(ptr), (&mut continuation.limits) as *mut StackLimits);
+                    self.0 = continuation.parent_chain.clone();
+                    Some(next)
+                }
+            }
+        }
+    }
+
+    #[repr(transparent)]
+    /// Wraps a `StackChain` in an `UnsafeCell`, in order to store it in a
+    /// `StoreOpaque`.
+    pub struct StackChainCell(pub UnsafeCell<StackChain>);
+
+    impl StackChainCell {
+        /// Indicates if the underlying `StackChain` object has value `Absent`.
+        pub fn absent() -> Self {
+            StackChainCell(UnsafeCell::new(StackChain::Absent))
+        }
+    }
+
+    // Since `StackChainCell` objects appear in the `StoreOpaque`,
+    // they need to be `Send` and `Sync`.
+    // This is safe for the same reason it is for `VMRuntimeLimits` (see comment
+    // there): Both types are pod-type with no destructor, and we don't access any
+    // of their fields from other threads.
+    unsafe impl Send for StackChainCell {}
+    unsafe impl Sync for StackChainCell {}
+}
+
+//
+// Dummy implementations
+//
+
 #[allow(missing_docs)]
-#[cfg(not(feature = "typed_continuations_baseline_implementation"))]
+#[cfg(feature = "wasmfx_baseline")]
+pub mod optimized {
+    use crate::runtime::vm::{Instance, TrapReason};
+    pub use wasmtime_continuations::{StackLimits, SwitchDirection};
+
+    pub type VMContRef = super::baseline::VMContRef;
+
+    pub fn cont_ref_forward_tag_return_values_buffer(
+        _parent: *mut VMContRef,
+        _child: *mut VMContRef,
+    ) -> Result<(), TrapReason> {
+        panic!("attempt to execute continuation::optimized::cont_ref_forward_tag_return_values_buffer with `typed_continuation_baseline_implementation` toggled!")
+    }
+
+    #[inline(always)]
+    pub fn drop_cont_ref(_instance: &mut Instance, _contref: *mut VMContRef) {
+        panic!("attempt to execute continuation::optimized::drop_cont_ref with `typed_continuation_baseline_implementation` toggled!")
+    }
+
+    #[inline(always)]
+    pub fn cont_new(
+        _instance: &mut Instance,
+        _func: *mut u8,
+        _param_count: u32,
+        _result_count: u32,
+    ) -> Result<*mut VMContRef, TrapReason> {
+        panic!("attempt to execute continuation::optimized::cont_new with `typed_continuation_baseline_implementation` toggled!")
+    }
+
+    #[inline(always)]
+    pub fn resume(
+        _instance: &mut Instance,
+        _contref: *mut VMContRef,
+        _parent_stack_limits: *mut StackLimits,
+    ) -> Result<SwitchDirection, TrapReason> {
+        panic!("attempt to execute continuation::optimized::resume with `typed_continuation_baseline_implementation` toggled!")
+    }
+
+    #[inline(always)]
+    pub fn suspend(_instance: &mut Instance, _tag_index: u32) -> Result<(), TrapReason> {
+        panic!("attempt to execute continuation::optimized::suspend with `typed_continuation_baseline_implementation` toggled!")
+    }
+}
+
+#[allow(missing_docs)]
+#[cfg(not(feature = "wasmfx_baseline"))]
 pub mod baseline {
     use crate::runtime::vm::{Instance, TrapReason};
 
@@ -833,32 +898,4 @@ pub mod baseline {
     pub fn has_ever_run_continuation() -> bool {
         panic!("attempt to execute continuation::baseline::has_ever_run_continuation without `typed_continuation_baseline_implementation` toggled!")
     }
-}
-
-#[test]
-fn offset_and_size_constants() {
-    use memoffset;
-    use wasmtime_continuations::offsets::*;
-
-    assert_eq!(
-        memoffset::offset_of!(VMContRef, limits),
-        vm_cont_ref::LIMITS
-    );
-    assert_eq!(
-        memoffset::offset_of!(VMContRef, parent_chain),
-        vm_cont_ref::PARENT_CHAIN
-    );
-    assert_eq!(memoffset::offset_of!(VMContRef, fiber), vm_cont_ref::FIBER);
-    assert_eq!(memoffset::offset_of!(VMContRef, args), vm_cont_ref::ARGS);
-    assert_eq!(
-        memoffset::offset_of!(VMContRef, tag_return_values),
-        vm_cont_ref::TAG_RETURN_VALUES
-    );
-    assert_eq!(memoffset::offset_of!(VMContRef, state), vm_cont_ref::STATE);
-
-    assert_eq!(
-        core::mem::size_of::<ContinuationFiber>(),
-        CONTINUATION_FIBER_SIZE
-    );
-    assert_eq!(core::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
 }

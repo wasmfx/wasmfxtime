@@ -4,7 +4,7 @@
 
 use crate::prelude::*;
 use crate::runtime::vm::const_expr::{ConstEvalContext, ConstExprEvaluator};
-use crate::runtime::vm::continuation::StackChainCell;
+use crate::runtime::vm::continuation::stack_chain::StackChainCell;
 use crate::runtime::vm::export::Export;
 use crate::runtime::vm::memory::{Memory, RuntimeMemoryCreator};
 use crate::runtime::vm::table::{Table, TableElement, TableElementType};
@@ -1320,6 +1320,8 @@ impl Instance {
         fault
     }
 
+    // NOTE(dhil): This function is not called when `wasmfx_baseline` is toggled.
+    #[cfg(not(feature = "wasmfx_baseline"))]
     pub(crate) fn typed_continuations_stack_chain(&mut self) -> *mut *mut StackChainCell {
         unsafe {
             self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_stack_chain())

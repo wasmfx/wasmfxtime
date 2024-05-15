@@ -11,7 +11,7 @@ mod coredump;
 mod coredump;
 
 use crate::prelude::*;
-use crate::runtime::vm::continuation::StackChainCell;
+use crate::runtime::vm::continuation::stack_chain::StackChainCell;
 use crate::runtime::vm::sys::traphandlers;
 use crate::runtime::vm::{Instance, VMContext, VMOpaqueContext, VMRuntimeLimits};
 use crate::sync::OnceLock;

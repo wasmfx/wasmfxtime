@@ -842,7 +842,7 @@ fn tc_cont_new(
     result_count: u32,
 ) -> Result<*mut u8, TrapReason> {
     let ans =
-        crate::runtime::vm::continuation::cont_new(instance, func, param_count, result_count)?;
+        crate::vm::continuation::optimized::cont_new(instance, func, param_count, result_count)?;
     Ok(ans.cast::<u8>())
 }
 
@@ -851,33 +851,62 @@ fn tc_resume(
     contref: *mut u8,
     parent_stack_limits: *mut u8,
 ) -> Result<u64, TrapReason> {
-    crate::runtime::vm::continuation::resume(
+    crate::vm::continuation::optimized::resume(
         instance,
-        contref.cast::<crate::runtime::vm::continuation::VMContRef>(),
-        parent_stack_limits.cast::<crate::runtime::vm::continuation::StackLimits>(),
+        contref.cast::<crate::vm::continuation::optimized::VMContRef>(),
+        parent_stack_limits.cast::<crate::vm::continuation::optimized::StackLimits>(),
     )
     .map(|reason| reason.into())
 }
 
 fn tc_suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {
-    crate::runtime::vm::continuation::suspend(instance, tag_index)
+    crate::vm::continuation::optimized::suspend(instance, tag_index)
 }
 
 fn tc_new_cont_obj(_instance: &mut Instance, contref: *mut u8) -> *mut u8 {
-    crate::runtime::vm::continuation::new_cont_obj(
-        contref.cast::<crate::runtime::vm::continuation::VMContRef>(),
-    )
-    .cast::<u8>()
+    // If this is enabled, we should never call this function.
+    assert!(!cfg!(
+        feature = "unsafe_disable_continuation_linearity_check"
+    ));
+
+    let contobj = alloc::boxed::Box::new(crate::vm::continuation::VMContObj(Some(
+        contref.cast::<crate::vm::continuation::imp::VMContRef>(),
+    )));
+    alloc::boxed::Box::into_raw(contobj).cast::<u8>()
 }
 
 fn tc_cont_obj_get_cont_ref(
     _instance: &mut Instance,
     contobj: *mut u8,
 ) -> Result<*mut u8, TrapReason> {
-    let ans = crate::runtime::vm::continuation::cont_obj_get_cont_ref(
-        contobj.cast::<crate::runtime::vm::continuation::VMContObj>(),
-    )?;
-    Ok(ans.cast::<u8>())
+    // If this is enabled, we should never call this function.
+    assert!(!cfg!(
+        feature = "unsafe_disable_continuation_linearity_check"
+    ));
+
+    let contobj = contobj.cast::<crate::vm::continuation::VMContObj>();
+    let contopt = unsafe {
+        contobj
+            .as_mut()
+            .ok_or_else(|| {
+                TrapReason::user_without_backtrace(anyhow::anyhow!(
+                    "Attempt to dereference null VMContObj!"
+                ))
+            })?
+            .0
+    };
+    match contopt {
+        None => Err(TrapReason::user_without_backtrace(anyhow::Error::msg(
+            "continuation already consumed",
+        ))), // TODO(dhil): presumably we can set things up such that
+        // we always read from a non-null reference.
+        Some(contref) => {
+            unsafe {
+                *contobj = crate::vm::continuation::VMContObj(None);
+            }
+            Ok(contref.cast::<u8>())
+        }
+    }
 }
 
 fn tc_cont_ref_forward_tag_return_values_buffer(
@@ -885,22 +914,23 @@ fn tc_cont_ref_forward_tag_return_values_buffer(
     parent_contref: *mut u8,
     child_contref: *mut u8,
 ) -> Result<(), TrapReason> {
-    crate::runtime::vm::continuation::cont_ref_forward_tag_return_values_buffer(
-        parent_contref.cast::<crate::runtime::vm::continuation::VMContRef>(),
-        child_contref.cast::<crate::runtime::vm::continuation::VMContRef>(),
+    crate::vm::continuation::optimized::cont_ref_forward_tag_return_values_buffer(
+        parent_contref.cast::<crate::vm::continuation::optimized::VMContRef>(),
+        child_contref.cast::<crate::vm::continuation::optimized::VMContRef>(),
     )
 }
 
-fn tc_drop_cont_ref(_instance: &mut Instance, contref: *mut u8) {
-    crate::runtime::vm::continuation::drop_cont_ref(
-        contref.cast::<crate::runtime::vm::continuation::VMContRef>(),
+fn tc_drop_cont_ref(instance: &mut Instance, contref: *mut u8) {
+    crate::vm::continuation::optimized::drop_cont_ref(
+        instance,
+        contref.cast::<crate::vm::continuation::optimized::VMContRef>(),
     )
 }
 
 fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> Result<*mut u8, TrapReason> {
     debug_assert!(size > 0);
     let layout =
-        alloc::alloc::Layout::from_size_align(size as usize, align as usize).map_err(|_error| {
+        std::alloc::Layout::from_size_align(size as usize, align as usize).map_err(|_error| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
                 "Continuation layout construction failed!"
             ))
@@ -925,12 +955,12 @@ fn tc_deallocate(
 ) -> Result<(), TrapReason> {
     debug_assert!(size > 0);
     let layout =
-        alloc::alloc::Layout::from_size_align(size as usize, align as usize).map_err(|_error| {
+        std::alloc::Layout::from_size_align(size as usize, align as usize).map_err(|_error| {
             TrapReason::user_without_backtrace(anyhow::anyhow!(
                 "Continuation layout construction failed!"
             ))
         })?;
-    Ok(unsafe { alloc::alloc::dealloc(ptr, layout) })
+    Ok(unsafe { std::alloc::dealloc(ptr, layout) })
 }
 
 fn tc_reallocate(
@@ -950,8 +980,8 @@ fn tc_reallocate(
 }
 
 fn tc_print_str(_instance: &mut Instance, s: *const u8, len: u64) {
-    let str = unsafe { alloc::slice::from_raw_parts(s, len as usize) };
-    let s = alloc::str::from_utf8(str).unwrap();
+    let str = unsafe { std::slice::from_raw_parts(s, len as usize) };
+    let s = std::str::from_utf8(str).unwrap();
     print!("{}", s);
 }
 
