@@ -748,13 +748,11 @@ jobs:
       env:
         RUST_BACKTRACE: 1
 
-    # TODO(dhil): The optimized implementation segfaults when using
-    # the stack pooling allocator.
     # Test WasmFX allocators
-    # - name: WasmFX pooling allocator
-    #   run: cargo test --features=default,wasmfx_pooling_allocator
-    #   env:
-    #     RUST_BACKTRACE: 1
+    - name: WasmFX pooling allocator
+      run: cargo test --features=default,wasmfx_pooling_allocator
+      env:
+        RUST_BACKTRACE: 1
 
     - name: WasmFX pooling allocator (baseline)
       run: cargo test --features=default,wasmfx_baseline,wasmfx_pooling_allocator
