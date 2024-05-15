@@ -71,8 +71,9 @@ WASM_API_EXTERN void wasmtime_linker_allow_shadowing(wasmtime_linker_t *linker,
  *
  * By default this setting is `false`.
  */
-WASM_API_EXTERN void wasmtime_linker_allow_unknown_exports(wasmtime_linker_t *linker,
-                                                     bool allow_unknown_exports);
+WASM_API_EXTERN void
+wasmtime_linker_allow_unknown_exports(wasmtime_linker_t *linker,
+                                      bool allow_unknown_exports);
 
 /**
  * \brief Defines a new item in this linker.
