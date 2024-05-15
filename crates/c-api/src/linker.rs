@@ -37,6 +37,14 @@ pub extern "C" fn wasmtime_linker_allow_shadowing(
     linker.linker.allow_shadowing(allow_shadowing);
 }
 
+#[no_mangle]
+pub extern "C" fn wasmtime_linker_allow_unknown_exports(
+    linker: &mut wasmtime_linker_t,
+    allow_unknown_exports: bool,
+) {
+    linker.linker.allow_unknown_exports(allow_unknown_exports);
+}
+
 macro_rules! to_str {
     ($ptr:expr, $len:expr) => {
         match str::from_utf8(crate::slice_from_raw_parts($ptr, $len)) {
