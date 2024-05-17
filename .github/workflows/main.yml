@@ -662,7 +662,9 @@ jobs:
     strategy:
       matrix:
         feature: ["openvino", "onnx"]
-        os: ["ubuntu-latest", "windows-latest"]
+        os: ["ubuntu-latest"]
+          # TODO(dhil): Windows is currently unsupported.
+          #["ubuntu-latest", "windows-latest"]
     name: Test wasi-nn (${{ matrix.feature }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: determine
