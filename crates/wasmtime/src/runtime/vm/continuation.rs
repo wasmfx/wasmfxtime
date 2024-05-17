@@ -315,7 +315,9 @@ pub mod optimized {
 #[cfg(feature = "wasmfx_baseline")]
 pub mod baseline {
     use super::stack_chain::{StackChain, StackLimits};
-    use crate::runtime::vm::{Instance, TrapReason, VMFuncRef, VMOpaqueContext, ValRaw};
+    use crate::runtime::vm::{
+        raise_user_trap, Instance, TrapReason, VMFuncRef, VMOpaqueContext, ValRaw,
+    };
     use core::{cell::Cell, cell::RefCell, cmp, mem};
     use wasmtime_continuations::DEFAULT_FIBER_SIZE;
     use wasmtime_environ::prelude::*;
@@ -370,11 +372,14 @@ pub mod baseline {
 
         let fiber = {
             let stack = wasmtime_fiber::FiberStack::new(DEFAULT_FIBER_SIZE)
-                .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+                .map_err(|_error| anyhow::anyhow!("Fiber stack allocation failed"))?;
             let fiber = match unsafe { func.cast::<VMFuncRef>().as_ref() } {
-                None => Fiber::new(stack, |_instance: &mut Instance, _suspend: &mut Yield| {
-                    panic!("Attempt to invoke null VMFuncRef!");
-                }),
+                None => Fiber::new(
+                    stack,
+                    |_instance: &mut Instance, _suspend: &mut Yield| unsafe {
+                        raise_user_trap(anyhow::anyhow!("Attempt to invoke null VMFuncRef!"), true)
+                    },
+                ),
                 Some(func_ref) => {
                     let callee_ctx = func_ref.vmctx;
 
@@ -452,6 +457,13 @@ pub mod baseline {
                 .stack_limit
                 .get_mut()) = 0
         };
+
+        if contref.fiber.done() {
+            let trap = TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "continuation already consumed"
+            ));
+            return Err(trap);
+        }
 
         // Resume the current continuation.
         contref
