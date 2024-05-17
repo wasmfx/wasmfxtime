@@ -2,6 +2,9 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     #[cfg(feature = "runtime")]
+    select_wasmfx_implementation();
+
+    #[cfg(feature = "runtime")]
     build_c_helpers();
 }
 
@@ -35,4 +38,20 @@ fn build_c_helpers() {
     println!("cargo:rerun-if-changed=src/runtime/vm/helpers.c");
     build.file("src/runtime/vm/helpers.c");
     build.compile("wasmtime-helpers");
+}
+
+// NOTE(dhil): This is a workaround the fact that cargo features are
+// additive. Having `wasmfx_baseline` as a feature in Cargo.toml means
+// it always overrides the main development aka optimized version of
+// our implementation when running in the CI.
+#[cfg(feature = "runtime")]
+fn select_wasmfx_implementation() {
+    println!("cargo:rerun-if-env-changed=WASMFX_IMPL");
+    match std::env::var("WASMFX_IMPL") {
+        Ok(val) if &val == "baseline" => {
+            println!("cargo:rustc-cfg=feature=\"wasmfx_baseline\"");
+            println!("cargo:rustc-cfg=feature=\"async\"")
+        }
+        _ => {}
+    }
 }

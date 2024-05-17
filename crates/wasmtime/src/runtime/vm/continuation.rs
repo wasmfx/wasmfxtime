@@ -191,6 +191,12 @@ pub mod optimized {
                 ))
             })?
         };
+        if cont.fiber.done() {
+            let trap = TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "continuation already consumed"
+            ));
+            return Err(trap);
+        }
         assert!(cont.state == State::Allocated || cont.state == State::Invoked);
 
         if ENABLE_DEBUG_PRINTING {
@@ -233,13 +239,6 @@ pub mod optimized {
 
             *runtime_limits.stack_limit.get() = (*contref).limits.stack_limit;
             *runtime_limits.last_wasm_entry_sp.get() = (*contref).limits.last_wasm_entry_sp;
-        }
-
-        if cont.fiber.done() {
-            let trap = TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "continuation already consumed"
-            ));
-            return Err(trap);
         }
 
         Ok(cont.fiber.resume())
