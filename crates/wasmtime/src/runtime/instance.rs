@@ -1,8 +1,8 @@
 use crate::linker::{Definition, DefinitionType};
 use crate::prelude::*;
 use crate::runtime::vm::{
-    Imports, InstanceAllocationRequest, StorePtr, VMContext, VMFuncRef, VMFunctionImport,
-    VMGlobalImport, VMMemoryImport, VMNativeCallFunction, VMOpaqueContext, VMTableImport,
+    Imports, InstanceAllocationRequest, StorePtr, VMFuncRef, VMFunctionImport, VMGlobalImport,
+    VMMemoryImport, VMOpaqueContext, VMTableImport,
 };
 use crate::store::{InstanceId, StoreOpaque, Stored};
 use crate::types::matching;
@@ -12,7 +12,6 @@ use crate::{
 };
 use alloc::sync::Arc;
 use anyhow::{anyhow, bail, Context, Result};
-use core::mem;
 use core::ptr::NonNull;
 use wasmparser::WasmFeatures;
 use wasmtime_environ::{
@@ -41,7 +40,7 @@ pub(crate) struct InstanceData {
     /// `InstanceHandle`.
     id: InstanceId,
     /// A lazily-populated list of exports of this instance. The order of
-    /// exports here matches the order of the exports in the the original
+    /// exports here matches the order of the exports in the original
     /// module.
     exports: Vec<Option<Extern>>,
 }
@@ -300,7 +299,7 @@ impl Instance {
         // we immediately insert it into the store to keep it alive.
         //
         // Note that we `clone` the instance handle just to make easier
-        // working the the borrow checker here easier. Technically the `&mut
+        // working the borrow checker here easier. Technically the `&mut
         // instance` has somewhat of a borrow on `store` (which
         // conflicts with the borrow on `store.engine`) but this doesn't
         // matter in practice since initialization isn't even running any
@@ -367,11 +366,13 @@ impl Instance {
             super::func::invoke_wasm_and_catch_traps(
                 store,
                 |_default_caller| {
-                    let func = mem::transmute::<
-                        NonNull<VMNativeCallFunction>,
-                        extern "C" fn(*mut VMOpaqueContext, *mut VMContext),
-                    >(f.func_ref.as_ref().native_call);
-                    func(f.func_ref.as_ref().vmctx, caller_vmctx)
+                    let func = f.func_ref.as_ref().array_call;
+                    func(
+                        f.func_ref.as_ref().vmctx,
+                        VMOpaqueContext::from_vmcontext(caller_vmctx),
+                        [].as_mut_ptr(),
+                        0,
+                    )
                 },
                 callee_vmctx,
             )?;
@@ -714,7 +715,6 @@ impl OwnedImports {
                 let f = f.func_ref.as_ref();
                 self.functions.push(VMFunctionImport {
                     wasm_call: f.wasm_call.unwrap(),
-                    native_call: f.native_call,
                     array_call: f.array_call,
                     vmctx: f.vmctx,
                 });
@@ -824,11 +824,11 @@ impl<T> InstancePre<T> {
                     if f.func_ref().wasm_call.is_none() {
                         // `f` needs its `VMFuncRef::wasm_call` patched with a
                         // Wasm-to-native trampoline.
-                        debug_assert!(matches!(f.host_ctx(), crate::HostContext::Native(_)));
+                        debug_assert!(matches!(f.host_ctx(), crate::HostContext::Array(_)));
                         func_refs.push(VMFuncRef {
                             wasm_call: module
                                 .runtime_info()
-                                .wasm_to_native_trampoline(f.sig_index()),
+                                .wasm_to_array_trampoline(f.sig_index()),
                             ..*f.func_ref()
                         });
                     }

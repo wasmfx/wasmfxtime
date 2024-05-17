@@ -3,7 +3,7 @@
 
 mod vm_host_func_context;
 
-pub use self::vm_host_func_context::{VMArrayCallHostFuncContext, VMNativeCallHostFuncContext};
+pub use self::vm_host_func_context::VMArrayCallHostFuncContext;
 use crate::runtime::vm::{GcStore, VMGcRef};
 use core::cell::UnsafeCell;
 use core::ffi::c_void;
@@ -38,18 +38,6 @@ use wasmtime_environ::{
 pub type VMArrayCallFunction =
     unsafe extern "C" fn(*mut VMOpaqueContext, *mut VMOpaqueContext, *mut ValRaw, usize);
 
-/// A function pointer that exposes the native calling convention.
-///
-/// Different Wasm function types end up mapping to different Rust function
-/// types, so this isn't simply a type alias the way that `VMArrayCallFunction`
-/// is.
-///
-/// This is the default calling convention for the target (e.g. System-V or
-/// fast-call) except multiple return values are handled by returning the first
-/// return value in a register and everything else through a return-pointer.
-#[repr(transparent)]
-pub struct VMNativeCallFunction(VMFunctionBody);
-
 /// A function pointer that exposes the Wasm calling convention.
 ///
 /// In practice, different Wasm function types end up mapping to different Rust
@@ -67,9 +55,6 @@ pub struct VMWasmCallFunction(VMFunctionBody);
 pub struct VMFunctionImport {
     /// Function pointer to use when calling this imported function from Wasm.
     pub wasm_call: NonNull<VMWasmCallFunction>,
-
-    /// Function pointer to use when calling this imported function from native code.
-    pub native_call: NonNull<VMNativeCallFunction>,
 
     /// Function pointer to use when calling this imported function with the
     /// "array" calling convention that `Func::new` et al use.
@@ -107,10 +92,6 @@ mod test_vmfunction_import {
         assert_eq!(
             offset_of!(VMFunctionImport, wasm_call),
             usize::from(offsets.vmfunction_import_wasm_call())
-        );
-        assert_eq!(
-            offset_of!(VMFunctionImport, native_call),
-            usize::from(offsets.vmfunction_import_native_call())
         );
         assert_eq!(
             offset_of!(VMFunctionImport, array_call),
@@ -648,10 +629,6 @@ mod test_vmshared_type_index {
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct VMFuncRef {
-    /// Function pointer for this funcref if being called via the native calling
-    /// convention.
-    pub native_call: NonNull<VMNativeCallFunction>,
-
     /// Function pointer for this funcref if being called via the "array"
     /// calling convention that `Func::new` et al use.
     pub array_call: VMArrayCallFunction,
@@ -665,7 +642,7 @@ pub struct VMFuncRef {
     /// Wasm-to-native trampoline for the function. In this case, we leave
     /// `wasm_call` empty until the function is passed as an import to Wasm (or
     /// otherwise exposed to Wasm via tables/globals). At this point, we look up
-    /// a Wasm-to-native trampoline for the function in the the Wasm's compiled
+    /// a Wasm-to-native trampoline for the function in the Wasm's compiled
     /// module and use that fill in `VMFunctionImport::wasm_call`. **However**
     /// there is no guarantee that the Wasm module has a trampoline for this
     /// function's signature. The Wasm module only has trampolines for its
@@ -706,10 +683,6 @@ mod test_vm_func_ref {
         assert_eq!(
             size_of::<VMFuncRef>(),
             usize::from(offsets.ptr.size_of_vm_func_ref())
-        );
-        assert_eq!(
-            offset_of!(VMFuncRef, native_call),
-            usize::from(offsets.ptr.vm_func_ref_native_call())
         );
         assert_eq!(
             offset_of!(VMFuncRef, array_call),
@@ -831,7 +804,7 @@ pub struct VMRuntimeLimits {
     /// to the host.
     ///
     /// When a host function is wrapped into a `wasmtime::Func`, and is then
-    /// called from the host, then this member has the sentinal value of `-1 as
+    /// called from the host, then this member has the sentinel value of `-1 as
     /// usize`, meaning that this contiguous sequence of Wasm frames is the
     /// empty sequence, and it is not safe to dereference the
     /// `last_wasm_exit_fp`.
@@ -1335,14 +1308,6 @@ impl VMOpaqueContext {
     #[inline]
     pub fn from_vm_array_call_host_func_context(
         ptr: *mut VMArrayCallHostFuncContext,
-    ) -> *mut VMOpaqueContext {
-        ptr.cast()
-    }
-
-    /// Helper function to clearly indicate that casts are desired.
-    #[inline]
-    pub fn from_vm_native_call_host_func_context(
-        ptr: *mut VMNativeCallHostFuncContext,
     ) -> *mut VMOpaqueContext {
         ptr.cast()
     }

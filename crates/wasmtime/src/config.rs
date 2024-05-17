@@ -684,7 +684,7 @@ impl Config {
     /// space consumed by a host function is counted towards this limit. The
     /// host functions are not prevented from consuming more than this limit.
     /// However, if the host function that used more than this limit and called
-    /// back into wasm, then the execution will trap immediatelly because of
+    /// back into wasm, then the execution will trap immediately because of
     /// stack overflow.
     ///
     /// When the `async` feature is enabled, this value cannot exceed the
@@ -1419,7 +1419,7 @@ impl Config {
     /// for pooling allocation by using memory protection; see
     /// `PoolingAllocatorConfig::memory_protection_keys` for details.
     pub fn static_memory_maximum_size(&mut self, max_size: u64) -> &mut Self {
-        self.tunables.static_memory_reservation = Some(max_size);
+        self.tunables.static_memory_reservation = Some(round_up_to_pages(max_size));
         self
     }
 
@@ -1624,7 +1624,7 @@ impl Config {
         Ok(self)
     }
 
-    /// Configure wether wasmtime should compile a module using multiple
+    /// Configure whether wasmtime should compile a module using multiple
     /// threads.
     ///
     /// Disabling this will result in a single thread being used to compile
@@ -2808,18 +2808,16 @@ impl PoolingAllocationConfig {
         self
     }
 
-    /// The maximum number of Wasm pages for any linear memory defined in a
-    /// module (default is `160`).
+    /// The maximum byte size that any WebAssembly linear memory may grow to.
     ///
-    /// The default of `160` means at most 10 MiB of host memory may be
-    /// committed for each instance.
+    /// This option defaults to 10 MiB.
     ///
-    /// If a memory's minimum page limit is greater than this value, the module
-    /// will fail to instantiate.
+    /// If a memory's minimum size is greater than this value, the module will
+    /// fail to instantiate.
     ///
-    /// If a memory's maximum page limit is unbounded or greater than this
-    /// value, the maximum will be `memory_pages` for the purpose of any
-    /// `memory.grow` instruction.
+    /// If a memory's maximum size is unbounded or greater than this value, the
+    /// maximum will be `max_memory_size` for the purpose of any `memory.grow`
+    /// instruction.
     ///
     /// This value is used to control the maximum accessible space for each
     /// linear memory of a core instance.
@@ -2827,8 +2825,8 @@ impl PoolingAllocationConfig {
     /// The reservation size of each linear memory is controlled by the
     /// `static_memory_maximum_size` setting and this value cannot exceed the
     /// configured static memory maximum size.
-    pub fn memory_pages(&mut self, pages: u64) -> &mut Self {
-        self.config.limits.memory_pages = pages;
+    pub fn max_memory_size(&mut self, bytes: usize) -> &mut Self {
+        self.config.limits.max_memory_size = bytes;
         self
     }
 

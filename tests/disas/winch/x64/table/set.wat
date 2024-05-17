@@ -15,7 +15,7 @@
   )
 )
 
-;; wasm[0]::function[0]:
+;; wasm[0]::function[0]::dummy:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movq    8(%rdi), %r11
@@ -108,7 +108,7 @@
 ;;       movq    %r14, %rdi
 ;;       movl    $0, %esi
 ;;       movl    (%rsp), %edx
-;;       callq   0x517
+;;       callq   0x48c
 ;;       addq    $4, %rsp
 ;;       movq    0x14(%rsp), %r14
 ;;       jmp     0x16e
