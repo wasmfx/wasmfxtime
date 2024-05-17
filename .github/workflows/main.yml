@@ -743,9 +743,10 @@ jobs:
 
     # Test baseline implementation
     - name: Baseline implementation
-      run: cargo test --features=default,wasmfx_baseline
+      run: cargo test --features=default
       env:
         RUST_BACKTRACE: 1
+        WASMFX_IMPL: "baseline"
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
