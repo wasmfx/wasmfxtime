@@ -4,7 +4,6 @@ use crate::binemit::StackMap;
 use crate::ir::{MemFlags, TrapCode};
 use crate::isa::s390x::inst::*;
 use crate::isa::s390x::settings as s390x_settings;
-use crate::trace;
 use cranelift_control::ControlPlane;
 
 /// Debug macro for testing that a regpair is valid: that the high register is even, and the low
@@ -69,17 +68,17 @@ pub fn mem_finalize(
     let mem = match mem {
         &MemArg::RegOffset { off, .. }
         | &MemArg::InitialSPOffset { off }
-        | &MemArg::NominalSPOffset { off } => {
+        | &MemArg::SlotOffset { off } => {
             let base = match mem {
                 &MemArg::RegOffset { reg, .. } => reg,
-                &MemArg::InitialSPOffset { .. } | &MemArg::NominalSPOffset { .. } => stack_reg(),
+                &MemArg::InitialSPOffset { .. } | &MemArg::SlotOffset { .. } => stack_reg(),
                 _ => unreachable!(),
             };
             let adj = match mem {
                 &MemArg::InitialSPOffset { .. } => {
-                    state.initial_sp_offset + state.virtual_sp_offset
+                    state.initial_sp_offset + i64::from(state.frame_layout().outgoing_args_size)
                 }
-                &MemArg::NominalSPOffset { .. } => state.virtual_sp_offset,
+                &MemArg::SlotOffset { .. } => i64::from(state.frame_layout().outgoing_args_size),
                 _ => 0,
             };
             let off = off + adj;
@@ -1307,21 +1306,21 @@ fn put_with_trap(sink: &mut MachBuffer<Inst>, enc: &[u8], trap_code: TrapCode) {
 #[derive(Default, Clone, Debug)]
 pub struct EmitState {
     pub(crate) initial_sp_offset: i64,
-    pub(crate) virtual_sp_offset: i64,
     /// Safepoint stack map for upcoming instruction, as provided to `pre_safepoint()`.
     stack_map: Option<StackMap>,
     /// Only used during fuzz-testing. Otherwise, it is a zero-sized struct and
     /// optimized away at compiletime. See [cranelift_control].
     ctrl_plane: ControlPlane,
+    frame_layout: FrameLayout,
 }
 
 impl MachInstEmitState<Inst> for EmitState {
     fn new(abi: &Callee<S390xMachineDeps>, ctrl_plane: ControlPlane) -> Self {
         EmitState {
-            virtual_sp_offset: 0,
             initial_sp_offset: abi.frame_size() as i64,
             stack_map: None,
             ctrl_plane,
+            frame_layout: abi.frame_layout().clone(),
         }
     }
 
@@ -1335,6 +1334,10 @@ impl MachInstEmitState<Inst> for EmitState {
 
     fn take_ctrl_plane(self) -> ControlPlane {
         self.ctrl_plane
+    }
+
+    fn frame_layout(&self) -> &FrameLayout {
+        &self.frame_layout
     }
 }
 
@@ -3381,15 +3384,6 @@ impl Inst {
                 // Lowering produces an EmitIsland before using a JTSequence, so we can safely
                 // disable the worst-case-size check in this case.
                 start_off = sink.cur_offset();
-            }
-
-            &Inst::VirtualSPOffsetAdj { offset } => {
-                trace!(
-                    "virtual sp offset adjusted by {} -> {}",
-                    offset,
-                    state.virtual_sp_offset + offset
-                );
-                state.virtual_sp_offset += offset;
             }
 
             &Inst::Unwind { ref inst } => {

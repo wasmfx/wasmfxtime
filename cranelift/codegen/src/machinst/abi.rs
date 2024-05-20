@@ -38,28 +38,20 @@
 //! We assume that a prologue first pushes the frame pointer (and
 //! return address above that, if the machine does not do that in
 //! hardware). We set FP to point to this two-word frame record. We
-//! store all other frame slots below this two-word frame record, with
-//! the stack pointer remaining at or below this fixed frame storage
-//! for the rest of the function. We can then access frame storage
-//! slots using positive offsets from SP. In order to allow codegen
-//! for the latter before knowing how SP might be adjusted around
-//! callsites, we implement a "nominal SP" tracking feature by which a
-//! fixup (distance between actual SP and a "nominal" SP) is known at
-//! each instruction. When the prologue is finished, SP is expected
-//! to point at the bottom of the outgoing argument area, and will
-//! only move again directly around function calls. This allows the
-//! use of fixed offsets from SP for the rest of the function body.
+//! store all other frame slots below this two-word frame record, as
+//! well as enough space for arguments to the largest possible
+//! function call. The stack pointer then remains at this position
+//! for the duration of the function, allowing us to address all
+//! frame storage at positive offsets from SP.
 //!
 //! Note that if we ever support dynamic stack-space allocation (for
 //! `alloca`), we will need a way to reference spill slots and stack
-//! slots without "nominal SP", because we will no longer be able to
-//! know a static offset from SP to the slots at any particular
+//! slots relative to a dynamic SP, because we will no longer be able
+//! to know a static offset from SP to the slots at any particular
 //! program point. Probably the best solution at that point will be to
 //! revert to using the frame pointer as the reference for all slots,
-//! and creating a "nominal FP" synthetic addressing mode (analogous
-//! to "nominal SP" today) to allow generating spill/reload and
-//! stackslot accesses before we know how large the clobber-saves will
-//! be.
+//! to allow generating spill/reload and stackslot accesses before we
+//! know how large the clobber-saves will be.
 //!
 //! # Stack Layout
 //!
@@ -71,7 +63,7 @@
 //!                              +---------------------------+
 //!                              |          ...              |
 //!                              | stack args                |
-//!                              | (accessed via FP)         |
+//! Canonical Frame Address -->  | (accessed via FP)         |
 //!                              +---------------------------+
 //! SP at function entry ----->  | return address            |
 //!                              +---------------------------+
@@ -83,16 +75,16 @@
 //!                              +---------------------------+
 //!                              |          ...              |
 //!                              | spill slots               |
-//!                              | (accessed via nominal SP) |
+//!                              | (accessed via SP)         |
 //!                              |          ...              |
 //!                              | stack slots               |
-//!                              | (accessed via nominal SP) |
-//! nominal SP --------------->  | (alloc'd by prologue)     |
+//!                              | (accessed via SP)         |
+//!                              | (alloc'd by prologue)     |
 //!                              +---------------------------+
 //!                              | [alignment as needed]     |
 //!                              |          ...              |
-//!                              | args for call             |
-//! SP ----------------------->  | (pushed at callsite)      |
+//!                              | args for largest call     |
+//! SP ----------------------->  | (alloc'd by prologue)     |
 //!                              +---------------------------+
 //!
 //!   (low address)
@@ -472,48 +464,6 @@ pub trait ABIMachineSpec {
     /// Adjust the stack pointer up or down.
     fn gen_sp_reg_adjust(amount: i32) -> SmallInstVec<Self::I>;
 
-    /// Generate a meta-instruction that adjusts the nominal SP offset.
-    fn gen_nominal_sp_adj(amount: i32) -> Self::I;
-
-    /// When setting up for a call, ensure that `space` bytes are available in the outgoing
-    /// argument area on the stack. The specified amount of space is the minimum required for both
-    /// arguments to that function, and any values returned through the stack. There are two
-    /// reasonable implementations which each target can choose between:
-    /// 1. At least this much space is reserved during the prologue and `StackAMode::OutgoingArg`
-    ///    refers to the bottom of the reserved area, so this method does nothing.
-    /// 2. `StackAMode::OutgoingArg` refers to the top of this area, so this method needs to adjust
-    ///    the stack pointer to trim any unused portion of the bottom of the stack frame
-    ///    immediately before the call. `gen_restore_argument_area` needs to undo any stack pointer
-    ///    changes made here.
-    fn gen_reserve_argument_area(_space: u32) -> SmallInstVec<Self::I> {
-        smallvec![]
-    }
-
-    /// When returning from a call, perform any cleanup necessary to restore the stack pointer to
-    /// just after the argument area. This ensures that we always have
-    /// [`FrameLayout::outgoing_args_size`] bytes available in the argument area.
-    ///
-    /// * `ret_space` - The space left consumed in the outgoing argument area for values returned
-    ///   by the callee.
-    /// * `arg_space` - The argument space explicitly cleaned up by the callee when it returns. A
-    ///   value of `0` indicates that the callee did not cleanup the argument area at all, while
-    ///   any other value indicates that the callee has moved the stack pointer to account for
-    ///   those arguments when it returns (as is the case for the tail calling convention).
-    fn gen_restore_argument_area(_ret_space: u32, arg_space: u32) -> SmallInstVec<Self::I> {
-        if arg_space > 0 {
-            let amount = i32::try_from(arg_space).unwrap();
-
-            // Recover the argument space by decrementing sp
-            let mut insts = Self::gen_sp_reg_adjust(-amount);
-
-            // Emit a nominal sp adjustment to ensure offsets are computed correctly
-            insts.push(Self::gen_nominal_sp_adj(amount));
-            insts
-        } else {
-            smallvec![]
-        }
-    }
-
     /// Compute a FrameLayout structure containing a sorted list of all clobbered
     /// registers that are callee-saved according to the ABI, as well as the sizes
     /// of all parts of the stack frame.  The result is used to emit the prologue
@@ -618,12 +568,6 @@ pub trait ABIMachineSpec {
         target_vector_bytes: u32,
         isa_flags: &Self::F,
     ) -> u32;
-
-    /// Get the current virtual-SP offset from an instruction-emission state.
-    fn get_virtual_sp_offset_from_state(s: &<Self::I as MachInstEmit>::State) -> i64;
-
-    /// Get the "nominal SP to FP" offset from an instruction-emission state.
-    fn get_nominal_sp_to_fp(s: &<Self::I as MachInstEmit>::State) -> i64;
 
     /// Get the ABI-dependent MachineEnv for managing register allocation.
     fn get_machine_env(flags: &settings::Flags, call_conv: isa::CallConv) -> &MachineEnv;
@@ -1039,8 +983,7 @@ pub struct FrameLayout {
     pub clobber_size: u32,
 
     /// Storage allocated for the fixed part of the stack frame.
-    /// This contains stack slots and spill slots.  The "nominal SP"
-    /// during execution of the function points to the bottom of this.
+    /// This contains stack slots and spill slots.
     pub fixed_frame_storage_size: u32,
 
     /// Stack size to be reserved for outgoing arguments, if used by
@@ -1178,7 +1121,11 @@ impl<M: ABIMachineSpec> Callee<M> {
             sized_stack_offset = sized_stack_offset
                 .checked_add(data.size)
                 .ok_or(CodegenError::ImplLimitExceeded)?;
-            let mask = M::word_bytes() - 1;
+            // Always at least machine-word-align slots, but also
+            // satisfy the user's requested alignment.
+            debug_assert!(data.align_shift < 32);
+            let align = std::cmp::max(M::word_bytes(), 1u32 << data.align_shift);
+            let mask = align - 1;
             sized_stack_offset = checked_round_up(sized_stack_offset, mask)
                 .ok_or(CodegenError::ImplLimitExceeded)?;
             debug_assert_eq!(stackslot.as_u32() as usize, sized_stackslots.len());
@@ -1706,8 +1653,7 @@ impl<M: ABIMachineSpec> Callee<M> {
         offset: u32,
         into_reg: Writable<Reg>,
     ) -> M::I {
-        // Offset from beginning of stackslot area, which is at nominal SP (see
-        // [MemArg::NominalSPOffset] for more details on nominal SP tracking).
+        // Offset from beginning of stackslot area.
         let stack_off = self.sized_stackslots[slot] as i64;
         let sp_off: i64 = stack_off + (offset as i64);
         M::gen_get_stack_addr(StackAMode::Slot(sp_off), into_reg)
@@ -1747,23 +1693,22 @@ impl<M: ABIMachineSpec> Callee<M> {
         slots: &[SpillSlot],
         state: &<M::I as MachInstEmit>::State,
     ) -> StackMap {
-        let virtual_sp_offset = M::get_virtual_sp_offset_from_state(state);
-        let nominal_sp_to_fp = M::get_nominal_sp_to_fp(state);
-        assert!(virtual_sp_offset >= 0);
+        let frame_layout = state.frame_layout();
+        let outgoing_args_size = frame_layout.outgoing_args_size;
+        let clobbers_and_slots = frame_layout.fixed_frame_storage_size + frame_layout.clobber_size;
         trace!(
             "spillslots_to_stackmap: slots = {:?}, state = {:?}",
             slots,
             state
         );
-        let map_size = (virtual_sp_offset + nominal_sp_to_fp) as u32;
+        let map_size = outgoing_args_size + clobbers_and_slots;
         let bytes = M::word_bytes();
         let map_words = (map_size + bytes - 1) / bytes;
         let mut bits = std::iter::repeat(false)
             .take(map_words as usize)
             .collect::<Vec<bool>>();
 
-        let first_spillslot_word =
-            ((self.stackslots_size + virtual_sp_offset as u32) / bytes) as usize;
+        let first_spillslot_word = ((self.stackslots_size + outgoing_args_size) / bytes) as usize;
         for &slot in slots {
             let slot = slot.index();
             bits[first_spillslot_word + slot] = true;
@@ -1865,17 +1810,6 @@ impl<M: ABIMachineSpec> Callee<M> {
             &frame_layout,
         ));
 
-        // N.B.: "nominal SP", which we use to refer to stackslots and
-        // spillslots, is defined to be equal to the stack pointer at this point
-        // in the prologue.
-        //
-        // If we push any further data onto the stack in the function
-        // body, we emit a virtual-SP adjustment meta-instruction so
-        // that the nominal SP references behave as if SP were still
-        // at this point. See documentation for
-        // [crate::machinst::abi](this module) for more details
-        // on stackframe layout and nominal SP maintenance.
-
         insts
     }
 
@@ -1894,12 +1828,6 @@ impl<M: ABIMachineSpec> Callee<M> {
             &self.flags,
             &frame_layout,
         ));
-
-        // N.B.: we do *not* emit a nominal SP adjustment here, because (i) there will be no
-        // references to nominal SP offsets before the return below, and (ii) the instruction
-        // emission tracks running SP offset linearly (in straight-line order), not according to
-        // the CFG, so early returns in the middle of function bodies would cause an incorrect
-        // offset for the rest of the body.
 
         // Tear down frame.
         insts.extend(M::gen_epilogue_frame_restore(
@@ -1938,8 +1866,8 @@ impl<M: ABIMachineSpec> Callee<M> {
         frame_layout.clobber_size + frame_layout.fixed_frame_storage_size
     }
 
-    /// Returns offset from the nominal SP to caller's SP.
-    pub fn nominal_sp_to_caller_sp_offset(&self) -> u32 {
+    /// Returns offset from the slot base in the current frame to the caller's SP.
+    pub fn slot_base_to_caller_sp_offset(&self) -> u32 {
         let frame_layout = self.frame_layout();
         frame_layout.clobber_size
             + frame_layout.fixed_frame_storage_size
@@ -1966,9 +1894,9 @@ impl<M: ABIMachineSpec> Callee<M> {
         M::get_number_of_spillslots_for_value(rc, max, &self.isa_flags)
     }
 
-    /// Get the spill slot offset relative to nominal SP.
+    /// Get the spill slot offset relative to the fixed allocation area start.
     pub fn get_spillslot_offset(&self, slot: SpillSlot) -> i64 {
-        // Offset from beginning of spillslot area, which is at nominal SP + stackslots_size.
+        // Offset from beginning of spillslot area.
         let islot = slot.index() as i64;
         let spill_off = islot * M::word_bytes() as i64;
         let sp_off = self.stackslots_size as i64 + spill_off;
@@ -2453,14 +2381,17 @@ impl<M: ABIMachineSpec> CallSite<M> {
         ctx.abi_mut()
             .accumulate_outgoing_args_size(ret_space + arg_space);
 
-        // Any adjustment to SP to account for required outgoing arguments/stack return values must
-        // be done around the call, to ensure that SP is always in a consistent state for all other
-        // writes.
-        for inst in M::gen_reserve_argument_area(ret_space + arg_space) {
-            ctx.emit(inst);
-        }
-
         let tmp = ctx.alloc_tmp(word_type).only_reg().unwrap();
+
+        // Any adjustment to SP to account for required outgoing arguments/stack return values must
+        // be done inside of the call pseudo-op, to ensure that SP is always in a consistent
+        // state for all other instructions. For example, if a tail-call abi function is called
+        // here, the reclamation of the outgoing argument area must be done inside of the call
+        // pseudo-op's emission to ensure that SP is consistent at all other points in the lowered
+        // function. (Except the prologue and epilogue, but those are fairly special parts of the
+        // function that establish the SP invariants that are relied on elsewhere and are generated
+        // after the register allocator has run and thus cannot have register allocator-inserted
+        // references to SP offsets.)
         for inst in M::gen_call(
             &self.dest,
             uses,
@@ -2474,20 +2405,6 @@ impl<M: ABIMachineSpec> CallSite<M> {
         )
         .into_iter()
         {
-            ctx.emit(inst);
-        }
-
-        // Compute the space that's reclaimed by the callee when it returns. In the case of the
-        // Tail calling convention, the callee will cleanup the arguments used in the outgoing
-        // argument area, which we will need to adjust back down to restore SP to where it was
-        // before the call.
-        let arg_space = if call_conv == isa::CallConv::Tail {
-            arg_space
-        } else {
-            0
-        };
-
-        for inst in M::gen_restore_argument_area(ret_space, arg_space) {
             ctx.emit(inst);
         }
     }

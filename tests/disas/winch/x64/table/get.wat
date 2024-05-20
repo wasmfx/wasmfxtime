@@ -10,7 +10,7 @@
 )
 
 
-;; wasm[0]::function[0]:
+;; wasm[0]::function[0]::dummy:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movq    8(%rdi), %r11
@@ -27,7 +27,7 @@
 ;;       retq
 ;;   31: ud2
 ;;
-;; wasm[0]::function[1]:
+;; wasm[0]::function[1]::f3:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movq    8(%rdi), %r11
@@ -65,7 +65,7 @@
 ;;       movq    %r14, %rdi
 ;;       movl    $0, %esi
 ;;       movl    4(%rsp), %edx
-;;       callq   0x33f
+;;       callq   0x2da
 ;;       addq    $4, %rsp
 ;;       addq    $4, %rsp
 ;;       movq    0x10(%rsp), %r14

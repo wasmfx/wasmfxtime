@@ -50,11 +50,11 @@
 //!                              +---------------------------+
 //!                              |          ...              |
 //!                              | spill slots               |
-//!                              | (accessed via nominal SP) |
+//!                              | (accessed via SP)         |
 //!                              |          ...              |
 //!                              | stack slots               |
-//!                              | (accessed via nominal SP) |
-//! nominal SP --------------->  | (alloc'd by prologue)     |
+//!                              | (accessed via SP)         |
+//!                              | (alloc'd by prologue)     |
 //!                              +---------------------------+
 //!                              |          ...              |
 //!                              | args for call             |
@@ -193,7 +193,7 @@ impl Into<MemArg> for StackAMode {
         match self {
             // Argument area always begins at the initial SP.
             StackAMode::IncomingArg(off, _) => MemArg::InitialSPOffset { off },
-            StackAMode::Slot(off) => MemArg::NominalSPOffset { off },
+            StackAMode::Slot(off) => MemArg::SlotOffset { off },
             StackAMode::OutgoingArg(off) => {
                 MemArg::reg_plus_off(stack_reg(), off, MemFlags::trusted())
             }
@@ -538,12 +538,6 @@ impl ABIMachineSpec for S390xMachineDeps {
         insts
     }
 
-    fn gen_nominal_sp_adj(offset: i32) -> Inst {
-        Inst::VirtualSPOffsetAdj {
-            offset: offset.into(),
-        }
-    }
-
     fn gen_prologue_frame_setup(
         _call_conv: isa::CallConv,
         _flags: &settings::Flags,
@@ -645,11 +639,6 @@ impl ABIMachineSpec for S390xMachineDeps {
                     size: stack_size as u32,
                 },
             });
-        }
-
-        let sp_adj = frame_layout.outgoing_args_size as i32;
-        if sp_adj > 0 {
-            insts.push(Self::gen_nominal_sp_adj(sp_adj));
         }
 
         // Write the stack backchain if requested, using the value saved above.
@@ -774,16 +763,6 @@ impl ABIMachineSpec for S390xMachineDeps {
             RegClass::Float => 2,
             RegClass::Vector => unreachable!(),
         }
-    }
-
-    /// Get the current virtual-SP offset from an instruction-emission state.
-    fn get_virtual_sp_offset_from_state(s: &EmitState) -> i64 {
-        s.virtual_sp_offset
-    }
-
-    /// Get the nominal-SP-to-FP offset from an instruction-emission state.
-    fn get_nominal_sp_to_fp(s: &EmitState) -> i64 {
-        s.initial_sp_offset
     }
 
     fn get_machine_env(_flags: &settings::Flags, _call_conv: isa::CallConv) -> &MachineEnv {

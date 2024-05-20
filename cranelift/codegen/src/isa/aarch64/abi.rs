@@ -38,7 +38,7 @@ impl Into<AMode> for StackAMode {
             StackAMode::IncomingArg(off, stack_args_size) => AMode::IncomingArg {
                 off: i64::from(stack_args_size) - off,
             },
-            StackAMode::Slot(off) => AMode::NominalSPOffset { off },
+            StackAMode::Slot(off) => AMode::SlotOffset { off },
             StackAMode::OutgoingArg(off) => AMode::SPOffset { off },
         }
     }
@@ -215,7 +215,7 @@ impl ABIMachineSpec for AArch64MachineDeps {
             //
             // See AArch64 ABI (https://github.com/ARM-software/abi-aa/blob/2021Q1/aapcs64/aapcs64.rst#642parameter-passing-rules), (Section 6.4.2 Stage C).
             //
-            // For arguments with alignment of 16 we round up the the register number
+            // For arguments with alignment of 16 we round up the register number
             // to the next even value. So we can never allocate for example an i128
             // to X1 and X2, we have to skip one register and do X2, X3
             // (Stage C.8)
@@ -556,12 +556,6 @@ impl ABIMachineSpec for AArch64MachineDeps {
             ret.push(adj_inst);
         }
         ret
-    }
-
-    fn gen_nominal_sp_adj(offset: i32) -> Inst {
-        Inst::VirtualSPOffsetAdj {
-            offset: offset as i64,
-        }
     }
 
     fn gen_prologue_frame_setup(
@@ -931,12 +925,6 @@ impl ABIMachineSpec for AArch64MachineDeps {
             insts.extend(Self::gen_sp_reg_adjust(-(stack_size as i32)));
         }
 
-        // Adjust the nominal sp to account for the outgoing argument area.
-        let sp_adj = frame_layout.outgoing_args_size as i32;
-        if sp_adj > 0 {
-            insts.push(Self::gen_nominal_sp_adj(sp_adj));
-        }
-
         insts
     }
 
@@ -1142,16 +1130,6 @@ impl ABIMachineSpec for AArch64MachineDeps {
             RegClass::Float => vector_size / 8,
             RegClass::Vector => unreachable!(),
         }
-    }
-
-    /// Get the current virtual-SP offset from an instruction-emission state.
-    fn get_virtual_sp_offset_from_state(s: &EmitState) -> i64 {
-        s.virtual_sp_offset
-    }
-
-    /// Get the nominal-SP-to-FP offset from an instruction-emission state.
-    fn get_nominal_sp_to_fp(s: &EmitState) -> i64 {
-        s.nominal_sp_to_fp
     }
 
     fn get_machine_env(flags: &settings::Flags, _call_conv: isa::CallConv) -> &MachineEnv {

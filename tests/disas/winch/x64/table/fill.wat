@@ -20,7 +20,7 @@
     (table.fill $t2 (local.get $i) (local.get $ref) (local.get $n))
   )
 )
-;; wasm[0]::function[0]:
+;; wasm[0]::function[0]::f1:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movq    8(%rdi), %r11
@@ -37,7 +37,7 @@
 ;;       retq
 ;;   31: ud2
 ;;
-;; wasm[0]::function[1]:
+;; wasm[0]::function[1]::f2:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movq    8(%rdi), %r11
@@ -54,7 +54,7 @@
 ;;       retq
 ;;   71: ud2
 ;;
-;; wasm[0]::function[2]:
+;; wasm[0]::function[2]::f3:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movq    8(%rdi), %r11
@@ -113,7 +113,7 @@
 ;;       movq    %r14, %rdi
 ;;       movl    $0, %esi
 ;;       movl    4(%rsp), %edx
-;;       callq   0x5f4
+;;       callq   0x4c9
 ;;       addq    $4, %rsp
 ;;       addq    $4, %rsp
 ;;       movq    0x20(%rsp), %r14
@@ -134,7 +134,7 @@
 ;;       movl    0x14(%rsp), %edx
 ;;       movq    0xc(%rsp), %rcx
 ;;       movl    8(%rsp), %r8d
-;;       callq   0x636
+;;       callq   0x50b
 ;;       addq    $8, %rsp
 ;;       addq    $0x10, %rsp
 ;;       movq    0x20(%rsp), %r14

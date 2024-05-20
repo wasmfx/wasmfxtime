@@ -18,7 +18,7 @@ use crate::machinst::{VCodeConstant, VCodeConstantData};
 use crate::{
     ir::{
         immediates::*, types::*, AtomicRmwOp, BlockCall, ExternalName, Inst, InstructionData,
-        MemFlags, Opcode, StackSlot, TrapCode, Value, ValueList,
+        MemFlags, Opcode, TrapCode, Value, ValueList,
     },
     isa::riscv64::inst::*,
     machinst::{ArgPair, InstOutput},
@@ -412,11 +412,10 @@ impl generated_code::Context for RV64IsleContext<'_, '_, MInst, Riscv64Backend> 
     }
 
     fn gen_stack_slot_amode(&mut self, ss: StackSlot, offset: i64) -> AMode {
-        // Offset from beginning of stackslot area, which is at nominal SP (see
-        // [MemArg::NominalSPOffset] for more details on nominal SP tracking).
+        // Offset from beginning of stackslot area.
         let stack_off = self.lower_ctx.abi().sized_stackslot_offsets()[ss] as i64;
         let sp_off: i64 = stack_off + offset;
-        AMode::NominalSPOffset(sp_off)
+        AMode::SlotOffset(sp_off)
     }
 
     fn gen_const_amode(&mut self, c: VCodeConstant) -> AMode {

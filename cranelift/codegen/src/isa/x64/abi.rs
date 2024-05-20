@@ -177,7 +177,7 @@ impl ABIMachineSpec for X64ABIMachineSpec {
                 );
             }
 
-            // Windows fastcall dictates that `__m128i` paramters to a function
+            // Windows fastcall dictates that `__m128i` parameters to a function
             // are passed indirectly as pointers, so handle that as a special
             // case before the loop below.
             if param.value_type.is_vector()
@@ -337,7 +337,7 @@ impl ABIMachineSpec for X64ABIMachineSpec {
         }
 
         // Fastcall's indirect 128+ bit vector arguments are all located on the
-        // stack, and stack space is reserved after all paramters are passed,
+        // stack, and stack space is reserved after all parameters are passed,
         // so allocate from the space now.
         if args_or_rets == ArgsOrRets::Args && is_fastcall {
             for arg in args.args_mut() {
@@ -521,12 +521,6 @@ impl ABIMachineSpec for X64ABIMachineSpec {
             RegMemImm::imm(amount),
             Writable::from_reg(regs::rsp()),
         )]
-    }
-
-    fn gen_nominal_sp_adj(offset: i32) -> Self::I {
-        Inst::VirtualSPOffsetAdj {
-            offset: offset as i64,
-        }
     }
 
     fn gen_prologue_frame_setup(
@@ -715,12 +709,6 @@ impl ABIMachineSpec for X64ABIMachineSpec {
             ));
         }
 
-        // Adjust the nominal sp to account for the outgoing argument area.
-        let sp_adj = frame_layout.outgoing_args_size as i32;
-        if sp_adj > 0 {
-            insts.push(Self::gen_nominal_sp_adj(sp_adj));
-        }
-
         // Store each clobbered register in order at offsets from RSP,
         // placing them above the fixed frame slots.
         let clobber_offset =
@@ -765,9 +753,9 @@ impl ABIMachineSpec for X64ABIMachineSpec {
     ) -> SmallVec<[Self::I; 16]> {
         let mut insts = SmallVec::new();
 
-        // Restore regs by loading from offsets of RSP. RSP will be
-        // returned to nominal-RSP at this point, so we can use the
-        // same offsets that we used when saving clobbers above.
+        // Restore regs by loading from offsets of RSP. We compute the offset from
+        // the same base as above in clobber_save, as RSP won't change between the
+        // prologue and epilogue.
         let mut cur_offset =
             frame_layout.fixed_frame_storage_size + frame_layout.outgoing_args_size;
         for reg in &frame_layout.clobbered_callee_saves {
@@ -928,14 +916,6 @@ impl ABIMachineSpec for X64ABIMachineSpec {
         }
     }
 
-    fn get_virtual_sp_offset_from_state(s: &<Self::I as MachInstEmit>::State) -> i64 {
-        s.virtual_sp_offset()
-    }
-
-    fn get_nominal_sp_to_fp(s: &<Self::I as MachInstEmit>::State) -> i64 {
-        s.nominal_sp_to_fp()
-    }
-
     fn get_machine_env(flags: &settings::Flags, _call_conv: isa::CallConv) -> &MachineEnv {
         if flags.enable_pinned_reg() {
             static MACHINE_ENV: OnceLock<MachineEnv> = OnceLock::new();
@@ -1074,7 +1054,7 @@ impl From<StackAMode> for SyntheticAmode {
             StackAMode::Slot(off) => {
                 let off = i32::try_from(off)
                     .expect("Offset in Slot is greater than 2GB; should hit impl limit first");
-                SyntheticAmode::nominal_sp_offset(off)
+                SyntheticAmode::slot_offset(off)
             }
             StackAMode::OutgoingArg(off) => {
                 let off = i32::try_from(off).expect(
