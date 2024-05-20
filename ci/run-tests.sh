@@ -15,16 +15,15 @@
 
 cargo test \
       --workspace \
-      --features=all-arch,winch,wmemcheck,disable-logging,wasi-nn,wasi-threads,wasi-http,pooling-allocator,component-model,wat,cache,parallel-compilation,logging,demangle,cranelift,profiling,coredump,addr2line,debug-builtins,threads,gc,old-cli,serve,explore,wast,config,compile,run \
+      --features=default \
       --exclude test-programs \
       --exclude wasmtime-wasi-nn \
       --exclude wasmtime-fuzzing \
       --exclude wasm-spec-interpreter \
       $@
 
-      # NOTE(dhil): Several WasmFX "features" aren't additive, so we
-      # don't want to run `--all-features` as it would inadvertently
-      # toggle a conflicting set of features.
+# NOTE(dhil): Several WasmFX features are conflicting, so we do not
+# want to run with `--all-features`.
 # cargo test \
 #       --workspace \
 #       --all-features \
