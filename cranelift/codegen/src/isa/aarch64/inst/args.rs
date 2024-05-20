@@ -14,7 +14,7 @@ pub enum ShiftOp {
     LSL = 0b00,
     /// Logical shift right.
     LSR = 0b01,
-    /// Arithmentic shift right.
+    /// Arithmetic shift right.
     ASR = 0b10,
     /// Rotate right.
     ROR = 0b11,
@@ -400,7 +400,7 @@ impl PrettyPrint for AMode {
             &AMode::SPOffset { .. }
             | &AMode::FPOffset { .. }
             | &AMode::IncomingArg { .. }
-            | &AMode::NominalSPOffset { .. }
+            | &AMode::SlotOffset { .. }
             | &AMode::RegOffset { .. } => {
                 panic!("Unexpected pseudo mem-arg mode: {:?}", self)
             }

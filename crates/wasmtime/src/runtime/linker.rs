@@ -67,7 +67,7 @@ use log::warn;
 /// [`Linker`] value at program start up and use that continuously for each
 /// [`Store`] created over the lifetime of the program.
 ///
-/// Note that once [`Store`]-owned items, such as [`Global`], are defined witin
+/// Note that once [`Store`]-owned items, such as [`Global`], are defined within
 /// a [`Linker`] then it is no longer compatible with any [`Store`]. At that
 /// point only the [`Store`] that owns the [`Global`] can be used to instantiate
 /// modules.
@@ -275,7 +275,6 @@ impl<T> Linker<T> {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(any(feature = "cranelift", feature = "winch"))]
     pub fn define_unknown_imports_as_traps(&mut self, module: &Module) -> anyhow::Result<()> {
         for import in module.imports() {
             if let Err(import_err) = self._get_by_import(&import) {
@@ -310,7 +309,6 @@ impl<T> Linker<T> {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(any(feature = "cranelift", feature = "winch"))]
     pub fn define_unknown_imports_as_default_values(
         &mut self,
         module: &Module,
@@ -428,7 +426,6 @@ impl<T> Linker<T> {
     ///
     /// Panics if the given function type is not associated with the same engine
     /// as this linker.
-    #[cfg(any(feature = "cranelift", feature = "winch"))]
     pub fn func_new(
         &mut self,
         module: &str,
@@ -451,7 +448,6 @@ impl<T> Linker<T> {
     ///
     /// Panics if the given function type is not associated with the same engine
     /// as this linker.
-    #[cfg(any(feature = "cranelift", feature = "winch"))]
     pub unsafe fn func_new_unchecked(
         &mut self,
         module: &str,
@@ -781,7 +777,6 @@ impl<T> Linker<T> {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(any(feature = "cranelift", feature = "winch"))]
     pub fn module(
         &mut self,
         mut store: impl AsContextMut<Data = T>,

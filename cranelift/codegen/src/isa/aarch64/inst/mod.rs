@@ -158,7 +158,7 @@ fn inst_size_test() {
 }
 
 impl Inst {
-    /// Create an instruction that loads a constant, using one of serveral options (MOVZ, MOVN,
+    /// Create an instruction that loads a constant, using one of several options (MOVZ, MOVN,
     /// logical immediate, or constant pool).
     pub fn load_constant<F: FnMut(Type) -> Writable<Reg>>(
         rd: Writable<Reg>,
@@ -411,7 +411,7 @@ fn memarg_operands(memarg: &mut AMode, collector: &mut impl OperandVisitor) {
         AMode::Label { .. } => {}
         AMode::SPPreIndexed { .. } | AMode::SPPostIndexed { .. } => {}
         AMode::FPOffset { .. } | AMode::IncomingArg { .. } => {}
-        AMode::SPOffset { .. } | AMode::NominalSPOffset { .. } => {}
+        AMode::SPOffset { .. } | AMode::SlotOffset { .. } => {}
         AMode::RegOffset { rn, .. } => {
             collector.reg_use(rn);
         }
@@ -944,7 +944,6 @@ fn aarch64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             // to do anything.
         }
         Inst::Bti { .. } => {}
-        Inst::VirtualSPOffsetAdj { .. } => {}
 
         Inst::ElfTlsGetAddr { rd, tmp, .. } => {
             // TLSDESC has a very neat calling convention. It is required to preserve
@@ -2842,10 +2841,6 @@ impl Inst {
                 };
 
                 "bti".to_string() + targets
-            }
-            &Inst::VirtualSPOffsetAdj { offset } => {
-                state.virtual_sp_offset += offset;
-                format!("virtual_sp_offset_adjust {}", offset)
             }
             &Inst::EmitIsland { needed_space } => format!("emit_island {}", needed_space),
 

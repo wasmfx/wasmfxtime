@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use crate::runtime::vm::{
     CompiledModuleId, MemoryImage, MmapVec, ModuleMemoryImages, VMArrayCallFunction,
-    VMNativeCallFunction, VMWasmCallFunction,
+    VMWasmCallFunction,
 };
 use crate::sync::OnceLock;
 use crate::{
@@ -428,7 +428,7 @@ impl Module {
     /// entire lifetime of the [`Module`] returned. Any changes to the file on
     /// disk may change future instantiations of the module to be incorrect.
     /// This is because the file is mapped into memory and lazily loaded pages
-    /// reflect the current state of the file, not necessarily the origianl
+    /// reflect the current state of the file, not necessarily the original
     /// state of the file.
     #[cfg(feature = "std")]
     pub unsafe fn deserialize_file(engine: &Engine, path: impl AsRef<Path>) -> Result<Module> {
@@ -437,7 +437,7 @@ impl Module {
     }
 
     /// Entrypoint for creating a `Module` for all above functions, both
-    /// of the AOT and jit-compiled cateogries.
+    /// of the AOT and jit-compiled categories.
     ///
     /// In all cases the compilation artifact, `code_memory`, is provided here.
     /// The `info_and_types` argument is `None` when a module is being
@@ -1095,25 +1095,12 @@ impl crate::runtime::vm::ModuleRuntimeInfo for ModuleInner {
         NonNull::new(ptr).unwrap()
     }
 
-    fn native_to_wasm_trampoline(
-        &self,
-        index: DefinedFuncIndex,
-    ) -> Option<NonNull<VMNativeCallFunction>> {
-        let ptr = self
-            .module
-            .native_to_wasm_trampoline(index)?
-            .as_ptr()
-            .cast::<VMNativeCallFunction>()
-            .cast_mut();
-        Some(NonNull::new(ptr).unwrap())
-    }
-
     fn array_to_wasm_trampoline(&self, index: DefinedFuncIndex) -> Option<VMArrayCallFunction> {
         let ptr = self.module.array_to_wasm_trampoline(index)?.as_ptr();
         Some(unsafe { mem::transmute::<*const u8, VMArrayCallFunction>(ptr) })
     }
 
-    fn wasm_to_native_trampoline(
+    fn wasm_to_array_trampoline(
         &self,
         signature: VMSharedTypeIndex,
     ) -> Option<NonNull<VMWasmCallFunction>> {
@@ -1138,7 +1125,7 @@ impl crate::runtime::vm::ModuleRuntimeInfo for ModuleInner {
 
         let ptr = self
             .module
-            .wasm_to_native_trampoline(trampoline_module_ty)
+            .wasm_to_array_trampoline(trampoline_module_ty)
             .as_ptr()
             .cast::<VMWasmCallFunction>()
             .cast_mut();
@@ -1244,14 +1231,7 @@ impl crate::runtime::vm::ModuleRuntimeInfo for BareModuleInfo {
         unreachable!()
     }
 
-    fn native_to_wasm_trampoline(
-        &self,
-        _index: DefinedFuncIndex,
-    ) -> Option<NonNull<VMNativeCallFunction>> {
-        unreachable!()
-    }
-
-    fn wasm_to_native_trampoline(
+    fn wasm_to_array_trampoline(
         &self,
         _signature: VMSharedTypeIndex,
     ) -> Option<NonNull<VMWasmCallFunction>> {

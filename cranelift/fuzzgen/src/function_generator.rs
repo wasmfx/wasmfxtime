@@ -134,7 +134,7 @@ fn insert_stack_load(
     let type_size = typevar.bytes();
     let (slot, slot_size, category) = fgen.stack_slot_with_size(type_size)?;
 
-    // `stack_load` doesen't support setting MemFlags, and it does not set any
+    // `stack_load` doesn't support setting MemFlags, and it does not set any
     // alias analysis bits, so we can only emit it for `Other` slots.
     if category != AACategory::Other {
         return Err(arbitrary::Error::IncorrectFormat.into());
@@ -161,7 +161,7 @@ fn insert_stack_store(
 
     let (slot, slot_size, category) = fgen.stack_slot_with_size(type_size)?;
 
-    // `stack_store` doesen't support setting MemFlags, and it does not set any
+    // `stack_store` doesn't support setting MemFlags, and it does not set any
     // alias analysis bits, so we can only emit it for `Other` slots.
     if category != AACategory::Other {
         return Err(arbitrary::Error::IncorrectFormat.into());
@@ -822,7 +822,7 @@ static OPCODE_SIGNATURES: Lazy<Vec<OpcodeSignature>> = Lazy::new(|| {
                 // Constants are generated outside of `generate_instructions`
                 Opcode::Iconst => false,
 
-                // TODO: extract_vector raises exceptions during return type generation becuase it
+                // TODO: extract_vector raises exceptions during return type generation because it
                 // uses dynamic vectors.
                 Opcode::ExtractVector => false,
 
@@ -1605,7 +1605,7 @@ where
     fn generate_stack_slots(&mut self, builder: &mut FunctionBuilder) -> Result<()> {
         for _ in 0..self.param(&self.config.static_stack_slots_per_function)? {
             let bytes = self.param(&self.config.static_stack_slot_size)? as u32;
-            let ss_data = StackSlotData::new(StackSlotKind::ExplicitSlot, bytes);
+            let ss_data = StackSlotData::new(StackSlotKind::ExplicitSlot, bytes, 0);
             let slot = builder.create_sized_stack_slot(ss_data);
 
             // Generate one Alias Analysis Category for each slot

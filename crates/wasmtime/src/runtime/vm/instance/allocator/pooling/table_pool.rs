@@ -201,7 +201,7 @@ impl TablePool {
         let size_to_memset = size.min(self.keep_resident);
         std::ptr::write_bytes(base, 0, size_to_memset);
 
-        // And decommit the the rest of it.
+        // And decommit the rest of it.
         decommit(base.add(size_to_memset), size - size_to_memset)
     }
 }
@@ -218,7 +218,7 @@ mod tests {
             limits: InstanceLimits {
                 total_tables: 7,
                 table_elements: 100,
-                memory_pages: 0,
+                max_memory_size: 0,
                 max_memories_per_module: 0,
                 ..Default::default()
             },
