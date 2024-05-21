@@ -85,6 +85,9 @@ pub enum Trap {
 
     /// We are suspending to a tag for which there is no active handler.
     UnhandledTag,
+
+    /// Attempt to resume a continuation twice.
+    ContinuationAlreadyConsumed,
     // if adding a variant here be sure to update the `check!` macro below
 }
 
@@ -120,6 +123,7 @@ impl Trap {
             NullI31Ref
             CannotEnterComponent
             UnhandledTag
+            ContinuationAlreadyConsumed
         }
 
         None
@@ -149,6 +153,7 @@ impl fmt::Display for Trap {
             NullI31Ref => "null i31 reference",
             CannotEnterComponent => "cannot enter component instance",
             UnhandledTag => "unhandled tag",
+            ContinuationAlreadyConsumed => "continuation already consumed",
         };
         write!(f, "wasm trap: {desc}")
     }

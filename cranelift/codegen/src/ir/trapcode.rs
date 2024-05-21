@@ -58,6 +58,10 @@ pub enum TrapCode {
     /// We are suspending to a tag for which there is no active handler.
     UnhandledTag,
 
+    /// Attempt to resume a continuation object whose revision is out
+    /// of sync with the underlying continuation reference.
+    ContinuationAlreadyConsumed,
+
     /// A null `i31ref` was encountered which was required to be non-null.
     NullI31Ref,
 }
@@ -79,6 +83,7 @@ impl TrapCode {
             TrapCode::Interrupt,
             TrapCode::NullReference,
             TrapCode::UnhandledTag,
+            TrapCode::ContinuationAlreadyConsumed,
         ]
     }
 }
@@ -102,6 +107,7 @@ impl Display for TrapCode {
             NullReference => "null_reference",
             UnhandledTag => "unhandled_tag",
             NullI31Ref => "null_i31ref",
+            ContinuationAlreadyConsumed => "continuation_already_consumed",
         };
         f.write_str(identifier)
     }
@@ -127,6 +133,7 @@ impl FromStr for TrapCode {
             "null_reference" => Ok(NullReference),
             "unhandled_tag" => Ok(UnhandledTag),
             "null_i31ref" => Ok(NullI31Ref),
+            "continuation_already_consumed" => Ok(ContinuationAlreadyConsumed),
             _ if s.starts_with("user") => s[4..].parse().map(User).map_err(|_| ()),
             _ => Err(()),
         }

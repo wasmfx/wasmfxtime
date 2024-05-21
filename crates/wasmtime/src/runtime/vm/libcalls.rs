@@ -874,40 +874,6 @@ fn tc_suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason>
     crate::vm::continuation::optimized::suspend(instance, tag_index)
 }
 
-fn tc_new_cont_obj(_instance: &mut Instance, contref: *mut u8) -> *mut u8 {
-    // If this is enabled, we should never call this function.
-    assert!(!cfg!(
-        feature = "unsafe_disable_continuation_linearity_check"
-    ));
-    crate::vm::continuation::VMContObj::new(
-        contref.cast::<crate::vm::continuation::imp::VMContRef>(),
-    )
-    .cast::<u8>()
-}
-
-fn tc_cont_obj_get_cont_ref(
-    _instance: &mut Instance,
-    contobj: *mut u8,
-) -> Result<*mut u8, TrapReason> {
-    // If this is enabled, we should never call this function.
-    assert!(!cfg!(
-        feature = "unsafe_disable_continuation_linearity_check"
-    ));
-
-    let contobj = contobj.cast::<crate::vm::continuation::VMContObj>();
-    let contobj = unsafe {
-        contobj.as_mut().ok_or_else(|| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Attempt to dereference null VMContObj!"
-            ))
-        })?
-    };
-    let contref = contobj
-        .take_contref()
-        .map_err(|error| TrapReason::user_without_backtrace(error))?;
-    Ok(contref.cast::<u8>())
-}
-
 fn tc_cont_ref_forward_tag_return_values_buffer(
     _instance: &mut Instance,
     parent_contref: *mut u8,

@@ -369,7 +369,8 @@ impl MemFlags {
             Some(TrapCode::Interrupt) => 0b1010,
             Some(TrapCode::NullReference) => 0b1011,
             Some(TrapCode::NullI31Ref) => 0b1100,
-            Some(TrapCode::UnhandledTag) => 0b1101,
+            Some(TrapCode::UnhandledTag) => 0b1110,
+            Some(TrapCode::ContinuationAlreadyConsumed) => 0b1101,
             None => 0b1111,
 
             Some(TrapCode::User(_)) => panic!("cannot set user trap code in mem flags"),

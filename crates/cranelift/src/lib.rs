@@ -306,6 +306,7 @@ pub fn mach_trap_to_trap(trap: &MachTrap) -> Option<TrapInformation> {
             ir::TrapCode::NullReference => Trap::NullReference,
             ir::TrapCode::UnhandledTag => Trap::UnhandledTag,
             ir::TrapCode::NullI31Ref => Trap::NullI31Ref,
+            ir::TrapCode::ContinuationAlreadyConsumed => Trap::ContinuationAlreadyConsumed,
 
             // These do not get converted to wasmtime traps, since they
             // shouldn't ever be hit in theory. Instead of catching and handling
