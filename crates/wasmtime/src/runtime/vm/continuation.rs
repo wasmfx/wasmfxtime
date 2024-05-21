@@ -16,7 +16,7 @@ cfg_if::cfg_if! {
     if #[cfg(feature = "unsafe_disable_continuation_linearity_check")] {
         /// NOTE(dhil): This representation is never used, but added
         /// here to illustrate the semantics of the generated code.
-        #[repr(C)]
+        #[repr(transparent)]
         pub struct VMContObj(pub *mut imp::VMContRef);
 
         impl VMContObj {
@@ -25,7 +25,7 @@ cfg_if::cfg_if! {
             }
 
             pub fn take_contref(&mut self) -> Result<*mut imp::VMContRef> {
-                Ok(self.cast::<VMContRef>())
+                Ok(self.0.cast::<imp::VMContRef>())
             }
         }
     } else {
