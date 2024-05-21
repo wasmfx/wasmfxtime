@@ -8,6 +8,7 @@
 #define WASMTIME_LINKER_H
 
 #include <wasm.h>
+#include <wasmtime/conf.h>
 #include <wasmtime/error.h>
 #include <wasmtime/extern.h>
 #include <wasmtime/store.h>
@@ -143,6 +144,8 @@ WASM_API_EXTERN wasmtime_error_t *wasmtime_linker_define_func_unchecked(
     wasmtime_func_unchecked_callback_t cb, void *data,
     void (*finalizer)(void *));
 
+#ifdef WASMTIME_FEATURE_WASI
+
 /**
  * \brief Defines WASI functions in this linker.
  *
@@ -162,6 +165,8 @@ WASM_API_EXTERN wasmtime_error_t *wasmtime_linker_define_func_unchecked(
  */
 WASM_API_EXTERN wasmtime_error_t *
 wasmtime_linker_define_wasi(wasmtime_linker_t *linker);
+
+#endif // WASMTIME_FEATURE_WASI
 
 /**
  * \brief Defines an instance under the specified name in this linker.

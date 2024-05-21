@@ -20,7 +20,7 @@ cpp_demangle = { version = "0.4.3", optional = true }
 cranelift-entity = { workspace = true }
 wasmtime-types = { workspace = true }
 wasmtime-continuations = { workspace = true }
-wasmparser = { workspace = true, features = ['validate'] }
+wasmparser = { workspace = true, features = ['validate', 'serde'] }
 indexmap = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 serde_derive = { workspace = true }
