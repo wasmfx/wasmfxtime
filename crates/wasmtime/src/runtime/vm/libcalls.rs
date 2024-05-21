@@ -220,6 +220,10 @@ unsafe fn table_grow(
             .unwrap()
             .map(|r| (*instance.store()).gc_store().clone_gc_ref(&r))
             .into(),
+        TableElementType::Cont => {
+            use crate::vm::continuation::VMContObj;
+            (init_value as *mut VMContObj).into()
+        }
     };
 
     Ok(match instance.table_grow(table_index, delta, element)? {
@@ -229,6 +233,7 @@ unsafe fn table_grow(
 }
 
 use table_grow as table_grow_func_ref;
+use table_grow as table_grow_cont_obj;
 
 #[cfg(feature = "gc")]
 use table_grow as table_grow_gc_ref;
@@ -256,6 +261,12 @@ unsafe fn table_fill(
             let gc_ref = VMGcRef::from_r64(u64::try_from(val as usize).unwrap()).unwrap();
             let gc_ref = gc_ref.map(|r| gc_store.clone_gc_ref(&r));
             table.fill(gc_store, dst, gc_ref.into(), len)
+        }
+
+        TableElementType::Cont => {
+            use crate::vm::continuation::VMContObj;
+            let val = val.cast::<VMContObj>();
+            table.fill((*instance.store()).gc_store(), dst, val.into(), len)
         }
     }
 }
@@ -868,11 +879,10 @@ fn tc_new_cont_obj(_instance: &mut Instance, contref: *mut u8) -> *mut u8 {
     assert!(!cfg!(
         feature = "unsafe_disable_continuation_linearity_check"
     ));
-
-    let contobj = alloc::boxed::Box::new(crate::vm::continuation::VMContObj(Some(
+    crate::vm::continuation::VMContObj::new(
         contref.cast::<crate::vm::continuation::imp::VMContRef>(),
-    )));
-    alloc::boxed::Box::into_raw(contobj).cast::<u8>()
+    )
+    .cast::<u8>()
 }
 
 fn tc_cont_obj_get_cont_ref(
@@ -885,28 +895,17 @@ fn tc_cont_obj_get_cont_ref(
     ));
 
     let contobj = contobj.cast::<crate::vm::continuation::VMContObj>();
-    let contopt = unsafe {
-        contobj
-            .as_mut()
-            .ok_or_else(|| {
-                TrapReason::user_without_backtrace(anyhow::anyhow!(
-                    "Attempt to dereference null VMContObj!"
-                ))
-            })?
-            .0
+    let contobj = unsafe {
+        contobj.as_mut().ok_or_else(|| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!(
+                "Attempt to dereference null VMContObj!"
+            ))
+        })?
     };
-    match contopt {
-        None => Err(TrapReason::user_without_backtrace(anyhow::Error::msg(
-            "continuation already consumed",
-        ))), // TODO(dhil): presumably we can set things up such that
-        // we always read from a non-null reference.
-        Some(contref) => {
-            unsafe {
-                *contobj = crate::vm::continuation::VMContObj(None);
-            }
-            Ok(contref.cast::<u8>())
-        }
-    }
+    let contref = contobj
+        .take_contref()
+        .map_err(|error| TrapReason::user_without_backtrace(error))?;
+    Ok(contref.cast::<u8>())
 }
 
 fn tc_cont_ref_forward_tag_return_values_buffer(

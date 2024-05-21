@@ -1,4 +1,5 @@
 //! Continuations TODO
+use anyhow::Result;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "wasmfx_baseline")] {
@@ -8,12 +9,58 @@ cfg_if::cfg_if! {
     }
 }
 
-/// M:1 Many-to-one mapping. A single VMContRef may be
-/// referenced by multiple VMContObj, though, only one
-/// VMContObj may hold a non-null reference to the object
-/// at a given time.
-#[repr(C)]
-pub struct VMContObj(pub Option<*mut imp::VMContRef>);
+unsafe impl Send for imp::VMContRef {}
+unsafe impl Sync for imp::VMContRef {}
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "unsafe_disable_continuation_linearity_check")] {
+        /// NOTE(dhil): This representation is never used, but added
+        /// here to illustrate the semantics of the generated code.
+        #[repr(C)]
+        pub struct VMContObj(pub *mut imp::VMContRef);
+
+        impl VMContObj {
+            pub fn new(contref: *mut imp::VMContRef) -> *mut Self {
+                contref.cast::<Self>()
+            }
+
+            pub fn take_contref(&mut self) -> Result<*mut imp::VMContRef> {
+                Ok(self.cast::<VMContRef>())
+            }
+        }
+    } else {
+        /// M:1 Many-to-one mapping. A single VMContRef may be
+        /// referenced by multiple VMContObj, though, only one
+        /// VMContObj may hold a non-null reference to the object
+        /// at a given time.
+        #[repr(C)]
+        pub struct VMContObj(pub Option<*mut imp::VMContRef>);
+
+        impl VMContObj {
+            pub fn new(contref: *mut imp::VMContRef) -> *mut Self {
+                let boxed = alloc::boxed::Box::new(if contref.is_null() {
+                    Self(None)
+                } else {
+                    Self(Some(contref))
+                });
+                alloc::boxed::Box::into_raw(boxed)
+            }
+
+            pub fn take_contref(&mut self) -> Result<*mut imp::VMContRef> {
+                match self.0 {
+                    None => Err(anyhow::Error::msg("continuation already consumed")),
+                    Some(contref) => {
+                        self.0 = None;
+                        Ok(contref)
+                    }
+                }
+            }
+        }
+    }
+}
+
+unsafe impl Send for VMContObj {}
+unsafe impl Sync for VMContObj {}
 
 #[cfg(not(feature = "wasmfx_baseline"))]
 pub mod optimized {
@@ -328,6 +375,7 @@ pub mod baseline {
     /// the list consists of a pointer to an actual
     /// wasmtime_fiber::Fiber, a suspend object, a parent pointer, an
     /// arguments buffer, and a return buffer.
+    #[repr(C)]
     pub struct VMContRef {
         pub fiber: Box<ContinuationFiber>,
         pub suspend: *mut Yield,
