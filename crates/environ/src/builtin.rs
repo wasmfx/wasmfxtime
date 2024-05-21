@@ -161,6 +161,9 @@ macro_rules! foreach_builtin_function {
             tc_print_int(vmctx: vmctx, arg : i64);
             // TODO
             tc_print_pointer(vmctx: vmctx, arg : pointer);
+
+            // Returns an index for Wasm's `table.grow` instruction for `contobj`s.
+            table_grow_cont_obj(vmctx: vmctx, table: i32, delta: i32, init: pointer) -> i32;
         }
     };
 }
