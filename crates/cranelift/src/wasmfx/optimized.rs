@@ -418,7 +418,8 @@ pub(crate) mod typed_continuation_helpers {
             new_stack_chain.store(env, builder, self.address, offset)
         }
 
-        /// Gets the revision counter on the continuation references.
+        /// Gets the revision counter the a given continuation
+        /// reference.
         pub fn get_revision<'a>(
             &mut self,
             _env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -434,7 +435,8 @@ pub(crate) mod typed_continuation_helpers {
             }
         }
 
-        /// Increments the revision counter on the continuation references.
+        /// Increments the revision counter on the given continuation
+        /// reference.
         pub fn incr_revision<'a>(
             &mut self,
             _env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -1333,7 +1335,6 @@ pub(crate) fn translate_cont_bind<'a>(
     if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
         emit_debug_println!(env, builder, "new revision = {}", revision);
     }
-    //typed_continuations_new_cont_obj(env, builder, contref)
     let contobj = shared::assemble_contobj(env, builder, revision, contref);
     if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
         emit_debug_println!(env, builder, "[cont_bind] contobj = {:p}", contobj);
@@ -1380,7 +1381,6 @@ pub(crate) fn translate_resume<'a>(
 
     let (next_revision, resume_contref, parent_stack_chain) = {
         let (witness, resume_contref) = shared::disassemble_contobj(env, builder, contobj);
-        //shared::typed_continuations_cont_obj_get_cont_ref(env, builder, contobj);
 
         let mut vmcontref = tc::VMContRef::new(resume_contref, env.pointer_type());
 
@@ -1585,7 +1585,6 @@ pub(crate) fn translate_resume<'a>(
 
         // Create and push the continuation object. We only create
         // them here because we don't need them when forwarding.
-        // let revision = vmcontref.get_revision(env, builder);
         let contobj = shared::assemble_contobj(env, builder, next_revision, resume_contref);
         if wasmtime_continuations::ENABLE_DEBUG_PRINTING {
             emit_debug_println!(
