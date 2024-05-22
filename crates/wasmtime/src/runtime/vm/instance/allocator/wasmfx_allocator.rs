@@ -27,13 +27,14 @@ pub mod wasmfx_on_demand {
         }
 
         pub fn allocate(&self) -> Result<FiberStack> {
-            let stack = if cfg!(all(
-                feature = "unsafe_wasmfx_stacks",
-                not(feature = "wasmfx_baseline")
-            )) {
-                super::FiberStack::malloc(self.stack_size)
-            } else {
-                super::FiberStack::new(self.stack_size)
+            let stack = {
+                cfg_if::cfg_if! {
+                    if #[cfg(all(feature = "unsafe_wasmfx_stacks", not(feature = "wasmfx_baseline")))] {
+                        super::FiberStack::malloc(self.stack_size)
+                    } else {
+                        super::FiberStack::new(self.stack_size)
+                    }
+                }
             };
             stack.map_err(|_| anyhow::anyhow!("Fiber stack allocation failed"))
         }
