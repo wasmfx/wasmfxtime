@@ -270,4 +270,4 @@ std = [
 unsafe_disable_continuation_linearity_check = []
 
 # Toggle the baseline implementation of WasmFX
-wasmfx_baseline = ["async"]
+wasmfx_baseline = ["async", "wasmtime-cranelift?/wasmfx_baseline"]
