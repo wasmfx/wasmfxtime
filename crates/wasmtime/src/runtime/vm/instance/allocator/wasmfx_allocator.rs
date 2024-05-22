@@ -46,6 +46,7 @@ pub mod wasmfx_on_demand {
 
 // This module is dead code if the on-demand allocator is toggled.
 #[allow(dead_code)]
+#[cfg(feature = "wasmfx_pooling_allocator")]
 pub mod wasmfx_pooling {
     use super::*;
 
@@ -193,7 +194,7 @@ pub mod wasmfx_pooling {
 }
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "wasmfx_pooling_allocator")] {
+    if #[cfg(all(feature = "wasmfx_pooling_allocator"))] {
         use wasmfx_pooling as imp;
     } else {
         use wasmfx_on_demand as imp;

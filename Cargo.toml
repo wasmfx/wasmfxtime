@@ -390,6 +390,7 @@ wasmfx_baseline = [
 # Toggle the WasmFX pooling allocator
 wasmfx_pooling_allocator = [
   "wasmtime/wasmfx_pooling_allocator",
+  "pooling-allocator",
 ]
 
 # Enable the old-style unsafe malloc'd stacks (has no effect for
