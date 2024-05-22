@@ -1,4 +1,5 @@
 //! Continuations TODO
+use core::num::NonZeroU64;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "wasmfx_baseline")] {
@@ -7,6 +8,28 @@ cfg_if::cfg_if! {
         pub use optimized as imp;
     }
 }
+
+/// A continuation object is a handle to a continuation reference
+/// (i.e. an actual stack). A continuation object only be consumed
+/// once. The linearity is checked dynamically in the generated code
+/// by comparing the revision witness embedded in the pointer to the
+/// actual revision counter on the continuation reference.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+pub struct VMContObj(NonZeroU64);
+
+impl VMContObj {
+    pub fn from_u64(addr: u64) -> Option<Self> {
+        if addr > 0 {
+            Some(Self(NonZeroU64::new(addr).unwrap()))
+        } else {
+            None
+        }
+    }
+}
+
+unsafe impl Send for VMContObj {}
+unsafe impl Sync for VMContObj {}
 
 #[cfg(not(feature = "wasmfx_baseline"))]
 pub mod optimized {
@@ -330,6 +353,7 @@ pub mod baseline {
     /// the list consists of a pointer to an actual
     /// wasmtime_fiber::Fiber, a suspend object, a parent pointer, an
     /// arguments buffer, and a return buffer.
+    #[repr(C)]
     pub struct VMContRef {
         /// Revision counter.
         pub revision: u64,

@@ -1498,9 +1498,9 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
                 unreachable!()
             }
 
-            WasmHeapType::NoCont => todo!(),
-            WasmHeapType::ConcreteCont(_) => todo!(),
-            WasmHeapType::Cont => todo!(),
+            WasmHeapType::NoCont | WasmHeapType::ConcreteCont(_) | WasmHeapType::Cont => {
+                unreachable!()
+            }
         }
 
         let vmctx = self.env.vmctx(self.builder.func);
@@ -1719,10 +1719,13 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let grow = if ty.is_vmgcref_type() {
             gc::gc_ref_table_grow_builtin(ty, self, &mut pos.func)?
         } else {
-            //debug_assert_eq!(ty.top(), WasmHeapTopType::Func);
+            debug_assert!(matches!(
+                ty.top(),
+                WasmHeapTopType::Func | WasmHeapTopType::Cont
+            ));
             match ty.top() {
                 WasmHeapTopType::Func => self.builtin_functions.table_grow_func_ref(&mut pos.func),
-                WasmHeapTopType::Cont => self.builtin_functions.table_grow_func_ref(&mut pos.func), // TODO(dhil): temporary hack.
+                WasmHeapTopType::Cont => self.builtin_functions.table_grow_cont_obj(&mut pos.func),
                 _ => panic!("unsupported table type."),
             }
         };
@@ -1791,10 +1794,19 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
             // Continuation types.
             WasmHeapTopType::Cont => match plan.style {
-                // TODO(dhil): Just copied from above...
-                TableStyle::CallerChecksSignature { lazy_init: _ } => Ok(
-                    self.get_or_init_func_ref_table_elem(builder, table_index, index, false, false)
-                ),
+                TableStyle::CallerChecksSignature { lazy_init: _ } => {
+                    let pointer_type = self.pointer_type();
+                    self.ensure_table_exists(builder.func, table_index);
+                    let table_data = self.tables[table_index].as_ref().unwrap();
+
+                    let (table_entry_addr, flags) = table_data.prepare_table_addr(
+                        builder,
+                        index,
+                        pointer_type,
+                        self.isa.flags().enable_table_access_spectre_mitigation(),
+                    );
+                    Ok(builder.ins().load(pointer_type, flags, table_entry_addr, 0))
+                }
             },
         }
     }
@@ -1871,24 +1883,18 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             }
 
             // Continuation types.
-            WasmHeapTopType::Cont => {
-                // TODO(dhil): Just copied from above...
-                match plan.style {
-                    TableStyle::CallerChecksSignature { lazy_init: _ } => {
-                        let (elem_addr, flags) = table_data.prepare_table_addr(
-                            builder,
-                            index,
-                            pointer_type,
-                            self.isa.flags().enable_table_access_spectre_mitigation(),
-                        );
-                        let value_with_init_bit = value;
-                        builder
-                            .ins()
-                            .store(flags, value_with_init_bit, elem_addr, 0);
-                        Ok(())
-                    }
+            WasmHeapTopType::Cont => match plan.style {
+                TableStyle::CallerChecksSignature { lazy_init: _ } => {
+                    let (elem_addr, flags) = table_data.prepare_table_addr(
+                        builder,
+                        index,
+                        pointer_type,
+                        self.isa.flags().enable_table_access_spectre_mitigation(),
+                    );
+                    builder.ins().store(flags, value, elem_addr, 0);
+                    Ok(())
                 }
-            }
+            },
         }
     }
 
@@ -1904,7 +1910,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let libcall = if ty.is_vmgcref_type() {
             gc::gc_ref_table_fill_builtin(ty, self, &mut pos.func)?
         } else {
-            debug_assert_eq!(ty.top(), WasmHeapTopType::Func);
+            debug_assert!(matches!(
+                ty.top(),
+                WasmHeapTopType::Func | WasmHeapTopType::Cont
+            ));
             self.builtin_functions.table_fill_func_ref(&mut pos.func)
         };
 

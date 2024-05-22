@@ -220,6 +220,10 @@ unsafe fn table_grow(
             .unwrap()
             .map(|r| (*instance.store()).gc_store().clone_gc_ref(&r))
             .into(),
+        TableElementType::Cont => {
+            use crate::vm::continuation::VMContObj;
+            VMContObj::from_u64(u64::try_from(init_value as usize).unwrap()).into()
+        }
     };
 
     Ok(match instance.table_grow(table_index, delta, element)? {
@@ -229,6 +233,7 @@ unsafe fn table_grow(
 }
 
 use table_grow as table_grow_func_ref;
+use table_grow as table_grow_cont_obj;
 
 #[cfg(feature = "gc")]
 use table_grow as table_grow_gc_ref;
@@ -256,6 +261,12 @@ unsafe fn table_fill(
             let gc_ref = VMGcRef::from_r64(u64::try_from(val as usize).unwrap()).unwrap();
             let gc_ref = gc_ref.map(|r| gc_store.clone_gc_ref(&r));
             table.fill(gc_store, dst, gc_ref.into(), len)
+        }
+
+        TableElementType::Cont => {
+            use crate::vm::continuation::VMContObj;
+            let contobj = VMContObj::from_u64(u64::try_from(val as usize).unwrap()).unwrap();
+            table.fill((*instance.store()).gc_store(), dst, contobj.into(), len)
         }
     }
 }

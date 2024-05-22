@@ -657,6 +657,12 @@ jobs:
       env:
         RUST_BACKTRACE: 1
 
+    # Crude check for whether
+    # `unsafe_disable_continuation_linearity_check` makes the test
+    # `cont_twice` fail.
+    - run: |
+        (cargo test --features=unsafe_disable_continuation_linearity_check --test wast -- --exact Cranelift/tests/misc_testsuite/typed-continuations/cont_twice.wast && test $? -eq 101) || test $? -eq 101
+
     # NB: the test job here is explicitly lacking in cancellation of this run if
     # something goes wrong. These take the longest anyway and otherwise if
     # Windows fails GitHub Actions will confusingly mark the failed Windows job

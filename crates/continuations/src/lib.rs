@@ -56,7 +56,7 @@ pub mod types {
 /// line.
 ///
 /// Part of wasmtime::config::Config type (which is not in scope in this crate).
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct WasmFXConfig {
     pub stack_size: usize,
 
@@ -95,6 +95,7 @@ unsafe impl Send for StackLimits {}
 unsafe impl Sync for StackLimits {}
 
 #[repr(C)]
+#[derive(Debug, Clone)]
 pub struct Payloads {
     /// Number of currently occupied slots.
     pub length: types::payloads::Length,
@@ -134,7 +135,7 @@ pub const STACK_CHAIN_MAIN_STACK_DISCRIMINANT: usize = 1;
 pub const STACK_CHAIN_CONTINUATION_DISCRIMINANT: usize = 2;
 
 /// Encodes the life cycle of a `VMContRef`.
-#[derive(PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 #[repr(i32)]
 pub enum State {
     /// The `VMContRef` has been created, but `resume` has never been
@@ -169,6 +170,7 @@ pub type TagId = u32;
 
 /// See SwitchDirection below for overall use of this type.
 #[repr(u32)]
+#[derive(Debug, Clone)]
 pub enum SwitchDirectionEnum {
     // Used to indicate that the contination has returned normally.
     Return = 0,
@@ -215,6 +217,7 @@ impl SwitchDirectionEnum {
 /// In that representation, bits 0 to 31 (where 0 is the LSB) contain the
 /// discriminant (as u32), while bits 32 to 63 contain the `data`.
 #[repr(C)]
+#[derive(Debug, Clone)]
 pub struct SwitchDirection {
     pub discriminant: SwitchDirectionEnum,
 
