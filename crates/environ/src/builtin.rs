@@ -105,13 +105,6 @@ macro_rules! foreach_builtin_function {
             tc_resume(vmctx: vmctx, contref: pointer, parent_stack_limits: pointer) -> i64;
             // Suspends a continuation.
             tc_suspend(vmctx: vmctx, tag: i32);
-            // Returns the continuation reference corresponding to the given continuation object.
-            tc_cont_obj_get_cont_ref(vmctx: vmctx, contobj: pointer) -> pointer;
-            // Drops the given continuation reference. Currently unused.
-            //cont_ref_drop(vmctx: vmctx, contref: pointer);
-            // Creates a new continuation object.
-            tc_new_cont_obj(vmctx: vmctx, contref: pointer) -> pointer;
-
 
             // Sets the tag return values of `child_contref` to those of `parent_contref`.
             // This is implemented by exchanging the pointers to the underlying buffers.

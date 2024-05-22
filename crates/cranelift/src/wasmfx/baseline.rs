@@ -8,9 +8,48 @@ use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::{FunctionBuilder, Switch};
 use cranelift_wasm::FuncEnvironment;
 use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
-use shared::typed_continuations_cont_obj_get_cont_ref;
-use shared::typed_continuations_new_cont_obj;
+use shared::{assemble_contobj, disassemble_contobj};
 use wasmtime_environ::PtrSize;
+
+fn get_revision<'a>(
+    _env: &mut crate::func_environ::FuncEnvironment<'a>,
+    builder: &mut FunctionBuilder,
+    contref: ir::Value,
+) -> ir::Value {
+    if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
+        builder.ins().iconst(I64, 0)
+    } else {
+        let mem_flags = ir::MemFlags::trusted();
+        builder.ins().load(I64, mem_flags, contref, 0)
+    }
+}
+
+fn compare_revision_and_increment<'a>(
+    env: &mut crate::func_environ::FuncEnvironment<'a>,
+    builder: &mut FunctionBuilder,
+    contref: ir::Value,
+    witness: ir::Value,
+) -> ir::Value {
+    if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
+        builder.ins().iconst(I64, 0)
+    } else {
+        let mem_flags = ir::MemFlags::trusted();
+        let revision = get_revision(env, builder, contref);
+
+        let evidence = builder.ins().icmp(IntCC::Equal, witness, revision);
+        builder
+            .ins()
+            .trapz(evidence, ir::TrapCode::ContinuationAlreadyConsumed);
+
+        let revision_plus1 = builder.ins().iadd_imm(revision, 1);
+        let overflow = builder
+            .ins()
+            .icmp_imm(IntCC::UnsignedLessThan, revision_plus1, 1 << 16);
+        builder.ins().trapz(overflow, ir::TrapCode::IntegerOverflow); // TODO(dhil): Consider introducing a designated trap code.
+        builder.ins().store(mem_flags, revision_plus1, contref, 0);
+        revision_plus1
+    }
+}
 
 fn typed_continuations_load_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -194,9 +233,9 @@ pub(crate) fn translate_resume<'a>(
     let forwarding_block = builder.create_block();
 
     // Prelude: Push the continuation arguments.
-    {
-        let resumee_fiber =
-            shared::typed_continuations_cont_obj_get_cont_ref(env, builder, resumee_obj);
+    let next_revision = {
+        let (witness, resumee_fiber) = disassemble_contobj(env, builder, resumee_obj);
+        let next_revision = compare_revision_and_increment(env, builder, resumee_fiber, witness);
         if resume_args.len() > 0 {
             let nargs = builder.ins().iconst(I64, resume_args.len() as i64);
 
@@ -221,7 +260,8 @@ pub(crate) fn translate_resume<'a>(
         }
 
         builder.ins().jump(resume_block, &[resumee_fiber]);
-    }
+        next_revision
+    };
 
     // Resume block: here we continue the (suspended) resumee.
     let (tag, resumee_fiber) = {
@@ -298,7 +338,7 @@ pub(crate) fn translate_resume<'a>(
         let mut args = typed_continuations_load_payloads(env, builder, &param_types);
 
         // Create and push the continuation object.
-        let resumee_obj = shared::typed_continuations_new_cont_obj(env, builder, resumee_fiber);
+        let resumee_obj = assemble_contobj(env, builder, next_revision, resumee_fiber);
         args.push(resumee_obj);
 
         // Finally, emit the jump to `label`.
@@ -378,11 +418,11 @@ pub(crate) fn translate_cont_bind<'a>(
     args: &[ir::Value],
     remaining_arg_count: usize,
 ) -> ir::Value {
-    let contref = typed_continuations_cont_obj_get_cont_ref(env, builder, contobj);
+    let (witness, contref) = disassemble_contobj(env, builder, contobj);
+    let revision = compare_revision_and_increment(env, builder, contref, witness);
     let remaining_arg_count = builder.ins().iconst(I32, remaining_arg_count as i64);
     typed_continuations_store_resume_args(env, builder, args, remaining_arg_count, contref);
-
-    typed_continuations_new_cont_obj(env, builder, contref)
+    assemble_contobj(env, builder, revision, contref)
 }
 
 pub(crate) fn translate_cont_new<'a>(
@@ -397,7 +437,8 @@ pub(crate) fn translate_cont_new<'a>(
     let nargs = builder.ins().iconst(I64, arg_types.len() as i64);
     let nreturns = builder.ins().iconst(I64, return_types.len() as i64);
     call_builtin!(builder, env, let contref = tc_baseline_cont_new(func, nargs, nreturns));
-    let contobj = typed_continuations_new_cont_obj(env, builder, contref);
+    let revision = get_revision(env, builder, contref);
+    let contobj = assemble_contobj(env, builder, revision, contref);
     Ok(contobj)
 }
 

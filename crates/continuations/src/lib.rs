@@ -302,6 +302,8 @@ pub mod offsets {
         pub const TAG_RETURN_VALUES: usize = ARGS + core::mem::size_of::<Payloads>();
         /// Offset of `state` field
         pub const STATE: usize = TAG_RETURN_VALUES + core::mem::size_of::<Payloads>();
+        /// Offset of `revision` field
+        pub const REVISION: usize = STATE + core::mem::size_of::<usize>();
     }
 
     pub mod stack_limits {

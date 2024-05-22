@@ -8,13 +8,6 @@ cfg_if::cfg_if! {
     }
 }
 
-/// M:1 Many-to-one mapping. A single VMContRef may be
-/// referenced by multiple VMContObj, though, only one
-/// VMContObj may hold a non-null reference to the object
-/// at a given time.
-#[repr(C)]
-pub struct VMContObj(pub Option<*mut imp::VMContRef>);
-
 #[cfg(not(feature = "wasmfx_baseline"))]
 pub mod optimized {
     use super::stack_chain::StackChain;
@@ -59,6 +52,9 @@ pub mod optimized {
 
         /// Indicates the state of this continuation.
         pub state: State,
+
+        /// Revision counter.
+        pub revision: u64,
     }
 
     /// TODO
@@ -163,6 +159,7 @@ pub mod optimized {
         let tsp = fiber.stack().top().unwrap();
         let stack_limit = unsafe { tsp.sub(stack_size - red_zone_size) } as usize;
         let contref = Box::new(VMContRef {
+            revision: 0,
             limits: StackLimits::with_stack_limit(stack_limit),
             fiber,
             parent_chain: StackChain::Absent,
@@ -306,7 +303,12 @@ pub mod optimized {
             std::mem::size_of::<ContinuationFiber>(),
             CONTINUATION_FIBER_SIZE
         );
-        assert_eq!(std::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
+        assert_eq!(core::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
+
+        assert_eq!(
+            memoffset::offset_of!(VMContRef, revision),
+            vm_cont_ref::REVISION
+        );
     }
 }
 
@@ -329,6 +331,8 @@ pub mod baseline {
     /// wasmtime_fiber::Fiber, a suspend object, a parent pointer, an
     /// arguments buffer, and a return buffer.
     pub struct VMContRef {
+        /// Revision counter.
+        pub revision: u64,
         pub fiber: Box<ContinuationFiber>,
         pub suspend: *mut Yield,
         pub limits: StackLimits,
@@ -405,6 +409,7 @@ pub mod baseline {
         };
 
         let contref = Box::new(VMContRef {
+            revision: 0,
             limits: StackLimits::with_stack_limit(0),
             parent_chain: StackChain::Absent,
             parent: core::ptr::null_mut(),

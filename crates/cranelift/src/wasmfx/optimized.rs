@@ -8,8 +8,6 @@ use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::{FunctionBuilder, Switch};
 use cranelift_wasm::FuncEnvironment;
 use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
-use shared::typed_continuations_cont_obj_get_cont_ref;
-use shared::typed_continuations_new_cont_obj;
 use wasmtime_environ::PtrSize;
 
 #[macro_use]
@@ -76,7 +74,7 @@ pub(crate) mod typed_continuation_helpers {
                          val: ir::Value| {
             let ty = builder.func.dfg.value_type(val);
             let val = match ty {
-                I32 => builder.ins().uextend(I64, val),
+                I8 | I32 => builder.ins().uextend(I64, val),
                 I64 => val,
                 _ => panic!("Cannot print type {}", ty),
             };
@@ -418,6 +416,57 @@ pub(crate) mod typed_continuation_helpers {
         ) {
             let offset = wasmtime_continuations::offsets::vm_cont_ref::PARENT_CHAIN as i32;
             new_stack_chain.store(env, builder, self.address, offset)
+        }
+
+        /// Gets the revision counter the a given continuation
+        /// reference.
+        pub fn get_revision<'a>(
+            &mut self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
+                builder.ins().iconst(I64, 0)
+            } else {
+                let mem_flags = ir::MemFlags::trusted();
+                let offset = wasmtime_continuations::offsets::vm_cont_ref::REVISION as i32;
+                let revision = builder.ins().load(I64, mem_flags, self.address, offset);
+                revision
+            }
+        }
+
+        /// Sets the revision counter on the given continuation
+        /// reference to `revision + 1`.
+        pub fn incr_revision<'a>(
+            &mut self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            revision: ir::Value,
+        ) -> ir::Value {
+            if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
+                builder.ins().iconst(I64, 0)
+            } else {
+                if cfg!(debug_assertions) {
+                    let actual_revision = self.get_revision(env, builder);
+                    emit_debug_assert_eq!(env, builder, revision, actual_revision);
+                }
+                let mem_flags = ir::MemFlags::trusted();
+                let offset = wasmtime_continuations::offsets::vm_cont_ref::REVISION as i32;
+                let revision_plus1 = builder.ins().iadd_imm(revision, 1);
+                builder
+                    .ins()
+                    .store(mem_flags, revision_plus1, self.address, offset);
+                if cfg!(debug_assertions) {
+                    let new_revision = self.get_revision(env, builder);
+                    emit_debug_assert_eq!(env, builder, revision_plus1, new_revision);
+                }
+                let overflow =
+                    builder
+                        .ins()
+                        .icmp_imm(IntCC::UnsignedLessThan, revision_plus1, 1 << 16);
+                builder.ins().trapz(overflow, ir::TrapCode::IntegerOverflow); // TODO(dhil): Consider introducing a designated trap code.
+                revision_plus1
+            }
         }
     }
 
@@ -1268,11 +1317,31 @@ pub(crate) fn translate_cont_bind<'a>(
     args: &[ir::Value],
     remaining_arg_count: usize,
 ) -> ir::Value {
-    let contref = typed_continuations_cont_obj_get_cont_ref(env, builder, contobj);
+    //let contref = typed_continuations_cont_obj_get_cont_ref(env, builder, contobj);
+    let (witness, contref) = shared::disassemble_contobj(env, builder, contobj);
+    let mut vmcontref = tc::VMContRef::new(contref, env.pointer_type());
+    let revision = vmcontref.get_revision(env, builder);
+    let evidence = builder.ins().icmp(IntCC::Equal, witness, revision);
+    emit_debug_println!(
+        env,
+        builder,
+        "[cont_bind] witness = {}, revision = {}, evidence = {}",
+        witness,
+        revision,
+        evidence
+    );
+    builder
+        .ins()
+        .trapz(evidence, ir::TrapCode::ContinuationAlreadyConsumed);
+
     let remaining_arg_count = builder.ins().iconst(I32, remaining_arg_count as i64);
     typed_continuations_store_resume_args(env, builder, args, remaining_arg_count, contref);
 
-    typed_continuations_new_cont_obj(env, builder, contref)
+    let revision = vmcontref.incr_revision(env, builder, revision);
+    emit_debug_println!(env, builder, "new revision = {}", revision);
+    let contobj = shared::assemble_contobj(env, builder, revision, contref);
+    emit_debug_println!(env, builder, "[cont_bind] contobj = {:p}", contobj);
+    contobj
 }
 
 pub(crate) fn translate_cont_new<'a>(
@@ -1286,7 +1355,9 @@ pub(crate) fn translate_cont_new<'a>(
     let nargs = builder.ins().iconst(I32, arg_types.len() as i64);
     let nreturns = builder.ins().iconst(I32, return_types.len() as i64);
     call_builtin!(builder, env, let contref = tc_cont_new(func, nargs, nreturns));
-    let contobj = typed_continuations_new_cont_obj(env, builder, contref);
+    let tag = tc::VMContRef::new(contref, env.pointer_type()).get_revision(env, builder);
+    let contobj = shared::assemble_contobj(env, builder, tag, contref);
+    emit_debug_println!(env, builder, "[cont_new] contobj = {:p}", contobj);
     Ok(contobj)
 }
 
@@ -1308,9 +1379,20 @@ pub(crate) fn translate_resume<'a>(
 
     // Preamble: Part of previously active block
 
-    let (resume_contref, parent_stack_chain) = {
-        let resume_contref =
-            shared::typed_continuations_cont_obj_get_cont_ref(env, builder, contobj);
+    let (next_revision, resume_contref, parent_stack_chain) = {
+        let (witness, resume_contref) = shared::disassemble_contobj(env, builder, contobj);
+
+        let mut vmcontref = tc::VMContRef::new(resume_contref, env.pointer_type());
+
+        let revision = vmcontref.get_revision(env, builder);
+        let evidence = builder.ins().icmp(IntCC::Equal, revision, witness);
+        emit_debug_println!(env, builder, "[resume] contobj = {:p}, resume_contref = {:p} witness = {}, revision = {}, evidence = {}", contobj, resume_contref, witness, revision, evidence);
+
+        builder
+            .ins()
+            .trapz(evidence, ir::TrapCode::ContinuationAlreadyConsumed);
+        let next_revision = vmcontref.incr_revision(env, builder, revision);
+        emit_debug_println!(env, builder, "[resume] new revision = {}", next_revision);
 
         if resume_args.len() > 0 {
             // We store the arguments in the `VMContRef` to be resumed.
@@ -1322,14 +1404,10 @@ pub(crate) fn translate_resume<'a>(
         let original_stack_chain =
             tc::VMContext::new(vmctx, env.pointer_type()).load_stack_chain(env, builder);
         original_stack_chain.assert_not_absent(env, builder);
-        tc::VMContRef::new(resume_contref, env.pointer_type()).set_parent_stack_chain(
-            env,
-            builder,
-            &original_stack_chain,
-        );
+        vmcontref.set_parent_stack_chain(env, builder, &original_stack_chain);
 
         builder.ins().jump(resume_block, &[]);
-        (resume_contref, original_stack_chain)
+        (next_revision, resume_contref, original_stack_chain)
     };
 
     // Resume block: actually resume the fiber corresponding to the
@@ -1499,12 +1577,19 @@ pub(crate) fn translate_resume<'a>(
         // link to `StackChain::Absent`.
         let pointer_type = env.pointer_type();
         let chain = tc::StackChain::absent(builder, pointer_type);
-        tc::VMContRef::new(resume_contref, pointer_type)
-            .set_parent_stack_chain(env, builder, &chain);
+        let mut vmcontref = tc::VMContRef::new(resume_contref, pointer_type);
+        vmcontref.set_parent_stack_chain(env, builder, &chain);
 
         // Create and push the continuation object. We only create
         // them here because we don't need them when forwarding.
-        let contobj = typed_continuations_new_cont_obj(env, builder, resume_contref);
+        let contobj = shared::assemble_contobj(env, builder, next_revision, resume_contref);
+        emit_debug_println!(
+            env,
+            builder,
+            "[resume] revision = {}, contobj = {:p}",
+            next_revision,
+            contobj
+        );
 
         args.push(contobj);
 
