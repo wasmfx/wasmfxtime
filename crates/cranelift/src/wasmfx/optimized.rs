@@ -439,13 +439,17 @@ pub(crate) mod typed_continuation_helpers {
         /// reference to `revision + 1`.
         pub fn incr_revision<'a>(
             &mut self,
-            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
             revision: ir::Value,
         ) -> ir::Value {
             if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
                 builder.ins().iconst(I64, 0)
             } else {
+                if cfg!(debug_assertions) {
+                    let actual_revision = self.get_revision(env, builder);
+                    emit_debug_assert_eq!(env, builder, revision, actual_revision);
+                }
                 let mem_flags = ir::MemFlags::trusted();
                 let offset = wasmtime_continuations::offsets::vm_cont_ref::REVISION as i32;
                 let revision_plus1 = builder.ins().iadd_imm(revision, 1);
@@ -453,8 +457,8 @@ pub(crate) mod typed_continuation_helpers {
                     .ins()
                     .store(mem_flags, revision_plus1, self.address, offset);
                 if cfg!(debug_assertions) {
-                    let actual_revision = self.get_revision(builder, env);
-                    emit_debug_assert_eq!(env, builder, revision, actual_revision);
+                    let new_revision = self.get_revision(env, builder);
+                    emit_debug_assert_eq!(env, builder, revision_plus1, new_revision);
                 }
                 let overflow =
                     builder
