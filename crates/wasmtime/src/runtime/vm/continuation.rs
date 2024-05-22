@@ -8,13 +8,6 @@ cfg_if::cfg_if! {
     }
 }
 
-/// M:1 Many-to-one mapping. A single VMContRef may be
-/// referenced by multiple VMContObj, though, only one
-/// VMContObj may hold a non-null reference to the object
-/// at a given time.
-#[repr(C)]
-pub struct VMContObj(pub Option<*mut imp::VMContRef>);
-
 #[cfg(not(feature = "wasmfx_baseline"))]
 pub mod optimized {
     use super::stack_chain::StackChain;
