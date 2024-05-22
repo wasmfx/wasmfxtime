@@ -31,6 +31,7 @@ pub mod optimized {
 
     /// Fibers used for continuations
     pub type ContinuationFiber = Fiber;
+    pub type FiberStack = crate::runtime::vm::fibre::FiberStack;
 
     /// TODO
     #[repr(C)]
@@ -318,6 +319,7 @@ pub mod baseline {
     use wasmtime_fiber::{Fiber, Suspend};
 
     type ContinuationFiber = Fiber<'static, &'static mut Instance, u32, ()>;
+    pub type FiberStack = wasmtime_fiber::FiberStack;
     type Yield = Suspend<&'static mut Instance, u32, ()>;
 
     /// The baseline VM continuation record.

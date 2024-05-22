@@ -7,17 +7,10 @@
 use anyhow::Result;
 use wasmtime_continuations::WasmFXConfig;
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "wasmfx_baseline")] {
-        use wasmtime_fiber as fiber_impl;
-    } else {
-        use crate::vm::fibre as fiber_impl;
-    }
-}
+pub use crate::runtime::vm::continuation::imp::FiberStack;
 
-pub type FiberStack = fiber_impl::FiberStack;
-
-#[cfg(not(feature = "wasmfx_pooling_allocator"))]
+// This module is dead code if the pooling allocator is toggled.
+#[allow(dead_code)]
 pub mod wasmfx_on_demand {
     use super::*;
 
@@ -34,13 +27,15 @@ pub mod wasmfx_on_demand {
         }
 
         pub fn allocate(&self) -> Result<FiberStack> {
-            cfg_if::cfg_if! {
-                if #[cfg(all(feature = "unsafe_wasmfx_stacks", not(feature = "wasmfx_baseline")))] {
-                    Ok(fiber_impl::FiberStack::malloc(self.stack_size).ok_or_err(|_| anyhow::anyhow!("Fiber stack allocation failed"))?)
-                } else {
-                    Ok(fiber_impl::FiberStack::new(self.stack_size).map_err(|_| anyhow::anyhow!("Fiber stack allocation failed"))?)
-                }
-            }
+            let stack = if cfg!(all(
+                feature = "unsafe_wasmfx_stacks",
+                not(feature = "wasmfx_baseline")
+            )) {
+                super::FiberStack::malloc(self.stack_size)
+            } else {
+                super::FiberStack::new(self.stack_size)
+            };
+            stack.map_err(|_| anyhow::anyhow!("Fiber stack allocation failed"))
         }
 
         pub fn deallocate(&self, _stack: &FiberStack) {
@@ -49,7 +44,8 @@ pub mod wasmfx_on_demand {
     }
 }
 
-#[cfg(feature = "wasmfx_pooling_allocator")]
+// This module is dead code if the on-demand allocator is toggled.
+#[allow(dead_code)]
 pub mod wasmfx_pooling {
     use super::*;
 
@@ -57,11 +53,11 @@ pub mod wasmfx_pooling {
         index_allocator::{SimpleIndexAllocator, SlotId},
         round_up_to_pow2,
     };
-    use crate::runtime::vm::sys::vm::{commit_pages, decommit_pages};
+    use crate::runtime::vm::sys::vm::commit_pages;
     use crate::vm::Mmap;
     use anyhow::{anyhow, bail, Context, Result};
 
-    /// Represents a pool of execution stacks (used for the async fiber implementation).
+    /// Represents a pool of execution stacks.
     ///
     /// Each index into the pool represents a single execution stack. The maximum number of
     /// stacks is the same as the maximum number of instances.
@@ -78,8 +74,6 @@ pub mod wasmfx_pooling {
         max_stacks: usize,
         page_size: usize,
         index_allocator: SimpleIndexAllocator,
-        async_stack_zeroing: bool,
-        async_stack_keep_resident: usize,
     }
 
     impl InnerAllocator {
@@ -125,8 +119,6 @@ pub mod wasmfx_pooling {
                 stack_size,
                 max_stacks,
                 page_size,
-                async_stack_zeroing: false,
-                async_stack_keep_resident: 0,
                 index_allocator: SimpleIndexAllocator::new(total_stacks),
             })
         }
@@ -195,32 +187,7 @@ pub mod wasmfx_pooling {
             let index = (start_of_stack - base) / self.stack_size;
             assert!(index < self.max_stacks);
 
-            if self.async_stack_zeroing {
-                self.zero_stack(bottom_of_stack, stack_size);
-            }
-
             self.index_allocator.free(SlotId(index as u32));
-        }
-
-        fn zero_stack(&self, bottom: usize, size: usize) {
-            // Manually zero the top of the stack to keep the pages resident in
-            // memory and avoid future page faults. Use the system to deallocate
-            // pages past this. This hopefully strikes a reasonable balance between:
-            //
-            // * memset for the whole range is probably expensive
-            // * madvise for the whole range incurs expensive future page faults
-            // * most threads probably don't use most of the stack anyway
-            let size_to_memset = size.min(self.async_stack_keep_resident);
-            unsafe {
-                core::ptr::write_bytes(
-                    (bottom + size - size_to_memset) as *mut u8,
-                    0,
-                    size_to_memset,
-                );
-
-                // Use the system to reset remaining stack pages to zero.
-                decommit_pages(bottom as _, size - size_to_memset).unwrap();
-            }
         }
     }
 }
