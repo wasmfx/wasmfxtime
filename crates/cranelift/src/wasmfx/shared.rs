@@ -25,31 +25,60 @@ macro_rules! call_builtin {
 #[allow(unused_imports)]
 pub(crate) use call_builtin;
 
-/// TODO
-pub(crate) fn typed_continuations_cont_obj_get_cont_ref<'a>(
-    env: &mut crate::func_environ::FuncEnvironment<'a>,
-    builder: &mut FunctionBuilder,
-    contobj: ir::Value,
-) -> ir::Value {
-    if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
-        // The "contobj" is a contref already
-        return contobj;
-    } else {
-        call_builtin!(builder, env, let result = tc_cont_obj_get_cont_ref(contobj));
-        return result;
+struct TaggedPointer;
+
+type Uintptr = u64;
+const UINTPTR_MAX: u64 = 18_446_744_073_709_551_615u64;
+
+impl<'a> TaggedPointer {
+    const HB_TAG_BITS: u64 = 16;
+    const HB_POINTER_BITS: u64 = 48;
+    const HB_POINTER_MASK: Uintptr = (UINTPTR_MAX >> Self::HB_TAG_BITS);
+
+    pub fn untag(
+        _env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+        ptr: ir::Value,
+    ) -> (ir::Value, ir::Value) {
+        let tag = builder.ins().ushr_imm(ptr, Self::HB_POINTER_BITS as i64);
+        let unmasked = builder.ins().band_imm(ptr, Self::HB_POINTER_MASK as i64);
+        (tag, unmasked)
+    }
+
+    pub fn with_tag(
+        _env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+        tag: ir::Value,
+        ptr: ir::Value,
+    ) -> ir::Value {
+        let tag = builder.ins().ishl_imm(tag, Self::HB_POINTER_BITS as i64);
+        builder.ins().bor(ptr, tag)
     }
 }
 
-pub(crate) fn typed_continuations_new_cont_obj<'a>(
+pub(crate) fn disassemble_contobj<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
+    contobj: ir::Value,
+) -> (ir::Value, ir::Value) {
+    if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
+        let zero = builder.ins().iconst(cranelift_codegen::ir::types::I64, 0);
+        (zero, contobj)
+    } else {
+        TaggedPointer::untag(env, builder, contobj)
+    }
+}
+
+pub(crate) fn assemble_contobj<'a>(
+    env: &mut crate::func_environ::FuncEnvironment<'a>,
+    builder: &mut FunctionBuilder,
+    count: ir::Value,
     contref_addr: ir::Value,
 ) -> ir::Value {
     if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
-        return contref_addr;
+        contref_addr
     } else {
-        call_builtin!(builder, env, let result = tc_new_cont_obj(contref_addr));
-        return result;
+        TaggedPointer::with_tag(env, builder, count, contref_addr)
     }
 }
 
