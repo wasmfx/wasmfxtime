@@ -20,7 +20,6 @@ pub mod optimized {
     use super::stack_chain::StackChain;
     use crate::runtime::vm::{
         fibre::Fiber,
-        fibre::FiberStack,
         vmcontext::{VMFuncRef, ValRaw},
         Instance, TrapReason,
     };
@@ -32,6 +31,7 @@ pub mod optimized {
 
     /// Fibers used for continuations
     pub type ContinuationFiber = Fiber;
+    pub type FiberStack = crate::runtime::vm::fibre::FiberStack;
 
     /// TODO
     #[repr(C)]
@@ -90,11 +90,12 @@ pub mod optimized {
 
     /// TODO
     #[inline(always)]
-    pub fn drop_cont_ref(_instance: &mut Instance, contref: *mut VMContRef) {
+    pub fn drop_cont_ref(instance: &mut Instance, contref: *mut VMContRef) {
         // Note that continuation references do not own their parents, hence we ignore
         // parent fields here.
 
         let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
+        instance.wasmfx_deallocate_stack(contref.fiber.stack());
         if contref.args.data.is_null() {
             debug_assert!(contref.args.length as usize == 0);
             debug_assert!(contref.args.capacity as usize == 0);
@@ -142,7 +143,7 @@ pub mod optimized {
         let red_zone_size = wasmfx_config.red_zone_size;
 
         let fiber = {
-            let stack = FiberStack::malloc(stack_size).map_err(|_error| {
+            let stack = instance.wasmfx_allocate_stack().map_err(|_error| {
                 TrapReason::user_without_backtrace(anyhow::anyhow!(
                     "Fiber stack allocation failed!"
                 ))
@@ -302,26 +303,23 @@ pub mod optimized {
         assert_eq!(memoffset::offset_of!(VMContRef, state), vm_cont_ref::STATE);
 
         assert_eq!(
-            core::mem::size_of::<ContinuationFiber>(),
+            std::mem::size_of::<ContinuationFiber>(),
             CONTINUATION_FIBER_SIZE
         );
-        assert_eq!(core::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
+        assert_eq!(std::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
     }
 }
 
-//
-// Baseline implementation
-//
 #[cfg(feature = "wasmfx_baseline")]
 pub mod baseline {
     use super::stack_chain::{StackChain, StackLimits};
     use crate::runtime::vm::{Instance, TrapReason, VMFuncRef, VMOpaqueContext, ValRaw};
     use core::{cell::Cell, cell::RefCell, cmp, mem};
-    use wasmtime_continuations::DEFAULT_FIBER_SIZE;
     use wasmtime_environ::prelude::*;
     use wasmtime_fiber::{Fiber, Suspend};
 
     type ContinuationFiber = Fiber<'static, &'static mut Instance, u32, ()>;
+    pub type FiberStack = wasmtime_fiber::FiberStack;
     type Yield = Suspend<&'static mut Instance, u32, ()>;
 
     /// The baseline VM continuation record.
@@ -360,7 +358,7 @@ pub mod baseline {
     /// Allocates a new continuation in suspended mode.
     #[inline(always)]
     pub fn cont_new(
-        _instance: &mut Instance,
+        instance: &mut Instance,
         func: *mut u8,
         param_count: usize,
         result_count: usize,
@@ -369,7 +367,8 @@ pub mod baseline {
         let mut values: Vec<u128> = Vec::with_capacity(capacity);
 
         let fiber = {
-            let stack = wasmtime_fiber::FiberStack::new(DEFAULT_FIBER_SIZE)
+            let stack = instance
+                .wasmfx_allocate_stack()
                 .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
             let fiber = match unsafe { func.cast::<VMFuncRef>().as_ref() } {
                 None => Fiber::new(stack, |_instance: &mut Instance, _suspend: &mut Yield| {
@@ -508,10 +507,11 @@ pub mod baseline {
 
     /// Deallocates a gives continuation reference.
     #[inline(always)]
-    pub fn drop_continuation_reference(_instance: &mut Instance, contref: *mut VMContRef) {
+    pub fn drop_continuation_reference(instance: &mut Instance, contref: *mut VMContRef) {
         // Note that continuation objects do not own their parents, so
         // we let the parent object leak.
         let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
+        instance.wasmfx_deallocate_stack(contref.fiber.stack());
         let _: Box<ContinuationFiber> = contref.fiber;
         let _: Vec<u128> = contref.args;
         let _: Vec<u128> = contref.values;

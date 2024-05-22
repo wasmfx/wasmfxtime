@@ -384,7 +384,20 @@ unsafe_disable_continuation_linearity_check = [
 # The following toggles the baseline implementation of typed continuations.
 wasmfx_baseline = [
   "wasmtime-cranelift/wasmfx_baseline",
-  "wasmtime/wasmfx_baseline"
+  "wasmtime/wasmfx_baseline",
+]
+
+# Toggle the WasmFX pooling allocator
+wasmfx_pooling_allocator = [
+  "wasmtime/wasmfx_pooling_allocator",
+  "pooling-allocator",
+]
+
+# Enable the old-style unsafe malloc'd stacks (has no effect for
+# typed_continuations_baseline_implementation or when
+# wasmfx_pooling_allocator is toggled)
+unsafe_wasmfx_stacks = [
+  "wasmtime/unsafe_wasmfx_stacks",
 ]
 
 # ========================================
