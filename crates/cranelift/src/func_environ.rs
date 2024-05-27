@@ -1920,11 +1920,8 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         len: ir::Value,
     ) -> WasmResult<()> {
         let ty = self.module.table_plans[table_index].table.wasm_ty.heap_type;
-
         let vmctx = self.vmctx_val(&mut builder.cursor());
-
         let table_index_arg = builder.ins().iconst(I32, table_index.as_u32() as i64);
-
         let mut args = vec![vmctx, table_index_arg, dst];
         let libcall = if ty.is_vmgcref_type() {
             args.push(val);
