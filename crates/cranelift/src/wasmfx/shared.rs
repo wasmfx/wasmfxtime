@@ -90,12 +90,15 @@ pub(crate) fn disassemble_contobj<'a>(
         );
         let flags = ir::MemFlags::new().with_endianness(ir::Endianness::Little);
         let contobj = builder.ins().bitcast(ir::types::I64X2, flags, contobj);
-        //let (counter, contref) = builder.ins().isplit(contobj);
-        let counter = builder.ins().extractlane(contobj, 0);
+        let revision_counter = builder.ins().extractlane(contobj, 0);
         let contref = builder.ins().extractlane(contobj, 1);
         debug_assert_eq!(builder.func.dfg.value_type(contref), ir::types::I64);
-        debug_assert_eq!(builder.func.dfg.value_type(counter), ir::types::I64);
-        (counter, contref)
+        debug_assert_eq!(
+            builder.func.dfg.value_type(revision_counter),
+            ir::types::I64
+        );
+        // TODO(frank-emrich) On 32bit platforms, need to ireduce contref to env.pointer_type()
+        (revision_counter, contref)
     }
 }
 
@@ -104,36 +107,28 @@ pub(crate) fn disassemble_contobj<'a>(
 pub(crate) fn assemble_contobj<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    count: ir::Value,
+    revision_counter: ir::Value,
     contref_addr: ir::Value,
 ) -> ir::Value {
     if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
         contref_addr
     } else {
+        // TODO(frank-emrich) This check assumes env.pointer_type() == I64
         debug_assert_eq!(builder.func.dfg.value_type(contref_addr), ir::types::I64);
-        debug_assert_eq!(builder.func.dfg.value_type(count), ir::types::I64);
+        debug_assert_eq!(
+            builder.func.dfg.value_type(revision_counter),
+            ir::types::I64
+        );
 
-        let lower = builder.ins().scalar_to_vector(ir::types::I64X2, count);
-        let res = builder.ins().insertlane(lower, contref_addr, 1);
-
-        // let res = builder.ins().iconcat(count, contref_addr);
-        // // TODO: Do not hardcode this
-        // //let res = builder.ins().vconst(ir::types::I64X2, [0 as i8; 16]);
-        // builder.create_sized_stack_slot(data
-
-        // let bytes = 16 as u32;
-        // let ss_data = StackSlotData::new(StackSlotKind::ExplicitSlot, bytes, 0);)
-        // let slot = builder.create_sized_stack_slot(ss_data);
+        let lower = builder
+            .ins()
+            .scalar_to_vector(ir::types::I64X2, revision_counter);
+        let contobj = builder.ins().insertlane(lower, contref_addr, 1);
 
         let flags = ir::MemFlags::new().with_endianness(ir::Endianness::Little);
-        let contobj = builder.ins().bitcast(ir::types::I64X2, flags, res);
         let contobj = builder
             .ins()
             .bitcast(vm_contobj_type(env.pointer_type()), flags, contobj);
-        debug_assert_eq!(
-            builder.func.dfg.value_type(contobj),
-            vm_contobj_type(env.pointer_type())
-        );
         contobj
     }
 }
