@@ -470,10 +470,6 @@ impl Table {
                     cmp::min(len, max),
                 ));
                 let TableStyle::CallerChecksSignature { lazy_init } = plan.style;
-                // assert!(
-                //     !lazy_init,
-                //     "We do not support lazily initialized continuation tables, yet"
-                // );
                 Ok(Self::from(StaticContTable { data, size }))
             }
         }
