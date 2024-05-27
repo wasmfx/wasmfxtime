@@ -966,9 +966,8 @@ pub mod baseline {
     }
 }
 
-#[test]
 mod test {
-
+    #[test]
     fn null_pointer_optimization() {
         // The Rust spec does not technically guarantee that the null pointer
         // optimization applies to a struct containing a NonNull.
