@@ -187,7 +187,15 @@ fn ignore(test: &Path, strategy: Strategy) -> bool {
 
         if part == "typed-continuations" {
             // TODO(dhil): Tag linking is currently broken
-            return test.ends_with("linking_tags.wast");
+            if test.ends_with("linking_tags.wast") {
+                return true;
+            }
+
+            // This test specifically checks that we catch a continuation being
+            // resumed twice, which we cannot detect in this mode.
+            if test.ends_with("cont_twice.wast") {
+                return true;
+            }
         }
     }
 
