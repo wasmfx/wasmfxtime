@@ -2,7 +2,6 @@ use cranelift_codegen::ir;
 use cranelift_codegen::ir::InstBuilder;
 
 use cranelift_frontend::FunctionBuilder;
-use cranelift_wasm::TargetEnvironment;
 
 #[allow(unused_macros)]
 macro_rules! call_builtin {

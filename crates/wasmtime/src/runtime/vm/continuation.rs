@@ -46,7 +46,7 @@ pub mod unsafe_vm_contobj {
     pub struct VMContObj(NonNull<imp::VMContRef>);
 
     impl VMContObj {
-        pub fn new(contref: NonNull<imp::VMContRef>, revision: u64) -> Self {
+        pub fn new(contref: NonNull<imp::VMContRef>, _revision: u64) -> Self {
             Self(contref)
         }
     }

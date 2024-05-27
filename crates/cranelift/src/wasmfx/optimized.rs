@@ -10,6 +10,7 @@ use cranelift_wasm::FuncEnvironment;
 use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
 use wasmtime_environ::PtrSize;
 
+#[cfg_attr(feature = "wasmfx_baseline", allow(unused_imports))]
 pub(crate) use shared::{assemble_contobj, disassemble_contobj, vm_contobj_type};
 
 #[macro_use]

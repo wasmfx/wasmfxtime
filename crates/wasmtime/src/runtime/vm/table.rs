@@ -469,7 +469,7 @@ impl Table {
                     data.as_non_null().cast::<ContTableElem>(),
                     cmp::min(len, max),
                 ));
-                let TableStyle::CallerChecksSignature { lazy_init } = plan.style;
+                let TableStyle::CallerChecksSignature { lazy_init: _ } = plan.style;
                 Ok(Self::from(StaticContTable { data, size }))
             }
         }
