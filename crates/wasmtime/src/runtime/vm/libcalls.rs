@@ -54,6 +54,8 @@
 //! }
 //! ```
 
+use super::continuation::imp::VMContRef;
+use super::continuation::VMContObj;
 use crate::runtime::vm::table::{Table, TableElementType};
 use crate::runtime::vm::vmcontext::VMFuncRef;
 use crate::runtime::vm::{Instance, TrapReason, VMGcRef};
@@ -255,10 +257,7 @@ unsafe fn table_grow_cont_obj(
     let table_index = TableIndex::from_u32(table_index);
 
     let element = match instance.table_element_type(table_index) {
-        TableElementType::Cont => {
-            //use crate::vm::continuation::VMContObj;
-            init_value.into()
-        }
+        TableElementType::Cont => init_value.into(),
         _ => panic!("Wrong table growing function"),
     };
 
@@ -314,7 +313,6 @@ unsafe fn table_fill_cont_obj(
     let table = &mut *instance.get_table(table_index);
     match table.element_type() {
         TableElementType::Cont => {
-            use crate::vm::continuation::VMContObj;
             let contobj = if value_contref.is_null() {
                 None
             } else {
@@ -334,9 +332,6 @@ use table_fill as table_fill_func_ref;
 
 #[cfg(feature = "gc")]
 use table_fill as table_fill_gc_ref;
-
-use super::continuation::imp::VMContRef;
-use super::continuation::VMContObj;
 
 // Implementation of `table.copy`.
 unsafe fn table_copy(

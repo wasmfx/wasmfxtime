@@ -1,5 +1,4 @@
 //! Continuations TODO
-use core::num::NonZeroU64;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "wasmfx_baseline")] {
@@ -14,20 +13,23 @@ cfg_if::cfg_if! {
 /// once. The linearity is checked dynamically in the generated code
 /// by comparing the revision witness embedded in the pointer to the
 /// actual revision counter on the continuation reference.
+#[cfg_attr(
+    feature = "unsafe_disable_continuation_linearity_check",
+    allow(dead_code)
+)]
 pub mod safe_vm_contobj {
+    use super::imp::VMContRef;
     use core::ptr::NonNull;
-
-    use super::*;
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct VMContObj {
         pub revision: u64,
-        pub contref: NonNull<imp::VMContRef>,
+        pub contref: NonNull<VMContRef>,
     }
 
     impl VMContObj {
-        pub fn new(contref: NonNull<imp::VMContRef>, revision: u64) -> Self {
+        pub fn new(contref: NonNull<VMContRef>, revision: u64) -> Self {
             Self { contref, revision }
         }
     }
@@ -36,17 +38,20 @@ pub mod safe_vm_contobj {
 /// This version of `VMContObj` does not actually store a revision counter. It is
 /// used when we opt out of the linearity check using the
 /// `unsafe_disable_continuation_linearity_check` feature
+#[cfg_attr(
+    not(feature = "unsafe_disable_continuation_linearity_check"),
+    allow(dead_code)
+)]
 pub mod unsafe_vm_contobj {
+    use super::imp::VMContRef;
     use core::ptr::NonNull;
-
-    use super::*;
 
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy)]
-    pub struct VMContObj(NonNull<imp::VMContRef>);
+    pub struct VMContObj(NonNull<VMContRef>);
 
     impl VMContObj {
-        pub fn new(contref: NonNull<imp::VMContRef>, _revision: u64) -> Self {
+        pub fn new(contref: NonNull<VMContRef>, _revision: u64) -> Self {
             Self(contref)
         }
     }
