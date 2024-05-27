@@ -1553,12 +1553,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let table_index = TableIndex::from_u32(*index);
             let delta = state.pop1();
             let init_value = state.pop1();
-            state.push1(environ.translate_table_grow(
-                builder,
-                table_index,
-                delta,
-                init_value,
-            )?);
+            state.push1(environ.translate_table_grow(builder, table_index, delta, init_value)?);
         }
         Operator::TableGet { table: index } => {
             let table_index = TableIndex::from_u32(*index);
