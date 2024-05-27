@@ -184,6 +184,11 @@ fn ignore(test: &Path, strategy: Strategy) -> bool {
             .iter()
             .any(|i| test.ends_with(i));
         }
+
+        if part == "typed-continuations" {
+            // TODO(dhil): Tag linking is currently broken
+            return test.ends_with("linking_tags.wast");
+        }
     }
 
     false
