@@ -1228,11 +1228,11 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         }
         Operator::RefNull { hty } => {
             let hty = environ.convert_heap_type(*hty);
-            state.push1(environ.translate_ref_null(builder.cursor(), hty)?)
+            state.push1(environ.translate_ref_null(builder, hty)?)
         }
         Operator::RefIsNull => {
             let value = state.pop1();
-            state.push1(environ.translate_ref_is_null(builder.cursor(), value)?);
+            state.push1(environ.translate_ref_is_null(builder, value)?);
         }
         Operator::RefFunc { function_index } => {
             let index = FuncIndex::from_u32(*function_index);
@@ -1554,7 +1554,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let delta = state.pop1();
             let init_value = state.pop1();
             state.push1(environ.translate_table_grow(
-                builder.cursor(),
+                builder,
                 table_index,
                 delta,
                 init_value,
@@ -1592,7 +1592,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let len = state.pop1();
             let val = state.pop1();
             let dest = state.pop1();
-            environ.translate_table_fill(builder.cursor(), table_index, dest, val, len)?;
+            environ.translate_table_fill(builder, table_index, dest, val, len)?;
         }
         Operator::TableInit {
             elem_index,
@@ -2433,7 +2433,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         Operator::BrOnNull { relative_depth } => {
             let r = state.pop1();
             let (br_destination, inputs) = translate_br_if_args(*relative_depth, state);
-            let is_null = environ.translate_ref_is_null(builder.cursor(), r)?;
+            let is_null = environ.translate_ref_is_null(builder, r)?;
             let else_block = builder.create_block();
             canonicalise_brif(builder, is_null, br_destination, inputs, else_block, &[]);
 
@@ -2448,7 +2448,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             // Peek the value val from the stack.
             // If val is ref.null ht, then: pop the value val from the stack.
             // Else: Execute the instruction (br relative_depth).
-            let is_null = environ.translate_ref_is_null(builder.cursor(), state.peek1())?;
+            let is_null = environ.translate_ref_is_null(builder, state.peek1())?;
             let (br_destination, inputs) = translate_br_if_args(*relative_depth, state);
             let else_block = builder.create_block();
             canonicalise_brif(builder, is_null, else_block, &[], br_destination, inputs);
@@ -2487,7 +2487,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         }
         Operator::RefAsNonNull => {
             let r = state.pop1();
-            let is_null = environ.translate_ref_is_null(builder.cursor(), r)?;
+            let is_null = environ.translate_ref_is_null(builder, r)?;
             builder.ins().trapnz(is_null, ir::TrapCode::NullReference);
             state.push1(r);
         }

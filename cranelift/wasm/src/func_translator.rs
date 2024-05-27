@@ -220,7 +220,7 @@ fn declare_locals<FE: FuncEnvironment + ?Sized>(
             let hty = environ.convert_heap_type(rt.heap_type());
             let ty = environ.reference_type(hty);
             let init = if rt.is_nullable() {
-                Some(environ.translate_ref_null(builder.cursor(), hty)?)
+                Some(environ.translate_ref_null(builder, hty)?)
             } else {
                 None
             };

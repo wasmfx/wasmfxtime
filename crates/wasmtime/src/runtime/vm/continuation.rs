@@ -14,17 +14,49 @@ cfg_if::cfg_if! {
 /// once. The linearity is checked dynamically in the generated code
 /// by comparing the revision witness embedded in the pointer to the
 /// actual revision counter on the continuation reference.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
-pub struct VMContObj(NonZeroU64);
+pub mod safe_vm_contobj {
+    use core::ptr::NonNull;
 
-impl VMContObj {
-    pub fn from_u64(addr: u64) -> Option<Self> {
-        if addr > 0 {
-            Some(Self(NonZeroU64::new(addr).unwrap()))
-        } else {
-            None
+    use super::*;
+
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct VMContObj {
+        pub revision: u64,
+        pub contref: NonNull<imp::VMContRef>,
+    }
+
+    impl VMContObj {
+        pub fn new(contref: NonNull<imp::VMContRef>, revision: u64) -> Self {
+            Self { contref, revision }
         }
+    }
+}
+
+/// This version of `VMContObj` does not actually store a revision counter. It is
+/// used when we opt out of the linearity check using the
+/// `unsafe_disable_continuation_linearity_check` feature
+pub mod unsafe_vm_contobj {
+    use core::ptr::NonNull;
+
+    use super::*;
+
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct VMContObj(NonNull<imp::VMContRef>);
+
+    impl VMContObj {
+        pub fn new(contref: NonNull<imp::VMContRef>, revision: u64) -> Self {
+            Self(contref)
+        }
+    }
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "unsafe_disable_continuation_linearity_check")] {
+        pub use unsafe_vm_contobj::*;
+    } else {
+        pub use safe_vm_contobj::*;
     }
 }
 
@@ -926,5 +958,18 @@ pub mod baseline {
     #[allow(missing_docs)]
     pub fn has_ever_run_continuation() -> bool {
         panic!("attempt to execute continuation::baseline::has_ever_run_continuation without `typed_continuation_baseline_implementation` toggled!")
+    }
+}
+
+#[test]
+mod test {
+
+    fn null_pointer_optimization() {
+        // The Rust spec does not technically guarantee that the null pointer
+        // optimization applies to a struct containing a NonNull.
+        assert_eq!(
+            std::mem::size_of::<Option<VMContRef>>(),
+            std::mem::size_of::<VMContRef>()
+        );
     }
 }

@@ -60,6 +60,7 @@ use crate::runtime::vm::{Instance, TrapReason, VMGcRef};
 #[cfg(feature = "wmemcheck")]
 use anyhow::bail;
 use anyhow::Result;
+use core::ptr::NonNull;
 #[cfg(feature = "threads")]
 use core::time::Duration;
 use wasmtime_environ::{DataIndex, ElemIndex, FuncIndex, MemoryIndex, TableIndex, Trap, Unsigned};
@@ -203,7 +204,7 @@ fn memory32_grow(
     Ok(result as *mut _)
 }
 
-// Implementation of `table.grow`.
+// Implementation of `table.grow` for elements that are pointer-sized.
 unsafe fn table_grow(
     instance: &mut Instance,
     table_index: u32,
@@ -221,8 +222,7 @@ unsafe fn table_grow(
             .map(|r| (*instance.store()).gc_store().clone_gc_ref(&r))
             .into(),
         TableElementType::Cont => {
-            use crate::vm::continuation::VMContObj;
-            VMContObj::from_u64(u64::try_from(init_value as usize).unwrap()).into()
+            panic!("Wrong table growing function")
         }
     };
 
@@ -233,12 +233,45 @@ unsafe fn table_grow(
 }
 
 use table_grow as table_grow_func_ref;
-use table_grow as table_grow_cont_obj;
+
+unsafe fn table_grow_cont_obj(
+    instance: &mut Instance,
+    table_index: u32,
+    delta: u32,
+    // The following two values together form the intitial Option<VMContObj>.
+    // A None value is indicated by the pointer being null.
+    init_value_contref: *mut u8,
+    init_value_revision: u64,
+) -> Result<u32> {
+    let init_value = if init_value_contref.is_null() {
+        None
+    } else {
+        // SAFETY: We just checked that the pointer is non-null
+        let contref = NonNull::new_unchecked(init_value_contref as *mut VMContRef);
+        let contobj = VMContObj::new(contref, init_value_revision);
+        Some(contobj)
+    };
+
+    let table_index = TableIndex::from_u32(table_index);
+
+    let element = match instance.table_element_type(table_index) {
+        TableElementType::Cont => {
+            //use crate::vm::continuation::VMContObj;
+            init_value.into()
+        }
+        _ => panic!("Wrong table growing function"),
+    };
+
+    Ok(match instance.table_grow(table_index, delta, element)? {
+        Some(r) => r,
+        None => (-1_i32).unsigned(),
+    })
+}
 
 #[cfg(feature = "gc")]
 use table_grow as table_grow_gc_ref;
 
-// Implementation of `table.fill`.
+// Implementation of `table.fill` for pointer-sized elements.
 unsafe fn table_fill(
     instance: &mut Instance,
     table_index: u32,
@@ -264,10 +297,36 @@ unsafe fn table_fill(
         }
 
         TableElementType::Cont => {
+            panic!("Wrong table filling function")
+        }
+    }
+}
+
+unsafe fn table_fill_cont_obj(
+    instance: &mut Instance,
+    table_index: u32,
+    dst: u32,
+    value_contref: *mut u8,
+    value_revision: u64,
+    len: u32,
+) -> Result<(), Trap> {
+    let table_index = TableIndex::from_u32(table_index);
+    let table = &mut *instance.get_table(table_index);
+    match table.element_type() {
+        TableElementType::Cont => {
             use crate::vm::continuation::VMContObj;
-            let contobj = VMContObj::from_u64(u64::try_from(val as usize).unwrap()).unwrap();
+            let contobj = if value_contref.is_null() {
+                None
+            } else {
+                // SAFETY: We just checked that the pointer is non-null
+                let contref = NonNull::new_unchecked(value_contref as *mut VMContRef);
+                let contobj = VMContObj::new(contref, value_revision);
+                Some(contobj)
+            };
+
             table.fill((*instance.store()).gc_store(), dst, contobj.into(), len)
         }
+        _ => panic!("Wrong table filling function"),
     }
 }
 
@@ -275,6 +334,9 @@ use table_fill as table_fill_func_ref;
 
 #[cfg(feature = "gc")]
 use table_fill as table_fill_gc_ref;
+
+use super::continuation::imp::VMContRef;
+use super::continuation::VMContObj;
 
 // Implementation of `table.copy`.
 unsafe fn table_copy(

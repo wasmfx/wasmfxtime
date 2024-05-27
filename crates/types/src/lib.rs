@@ -522,6 +522,13 @@ impl WasmHeapType {
         }
     }
 
+    pub fn is_cont_type(&self) -> bool {
+        match self {
+            WasmHeapType::Cont | WasmHeapType::ConcreteCont(_) | WasmHeapType::NoCont => true,
+            _ => false,
+        }
+    }
+
     /// Is this a type that is represented as a `VMGcRef` and is additionally
     /// not an `i31`?
     ///

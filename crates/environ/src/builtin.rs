@@ -163,7 +163,12 @@ macro_rules! foreach_builtin_function {
             tc_print_pointer(vmctx: vmctx, arg : pointer);
 
             // Returns an index for Wasm's `table.grow` instruction for `contobj`s.
-            table_grow_cont_obj(vmctx: vmctx, table: i32, delta: i32, init: pointer) -> i32;
+            // Note that the initial Option<ContObj> is split into two arguments: The underlying continuation reference and the revision count.
+            // If unsafe_disable_continuation_linearity_check is enabled, the revision value is arbitrary.
+            // To denote the continuation being None, init_contref may be null
+            table_grow_cont_obj(vmctx: vmctx, table: i32, delta: i32, init_contref: pointer, init_revision : i64) -> i32;
+            // `value_contref` and `value_revision` denote the Option<VMContobj>, as in previous libcall.
+            table_fill_cont_obj(vmctx: vmctx, table: i32, dst: i32, value_contref: pointer, value_revision : i64, len: i32);
         }
     };
 }

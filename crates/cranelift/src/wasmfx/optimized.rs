@@ -10,6 +10,8 @@ use cranelift_wasm::FuncEnvironment;
 use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
 use wasmtime_environ::PtrSize;
 
+pub(crate) use shared::{assemble_contobj, disassemble_contobj, vm_contobj_type};
+
 #[macro_use]
 pub(crate) mod typed_continuation_helpers {
     use crate::wasmfx::shared::call_builtin;
@@ -460,11 +462,6 @@ pub(crate) mod typed_continuation_helpers {
                     let new_revision = self.get_revision(env, builder);
                     emit_debug_assert_eq!(env, builder, revision_plus1, new_revision);
                 }
-                let overflow =
-                    builder
-                        .ins()
-                        .icmp_imm(IntCC::UnsignedLessThan, revision_plus1, 1 << 16);
-                builder.ins().trapz(overflow, ir::TrapCode::IntegerOverflow); // TODO(dhil): Consider introducing a designated trap code.
                 revision_plus1
             }
         }
@@ -1340,7 +1337,7 @@ pub(crate) fn translate_cont_bind<'a>(
     let revision = vmcontref.incr_revision(env, builder, revision);
     emit_debug_println!(env, builder, "new revision = {}", revision);
     let contobj = shared::assemble_contobj(env, builder, revision, contref);
-    emit_debug_println!(env, builder, "[cont_bind] contobj = {:p}", contobj);
+    emit_debug_println!(env, builder, "[cont_bind] contref = {:p}", contref);
     contobj
 }
 
@@ -1357,7 +1354,7 @@ pub(crate) fn translate_cont_new<'a>(
     call_builtin!(builder, env, let contref = tc_cont_new(func, nargs, nreturns));
     let tag = tc::VMContRef::new(contref, env.pointer_type()).get_revision(env, builder);
     let contobj = shared::assemble_contobj(env, builder, tag, contref);
-    emit_debug_println!(env, builder, "[cont_new] contobj = {:p}", contobj);
+    emit_debug_println!(env, builder, "[cont_new] contref = {:p}", contref);
     Ok(contobj)
 }
 
@@ -1385,12 +1382,21 @@ pub(crate) fn translate_resume<'a>(
         let mut vmcontref = tc::VMContRef::new(resume_contref, env.pointer_type());
 
         let revision = vmcontref.get_revision(env, builder);
-        let evidence = builder.ins().icmp(IntCC::Equal, revision, witness);
-        emit_debug_println!(env, builder, "[resume] contobj = {:p}, resume_contref = {:p} witness = {}, revision = {}, evidence = {}", contobj, resume_contref, witness, revision, evidence);
-
-        builder
-            .ins()
-            .trapz(evidence, ir::TrapCode::ContinuationAlreadyConsumed);
+        if !cfg!(feature = "unsafe_disable_continuation_linearity_check") {
+            let evidence = builder.ins().icmp(IntCC::Equal, revision, witness);
+            emit_debug_println!(
+                env,
+                builder,
+                "[resume] resume_contref = {:p} witness = {}, revision = {}, evidence = {}",
+                resume_contref,
+                witness,
+                revision,
+                evidence
+            );
+            builder
+                .ins()
+                .trapz(evidence, ir::TrapCode::ContinuationAlreadyConsumed);
+        }
         let next_revision = vmcontref.incr_revision(env, builder, revision);
         emit_debug_println!(env, builder, "[resume] new revision = {}", next_revision);
 
@@ -1586,9 +1592,9 @@ pub(crate) fn translate_resume<'a>(
         emit_debug_println!(
             env,
             builder,
-            "[resume] revision = {}, contobj = {:p}",
+            "[resume] revision = {}, contref = {:p}",
             next_revision,
-            contobj
+            resume_contref
         );
 
         args.push(contobj);
