@@ -1140,7 +1140,9 @@ mod misc {
 (module
   (type $ft (func))
   (type $ct (cont $ft))
+
   (tag $yield)
+
   (func $loop
     (loop $loop
       (suspend $yield)
@@ -1148,6 +1150,7 @@ mod misc {
     )
   )
   (elem declare func $loop)
+
   ;; Loops 65536 times to overflow the 16 bit revision counter on the continuation reference.
   (func (export "entry")
     (local $k (ref $ct))
