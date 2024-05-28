@@ -462,6 +462,8 @@ pub(crate) mod typed_continuation_helpers {
                 if cfg!(debug_assertions) {
                     let new_revision = self.get_revision(env, builder);
                     emit_debug_assert_eq!(env, builder, revision_plus1, new_revision);
+                    // Check for overflow:
+                    emit_debug_assert_ule!(env, builder, revision, revision_plus1);
                 }
                 revision_plus1
             }
@@ -1383,7 +1385,7 @@ pub(crate) fn translate_resume<'a>(
         let mut vmcontref = tc::VMContRef::new(resume_contref, env.pointer_type());
 
         let revision = vmcontref.get_revision(env, builder);
-        if !cfg!(feature = "unsafe_disable_continuation_linearity_check") {
+        if cfg!(not(feature = "unsafe_disable_continuation_linearity_check")) {
             let evidence = builder.ins().icmp(IntCC::Equal, revision, witness);
             emit_debug_println!(
                 env,

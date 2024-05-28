@@ -1939,7 +1939,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                     self.builtin_functions
                         .table_fill_cont_obj(&mut builder.func)
                 }
-                _ => panic!("Illegal table type"),
+                _ => panic!("unsupported table type"),
             }
         };
         args.push(len);
