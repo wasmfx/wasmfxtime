@@ -193,7 +193,9 @@ fn ignore(test: &Path, strategy: Strategy) -> bool {
 
             // This test specifically checks that we catch a continuation being
             // resumed twice, which we cannot detect in this mode.
-            if test.ends_with("cont_twice.wast") {
+            if cfg!(feature = "unsafe_disable_continuation_linearity_check")
+                && test.ends_with("cont_twice.wast")
+            {
                 return true;
             }
         }
