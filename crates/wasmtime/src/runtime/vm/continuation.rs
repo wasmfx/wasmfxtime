@@ -21,7 +21,9 @@ pub mod safe_vm_contobj {
     use super::imp::VMContRef;
     use core::ptr::NonNull;
 
-    #[repr(C)]
+    // This type is 16 byte aligned so that we can do an aligned load into a
+    // 128bit value (see [wasmtime_cranelift::wasmfx::shared::vm_contobj_type]).
+    #[repr(C, align(16))]
     #[derive(Debug, Clone, Copy)]
     pub struct VMContObj {
         pub revision: u64,
