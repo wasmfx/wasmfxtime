@@ -254,15 +254,15 @@ wit-bindgen = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "v0.25.0"
 wit-bindgen-rust-macro = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "v0.25.0", default-features = false }
 
 # wasm-tools family:
-wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.208.1", default-features = false }
-wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.208.1" }
-wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.208.1" }
-wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.208.1" }
-wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.208.1" }
-wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.208.1" }
-wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.208.1" }
-wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.208.1" }
-wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.208.1" }
+wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1", default-features = false }
+wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
+wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
+wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
+wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
+wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
+wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
+wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
+wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
 
 # Non-Bytecode Alliance maintained dependencies:
 # --------------------------
