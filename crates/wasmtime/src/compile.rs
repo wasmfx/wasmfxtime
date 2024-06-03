@@ -122,7 +122,7 @@ pub(crate) fn build_artifacts<T: FinishedObject>(
 /// The output artifact here is the serialized object file contained within
 /// an owned mmap along with metadata about the compilation itself.
 #[cfg(feature = "component-model")]
-pub(crate) fn build_component_artifacts<'a, T: FinishedObject>(
+pub(crate) fn build_component_artifacts<T: FinishedObject>(
     engine: &Engine,
     binary: &[u8],
     _dwarf_package: Option<&[u8]>,
@@ -413,11 +413,12 @@ impl<'a> CompileInputs<'a> {
         /// Maximum length of symbols generated in objects.
         const MAX_SYMBOL_LEN: usize = 96;
 
-        // Just to be on the safe side, avoid passing user-provided data to tools
-        // like "perf" or "objdump", and filter the name.  Let only characters usually
-        // used for function names, plus some characters that might be used in name
-        // mangling.
-        let bad_char = |c: char| !c.is_ascii_alphanumeric() && !r"<>[]_-:@$".contains(c);
+        // Just to be on the safe side, filter out characters that could
+        // pose issues to tools such as "perf" or "objdump".  To avoid
+        // having to update a list of allowed characters for each different
+        // language that compiles to Wasm, allows only graphic ASCII
+        // characters; replace runs of everything else with a "?".
+        let bad_char = |c: char| !c.is_ascii_graphic();
         if name.chars().any(bad_char) {
             let mut last_char_seen = '\u{0000}';
             Cow::Owned(
