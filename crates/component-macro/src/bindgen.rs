@@ -80,6 +80,7 @@ impl Parse for Config {
         let mut inline = None;
         let mut path = None;
         let mut async_configured = false;
+        let mut features = Vec::new();
 
         if input.peek(token::Brace) {
             let content;
@@ -150,6 +151,10 @@ impl Parse for Config {
                     }
                     Opt::Stringify(val) => opts.stringify = val,
                     Opt::SkipMutForwardingImpls(val) => opts.skip_mut_forwarding_impls = val,
+                    Opt::Features(f) => {
+                        features.extend(f.into_iter().map(|f| f.value()));
+                    }
+                    Opt::RequireStoreDataSend(val) => opts.require_store_data_send = val,
                 }
             }
         } else {
@@ -158,7 +163,7 @@ impl Parse for Config {
                 path = Some(input.parse::<syn::LitStr>()?.value());
             }
         }
-        let (resolve, pkg, files) = parse_source(&path, &inline)
+        let (resolve, pkg, files) = parse_source(&path, &inline, &features)
             .map_err(|err| Error::new(call_site, format!("{err:?}")))?;
 
         let world = resolve
@@ -176,8 +181,10 @@ impl Parse for Config {
 fn parse_source(
     path: &Option<String>,
     inline: &Option<String>,
+    features: &[String],
 ) -> anyhow::Result<(Resolve, PackageId, Vec<PathBuf>)> {
     let mut resolve = Resolve::default();
+    resolve.features.extend(features.iter().cloned());
     let mut files = Vec::new();
     let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
 
@@ -221,6 +228,8 @@ mod kw {
     syn::custom_keyword!(additional_derives);
     syn::custom_keyword!(stringify);
     syn::custom_keyword!(skip_mut_forwarding_impls);
+    syn::custom_keyword!(features);
+    syn::custom_keyword!(require_store_data_send);
 }
 
 enum Opt {
@@ -237,6 +246,8 @@ enum Opt {
     AdditionalDerives(Vec<syn::Path>),
     Stringify(bool),
     SkipMutForwardingImpls(bool),
+    Features(Vec<syn::LitStr>),
+    RequireStoreDataSend(bool),
 }
 
 impl Parse for Opt {
@@ -385,6 +396,19 @@ impl Parse for Opt {
             input.parse::<kw::skip_mut_forwarding_impls>()?;
             input.parse::<Token![:]>()?;
             Ok(Opt::SkipMutForwardingImpls(
+                input.parse::<syn::LitBool>()?.value,
+            ))
+        } else if l.peek(kw::features) {
+            input.parse::<kw::features>()?;
+            input.parse::<Token![:]>()?;
+            let contents;
+            syn::bracketed!(contents in input);
+            let list = Punctuated::<_, Token![,]>::parse_terminated(&contents)?;
+            Ok(Opt::Features(list.into_iter().collect()))
+        } else if l.peek(kw::require_store_data_send) {
+            input.parse::<kw::require_store_data_send>()?;
+            input.parse::<Token![:]>()?;
+            Ok(Opt::RequireStoreDataSend(
                 input.parse::<syn::LitBool>()?.value,
             ))
         } else {
