@@ -67,13 +67,13 @@ const FULL_MATRIX = [
     "filter": "linux-x64",
     "isa": "x64"
   },
-  {
-    "os": "macos-13",
-    "name": "Test macOS x86_64",
-    "filter": "macos-x64",
-  },
   // TODO(dhil): Disabled as long as we don't support other platforms
   // than x86_64 Linux.
+  // {
+  //   "os": "macos-13",
+  //   "name": "Test macOS x86_64",
+  //   "filter": "macos-x64",
+  // },
   // {
   //   "os": "macos-14",
   //   "name": "Test macOS arm64",
