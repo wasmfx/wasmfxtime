@@ -359,7 +359,7 @@ impl From<DynamicContTable> for Table {
     }
 }
 
-pub fn wasm_to_table_type(ty: WasmRefType) -> TableElementType {
+pub(crate) fn wasm_to_table_type(ty: WasmRefType) -> TableElementType {
     match ty.heap_type.top() {
         WasmHeapTopType::Func => TableElementType::Func,
         WasmHeapTopType::Any | WasmHeapTopType::Extern => TableElementType::GcRef,
