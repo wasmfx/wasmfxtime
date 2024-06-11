@@ -55,6 +55,15 @@ impl TableElementType {
             _ => false,
         }
     }
+
+    /// Returns the size required to actually store an element of this particular type
+    pub fn element_size(&self) -> usize {
+        match self {
+            TableElementType::Func => core::mem::size_of::<FuncTableElem>(),
+            TableElementType::GcRef => core::mem::size_of::<Option<VMGcRef>>(),
+            TableElementType::Cont => core::mem::size_of::<ContTableElem>(),
+        }
+    }
 }
 
 // The usage of `*mut VMFuncRef` is safe w.r.t. thread safety, this just relies
@@ -158,6 +167,33 @@ impl TaggedFuncRef {
 
 pub type FuncTableElem = Option<SendSyncPtr<VMFuncRef>>;
 pub type ContTableElem = Option<SendSyncPtr<VMContObj>>;
+
+/// The maximum of the sizes of any of the table element types
+pub const MAX_TABLE_ELEM_SIZE: usize = {
+    let sizes = [
+        core::mem::size_of::<FuncTableElem>(),
+        core::mem::size_of::<ContTableElem>(),
+        core::mem::size_of::<Option<VMGcRef>>(),
+    ];
+
+    // This is equivalent to `|data| {data.iter().reduce(std::cmp::max).unwrap()}`,
+    // but as a `const` function, so we can use it to define a constant.
+    const fn slice_max(data: &[usize]) -> usize {
+        match data {
+            [] => 0,
+            [head, tail @ ..] => {
+                let tail_max = slice_max(tail);
+                if *head >= tail_max {
+                    *head
+                } else {
+                    tail_max
+                }
+            }
+        }
+    }
+
+    slice_max(&sizes)
+};
 
 pub enum StaticTable {
     Func(StaticFuncTable),
@@ -323,7 +359,7 @@ impl From<DynamicContTable> for Table {
     }
 }
 
-fn wasm_to_table_type(ty: WasmRefType) -> TableElementType {
+pub fn wasm_to_table_type(ty: WasmRefType) -> TableElementType {
     match ty.heap_type.top() {
         WasmHeapTopType::Func => TableElementType::Func,
         WasmHeapTopType::Any | WasmHeapTopType::Extern => TableElementType::GcRef,

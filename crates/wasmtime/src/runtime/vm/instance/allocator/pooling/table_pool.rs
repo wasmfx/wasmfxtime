@@ -7,7 +7,6 @@ use crate::runtime::vm::{
     InstanceAllocationRequest, Mmap, PoolingInstanceAllocatorConfig, SendSyncPtr, Table,
 };
 use anyhow::{anyhow, bail, Context, Result};
-use std::mem;
 use std::ptr::NonNull;
 use wasmtime_environ::{Module, TablePlan};
 
@@ -32,8 +31,10 @@ impl TablePool {
     pub fn new(config: &PoolingInstanceAllocatorConfig) -> Result<Self> {
         let page_size = crate::runtime::vm::page_size();
 
+        // The maximum size that a single table can possibly occupy, independent
+        // from its actual elements.
         let table_size = round_up_to_pow2(
-            mem::size_of::<*mut u8>()
+            crate::runtime::vm::table::MAX_TABLE_ELEM_SIZE
                 .checked_mul(config.limits.table_elements as usize)
                 .ok_or_else(|| anyhow!("table size exceeds addressable memory"))?,
             page_size,
@@ -129,16 +130,16 @@ impl TablePool {
         match (|| {
             let base = self.get(allocation_index);
 
+            let element_size =
+                crate::vm::table::wasm_to_table_type(table_plan.table.wasm_ty).element_size();
+
             unsafe {
-                commit_pages(
-                    base as *mut u8,
-                    self.table_elements * mem::size_of::<*mut u8>(),
-                )?;
+                commit_pages(base as *mut u8, self.table_elements * element_size)?;
             }
 
             let ptr = NonNull::new(std::ptr::slice_from_raw_parts_mut(
                 base.cast(),
-                self.table_elements * mem::size_of::<*mut u8>(),
+                self.table_elements * element_size,
             ))
             .unwrap();
             unsafe {
@@ -192,10 +193,9 @@ impl TablePool {
         assert!(table.is_static());
         let base = self.get(allocation_index);
 
-        let size = round_up_to_pow2(
-            table.size() as usize * mem::size_of::<*mut u8>(),
-            self.page_size,
-        );
+        let element_size = table.element_type().element_size();
+
+        let size = round_up_to_pow2(table.size() as usize * element_size, self.page_size);
 
         // `memset` the first `keep_resident` bytes.
         let size_to_memset = size.min(self.keep_resident);
