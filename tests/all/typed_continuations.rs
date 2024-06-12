@@ -1133,6 +1133,7 @@ mod misc {
     use super::test_utils::*;
     use wasmtime::*;
 
+    #[ignore]
     #[test]
     pub fn continuation_revision_counter_wraparound() -> Result<()> {
         let wat = r#"

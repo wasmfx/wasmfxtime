@@ -366,7 +366,7 @@ pub trait FuncEnvironment: TargetEnvironment {
     /// Translate a `table.grow` WebAssembly instruction.
     fn translate_table_grow(
         &mut self,
-        pos: FuncCursor,
+        builder: &mut FunctionBuilder,
         table_index: TableIndex,
         delta: ir::Value,
         init_value: ir::Value,
@@ -403,7 +403,7 @@ pub trait FuncEnvironment: TargetEnvironment {
     /// Translate a `table.fill` WebAssembly instruction.
     fn translate_table_fill(
         &mut self,
-        pos: FuncCursor,
+        builder: &mut FunctionBuilder,
         table_index: TableIndex,
         dst: ir::Value,
         val: ir::Value,
@@ -435,11 +435,11 @@ pub trait FuncEnvironment: TargetEnvironment {
     /// `translate_ref_is_null` as well.
     fn translate_ref_null(
         &mut self,
-        mut pos: FuncCursor,
+        builder: &mut FunctionBuilder,
         ty: WasmHeapType,
     ) -> WasmResult<ir::Value> {
         let _ = ty;
-        Ok(pos.ins().null(self.reference_type(ty)))
+        Ok(builder.ins().null(self.reference_type(ty)))
     }
 
     /// Translate a `ref.is_null` WebAssembly instruction.
@@ -452,11 +452,11 @@ pub trait FuncEnvironment: TargetEnvironment {
     /// `translate_ref_null` as well.
     fn translate_ref_is_null(
         &mut self,
-        mut pos: FuncCursor,
+        builder: &mut FunctionBuilder,
         value: ir::Value,
     ) -> WasmResult<ir::Value> {
-        let is_null = pos.ins().is_null(value);
-        Ok(pos.ins().uextend(ir::types::I32, is_null))
+        let is_null = builder.ins().is_null(value);
+        Ok(builder.ins().uextend(ir::types::I32, is_null))
     }
 
     /// Translate a `ref.func` WebAssembly instruction.

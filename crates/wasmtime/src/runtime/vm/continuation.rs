@@ -1,5 +1,4 @@
 //! Continuations TODO
-use core::num::NonZeroU64;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "wasmfx_baseline")] {
@@ -14,17 +13,57 @@ cfg_if::cfg_if! {
 /// once. The linearity is checked dynamically in the generated code
 /// by comparing the revision witness embedded in the pointer to the
 /// actual revision counter on the continuation reference.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
-pub struct VMContObj(NonZeroU64);
+#[cfg_attr(
+    feature = "unsafe_disable_continuation_linearity_check",
+    allow(dead_code)
+)]
+pub mod safe_vm_contobj {
+    use super::imp::VMContRef;
+    use core::ptr::NonNull;
 
-impl VMContObj {
-    pub fn from_u64(addr: u64) -> Option<Self> {
-        if addr > 0 {
-            Some(Self(NonZeroU64::new(addr).unwrap()))
-        } else {
-            None
+    // This type is 16 byte aligned so that we can do an aligned load into a
+    // 128bit value (see [wasmtime_cranelift::wasmfx::shared::vm_contobj_type]).
+    #[repr(C, align(16))]
+    #[derive(Debug, Clone, Copy)]
+    pub struct VMContObj {
+        pub revision: u64,
+        pub contref: NonNull<VMContRef>,
+    }
+
+    impl VMContObj {
+        pub fn new(contref: NonNull<VMContRef>, revision: u64) -> Self {
+            Self { contref, revision }
         }
+    }
+}
+
+/// This version of `VMContObj` does not actually store a revision counter. It is
+/// used when we opt out of the linearity check using the
+/// `unsafe_disable_continuation_linearity_check` feature
+#[cfg_attr(
+    not(feature = "unsafe_disable_continuation_linearity_check"),
+    allow(dead_code)
+)]
+pub mod unsafe_vm_contobj {
+    use super::imp::VMContRef;
+    use core::ptr::NonNull;
+
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct VMContObj(NonNull<VMContRef>);
+
+    impl VMContObj {
+        pub fn new(contref: NonNull<VMContRef>, _revision: u64) -> Self {
+            Self(contref)
+        }
+    }
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "unsafe_disable_continuation_linearity_check")] {
+        pub use unsafe_vm_contobj::*;
+    } else {
+        pub use safe_vm_contobj::*;
     }
 }
 
@@ -926,5 +965,17 @@ pub mod baseline {
     #[allow(missing_docs)]
     pub fn has_ever_run_continuation() -> bool {
         panic!("attempt to execute continuation::baseline::has_ever_run_continuation without `typed_continuation_baseline_implementation` toggled!")
+    }
+}
+
+mod test {
+    #[test]
+    fn null_pointer_optimization() {
+        // The Rust spec does not technically guarantee that the null pointer
+        // optimization applies to a struct containing a NonNull.
+        assert_eq!(
+            std::mem::size_of::<Option<super::safe_vm_contobj::VMContObj>>(),
+            std::mem::size_of::<super::safe_vm_contobj::VMContObj>()
+        );
     }
 }

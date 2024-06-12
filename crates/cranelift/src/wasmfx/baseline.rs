@@ -8,8 +8,10 @@ use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::{FunctionBuilder, Switch};
 use cranelift_wasm::FuncEnvironment;
 use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
-use shared::{assemble_contobj, disassemble_contobj};
 use wasmtime_environ::PtrSize;
+
+#[cfg_attr(not(feature = "wasmfx_baseline"), allow(unused_imports))]
+pub(crate) use shared::{assemble_contobj, disassemble_contobj, vm_contobj_type};
 
 fn get_revision<'a>(
     _env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -42,10 +44,6 @@ fn compare_revision_and_increment<'a>(
             .trapz(evidence, ir::TrapCode::ContinuationAlreadyConsumed);
 
         let revision_plus1 = builder.ins().iadd_imm(revision, 1);
-        let overflow = builder
-            .ins()
-            .icmp_imm(IntCC::UnsignedLessThan, revision_plus1, 1 << 16);
-        builder.ins().trapz(overflow, ir::TrapCode::IntegerOverflow); // TODO(dhil): Consider introducing a designated trap code.
         builder.ins().store(mem_flags, revision_plus1, contref, 0);
         revision_plus1
     }

@@ -166,7 +166,7 @@ impl TaggedFuncRef {
 }
 
 pub type FuncTableElem = Option<SendSyncPtr<VMFuncRef>>;
-pub type ContTableElem = Option<SendSyncPtr<VMContObj>>;
+pub type ContTableElem = Option<VMContObj>;
 
 /// The maximum of the sizes of any of the table element types
 pub const MAX_TABLE_ELEM_SIZE: usize = {

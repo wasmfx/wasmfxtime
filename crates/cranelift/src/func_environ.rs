@@ -26,9 +26,9 @@ use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "wasmfx_baseline")] {
-        use crate::wasmfx::baseline as wasmfx_impl;
+        pub (crate) use crate::wasmfx::baseline as wasmfx_impl;
     } else {
-        use crate::wasmfx::optimized as wasmfx_impl;
+        pub(crate) use crate::wasmfx::optimized as wasmfx_impl;
     }
 }
 
@@ -1707,34 +1707,45 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
     fn translate_table_grow(
         &mut self,
-        mut pos: cranelift_codegen::cursor::FuncCursor<'_>,
+        builder: &mut FunctionBuilder,
         table_index: TableIndex,
         delta: ir::Value,
         init_value: ir::Value,
     ) -> WasmResult<ir::Value> {
         let ty = self.module.table_plans[table_index].table.wasm_ty.heap_type;
+        let vmctx = self.vmctx_val(&mut builder.cursor());
+        let table_index_arg = builder.ins().iconst(I32, table_index.as_u32() as i64);
+
+        let mut args = vec![vmctx, table_index_arg, delta];
         let grow = if ty.is_vmgcref_type() {
-            gc::gc_ref_table_grow_builtin(ty, self, &mut pos.func)?
+            args.push(init_value);
+            gc::gc_ref_table_grow_builtin(ty, self, &mut builder.func)?
         } else {
             debug_assert!(matches!(
                 ty.top(),
                 WasmHeapTopType::Func | WasmHeapTopType::Cont
             ));
             match ty.top() {
-                WasmHeapTopType::Func => self.builtin_functions.table_grow_func_ref(&mut pos.func),
-                WasmHeapTopType::Cont => self.builtin_functions.table_grow_cont_obj(&mut pos.func),
+                WasmHeapTopType::Func => {
+                    args.push(init_value);
+                    self.builtin_functions
+                        .table_grow_func_ref(&mut builder.func)
+                }
+                WasmHeapTopType::Cont => {
+                    let (revision, contref) =
+                        wasmfx_impl::disassemble_contobj(self, builder, init_value);
+                    args.extend_from_slice(&[contref, revision]);
+                    self.builtin_functions
+                        .table_grow_cont_obj(&mut builder.func)
+                }
+
                 _ => panic!("unsupported table type."),
             }
         };
 
-        let vmctx = self.vmctx_val(&mut pos);
+        let call_inst = builder.ins().call(grow, &args);
 
-        let table_index_arg = pos.ins().iconst(I32, table_index.as_u32() as i64);
-        let call_inst = pos
-            .ins()
-            .call(grow, &[vmctx, table_index_arg, delta, init_value]);
-
-        Ok(pos.func.dfg.first_result(call_inst))
+        Ok(builder.func.dfg.first_result(call_inst))
     }
 
     fn translate_table_get(
@@ -1802,7 +1813,12 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                         pointer_type,
                         self.isa.flags().enable_table_access_spectre_mitigation(),
                     );
-                    Ok(builder.ins().load(pointer_type, flags, table_entry_addr, 0))
+                    Ok(builder.ins().load(
+                        wasmfx_impl::vm_contobj_type(self.pointer_type()),
+                        flags,
+                        table_entry_addr,
+                        0,
+                    ))
                 }
             },
         }
@@ -1897,28 +1913,38 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
     fn translate_table_fill(
         &mut self,
-        mut pos: cranelift_codegen::cursor::FuncCursor<'_>,
+        builder: &mut FunctionBuilder,
         table_index: TableIndex,
         dst: ir::Value,
         val: ir::Value,
         len: ir::Value,
     ) -> WasmResult<()> {
         let ty = self.module.table_plans[table_index].table.wasm_ty.heap_type;
+        let vmctx = self.vmctx_val(&mut builder.cursor());
+        let table_index_arg = builder.ins().iconst(I32, table_index.as_u32() as i64);
+        let mut args = vec![vmctx, table_index_arg, dst];
         let libcall = if ty.is_vmgcref_type() {
-            gc::gc_ref_table_fill_builtin(ty, self, &mut pos.func)?
+            args.push(val);
+            gc::gc_ref_table_fill_builtin(ty, self, &mut builder.func)?
         } else {
-            debug_assert!(matches!(
-                ty.top(),
-                WasmHeapTopType::Func | WasmHeapTopType::Cont
-            ));
-            self.builtin_functions.table_fill_func_ref(&mut pos.func)
+            match ty.top() {
+                WasmHeapTopType::Func => {
+                    args.push(val);
+                    self.builtin_functions
+                        .table_fill_func_ref(&mut builder.func)
+                }
+                WasmHeapTopType::Cont => {
+                    let (revision, contref) = wasmfx_impl::disassemble_contobj(self, builder, val);
+                    args.extend_from_slice(&[contref, revision]);
+                    self.builtin_functions
+                        .table_fill_cont_obj(&mut builder.func)
+                }
+                _ => panic!("unsupported table type"),
+            }
         };
+        args.push(len);
 
-        let vmctx = self.vmctx_val(&mut pos);
-
-        let table_index_arg = pos.ins().iconst(I32, table_index.as_u32() as i64);
-        pos.ins()
-            .call(libcall, &[vmctx, table_index_arg, dst, val, len]);
+        builder.ins().call(libcall, &args);
 
         Ok(())
     }
@@ -1960,35 +1986,47 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
     fn translate_ref_null(
         &mut self,
-        mut pos: cranelift_codegen::cursor::FuncCursor,
+        builder: &mut FunctionBuilder,
         ht: WasmHeapType,
     ) -> WasmResult<ir::Value> {
         Ok(match ht.top() {
-            WasmHeapTopType::Func => pos.ins().iconst(self.pointer_type(), 0),
-            WasmHeapTopType::Cont => pos.ins().iconst(self.pointer_type(), 0),
+            WasmHeapTopType::Func => builder.ins().iconst(self.pointer_type(), 0),
+            WasmHeapTopType::Cont => {
+                let zero = builder.ins().iconst(self.pointer_type(), 0);
+                // TODO do this nicer
+                wasmfx_impl::assemble_contobj(self, builder, zero, zero)
+            }
             WasmHeapTopType::Any | WasmHeapTopType::Extern => {
-                pos.ins().null(self.reference_type(ht))
+                builder.ins().null(self.reference_type(ht))
             }
         })
     }
 
     fn translate_ref_is_null(
         &mut self,
-        mut pos: cranelift_codegen::cursor::FuncCursor,
+        builder: &mut FunctionBuilder,
         value: ir::Value,
     ) -> WasmResult<ir::Value> {
-        let bool_is_null = match pos.func.dfg.value_type(value) {
+        let bool_is_null = match builder.func.dfg.value_type(value) {
             // `externref`
-            ty if ty.is_ref() => pos.ins().is_null(value),
-            // `funcref`
+            ty if ty.is_ref() => builder.ins().is_null(value),
+            // `funcref` or continuation (if not using fat pointers)
             ty if ty == self.pointer_type() => {
-                pos.ins()
+                builder
+                    .ins()
                     .icmp_imm(cranelift_codegen::ir::condcodes::IntCC::Equal, value, 0)
+            }
+            // continuation
+            ty if ty == wasmfx_impl::vm_contobj_type(self.pointer_type()) => {
+                let (_revision, contref) = wasmfx_impl::disassemble_contobj(self, builder, value);
+                builder
+                    .ins()
+                    .icmp_imm(cranelift_codegen::ir::condcodes::IntCC::Equal, contref, 0)
             }
             _ => unreachable!(),
         };
 
-        Ok(pos.ins().uextend(ir::types::I32, bool_is_null))
+        Ok(builder.ins().uextend(ir::types::I32, bool_is_null))
     }
 
     fn translate_ref_func(
