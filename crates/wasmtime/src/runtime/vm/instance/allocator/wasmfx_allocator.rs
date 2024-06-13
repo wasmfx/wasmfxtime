@@ -84,7 +84,7 @@ pub mod wasmfx_pooling {
 
             let total_stacks = 1024 /* total amount of stacks */;
 
-            let page_size = crate::vm::page_size();
+            let page_size = crate::vm::host_page_size();
 
             // Add a page to the stack size for the guard page when using fiber stacks
             let stack_size = if config.stack_size == 0 {

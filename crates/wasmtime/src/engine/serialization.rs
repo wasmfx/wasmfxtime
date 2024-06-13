@@ -203,6 +203,7 @@ struct WasmFeatures {
     function_references: bool,
     typed_continuations: bool,
     gc: bool,
+    custom_page_sizes: bool,
 }
 
 impl Metadata<'_> {
@@ -243,7 +244,6 @@ impl Metadata<'_> {
         assert!(!memory_control);
         assert!(!component_model_values);
         assert!(!component_model_nested_names);
-        assert!(!custom_page_sizes);
         assert!(!shared_everything_threads);
 
         Metadata {
@@ -267,6 +267,7 @@ impl Metadata<'_> {
                 function_references,
                 typed_continuations,
                 gc,
+                custom_page_sizes,
             },
         }
     }
@@ -484,6 +485,7 @@ impl Metadata<'_> {
             function_references,
             typed_continuations,
             gc,
+            custom_page_sizes,
         } = self.features;
 
         use wasmparser::WasmFeatures as F;
@@ -564,6 +566,11 @@ impl Metadata<'_> {
             typed_continuations,
             other.contains(F::TYPED_CONTINUATIONS),
             "WebAssembly typed-continuations support",
+        )?;
+        Self::check_bool(
+            custom_page_sizes,
+            other.contains(F::CUSTOM_PAGE_SIZES),
+            "WebAssembly custom-page-sizes support",
         )?;
 
         Ok(())
