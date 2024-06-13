@@ -78,14 +78,15 @@
 
 use crate::instance::InstanceData;
 use crate::linker::Definition;
-use crate::module::{BareModuleInfo, RegisteredModuleId};
+use crate::module::RegisteredModuleId;
 use crate::prelude::*;
 use crate::runtime::vm::continuation::stack_chain::{StackChain, StackChainCell, StackLimits};
 use crate::runtime::vm::mpk::{self, ProtectionKey, ProtectionMask};
 use crate::runtime::vm::{
     Backtrace, ExportGlobal, GcHeapAllocationIndex, GcRootsList, GcStore,
-    InstanceAllocationRequest, InstanceAllocator, InstanceHandle, OnDemandInstanceAllocator,
-    SignalHandler, StoreBox, StorePtr, VMContext, VMFuncRef, VMGcRef, VMRuntimeLimits, WasmFault,
+    InstanceAllocationRequest, InstanceAllocator, InstanceHandle, ModuleRuntimeInfo,
+    OnDemandInstanceAllocator, SignalHandler, StoreBox, StorePtr, VMContext, VMFuncRef, VMGcRef,
+    VMRuntimeLimits, WasmFault,
 };
 use crate::trampoline::VMHostGlobalContext;
 use crate::RootSet;
@@ -420,7 +421,9 @@ pub struct AutoAssertNoGc<'a> {
 impl<'a> AutoAssertNoGc<'a> {
     #[inline]
     pub fn new(store: &'a mut StoreOpaque) -> Self {
-        let entered = if let Some(gc_store) = store.gc_store.as_mut() {
+        let entered = if !cfg!(feature = "gc") {
+            false
+        } else if let Some(gc_store) = store.gc_store.as_mut() {
             gc_store.gc_heap.enter_no_gc_scope();
             true
         } else {
@@ -553,7 +556,7 @@ impl<T> Store<T> {
         // is never null.
         inner.default_caller = {
             let module = Arc::new(wasmtime_environ::Module::default());
-            let shim = BareModuleInfo::empty(module).into_traitobj();
+            let shim = ModuleRuntimeInfo::bare(module);
             let allocator = OnDemandInstanceAllocator::default();
             allocator
                 .validate_module(shim.module(), shim.offsets())
