@@ -342,35 +342,29 @@ pub mod optimized {
     // Tests
     #[test]
     fn offset_and_size_constants() {
-        use memoffset;
+        use core::mem::offset_of;
         use wasmtime_continuations::offsets::*;
 
+        assert_eq!(offset_of!(VMContRef, limits), vm_cont_ref::LIMITS);
         assert_eq!(
-            memoffset::offset_of!(VMContRef, limits),
-            vm_cont_ref::LIMITS
-        );
-        assert_eq!(
-            memoffset::offset_of!(VMContRef, parent_chain),
+            offset_of!(VMContRef, parent_chain),
             vm_cont_ref::PARENT_CHAIN
         );
-        assert_eq!(memoffset::offset_of!(VMContRef, fiber), vm_cont_ref::FIBER);
-        assert_eq!(memoffset::offset_of!(VMContRef, args), vm_cont_ref::ARGS);
+        assert_eq!(offset_of!(VMContRef, fiber), vm_cont_ref::FIBER);
+        assert_eq!(offset_of!(VMContRef, args), vm_cont_ref::ARGS);
         assert_eq!(
-            memoffset::offset_of!(VMContRef, tag_return_values),
+            offset_of!(VMContRef, tag_return_values),
             vm_cont_ref::TAG_RETURN_VALUES
         );
-        assert_eq!(memoffset::offset_of!(VMContRef, state), vm_cont_ref::STATE);
+        assert_eq!(offset_of!(VMContRef, state), vm_cont_ref::STATE);
 
         assert_eq!(
-            std::mem::size_of::<ContinuationFiber>(),
+            core::mem::size_of::<ContinuationFiber>(),
             CONTINUATION_FIBER_SIZE
         );
         assert_eq!(core::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
 
-        assert_eq!(
-            memoffset::offset_of!(VMContRef, revision),
-            vm_cont_ref::REVISION
-        );
+        assert_eq!(offset_of!(VMContRef, revision), vm_cont_ref::REVISION);
     }
 }
 
