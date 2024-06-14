@@ -152,6 +152,7 @@ impl Inst {
             | Inst::CoffTlsGetAddr { .. }
             | Inst::Unwind { .. }
             | Inst::DummyUse { .. }
+            | Inst::GetRip { .. }
             | Inst::AluConstOp { .. } => smallvec![],
 
             Inst::AluRmRVex { op, .. } => op.available_from(),
@@ -1889,6 +1890,10 @@ impl PrettyPrint for Inst {
                 let reg = pretty_print_reg(*reg, 8);
                 format!("dummy_use {reg}")
             }
+
+            Inst::GetRip { .. } => {
+                format!("get_rip")
+            }
         }
     }
 }
@@ -2537,6 +2542,10 @@ fn x64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
 
         Inst::DummyUse { reg } => {
             collector.reg_use(reg);
+        }
+
+        Inst::GetRip { dst } => {
+            collector.reg_def(dst);
         }
     }
 }

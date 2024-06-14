@@ -298,7 +298,6 @@ pub mod optimized {
     pub fn resume(
         instance: &mut Instance,
         contref: *mut VMContRef,
-        parent_stack_limits: *mut StackLimits,
     ) -> Result<ControlEffect, TrapReason> {
         let cont = unsafe {
             contref.as_ref().ok_or_else(|| {
@@ -333,22 +332,6 @@ pub mod optimized {
                     )));
                 }
             }
-        }
-
-        // See the comment on `wasmtime_continuations::StackChain` for a description
-        // of the invariants that we maintain for the various stack limits.
-        unsafe {
-            let runtime_limits = &**instance.runtime_limits();
-
-            (*parent_stack_limits).stack_limit = *runtime_limits.stack_limit.get();
-            (*parent_stack_limits).last_wasm_entry_sp = *runtime_limits.last_wasm_entry_sp.get();
-            // These last two values were only just updated in the `runtime_limits`
-            // because we entered the current libcall.
-            (*parent_stack_limits).last_wasm_exit_fp = *runtime_limits.last_wasm_exit_fp.get();
-            (*parent_stack_limits).last_wasm_exit_pc = *runtime_limits.last_wasm_exit_pc.get();
-
-            *runtime_limits.stack_limit.get() = (*contref).limits.stack_limit;
-            *runtime_limits.last_wasm_entry_sp.get() = (*contref).limits.last_wasm_entry_sp;
         }
 
         Ok(cont.stack.resume())

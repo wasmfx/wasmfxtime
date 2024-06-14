@@ -102,7 +102,7 @@ macro_rules! foreach_builtin_function {
             tc_cont_new(vmctx: vmctx, r: pointer, param_count: i32, result_count: i32) -> pointer;
             // Resumes a continuation. The result value is of type
             // wasmtime_continuations::SwitchDirection.
-            tc_resume(vmctx: vmctx, contref: pointer, parent_stack_limits: pointer) -> pointer;
+            tc_resume(vmctx: vmctx, contref: pointer) -> pointer;
             // Suspends a continuation.
             tc_suspend(vmctx: vmctx, tag: pointer);
 
