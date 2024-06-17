@@ -254,10 +254,17 @@
 //! * `threads` - Enabled by default, this enables compile-time support for the
 //!   WebAssembly `threads` proposal, notably shared memories.
 //!
-//! * `call-hook` - Enabled by default, this enables support for the
+//! * `call-hook` - Disabled by default, this enables support for the
 //!   [`Store::call_hook`] API. This incurs a small overhead on all
 //!   entries/exits from WebAssembly and may want to be disabled by some
 //!   embedders.
+//!
+//! * `memory-protection-keys` - Disabled by default, this enables support for
+//!   the [`PoolingAllocationConfig::memory_protection_keys`] API. This feature
+//!   currently only works on x64 Linux and can enable compacting the virtual
+//!   memory allocation for linear memories in the pooling allocator. This comes
+//!   with the same overhead as the `call-hook` feature where entries/exits into
+//!   WebAssembly will have more overhead than before.
 //!
 //! More crate features can be found in the [manifest] of Wasmtime itself for
 //! seeing what can be enabled and disabled.
@@ -281,7 +288,11 @@
 extern crate std;
 extern crate alloc;
 
-use wasmtime_environ::prelude;
+pub(crate) mod prelude {
+    pub use crate::{Error, Result};
+    pub use anyhow::{anyhow, bail, ensure, format_err, Context};
+    pub use wasmtime_environ::prelude::*;
+}
 
 /// A helper macro to safely map `MaybeUninit<T>` to `MaybeUninit<U>` where `U`
 /// is a field projection within `T`.
@@ -375,6 +386,7 @@ use sync_nostd as sync;
 ///
 /// This type can be used to interact with `wasmtimes`'s extensive use
 /// of `anyhow::Error` while still not directly depending on `anyhow`.
+///
 /// This type alias is identical to `anyhow::Result`.
 #[doc(no_inline)]
 pub use anyhow::{Error, Result};

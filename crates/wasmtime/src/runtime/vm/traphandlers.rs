@@ -15,7 +15,6 @@ use crate::runtime::vm::continuation::stack_chain::StackChainCell;
 use crate::runtime::vm::sys::traphandlers;
 use crate::runtime::vm::{Instance, VMContext, VMOpaqueContext, VMRuntimeLimits};
 use crate::sync::OnceLock;
-use anyhow::Error;
 use core::cell::{Cell, UnsafeCell};
 use core::mem::MaybeUninit;
 use core::ptr;

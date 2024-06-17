@@ -56,13 +56,10 @@
 
 use super::continuation::imp::VMContRef;
 use super::continuation::VMContObj;
+use crate::prelude::*;
 use crate::runtime::vm::table::{Table, TableElementType};
 use crate::runtime::vm::vmcontext::VMFuncRef;
 use crate::runtime::vm::{Instance, TrapReason, VMGcRef};
-#[cfg(feature = "wmemcheck")]
-use anyhow::bail;
-use anyhow::Result;
-use core::ptr::NonNull;
 #[cfg(feature = "threads")]
 use core::time::Duration;
 use wasmtime_environ::{DataIndex, ElemIndex, FuncIndex, MemoryIndex, TableIndex, Trap, Unsigned};
@@ -245,6 +242,7 @@ unsafe fn table_grow_cont_obj(
     init_value_contref: *mut u8,
     init_value_revision: u64,
 ) -> Result<u32> {
+    use core::ptr::NonNull;
     let init_value = if init_value_contref.is_null() {
         None
     } else {
@@ -309,6 +307,7 @@ unsafe fn table_fill_cont_obj(
     value_revision: u64,
     len: u32,
 ) -> Result<(), Trap> {
+    use core::ptr::NonNull;
     let table_index = TableIndex::from_u32(table_index);
     let table = &mut *instance.get_table(table_index);
     match table.element_type() {
