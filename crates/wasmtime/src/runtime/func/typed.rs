@@ -1,11 +1,11 @@
 use super::invoke_wasm_and_catch_traps;
+use crate::prelude::*;
 use crate::runtime::vm::{VMFuncRef, VMOpaqueContext};
 use crate::store::{AutoAssertNoGc, StoreOpaque};
 use crate::{
     AsContext, AsContextMut, Engine, Func, FuncType, HeapType, NoFunc, RefType, StoreContextMut,
     ValRaw, ValType,
 };
-use anyhow::{bail, Context, Result};
 use core::ffi::c_void;
 use core::marker;
 use core::mem::{self, MaybeUninit};
@@ -319,6 +319,14 @@ pub unsafe trait WasmTy: Send {
     // The value type that this Type represents.
     #[doc(hidden)]
     fn valtype() -> ValType;
+
+    #[doc(hidden)]
+    fn may_gc() -> bool {
+        match Self::valtype() {
+            ValType::Ref(_) => true,
+            ValType::I32 | ValType::I64 | ValType::F32 | ValType::F64 | ValType::V128 => false,
+        }
+    }
 
     // Dynamic checks that this value is being used with the correct store
     // context.

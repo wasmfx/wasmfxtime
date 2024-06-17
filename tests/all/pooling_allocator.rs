@@ -651,6 +651,7 @@ configured maximum of 16 bytes; breakdown of allocation requirement:
 
  * 66.67% - 256 bytes - instance state management
  * 6.25% - 24 bytes - typed continuations payloads object
+ * 22.92% - 88 bytes - static vmctx data
 "
     } else {
         "\
@@ -659,7 +660,7 @@ configured maximum of 16 bytes; breakdown of allocation requirement:
 
  * 55.56% - 160 bytes - instance state management
  * 8.33% - 24 bytes - typed continuations payloads object
- * 5.56% - 16 bytes - jit store state
+ * 30.56% - 88 bytes - static vmctx data
 "
     };
     match Module::new(&engine, "(module)") {

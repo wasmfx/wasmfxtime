@@ -5,7 +5,6 @@
 
 use crate::prelude::*;
 use alloc::sync::Arc;
-use anyhow::{anyhow, Error, Result};
 use continuation::stack_chain::StackChainCell;
 use core::fmt;
 use core::mem;
