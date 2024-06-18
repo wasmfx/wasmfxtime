@@ -306,6 +306,19 @@ impl Config {
         // but it's not implemented in Wasmtime yet so disable it.
         ret.features.set(WasmFeatures::TAIL_CALL, false);
 
+        // WasmFX (aka typed-continuations) and its dependencies are enabled by
+        // default in our fork. This is just to make it easier to use.
+        // While the WasmFX proposal does not require garbage collection, it
+        // depends on the function references feature, whose implementation
+        // requires the Cargo feature "gc" to be present.
+        // We thus only enable WasmFX by default if the "gc" Cargo feature is
+        // enabled.
+        if cfg!(feature = "gc") {
+            ret.features.set(WasmFeatures::TYPED_CONTINUATIONS, true);
+            ret.features.set(WasmFeatures::EXCEPTIONS, true);
+            ret.features.set(WasmFeatures::FUNCTION_REFERENCES, true);
+        }
+
         ret
     }
 
