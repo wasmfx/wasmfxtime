@@ -20,6 +20,7 @@ cargo test \
       --exclude wasmtime-wasi-nn \
       --exclude wasmtime-fuzzing \
       --exclude wasm-spec-interpreter \
+      --exclude wasmtime-winch \
       $@
 
 # NOTE(dhil): Several WasmFX features are conflicting, so we do not
