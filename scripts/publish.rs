@@ -18,6 +18,7 @@ use std::time::Duration;
 // note that this list must be topologically sorted by dependencies
 const CRATES_TO_PUBLISH: &[&str] = &[
     // cranelift
+    "cranelift-bitset",
     "cranelift-isle",
     "cranelift-entity",
     "wasmtime-types",
@@ -73,6 +74,8 @@ const CRATES_TO_PUBLISH: &[&str] = &[
     "wasmtime-cli-flags",
     "wasmtime-explorer",
     "wasmtime-cli",
+    // wasi component adapter
+    "wasi-preview1-component-adapter-provider",
 ];
 
 // Anything **not** mentioned in this array is required to have an `=a.b.c`
@@ -91,6 +94,7 @@ const PUBLIC_CRATES: &[&str] = &[
     // have breaking API changes in patch releases
     "cranelift-entity",
     "cranelift-bforest",
+    "cranelift-bitset",
     "cranelift-codegen-shared",
     "cranelift-codegen-meta",
     "cranelift-egraph",
@@ -109,6 +113,8 @@ const PUBLIC_CRATES: &[&str] = &[
     // This is a dependency of cranelift crates and as a result can't break in
     // patch releases as well
     "wasmtime-types",
+    // wasi component adapter
+    "wasi-preview1-component-adapter-provider",
 ];
 
 const C_HEADER_PATH: &str = "./crates/c-api/include/wasmtime.h";

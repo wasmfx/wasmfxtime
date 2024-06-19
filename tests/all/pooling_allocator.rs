@@ -646,21 +646,21 @@ fn instance_too_large() -> Result<()> {
     let engine = Engine::new(&config)?;
     let expected = if cfg!(feature = "wmemcheck") {
         "\
-        instance allocation for this module requires 384 bytes which exceeds the \
+        instance allocation for this module requires 368 bytes which exceeds the \
 configured maximum of 16 bytes; breakdown of allocation requirement:
 
- * 66.67% - 256 bytes - instance state management
- * 6.25% - 24 bytes - typed continuations payloads object
- * 22.92% - 88 bytes - static vmctx data
+ * 65.22% - 240 bytes - instance state management
+ * 6.52% - 24 bytes - typed continuations payloads object
+ * 23.91% - 88 bytes - static vmctx data
 "
     } else {
         "\
-instance allocation for this module requires 288 bytes which exceeds the \
+instance allocation for this module requires 272 bytes which exceeds the \
 configured maximum of 16 bytes; breakdown of allocation requirement:
 
- * 55.56% - 160 bytes - instance state management
- * 8.33% - 24 bytes - typed continuations payloads object
- * 30.56% - 88 bytes - static vmctx data
+ * 52.94% - 144 bytes - instance state management
+ * 8.82% - 24 bytes - typed continuations payloads object
+ * 32.35% - 88 bytes - static vmctx data
 "
     };
     match Module::new(&engine, "(module)") {
@@ -676,19 +676,19 @@ configured maximum of 16 bytes; breakdown of allocation requirement:
 
     let expected = if cfg!(feature = "wmemcheck") {
         "\
-instance allocation for this module requires 1984 bytes which exceeds the \
+instance allocation for this module requires 1968 bytes which exceeds the \
 configured maximum of 16 bytes; breakdown of allocation requirement:
 
- * 12.90% - 256 bytes - instance state management
- * 80.65% - 1600 bytes - defined globals
+ * 12.20% - 240 bytes - instance state management
+ * 81.30% - 1600 bytes - defined globals
 "
     } else {
         "\
-instance allocation for this module requires 1888 bytes which exceeds the \
+instance allocation for this module requires 1872 bytes which exceeds the \
 configured maximum of 16 bytes; breakdown of allocation requirement:
 
- * 8.47% - 160 bytes - instance state management
- * 84.75% - 1600 bytes - defined globals
+ * 7.69% - 144 bytes - instance state management
+ * 85.47% - 1600 bytes - defined globals
 "
     };
     match Module::new(&engine, &lots_of_globals) {

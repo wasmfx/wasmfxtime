@@ -1,6 +1,6 @@
 use crate::rust::{to_rust_ident, to_rust_upper_camel_case, RustGenerator, TypeMode};
 use crate::types::{TypeInfo, Types};
-use anyhow::{bail, Context};
+use anyhow::bail;
 use heck::*;
 use indexmap::{IndexMap, IndexSet};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -83,9 +83,16 @@ struct ImportFunction {
 
 #[derive(Default)]
 struct Exports {
-    fields: BTreeMap<String, (String, String)>,
+    fields: BTreeMap<String, ExportField>,
     modules: Vec<(String, InterfaceName)>,
     funcs: Vec<String>,
+}
+
+struct ExportField {
+    ty: String,
+    ty_pre: String,
+    getter: String,
+    getter_pre: String,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -325,14 +332,51 @@ impl Wasmtime {
 
     fn generate(&mut self, resolve: &Resolve, id: WorldId) -> anyhow::Result<String> {
         self.types.analyze(resolve, id);
-        for (i, te) in self.opts.trappable_error_type.iter().enumerate() {
-            let id = resolve_type_in_package(resolve, &te.wit_path)
-                .context(format!("resolving {:?}", te))
-                .unwrap();
-            let name = format!("_TrappableError{i}");
-            uwriteln!(self.src, "type {name} = {};", te.rust_type_name);
-            let prev = self.trappable_errors.insert(id, name);
-            assert!(prev.is_none());
+
+        // Resolve the `trappable_error_type` configuration values to `TypeId`
+        // values. This is done by iterating over each `trappable_error_type`
+        // and then locating the interface that it corresponds to as well as the
+        // type within that interface.
+        //
+        // Note that `LookupItem::InterfaceNoPop` is used here as the full
+        // hierarchical behavior of `lookup_keys` isn't used as the interface
+        // must be named here.
+        'outer: for (i, te) in self.opts.trappable_error_type.iter().enumerate() {
+            let error_name = format!("_TrappableError{i}");
+            for (id, iface) in resolve.interfaces.iter() {
+                for (key, projection) in lookup_keys(
+                    resolve,
+                    &WorldKey::Interface(id),
+                    LookupItem::InterfaceNoPop,
+                ) {
+                    assert!(projection.is_empty());
+
+                    // If `wit_path` looks like `{key}/{type_name}` where
+                    // `type_name` is a type within `iface` then we've found a
+                    // match. Otherwise continue to the next lookup key if there
+                    // is one, and failing that continue to the next interface.
+                    let suffix = match te.wit_path.strip_prefix(&key) {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    let suffix = match suffix.strip_prefix('/') {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    if let Some(id) = iface.types.get(suffix) {
+                        uwriteln!(self.src, "type {error_name} = {};", te.rust_type_name);
+                        let prev = self.trappable_errors.insert(*id, error_name);
+                        assert!(prev.is_none());
+                        continue 'outer;
+                    }
+                }
+            }
+
+            bail!(
+                "failed to locate a WIT error type corresponding to the \
+                   `trappable_error_type` name `{}` provided",
+                te.wit_path
+            )
         }
 
         // Convert all entries in `with` as relative to the root of where the
@@ -455,18 +499,26 @@ impl Wasmtime {
     fn export(&mut self, resolve: &Resolve, name: &WorldKey, item: &WorldItem) {
         let wt = self.wasmtime_path();
         let mut gen = InterfaceGenerator::new(self, resolve);
-        let (field, ty, getter) = match item {
+        let field;
+        let ty;
+        let ty_pre;
+        let getter;
+        let getter_pre;
+        match item {
             WorldItem::Function(func) => {
                 gen.define_rust_guest_export(resolve, None, func);
                 let body = mem::take(&mut gen.src).into();
-                let (_name, getter) = gen.extract_typed_function(func);
+                getter = gen.extract_typed_function(func).1;
                 assert!(gen.src.is_empty());
                 self.exports.funcs.push(body);
-                (
-                    func_field_name(resolve, func),
-                    format!("{wt}::component::Func"),
-                    getter,
-                )
+                ty_pre = format!("{wt}::component::ComponentExportIndex");
+                field = func_field_name(resolve, func);
+                ty = format!("{wt}::component::Func");
+                getter_pre = format!(
+                    "_component.export_index(None, \"{}\")
+                        .ok_or_else(|| anyhow::anyhow!(\"no function export `{0}` found\"))?.1",
+                    func.name
+                );
             }
             WorldItem::Type(_) => unreachable!(),
             WorldItem::Interface { id, .. } => {
@@ -490,13 +542,63 @@ impl Wasmtime {
                 }
                 uwriteln!(gen.src, "}}");
 
-                uwriteln!(gen.src, "impl {struct_name} {{");
+                uwriteln!(gen.src, "pub struct {struct_name}Pre {{");
+                for (_, func) in iface.functions.iter() {
+                    uwriteln!(
+                        gen.src,
+                        "{}: {wt}::component::ComponentExportIndex,",
+                        func_field_name(resolve, func)
+                    );
+                }
+                uwriteln!(gen.src, "}}");
+
+                uwriteln!(gen.src, "impl {struct_name}Pre {{");
+                let instance_name = resolve.name_world_key(name);
                 uwrite!(
                     gen.src,
                     "
-                        pub fn new(
-                            __exports: &mut {wt}::component::ExportInstance<'_, '_>,
+pub fn new(
+    component: &{wt}::component::Component,
+) -> {wt}::Result<{struct_name}Pre> {{
+    let _component = component;
+    let (_, instance) = component.export_index(None, \"{instance_name}\")
+        .ok_or_else(|| anyhow::anyhow!(\"no exported instance named `{instance_name}`\"))?;
+    let _lookup = |name: &str| {{
+        _component.export_index(Some(&instance), name)
+            .map(|p| p.1)
+            .ok_or_else(|| {{
+                anyhow::anyhow!(
+                    \"instance export `{instance_name}` does \\
+                      not have export `{{name}}`\"
+                )
+            }})
+    }};
+                    "
+                );
+                let mut fields = Vec::new();
+                for (_, func) in iface.functions.iter() {
+                    let name = func_field_name(resolve, func);
+                    uwriteln!(gen.src, "let {name} = _lookup(\"{}\")?;", func.name);
+                    fields.push(name);
+                }
+                uwriteln!(gen.src, "Ok({struct_name}Pre {{");
+                for name in fields {
+                    uwriteln!(gen.src, "{name},");
+                }
+                uwriteln!(gen.src, "}})");
+                uwriteln!(gen.src, "}}");
+
+                uwrite!(
+                    gen.src,
+                    "
+                        pub fn load(
+                            &self,
+                            mut store: impl {wt}::AsContextMut,
+                            instance: &{wt}::component::Instance,
                         ) -> {wt}::Result<{struct_name}> {{
+                            let mut store = store.as_context_mut();
+                            let _ = &mut store;
+                            let _instance = instance;
                     "
                 );
                 let mut fields = Vec::new();
@@ -510,8 +612,10 @@ impl Wasmtime {
                     uwriteln!(gen.src, "{name},");
                 }
                 uwriteln!(gen.src, "}})");
-                uwriteln!(gen.src, "}}");
+                uwriteln!(gen.src, "}}"); // end `fn new`
+                uwriteln!(gen.src, "}}"); // end `impl {struct_name}Pre`
 
+                uwriteln!(gen.src, "impl {struct_name} {{");
                 let mut resource_methods = IndexMap::new();
 
                 for (_, func) in iface.functions.iter() {
@@ -575,7 +679,6 @@ impl Wasmtime {
                     .modules
                     .push((module, self.interface_names[id].clone()));
 
-                let name = resolve.name_world_key(name);
                 let (path, method_name) = match pkgname {
                     Some(pkgname) => (
                         format!(
@@ -591,15 +694,8 @@ impl Wasmtime {
                     ),
                     None => (format!("exports::{snake}::{struct_name}"), snake.clone()),
                 };
-                let getter = format!(
-                    "\
-                        {path}::new(
-                            &mut __exports.instance(\"{name}\")
-                                .ok_or_else(|| anyhow::anyhow!(\"exported instance `{name}` not present\"))?
-                        )?\
-                    "
-                );
-                let field = format!("interface{}", self.exports.fields.len());
+                field = format!("interface{}", self.exports.fields.len());
+                getter = format!("self.{field}.load(&mut store, &_instance)?");
                 self.exports.funcs.push(format!(
                     "
                         pub fn {method_name}(&self) -> &{path} {{
@@ -607,19 +703,63 @@ impl Wasmtime {
                         }}
                     ",
                 ));
-                (field, path, getter)
+                ty_pre = format!("{path}Pre");
+                ty = path;
+                getter_pre = format!("{ty_pre}::new(_component)?");
             }
-        };
-        let prev = self.exports.fields.insert(field, (ty, getter));
+        }
+        let prev = self.exports.fields.insert(
+            field,
+            ExportField {
+                ty,
+                ty_pre,
+                getter,
+                getter_pre,
+            },
+        );
         assert!(prev.is_none());
     }
 
     fn build_world_struct(&mut self, resolve: &Resolve, world: WorldId) {
         let wt = self.wasmtime_path();
-        let camel = to_rust_upper_camel_case(&resolve.worlds[world].name);
-        uwriteln!(self.src, "pub struct {camel} {{");
-        for (name, (ty, _)) in self.exports.fields.iter() {
-            uwriteln!(self.src, "{name}: {ty},");
+        let world_name = &resolve.worlds[world].name;
+        let camel = to_rust_upper_camel_case(&world_name);
+        let (async_, async__, where_clause, await_) = if self.opts.async_.maybe_async() {
+            ("async", "_async", "where _T: Send", ".await")
+        } else {
+            ("", "", "", "")
+        };
+        uwriteln!(
+            self.src,
+            "
+            /// Auto-generated bindings for a pre-instantiated version of a
+            /// copmonent which implements the world `{world_name}`.
+            ///
+            /// This structure is created through [`{camel}Pre::new`] which
+            /// takes a [`InstancePre`]({wt}::component::InstancePre) that
+            /// has been created through a [`Linker`]({wt}::component::Linker).
+            pub struct {camel}Pre<T> {{"
+        );
+        uwriteln!(self.src, "instance_pre: {wt}::component::InstancePre<T>,");
+        for (name, field) in self.exports.fields.iter() {
+            uwriteln!(self.src, "{name}: {},", field.ty_pre);
+        }
+        self.src.push_str("}\n");
+
+        uwriteln!(
+            self.src,
+            "
+                /// Auto-generated bindings for an instance a component which
+                /// implements the world `{world_name}`.
+                ///
+                /// This structure is created through either
+                /// [`{camel}::instantiate{async__}`] or by first creating
+                /// a [`{camel}Pre`] followed by using
+                /// [`{camel}Pre::instantiate{async__}`].
+                pub struct {camel} {{"
+        );
+        for (name, field) in self.exports.fields.iter() {
+            uwriteln!(self.src, "{name}: {},", field.ty);
         }
         self.src.push_str("}\n");
 
@@ -634,59 +774,53 @@ impl Wasmtime {
             "
         );
 
-        uwriteln!(self.src, "impl {camel} {{");
-        self.world_add_to_linker(resolve, world);
+        uwriteln!(
+            self.src,
+            "impl<_T> {camel}Pre<_T> {{
+                /// Creates a new copy of `{camel}Pre` bindings which can then
+                /// be used to instantiate into a particular store.
+                ///
+                /// This method may fail if the compoennt behind `instance_pre`
+                /// does not have the required exports.
+                pub fn new(
+                    instance_pre: {wt}::component::InstancePre<_T>,
+                ) -> {wt}::Result<Self> {{
+                    let _component = instance_pre.component();
+            ",
+        );
+        for (name, field) in self.exports.fields.iter() {
+            uwriteln!(self.src, "let {name} = {};", field.getter_pre);
+        }
+        uwriteln!(self.src, "Ok({camel}Pre {{");
+        uwriteln!(self.src, "instance_pre,");
+        for (name, _) in self.exports.fields.iter() {
+            uwriteln!(self.src, "{name},");
+        }
+        uwriteln!(self.src, "}})");
+        uwriteln!(self.src, "}}"); // close `fn new`
 
-        let (async_, async__, send, await_) = if self.opts.async_.maybe_async() {
-            ("async", "_async", ":Send", ".await")
-        } else {
-            ("", "", "", "")
-        };
         uwriteln!(
             self.src,
             "
-                /// Instantiates the provided `module` using the specified
-                /// parameters, wrapping up the result in a structure that
-                /// translates between wasm and the host.
-                pub {async_} fn instantiate{async__}<T {send}>(
-                    mut store: impl {wt}::AsContextMut<Data = T>,
-                    component: &{wt}::component::Component,
-                    linker: &{wt}::component::Linker<T>,
-                ) -> {wt}::Result<(Self, {wt}::component::Instance)> {{
-                    let instance = linker.instantiate{async__}(&mut store, component){await_}?;
-                    Ok((Self::new(store, &instance)?, instance))
-                }}
-
-                /// Instantiates a pre-instantiated module using the specified
-                /// parameters, wrapping up the result in a structure that
-                /// translates between wasm and the host.
-                pub {async_} fn instantiate_pre<T {send}>(
-                    mut store: impl {wt}::AsContextMut<Data = T>,
-                    instance_pre: &{wt}::component::InstancePre<T>,
-                ) -> {wt}::Result<(Self, {wt}::component::Instance)> {{
-                    let instance = instance_pre.instantiate{async__}(&mut store){await_}?;
-                    Ok((Self::new(store, &instance)?, instance))
-                }}
-
-                /// Low-level creation wrapper for wrapping up the exports
-                /// of the `instance` provided in this structure of wasm
-                /// exports.
+                /// Instantiates a new instance of [`{camel}`] within the
+                /// `store` provided.
                 ///
-                /// This function will extract exports from the `instance`
-                /// defined within `store` and wrap them all up in the
-                /// returned structure which can be used to interact with
-                /// the wasm module.
-                pub fn new(
-                    mut store: impl {wt}::AsContextMut,
-                    instance: &{wt}::component::Instance,
-                ) -> {wt}::Result<Self> {{
+                /// This function will use `self` as the pre-instantiated
+                /// instance to perform instantiation. Afterwards the preloaded
+                /// indices in `self` are used to lookup all exports on the
+                /// resulting instance.
+                pub {async_} fn instantiate{async__}(
+                    &self,
+                    mut store: impl {wt}::AsContextMut<Data = _T>,
+                ) -> {wt}::Result<{camel}>
+                    {where_clause}
+                {{
                     let mut store = store.as_context_mut();
-                    let mut exports = instance.exports(&mut store);
-                    let mut __exports = exports.root();
+                    let _instance = self.instance_pre.instantiate{async__}(&mut store){await_}?;
             ",
         );
-        for (name, (_, get)) in self.exports.fields.iter() {
-            uwriteln!(self.src, "let {name} = {get};");
+        for (name, field) in self.exports.fields.iter() {
+            uwriteln!(self.src, "let {name} = {};", field.getter);
         }
         uwriteln!(self.src, "Ok({camel} {{");
         for (name, _) in self.exports.fields.iter() {
@@ -694,6 +828,27 @@ impl Wasmtime {
         }
         uwriteln!(self.src, "}})");
         uwriteln!(self.src, "}}"); // close `fn new`
+
+        uwriteln!(self.src, "}}");
+
+        uwriteln!(
+            self.src,
+            "impl {camel} {{
+                /// Convenience wrapper around [`{camel}Pre::new`] and
+                /// [`{camel}Pre::instantiate{async__}`].
+                pub {async_} fn instantiate{async__}<_T>(
+                    mut store: impl {wt}::AsContextMut<Data = _T>,
+                    component: &{wt}::component::Component,
+                    linker: &{wt}::component::Linker<_T>,
+                ) -> {wt}::Result<{camel}>
+                    {where_clause}
+                {{
+                    let pre = linker.instantiate_pre(component)?;
+                    {camel}Pre::new(pre)?.instantiate{async__}(store){await_}
+                }}
+            ",
+        );
+        self.world_add_to_linker(resolve, world);
 
         for func in self.exports.funcs.iter() {
             self.src.push_str(func);
@@ -800,141 +955,21 @@ impl Wasmtime {
         key: &WorldKey,
         item: Option<&str>,
     ) -> Option<String> {
-        struct Name<'a> {
-            prefix: Prefix,
-            item: Option<&'a str>,
-        }
-
-        #[derive(Copy, Clone)]
-        enum Prefix {
-            Namespace(PackageId),
-            UnversionedPackage(PackageId),
-            VersionedPackage(PackageId),
-            UnversionedInterface(InterfaceId),
-            VersionedInterface(InterfaceId),
-        }
-
-        let prefix = match key {
-            WorldKey::Interface(id) => Prefix::VersionedInterface(*id),
-
-            // Non-interface-keyed names don't get the lookup logic below,
-            // they're relatively uncommon so only lookup the precise key here.
-            WorldKey::Name(key) => {
-                let to_lookup = match item {
-                    Some(item) => format!("{key}/{item}"),
-                    None => key.to_string(),
-                };
-                let result = self.opts.with.get(&to_lookup).cloned();
-                if result.is_some() {
-                    self.used_with_opts.insert(to_lookup.clone());
-                }
-                return result;
-            }
+        let item = match item {
+            Some(item) => LookupItem::Name(item),
+            None => LookupItem::None,
         };
 
-        // Here names are iteratively attempted as `key` + `item` is "walked to
-        // its root" and each attempt is consulted in `self.opts.with`. This
-        // loop will start at the leaf, the most specific path, and then walk to
-        // the root, popping items, trying to find a result.
-        //
-        // Each time a name is "popped" the projection from the next path is
-        // pushed onto `projection`. This means that if we actually find a match
-        // then `projection` is a collection of namespaces that results in the
-        // final replacement name.
-        let mut name = Name { prefix, item };
-        let mut projection = Vec::new();
-        loop {
-            let lookup = name.lookup_key(resolve);
+        for (lookup, mut projection) in lookup_keys(resolve, key, item) {
             if let Some(renamed) = self.opts.with.get(&lookup) {
                 projection.push(renamed.clone());
                 projection.reverse();
                 self.used_with_opts.insert(lookup);
                 return Some(projection.join("::"));
             }
-            if !name.pop(resolve, &mut projection) {
-                return None;
-            }
         }
 
-        impl<'a> Name<'a> {
-            fn lookup_key(&self, resolve: &Resolve) -> String {
-                let mut s = self.prefix.lookup_key(resolve);
-                if let Some(item) = self.item {
-                    s.push_str("/");
-                    s.push_str(item);
-                }
-                s
-            }
-
-            fn pop(&mut self, resolve: &'a Resolve, projection: &mut Vec<String>) -> bool {
-                match (self.item, self.prefix) {
-                    // If this is a versioned resource name, try the unversioned
-                    // resource name next.
-                    (Some(_), Prefix::VersionedInterface(id)) => {
-                        self.prefix = Prefix::UnversionedInterface(id);
-                        true
-                    }
-                    // If this is an unversioned resource name then time to
-                    // ignore the resource itself and move on to the next most
-                    // specific item, versioned interface names.
-                    (Some(item), Prefix::UnversionedInterface(id)) => {
-                        self.prefix = Prefix::VersionedInterface(id);
-                        self.item = None;
-                        projection.push(item.to_upper_camel_case());
-                        true
-                    }
-                    (Some(_), _) => unreachable!(),
-                    (None, _) => self.prefix.pop(resolve, projection),
-                }
-            }
-        }
-
-        impl Prefix {
-            fn lookup_key(&self, resolve: &Resolve) -> String {
-                match *self {
-                    Prefix::Namespace(id) => resolve.packages[id].name.namespace.clone(),
-                    Prefix::UnversionedPackage(id) => {
-                        let mut name = resolve.packages[id].name.clone();
-                        name.version = None;
-                        name.to_string()
-                    }
-                    Prefix::VersionedPackage(id) => resolve.packages[id].name.to_string(),
-                    Prefix::UnversionedInterface(id) => {
-                        let id = resolve.id_of(id).unwrap();
-                        match id.find('@') {
-                            Some(i) => id[..i].to_string(),
-                            None => id,
-                        }
-                    }
-                    Prefix::VersionedInterface(id) => resolve.id_of(id).unwrap(),
-                }
-            }
-
-            fn pop(&mut self, resolve: &Resolve, projection: &mut Vec<String>) -> bool {
-                *self = match *self {
-                    // try the unversioned interface next
-                    Prefix::VersionedInterface(id) => Prefix::UnversionedInterface(id),
-                    // try this interface's versioned package next
-                    Prefix::UnversionedInterface(id) => {
-                        let iface = &resolve.interfaces[id];
-                        let name = iface.name.as_ref().unwrap();
-                        projection.push(to_rust_ident(name));
-                        Prefix::VersionedPackage(iface.package.unwrap())
-                    }
-                    // try the unversioned package next
-                    Prefix::VersionedPackage(id) => Prefix::UnversionedPackage(id),
-                    // try this package's namespace next
-                    Prefix::UnversionedPackage(id) => {
-                        let name = &resolve.packages[id].name;
-                        projection.push(to_rust_ident(&name.name));
-                        Prefix::Namespace(id)
-                    }
-                    // nothing left to try any more
-                    Prefix::Namespace(_) => return false,
-                };
-                true
-            }
-        }
+        None
     }
 
     fn wasmtime_path(&self) -> String {
@@ -942,6 +977,159 @@ impl Wasmtime {
             .wasmtime_crate
             .clone()
             .unwrap_or("wasmtime".to_string())
+    }
+}
+
+enum LookupItem<'a> {
+    None,
+    Name(&'a str),
+    InterfaceNoPop,
+}
+
+fn lookup_keys(
+    resolve: &Resolve,
+    key: &WorldKey,
+    item: LookupItem<'_>,
+) -> Vec<(String, Vec<String>)> {
+    struct Name<'a> {
+        prefix: Prefix,
+        item: Option<&'a str>,
+    }
+
+    #[derive(Copy, Clone)]
+    enum Prefix {
+        Namespace(PackageId),
+        UnversionedPackage(PackageId),
+        VersionedPackage(PackageId),
+        UnversionedInterface(InterfaceId),
+        VersionedInterface(InterfaceId),
+    }
+
+    let prefix = match key {
+        WorldKey::Interface(id) => Prefix::VersionedInterface(*id),
+
+        // Non-interface-keyed names don't get the lookup logic below,
+        // they're relatively uncommon so only lookup the precise key here.
+        WorldKey::Name(key) => {
+            let to_lookup = match item {
+                LookupItem::Name(item) => format!("{key}/{item}"),
+                LookupItem::None | LookupItem::InterfaceNoPop => key.to_string(),
+            };
+            return vec![(to_lookup, Vec::new())];
+        }
+    };
+
+    // Here names are iteratively attempted as `key` + `item` is "walked to
+    // its root" and each attempt is consulted in `self.opts.with`. This
+    // loop will start at the leaf, the most specific path, and then walk to
+    // the root, popping items, trying to find a result.
+    //
+    // Each time a name is "popped" the projection from the next path is
+    // pushed onto `projection`. This means that if we actually find a match
+    // then `projection` is a collection of namespaces that results in the
+    // final replacement name.
+    let (interface_required, item) = match item {
+        LookupItem::None => (false, None),
+        LookupItem::Name(s) => (false, Some(s)),
+        LookupItem::InterfaceNoPop => (true, None),
+    };
+    let mut name = Name { prefix, item };
+    let mut projection = Vec::new();
+    let mut ret = Vec::new();
+    loop {
+        let lookup = name.lookup_key(resolve);
+        ret.push((lookup, projection.clone()));
+        if !name.pop(resolve, &mut projection) {
+            break;
+        }
+        if interface_required {
+            match name.prefix {
+                Prefix::VersionedInterface(_) | Prefix::UnversionedInterface(_) => {}
+                _ => break,
+            }
+        }
+    }
+
+    return ret;
+
+    impl<'a> Name<'a> {
+        fn lookup_key(&self, resolve: &Resolve) -> String {
+            let mut s = self.prefix.lookup_key(resolve);
+            if let Some(item) = self.item {
+                s.push_str("/");
+                s.push_str(item);
+            }
+            s
+        }
+
+        fn pop(&mut self, resolve: &'a Resolve, projection: &mut Vec<String>) -> bool {
+            match (self.item, self.prefix) {
+                // If this is a versioned resource name, try the unversioned
+                // resource name next.
+                (Some(_), Prefix::VersionedInterface(id)) => {
+                    self.prefix = Prefix::UnversionedInterface(id);
+                    true
+                }
+                // If this is an unversioned resource name then time to
+                // ignore the resource itself and move on to the next most
+                // specific item, versioned interface names.
+                (Some(item), Prefix::UnversionedInterface(id)) => {
+                    self.prefix = Prefix::VersionedInterface(id);
+                    self.item = None;
+                    projection.push(item.to_upper_camel_case());
+                    true
+                }
+                (Some(_), _) => unreachable!(),
+                (None, _) => self.prefix.pop(resolve, projection),
+            }
+        }
+    }
+
+    impl Prefix {
+        fn lookup_key(&self, resolve: &Resolve) -> String {
+            match *self {
+                Prefix::Namespace(id) => resolve.packages[id].name.namespace.clone(),
+                Prefix::UnversionedPackage(id) => {
+                    let mut name = resolve.packages[id].name.clone();
+                    name.version = None;
+                    name.to_string()
+                }
+                Prefix::VersionedPackage(id) => resolve.packages[id].name.to_string(),
+                Prefix::UnversionedInterface(id) => {
+                    let id = resolve.id_of(id).unwrap();
+                    match id.find('@') {
+                        Some(i) => id[..i].to_string(),
+                        None => id,
+                    }
+                }
+                Prefix::VersionedInterface(id) => resolve.id_of(id).unwrap(),
+            }
+        }
+
+        fn pop(&mut self, resolve: &Resolve, projection: &mut Vec<String>) -> bool {
+            *self = match *self {
+                // try the unversioned interface next
+                Prefix::VersionedInterface(id) => Prefix::UnversionedInterface(id),
+                // try this interface's versioned package next
+                Prefix::UnversionedInterface(id) => {
+                    let iface = &resolve.interfaces[id];
+                    let name = iface.name.as_ref().unwrap();
+                    projection.push(to_rust_ident(name));
+                    Prefix::VersionedPackage(iface.package.unwrap())
+                }
+                // try the unversioned package next
+                Prefix::VersionedPackage(id) => Prefix::UnversionedPackage(id),
+                // try this package's namespace next
+                Prefix::UnversionedPackage(id) => {
+                    let name = &resolve.packages[id].name;
+                    projection.push(to_rust_ident(&name.name));
+                    Prefix::Namespace(id)
+                }
+                // nothing left to try any more
+                Prefix::Namespace(_) => return false,
+            };
+            true
+        }
     }
 }
 
@@ -1141,77 +1329,6 @@ impl Wasmtime {
             uwriteln!(self.src, "Ok(())\n}}");
         }
     }
-}
-
-fn resolve_type_in_package(resolve: &Resolve, wit_path: &str) -> anyhow::Result<TypeId> {
-    // Build a map, `packages_to_omit_version`, where that package can be
-    // uniquely identified by its name/namespace combo and as such version
-    // information is not required.
-    let mut packages_with_same_name = HashMap::new();
-    for (id, pkg) in resolve.packages.iter() {
-        packages_with_same_name
-            .entry(PackageName {
-                version: None,
-                ..pkg.name.clone()
-            })
-            .or_insert(Vec::new())
-            .push(id)
-    }
-    let packages_to_omit_version = packages_with_same_name
-        .iter()
-        .filter_map(
-            |(_name, list)| {
-                if list.len() == 1 {
-                    Some(list)
-                } else {
-                    None
-                }
-            },
-        )
-        .flat_map(|l| l)
-        .collect::<HashSet<_>>();
-
-    let mut found_interface = false;
-
-    // Look for an interface whose assigned prefix starts `wit_path`. Not
-    // exactly the most efficient thing ever but is sufficient for now.
-    for (id, interface) in resolve.interfaces.iter() {
-        found_interface = true;
-
-        let iface_name = match &interface.name {
-            Some(name) => name,
-            None => continue,
-        };
-        let pkgid = interface.package.unwrap();
-        let pkgname = &resolve.packages[pkgid].name;
-        let prefix = if packages_to_omit_version.contains(&pkgid) {
-            let mut name = pkgname.clone();
-            name.version = None;
-            format!("{name}/{iface_name}")
-        } else {
-            resolve.id_of(id).unwrap()
-        };
-        let wit_path = match wit_path.strip_prefix(&prefix) {
-            Some(rest) => rest,
-            None => continue,
-        };
-
-        let wit_path = match wit_path.strip_prefix('/') {
-            Some(rest) => rest,
-            None => continue,
-        };
-
-        match interface.types.get(wit_path).copied() {
-            Some(type_id) => return Ok(type_id),
-            None => continue,
-        }
-    }
-
-    if found_interface {
-        bail!("no types found to match `{wit_path}` in interface");
-    }
-
-    bail!("no package/interface found to match `{wit_path}`")
 }
 
 struct InterfaceGenerator<'a> {
@@ -2354,7 +2471,7 @@ impl<'a> InterfaceGenerator<'a> {
     fn extract_typed_function(&mut self, func: &Function) -> (String, String) {
         let prev = mem::take(&mut self.src);
         let snake = func_field_name(self.resolve, func);
-        uwrite!(self.src, "*__exports.typed_func::<(");
+        uwrite!(self.src, "*_instance.get_typed_func::<(");
         for (_, ty) in func.params.iter() {
             self.print_ty(ty, TypeMode::AllBorrowed("'_"));
             self.push_str(", ");
@@ -2364,9 +2481,7 @@ impl<'a> InterfaceGenerator<'a> {
             self.print_ty(ty, TypeMode::Owned);
             self.push_str(", ");
         }
-        self.src.push_str(")>(\"");
-        self.src.push_str(&func.name);
-        self.src.push_str("\")?.func()");
+        uwriteln!(self.src, ")>(&mut store, &self.{snake})?.func()");
 
         let ret = (snake, mem::take(&mut self.src).to_string());
         self.src = prev;
