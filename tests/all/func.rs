@@ -1044,6 +1044,7 @@ fn pass_cross_store_arg(config: &mut Config) -> anyhow::Result<()> {
 fn externref_signature_no_reference_types() -> anyhow::Result<()> {
     let mut config = Config::new();
     config.wasm_reference_types(false);
+    config.wasm_function_references(false);
     let mut store = Store::new(&Engine::new(&config)?, ());
     Func::wrap(&mut store, |_: Option<Func>| {});
     let func_ty = FuncType::new(
