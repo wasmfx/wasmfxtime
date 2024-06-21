@@ -1,3 +1,126 @@
+This repository contains an up-to-date fork of [Wasmtime](https://docs.wasmtime.dev/), a standalone WebAssembly engine. This fork adds support for the [WasmFX](https://wasmfx.dev/) proposal for stack switching. 
+
+The [stack switching repository](https://github.com/WebAssembly/stack-switching) contains a 
+[high-level summary of the proposal](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Explainer.md),
+[a more formal description](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Overview.md),
+and [examples](https://github.com/WebAssembly/stack-switching/tree/main/proposals/continuations/examples).
+
+## Building 
+
+The build steps are equivalent to the [standard steps for building Wasmtime from source](https://docs.wasmtime.dev/contributing-building.html), but using this repository instead. There is no need to build or install the original version of Wasmtime to use this fork.
+
+Concretely, the steps are as follows:
+
+1. Make sure that you have a Rust toolchain installed, for example using [rustup](https://www.rust-lang.org/tools/install).
+2. Check out this repository:
+``` sh
+git clone https://github.com/wasmfx/wasmfxtime.git
+cd wasmfxtime
+git submodule update --init
+```
+3. Build:
+``` sh
+cargo build
+```
+
+As a result, a debug build of the `wasmtime` executable will be created at `target/debug/wasmtime`.
+
+To create a release build instead, run `cargo build --release`, which will create `target/release/wasmtime`.
+
+
+## Running programs
+
+A WebAssembly module `my_module.wat` (or `my_module.wasm`)  is executed using the `wasmtime` executable [in the usual way](https://docs.wasmtime.dev/cli.html). To run programs containing WasmFX instructions, enable the necessary features as follows:
+
+``` sh
+wasmtime -W=exceptions,function-references,typed-continuations my_module.wat
+```
+
+To run an arbitrary function exported as `foo` by the module run 
+
+``` sh
+wasmtime -W=exceptions,function-references,typed-continuations --invoke=foo my_module.wat
+```
+
+## Example program
+
+The following module implements a generator and consumer using stack switching.
+
+```wat
+(module
+  (type $ft (func))
+  (type $ct (cont $ft))
+
+  ;; Tag used by generator, the i32 payload corresponds to the generated values
+  (tag $yield (param i32))
+
+  ;; Printing function for unsigned integers.
+  ;; This function is unrelated to stack switching.
+  (func $println_u32 (param $value i32)
+    ;; See examples/generator.wat for actual implementation
+  )
+
+
+  ;; Simple generator yielding values from 100 down to 1
+  (func $generator
+    (local $i i32)
+    (local.set $i (i32.const 100))
+    (loop $l
+      ;; Suspend generator, yield current value of $i to consumer
+      (suspend $yield (local.get $i))
+      ;; Decrement $i and exit loop once $i reaches 0
+      (local.tee $i (i32.sub (local.get $i) (i32.const 1)))
+      (br_if $l)
+    )
+  )
+  (elem declare func $generator)
+
+  (func $consumer
+    (local $c (ref $ct))
+    ;; Create continuation executing function $generator
+    (local.set $c (cont.new $ct (ref.func $generator)))
+
+    (loop $loop
+      (block $on_yield (result i32 (ref $ct))
+        ;; Resume continuation $c
+        (resume $ct (tag $yield $on_yield) (local.get $c))
+        ;; Generator returned: no more data
+        (return)
+      )
+      ;; Generator suspend, stack contains [i32 (ref $ct)]
+      (local.set $c)
+      ;; Stack now contains the i32 value yielded by generator
+      (call $println_u32)
+
+      (br $loop)
+    )
+  )
+
+  (func $start (export "_start")
+    (call $consumer)
+  )
+)
+```
+
+See [examples/generator.wat](https://github.com/frank-emrich/wasmtime/blob/main/examples/generator.wat) for the full version of the file, including the definition of `$println_u32`.
+
+Running the full version with 
+```
+wasmtime -W=exceptions,function-references,typed-continuations generator.wat
+```
+then prints the numbers 100 down to 1 in the terminal.
+
+
+## Current limitations
+
+The implementation of the WasmFX proposal is currently limited in a few ways:
+- The only supported platform is x64 Linux. 
+- Only a single module can be executed. In particular, providing additional modules using the `--preload` option of `wasmtime` can lead to unexpected behavior.
+
+
+
+# Original Wasmtime documentation below
+
 <div align="center">
   <h1><code>wasmtime</code></h1>
 
