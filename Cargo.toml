@@ -14,22 +14,22 @@ default-run = "wasmtime"
 rust-version.workspace = true
 
 [package.metadata.binstall]
-pkg-url = "{repo}/releases/download/v{version}/{name}-v{version}-{target-arch}-{target-family}{archive-suffix}"
-bin-dir = "{name}-{version}-{target-arch}-{target-family}/{bin}{binary-ext}"
+pkg-url = "{repo}/releases/download/v{version}/wasmtime-v{version}-{target-arch}-{target-family}{archive-suffix}"
+bin-dir = "wasmtime-{version}-{target-arch}-{target-family}/{bin}{binary-ext}"
 pkg-fmt = "txz"
 [package.metadata.binstall.overrides.x86_64-apple-darwin]
-pkg-url = "{repo}/releases/download/v{version}/{name}-v{version}-{target-arch}-macos{archive-suffix}"
-bin-dir = "{name}-v{version}-{target-arch}-macos/{bin}{binary-ext}"
+pkg-url = "{repo}/releases/download/v{version}/wasmtime-v{version}-{target-arch}-macos{archive-suffix}"
+bin-dir = "wasmtime-v{version}-{target-arch}-macos/{bin}{binary-ext}"
 [package.metadata.binstall.overrides.aarch64-apple-darwin]
-pkg-url = "{repo}/releases/download/v{version}/{name}-v{version}-{target-arch}-macos{archive-suffix}"
-bin-dir = "{name}-v{version}-{target-arch}-macos/{bin}{binary-ext}"
+pkg-url = "{repo}/releases/download/v{version}/wasmtime-v{version}-{target-arch}-macos{archive-suffix}"
+bin-dir = "wasmtime-v{version}-{target-arch}-macos/{bin}{binary-ext}"
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
 pkg-fmt = "zip"
 [package.metadata.binstall.overrides.x86_64-pc-windows-gnu]
 pkg-fmt = "zip"
 [package.metadata.binstall.overrides.x86_64-unknown-linux-musl]
-pkg-url = "{repo}/releases/download/v{version}/{name}-v{version}-{target-arch}-musl{archive-suffix}"
-bin-dir = "{name}-v{version}-{target-arch}-musl/{bin}{binary-ext}"
+pkg-url = "{repo}/releases/download/v{version}/wasmtime-v{version}-{target-arch}-musl{archive-suffix}"
+bin-dir = "wasmtime-v{version}-{target-arch}-musl/{bin}{binary-ext}"
 
 [lints]
 workspace = true
@@ -140,7 +140,6 @@ members = [
   "crates/environ/fuzz",
   "crates/test-programs",
   "crates/wasi-preview1-component-adapter",
-  "crates/wasi-preview1-component-adapter/provider",
   "crates/wasi-preview1-component-adapter/verify",
   "examples/fib-debug/wasm",
   "examples/wasi/wasm",
@@ -208,7 +207,6 @@ wiggle = { path = "crates/wiggle", version = "=23.0.0", default-features = false
 wiggle-macro = { path = "crates/wiggle/macro", version = "=23.0.0" }
 wiggle-generate = { path = "crates/wiggle/generate", version = "=23.0.0" }
 wasi-common = { path = "crates/wasi-common", version = "=23.0.0", default-features = false }
-wasi-preview1-component-adapter-provider = { path = "crates/wasi-preview1-component-adapter/provider", version = "23.0.0", default-features = false }
 wasmtime-fuzzing = { path = "crates/fuzzing" }
 wasmtime-jit-icache-coherence = { path = "crates/jit-icache-coherence", version = "=23.0.0" }
 wasmtime-wit-bindgen = { path = "crates/wit-bindgen", version = "=23.0.0" }
@@ -258,15 +256,15 @@ wit-bindgen = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "v0.26.0"
 wit-bindgen-rust-macro = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "v0.26.0", default-features = false }
 
 # wasm-tools family:
-wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1", default-features = false }
-wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
-wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
-wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
-wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
-wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
-wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
-wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
-wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.209.1" }
+wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.211.1", default-features = false }
+wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.211.1" }
+wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.211.1" }
+wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.211.1" }
+wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.211.1" }
+wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.211.1" }
+wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.211.1" }
+wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.211.1" }
+wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.211.1" }
 
 # Non-Bytecode Alliance maintained dependencies:
 # --------------------------
