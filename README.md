@@ -3,6 +3,11 @@ This repository contains an up-to-date fork of
 fork adds support for the [WasmFX](https://wasmfx.dev/) proposal for stack
 switching. 
 
+Additional key resources are
+* An [explainer document](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Explainer.md) with an informal introduction to the instruction set extension along with [example programs](https://github.com/WebAssembly/stack-switching/tree/main/proposals/continuations/examples).
+* A [formal description](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Overview.md) of the extension.
+* A collection of [benchmark programs](https://github.com/wasmfx/benchfx) and a prototype library for [asynchronous I/O programming](https://github.com/wasmfx/waeio) leveraging the instruction extension.
+
 The [stack switching repository](https://github.com/WebAssembly/stack-switching) contains a 
 [high-level summary of the proposal](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Explainer.md),
 [a more formal description](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Overview.md),
