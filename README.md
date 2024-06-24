@@ -1,7 +1,9 @@
-This repository contains an up-to-date fork of
-[Wasmtime](https://docs.wasmtime.dev/), a standalone WebAssembly engine. This
-fork adds support for the [WasmFX](https://wasmfx.dev/) proposal for stack
-switching. 
+This repository is a fork of [Wasmtime](https://docs.wasmtime.dev/) extended
+with support for the [WasmFX](https://wasmfx.dev/) instruction set. WasmFX adds
+stack switching capabilities to core Wasm, thereby enabling interleaving of
+computation. The design of the instruction set extension is based on [effect
+handlers](https://effect-handlers.org), which provide a structured facility for
+handling non-local control flow. 
 
 Additional key resources are
 * An [explainer document](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Explainer.md) with an informal introduction to the instruction set extension along with [example programs](https://github.com/WebAssembly/stack-switching/tree/main/proposals/continuations/examples).
