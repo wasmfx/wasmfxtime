@@ -20,13 +20,13 @@ Concretely, the steps are as follows:
 1. Make sure that you have a Rust toolchain installed, for example using
    [rustup](https://www.rust-lang.org/tools/install).
 2. Check out this repository:
-``` sh
+```sh
 git clone https://github.com/wasmfx/wasmfxtime.git
 cd wasmfxtime
 git submodule update --init
 ```
 3. Build in debug mode:
-``` sh
+```sh
 cargo build
 ```
 
@@ -40,7 +40,7 @@ Analogously, to build in release mode run `cargo build --release`, which places 
 
 The `wasmtime` executable can compile and run WebAssembly modules [in the usual way](https://docs.wasmtime.dev/cli.html). However, if a module contains WasmFX instructions, then it is necessary to enable additional features, e.g.
 
-``` sh
+```sh
 wasmtime -W=exceptions,function-references,typed-continuations my_module.wat
 ```
 
@@ -48,7 +48,7 @@ The first two features are prerequisite features, i.e. the `exceptions` feature 
 
 To run an arbitrary function exported as `foo` by the module type 
 
-``` sh
+```sh
 wasmtime -W=exceptions,function-references,typed-continuations --invoke=foo my_module.wat
 ```
 
