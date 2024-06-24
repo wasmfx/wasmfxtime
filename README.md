@@ -10,11 +10,6 @@ Additional key resources are
 * A [formal description](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Overview.md) of the extension.
 * A collection of [benchmark programs](https://github.com/wasmfx/benchfx) and a prototype library for [asynchronous I/O programming](https://github.com/wasmfx/waeio) leveraging the instruction extension.
 
-The [stack switching repository](https://github.com/WebAssembly/stack-switching) contains a 
-[high-level summary of the proposal](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Explainer.md),
-[a more formal description](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Overview.md),
-and [examples](https://github.com/WebAssembly/stack-switching/tree/main/proposals/continuations/examples).
-
 ## Building 
 
 The build steps are equivalent to the [standard steps for building Wasmtime from
