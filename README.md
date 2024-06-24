@@ -25,7 +25,7 @@ git clone https://github.com/wasmfx/wasmfxtime.git
 cd wasmfxtime
 git submodule update --init
 ```
-3. Build:
+3. Build in debug mode:
 ``` sh
 cargo build
 ```
@@ -33,22 +33,20 @@ cargo build
 As a result, a debug build of the `wasmtime` executable will be created at
 `target/debug/wasmtime`.
 
-To create a release build instead, run `cargo build --release`, which will
-create `target/release/wasmtime`.
+Analogously, to build in release mode run `cargo build --release`, which places the `wasmtime` artifact in `target/release/`.
 
 
 ## Running programs
 
-A WebAssembly module `my_module.wat` (or `my_module.wasm`) is executed using the
-`wasmtime` executable [in the usual way](https://docs.wasmtime.dev/cli.html). To
-run programs containing WasmFX instructions, enable the necessary features as
-follows:
+The `wasmtime` executable can compile and run WebAssembly modules [in the usual way](https://docs.wasmtime.dev/cli.html). However, if a module contains WasmFX instructions, then it is necessary to enable additional features, e.g.
 
 ``` sh
 wasmtime -W=exceptions,function-references,typed-continuations my_module.wat
 ```
 
-To run an arbitrary function exported as `foo` by the module run 
+The first two features are prerequisite features, i.e. the `exceptions` feature is required to support WebAssembly tags and the `function-references` feature is required to support typed references. The `typed-continuations` feature enables support for the WasmFX instruction set.
+
+To run an arbitrary function exported as `foo` by the module type 
 
 ``` sh
 wasmtime -W=exceptions,function-references,typed-continuations --invoke=foo my_module.wat
