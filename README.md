@@ -1,4 +1,7 @@
-This repository contains an up-to-date fork of [Wasmtime](https://docs.wasmtime.dev/), a standalone WebAssembly engine. This fork adds support for the [WasmFX](https://wasmfx.dev/) proposal for stack switching. 
+This repository contains an up-to-date fork of
+[Wasmtime](https://docs.wasmtime.dev/), a standalone WebAssembly engine. This
+fork adds support for the [WasmFX](https://wasmfx.dev/) proposal for stack
+switching. 
 
 The [stack switching repository](https://github.com/WebAssembly/stack-switching) contains a 
 [high-level summary of the proposal](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Explainer.md),
@@ -7,11 +10,15 @@ and [examples](https://github.com/WebAssembly/stack-switching/tree/main/proposal
 
 ## Building 
 
-The build steps are equivalent to the [standard steps for building Wasmtime from source](https://docs.wasmtime.dev/contributing-building.html), but using this repository instead. There is no need to build or install the original version of Wasmtime to use this fork.
+The build steps are equivalent to the [standard steps for building Wasmtime from
+source](https://docs.wasmtime.dev/contributing-building.html), but using this
+repository instead. There is no need to build or install the original version of
+Wasmtime to use this fork.
 
 Concretely, the steps are as follows:
 
-1. Make sure that you have a Rust toolchain installed, for example using [rustup](https://www.rust-lang.org/tools/install).
+1. Make sure that you have a Rust toolchain installed, for example using
+   [rustup](https://www.rust-lang.org/tools/install).
 2. Check out this repository:
 ``` sh
 git clone https://github.com/wasmfx/wasmfxtime.git
@@ -23,14 +30,19 @@ git submodule update --init
 cargo build
 ```
 
-As a result, a debug build of the `wasmtime` executable will be created at `target/debug/wasmtime`.
+As a result, a debug build of the `wasmtime` executable will be created at
+`target/debug/wasmtime`.
 
-To create a release build instead, run `cargo build --release`, which will create `target/release/wasmtime`.
+To create a release build instead, run `cargo build --release`, which will
+create `target/release/wasmtime`.
 
 
 ## Running programs
 
-A WebAssembly module `my_module.wat` (or `my_module.wasm`)  is executed using the `wasmtime` executable [in the usual way](https://docs.wasmtime.dev/cli.html). To run programs containing WasmFX instructions, enable the necessary features as follows:
+A WebAssembly module `my_module.wat` (or `my_module.wasm`) is executed using the
+`wasmtime` executable [in the usual way](https://docs.wasmtime.dev/cli.html). To
+run programs containing WasmFX instructions, enable the necessary features as
+follows:
 
 ``` sh
 wasmtime -W=exceptions,function-references,typed-continuations my_module.wat
@@ -102,7 +114,9 @@ The following module implements a generator and consumer using stack switching.
 )
 ```
 
-See [examples/generator.wat](https://github.com/frank-emrich/wasmtime/blob/main/examples/generator.wat) for the full version of the file, including the definition of `$println_u32`.
+See
+[examples/generator.wat](https://github.com/frank-emrich/wasmtime/blob/main/examples/generator.wat)
+for the full version of the file, including the definition of `$println_u32`.
 
 Running the full version with 
 ```
@@ -115,7 +129,9 @@ then prints the numbers 100 down to 1 in the terminal.
 
 The implementation of the WasmFX proposal is currently limited in a few ways:
 - The only supported platform is x64 Linux. 
-- Only a single module can be executed. In particular, providing additional modules using the `--preload` option of `wasmtime` can lead to unexpected behavior.
+- Only a single module can be executed. In particular, providing additional
+  modules using the `--preload` option of `wasmtime` can lead to unexpected
+  behavior.
 
 
 
