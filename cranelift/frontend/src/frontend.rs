@@ -29,7 +29,8 @@ pub struct FunctionBuilderContext {
     ssa: SSABuilder,
     status: SecondaryMap<Block, BlockStatus>,
     types: SecondaryMap<Variable, Type>,
-    needs_stack_map: EntitySet<Value>,
+    stack_map_vars: EntitySet<Variable>,
+    stack_map_values: EntitySet<Value>,
     dfs: Dfs,
 }
 
@@ -260,6 +261,8 @@ impl fmt::Display for DefVariableError {
     }
 }
 
+const LOG2_SIZE_CAPACITY: usize = (16u8.ilog2() as usize) + 1;
+
 /// This module allows you to create a function in Cranelift IR in a straightforward way, hiding
 /// all the complexity of its internal representation.
 ///
@@ -382,9 +385,15 @@ impl<'a> FunctionBuilder<'a> {
         self.handle_ssa_side_effects(side_effects);
     }
 
-    /// Declares the type of a variable, so that it can be used later (by calling
-    /// [`FunctionBuilder::use_var`]). This function will return an error if the variable
-    /// has been previously declared.
+    /// Declares the type of a variable.
+    ///
+    /// This allows the variable to be used later (by calling
+    /// [`FunctionBuilder::use_var`]).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the variable has been previously
+    /// declared.
     pub fn try_declare_var(&mut self, var: Variable, ty: Type) -> Result<(), DeclareVariableError> {
         if self.func_ctx.types[var] != types::INVALID {
             return Err(DeclareVariableError::DeclaredMultipleTimes(var));
@@ -393,11 +402,35 @@ impl<'a> FunctionBuilder<'a> {
         Ok(())
     }
 
-    /// In order to use a variable (by calling [`FunctionBuilder::use_var`]), you need
-    /// to first declare its type with this method.
+    /// Declares the type of a variable, panicking if it is already declared.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variable has already been declared.
     pub fn declare_var(&mut self, var: Variable, ty: Type) {
         self.try_declare_var(var, ty)
             .unwrap_or_else(|_| panic!("the variable {:?} has been declared multiple times", var))
+    }
+
+    /// Declare that all uses of the given variable must be included in stack
+    /// map metadata.
+    ///
+    /// All values that are uses of this variable will be spilled to the stack
+    /// before each safepoint and their location on the stack included in stack
+    /// maps. Stack maps allow the garbage collector to identify the on-stack GC
+    /// roots.
+    ///
+    /// This does not affect any pre-existing uses of the variable.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variable's type is larger than 16 bytes or if this
+    /// variable has not been declared yet.
+    pub fn declare_var_needs_stack_map(&mut self, var: Variable) {
+        let ty = self.func_ctx.types[var];
+        assert!(ty != types::INVALID);
+        assert!(ty.bytes() <= 16);
+        self.func_ctx.stack_map_vars.insert(var);
     }
 
     /// Returns the Cranelift IR necessary to use a previously defined user
@@ -426,6 +459,13 @@ impl<'a> FunctionBuilder<'a> {
                 .use_var(self.func, var, ty, self.position.unwrap())
         };
         self.handle_ssa_side_effects(side_effects);
+
+        // If the variable was declared as needing stack maps, then propagate
+        // that requirement to all values derived from using the variable.
+        if self.func_ctx.stack_map_vars.contains(var) {
+            self.declare_value_needs_stack_map(val);
+        }
+
         Ok(val)
     }
 
@@ -513,13 +553,13 @@ impl<'a> FunctionBuilder<'a> {
     /// # Panics
     ///
     /// Panics if `val` is larger than 16 bytes.
-    pub fn declare_needs_stack_map(&mut self, val: Value) {
+    pub fn declare_value_needs_stack_map(&mut self, val: Value) {
         // We rely on these properties in `insert_safepoint_spills`.
         let size = self.func.dfg.value_type(val).bytes();
         assert!(size <= 16);
         assert!(size.is_power_of_two());
 
-        self.func_ctx.needs_stack_map.insert(val);
+        self.func_ctx.stack_map_values.insert(val);
     }
 
     /// Creates a jump table in the function, to be used by [`br_table`](InstBuilder::br_table) instructions.
@@ -648,9 +688,40 @@ impl<'a> FunctionBuilder<'a> {
     /// (currently this is just non-tail calls).
     ///
     /// Second, take those results, add stack slots so we have a place to spill
-    /// to, and then finally spill the live needs-stack-map values at each
-    /// safepoint.
+    /// to.
+    ///
+    /// Third, and finally, we spill the live needs-stack-map values at each
+    /// safepoint into those stack slots.
     fn insert_safepoint_spills(&mut self) {
+        // Find all the GC values that are live across each safepoint.
+        let (safepoints, max_vals_in_stack_map_by_log2_size) =
+            self.find_live_stack_map_values_at_each_safepoint();
+
+        // Create the stack slots to spill them into.
+        let stack_slots = self.create_safepoint_slots(max_vals_in_stack_map_by_log2_size);
+
+        // Insert spills to our new stack slots before each safepoint
+        // instruction.
+        self.insert_safepoint_spills_to_stack_slots(safepoints, stack_slots);
+    }
+
+    /// Find the live GC references for each safepoint instruction in this
+    /// function.
+    ///
+    /// Returns a pair of
+    ///
+    /// 1. A map from each safepoint instruction to the set of GC references
+    ///    that are live across it
+    ///
+    /// 2. The maximum number of values we need to store in a stack map at the
+    ///    same time, bucketed by their type's size. This array is indexed by
+    ///    the log2 of the type's size.
+    fn find_live_stack_map_values_at_each_safepoint(
+        &mut self,
+    ) -> (
+        crate::HashMap<ir::Inst, SmallVec<[ir::Value; 4]>>,
+        [usize; LOG2_SIZE_CAPACITY],
+    ) {
         // A map from each safepoint to the set of GC references that are live
         // across it.
         let mut safepoints: crate::HashMap<ir::Inst, SmallVec<[ir::Value; 4]>> =
@@ -660,7 +731,6 @@ impl<'a> FunctionBuilder<'a> {
         // same time, bucketed by their type's size. This array is indexed by
         // the log2 of the type's size. We do not support recording values whose
         // size is greater than 16 in stack maps.
-        const LOG2_SIZE_CAPACITY: usize = (16u8.ilog2() as usize) + 1;
         let mut max_vals_in_stack_map_by_log2_size = [0; LOG2_SIZE_CAPACITY];
 
         // The set of needs-stack-maps values that are currently live in our
@@ -738,7 +808,8 @@ impl<'a> FunctionBuilder<'a> {
                 // instruction to the live set. This includes branch arguments,
                 // as mentioned above.
                 for val in self.func.dfg.inst_values(inst) {
-                    if self.func_ctx.needs_stack_map.contains(val) {
+                    let val = self.func.dfg.resolve_aliases(val);
+                    if self.func_ctx.stack_map_values.contains(val) {
                         live.insert(val);
                     }
                 }
@@ -753,17 +824,26 @@ impl<'a> FunctionBuilder<'a> {
             }
         }
 
-        // Create a stack slot for each size of needs-stack-map value. These
-        // slots are arrays capable of holding the maximum number of same-sized
-        // values that must appear in the same stack map at the same time.
-        //
-        // This is indexed by the log2 of the type size.
+        (safepoints, max_vals_in_stack_map_by_log2_size)
+    }
+
+    /// Create a stack slot for each size of needs-stack-map value.
+    ///
+    /// These slots are arrays capable of holding the maximum number of
+    /// same-sized values that must appear in the same stack map at the same
+    /// time.
+    ///
+    /// The resulting array of stack slots is indexed by the log2 of the type
+    /// size.
+    fn create_safepoint_slots(
+        &mut self,
+        max_vals_in_stack_map_by_log2_size: [usize; LOG2_SIZE_CAPACITY],
+    ) -> [PackedOption<ir::StackSlot>; LOG2_SIZE_CAPACITY] {
         let mut stack_slots = [PackedOption::<ir::StackSlot>::default(); LOG2_SIZE_CAPACITY];
         for (log2_size, capacity) in max_vals_in_stack_map_by_log2_size.into_iter().enumerate() {
             if capacity == 0 {
                 continue;
             }
-
             let size = 1usize << log2_size;
             let slot = self.func.create_sized_stack_slot(ir::StackSlotData::new(
                 ir::StackSlotKind::ExplicitSlot,
@@ -772,9 +852,16 @@ impl<'a> FunctionBuilder<'a> {
             ));
             stack_slots[log2_size] = Some(slot).into();
         }
+        stack_slots
+    }
 
-        // Insert spills to our new stack slots before each safepoint
-        // instruction.
+    /// Insert spills to the given stack slots before each safepoint
+    /// instruction.
+    fn insert_safepoint_spills_to_stack_slots(
+        &mut self,
+        safepoints: crate::HashMap<ir::Inst, SmallVec<[ir::Value; 4]>>,
+        stack_slots: [PackedOption<ir::StackSlot>; LOG2_SIZE_CAPACITY],
+    ) {
         let mut cursor = FuncCursor::new(self.func);
         for (inst, live_vals) in safepoints {
             cursor = cursor.at_inst(inst);
@@ -844,7 +931,7 @@ impl<'a> FunctionBuilder<'a> {
             }
         }
 
-        if !self.func_ctx.needs_stack_map.is_empty() {
+        if !self.func_ctx.stack_map_values.is_empty() {
             self.insert_safepoint_spills();
         }
 
@@ -2110,8 +2197,8 @@ block0:
         builder.append_block_params_for_function_params(block0);
         let a = builder.func.dfg.block_params(block0)[0];
         let b = builder.func.dfg.block_params(block0)[1];
-        builder.declare_needs_stack_map(a);
-        builder.declare_needs_stack_map(b);
+        builder.declare_value_needs_stack_map(a);
+        builder.declare_value_needs_stack_map(b);
         builder.switch_to_block(block0);
         builder.ins().call(func_ref, &[a]);
         builder.ins().jump(block0, &[a, b]);
@@ -2182,13 +2269,13 @@ block0(v0: i32, v1: i32):
         builder.append_block_params_for_function_params(block0);
         builder.switch_to_block(block0);
         let v0 = builder.ins().iconst(ir::types::I32, 0);
-        builder.declare_needs_stack_map(v0);
+        builder.declare_value_needs_stack_map(v0);
         let v1 = builder.ins().iconst(ir::types::I32, 1);
-        builder.declare_needs_stack_map(v1);
+        builder.declare_value_needs_stack_map(v1);
         let v2 = builder.ins().iconst(ir::types::I32, 2);
-        builder.declare_needs_stack_map(v2);
+        builder.declare_value_needs_stack_map(v2);
         let v3 = builder.ins().iconst(ir::types::I32, 3);
-        builder.declare_needs_stack_map(v3);
+        builder.declare_value_needs_stack_map(v3);
         builder.ins().call(func_ref, &[v0]);
         builder.ins().call(func_ref, &[v0]);
         builder.ins().call(func_ref, &[v1]);
@@ -2286,7 +2373,7 @@ block0:
 
         builder.switch_to_block(block1);
         let v1 = builder.ins().iconst(ir::types::I64, 0x12345678);
-        builder.declare_needs_stack_map(v1);
+        builder.declare_value_needs_stack_map(v1);
         builder.ins().jump(block3, &[]);
 
         builder.switch_to_block(block2);
@@ -2380,7 +2467,7 @@ block3:
         builder.switch_to_block(block0);
         let v0 = builder.func.dfg.block_params(block0)[0];
         let v1 = builder.ins().iconst(ir::types::I64, 0x12345678);
-        builder.declare_needs_stack_map(v1);
+        builder.declare_value_needs_stack_map(v1);
         builder.ins().brif(v0, block1, &[], block2, &[]);
 
         builder.switch_to_block(block1);
@@ -2457,7 +2544,7 @@ block2:
         builder.switch_to_block(block0);
         let v0 = builder.func.dfg.block_params(block0)[0];
         let v1 = builder.ins().iconst(ir::types::I64, 0x12345678);
-        builder.declare_needs_stack_map(v1);
+        builder.declare_value_needs_stack_map(v1);
         builder.ins().brif(v0, block1, &[], block2, &[]);
 
         builder.switch_to_block(block1);
@@ -2544,7 +2631,7 @@ block2:
         builder.switch_to_block(block0);
         let v0 = builder.func.dfg.block_params(block0)[0];
         let v1 = builder.ins().iconst(ir::types::I64, 0x12345678);
-        builder.declare_needs_stack_map(v1);
+        builder.declare_value_needs_stack_map(v1);
         builder.ins().brif(v0, block1, &[], block2, &[]);
 
         builder.switch_to_block(block1);
@@ -2619,7 +2706,7 @@ block2:
         builder.switch_to_block(block0);
         let v0 = builder.func.dfg.block_params(block0)[0];
         let v1 = builder.ins().iconst(ir::types::I64, 0x12345678);
-        builder.declare_needs_stack_map(v1);
+        builder.declare_value_needs_stack_map(v1);
         builder.ins().brif(v0, block1, &[], block2, &[]);
 
         builder.switch_to_block(block1);
@@ -2713,17 +2800,17 @@ block2:
 
         builder.switch_to_block(block1);
         let v1 = builder.ins().iconst(ir::types::I64, 1);
-        builder.declare_needs_stack_map(v1);
+        builder.declare_value_needs_stack_map(v1);
         let v2 = builder.ins().iconst(ir::types::I64, 2);
-        builder.declare_needs_stack_map(v2);
+        builder.declare_value_needs_stack_map(v2);
         builder.ins().call(func_ref, &[]);
         builder.ins().jump(block3, &[v1, v2]);
 
         builder.switch_to_block(block2);
         let v3 = builder.ins().iconst(ir::types::I64, 3);
-        builder.declare_needs_stack_map(v3);
+        builder.declare_value_needs_stack_map(v3);
         let v4 = builder.ins().iconst(ir::types::I64, 4);
-        builder.declare_needs_stack_map(v4);
+        builder.declare_value_needs_stack_map(v4);
         builder.ins().call(func_ref, &[]);
         builder.ins().jump(block3, &[v3, v3]);
 
@@ -2826,7 +2913,7 @@ block3:
         builder.switch_to_block(block0);
         let params = builder.func.dfg.block_params(block0).to_vec();
         for val in &params {
-            builder.declare_needs_stack_map(*val);
+            builder.declare_value_needs_stack_map(*val);
         }
         builder.ins().call(func_ref, &[]);
         builder.ins().return_(&params);
@@ -2859,6 +2946,71 @@ block0(v0: i8, v1: i16, v2: i32, v3: i64, v4: i128, v5: f32, v6: f64, v7: i8x16,
     stack_store v8, ss4+32
     call fn0(), stack_map=[i8 @ ss0+0, i16 @ ss1+0, i32 @ ss2+0, f32 @ ss2+4, i64 @ ss3+0, f64 @ ss3+8, i128 @ ss4+0, i8x16 @ ss4+16, i16x8 @ ss4+32]
     return v0, v1, v2, v3, v4, v5, v6, v7, v8
+}
+            "#
+            .trim()
+        );
+    }
+
+    #[test]
+    fn var_needs_stack_map() {
+        let mut sig = Signature::new(CallConv::SystemV);
+        sig.params
+            .push(AbiParam::new(cranelift_codegen::ir::types::I32));
+        sig.returns
+            .push(AbiParam::new(cranelift_codegen::ir::types::I32));
+
+        let mut fn_ctx = FunctionBuilderContext::new();
+        let mut func = Function::with_name_signature(UserFuncName::testcase("sample"), sig);
+        let mut builder = FunctionBuilder::new(&mut func, &mut fn_ctx);
+
+        let var = Variable::from_u32(0);
+        builder.declare_var(var, cranelift_codegen::ir::types::I32);
+        builder.declare_var_needs_stack_map(var);
+
+        let name = builder
+            .func
+            .declare_imported_user_function(ir::UserExternalName {
+                namespace: 0,
+                index: 0,
+            });
+        let signature = builder
+            .func
+            .import_signature(Signature::new(CallConv::SystemV));
+        let func_ref = builder.import_function(ir::ExtFuncData {
+            name: ir::ExternalName::user(name),
+            signature,
+            colocated: true,
+        });
+
+        let block0 = builder.create_block();
+        builder.append_block_params_for_function_params(block0);
+        builder.switch_to_block(block0);
+
+        let arg = builder.func.dfg.block_params(block0)[0];
+        builder.def_var(var, arg);
+
+        builder.ins().call(func_ref, &[]);
+
+        let val = builder.use_var(var);
+        builder.ins().return_(&[val]);
+
+        builder.seal_all_blocks();
+        builder.finalize();
+
+        eprintln!("Actual = {}", func.display());
+        assert_eq!(
+            func.display().to_string().trim(),
+            r#"
+function %sample(i32) -> i32 system_v {
+    ss0 = explicit_slot 4, align = 4
+    sig0 = () system_v
+    fn0 = colocated u0:0 sig0
+
+block0(v0: i32):
+    stack_store v0, ss0
+    call fn0(), stack_map=[i32 @ ss0+0]
+    return v0
 }
             "#
             .trim()

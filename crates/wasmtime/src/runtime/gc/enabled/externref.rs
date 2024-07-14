@@ -5,7 +5,7 @@ use crate::runtime::vm::VMGcRef;
 use crate::{
     store::{AutoAssertNoGc, StoreOpaque},
     AsContextMut, GcHeapOutOfMemory, GcRefImpl, GcRootIndex, HeapType, ManuallyRooted, RefType,
-    Result, RootSet, Rooted, StoreContext, StoreContextMut, ValRaw, ValType, WasmTy,
+    Result, Rooted, StoreContext, StoreContextMut, ValRaw, ValType, WasmTy,
 };
 use core::any::Any;
 use core::mem;
@@ -108,7 +108,7 @@ use core::mem::MaybeUninit;
 #[derive(Debug, Clone)]
 #[repr(transparent)]
 pub struct ExternRef {
-    inner: GcRootIndex,
+    pub(crate) inner: GcRootIndex,
 }
 
 unsafe impl GcRefImpl for ExternRef {
@@ -280,7 +280,7 @@ impl ExternRef {
         gc_ref: VMGcRef,
     ) -> Rooted<Self> {
         assert!(
-            gc_ref.is_extern_ref(),
+            gc_ref.is_extern_ref(&*store.unwrap_gc_store().gc_heap),
             "GC reference {gc_ref:#p} is not an externref"
         );
         Rooted::new(store, gc_ref)
@@ -319,7 +319,7 @@ impl ExternRef {
         T: 'a,
     {
         let store = store.into().0;
-        let gc_ref = self.inner.unchecked_try_gc_ref(&store)?;
+        let gc_ref = self.inner.try_gc_ref(&store)?;
         let externref = gc_ref.as_externref_unchecked();
         Ok(store.gc_store()?.externref_host_data(externref))
     }
@@ -359,7 +359,10 @@ impl ExternRef {
         T: 'a,
     {
         let store = store.into().0;
-        let gc_ref = self.inner.unchecked_try_gc_ref(store)?.unchecked_copy();
+        // NB: need to do an unchecked copy to release the borrow on the store
+        // so that we can get the store's GC store. But importantly we cannot
+        // trigger a GC while we are working with `gc_ref` here.
+        let gc_ref = self.inner.try_gc_ref(store)?.unchecked_copy();
         let externref = gc_ref.as_externref_unchecked();
         Ok(store.gc_store_mut()?.externref_host_data_mut(externref))
     }
@@ -394,9 +397,14 @@ impl ExternRef {
     /// [`ValRaw`]: crate::ValRaw
     pub unsafe fn from_raw(mut store: impl AsContextMut, raw: u32) -> Option<Rooted<ExternRef>> {
         let mut store = AutoAssertNoGc::new(store.as_context_mut().0);
+        Self::_from_raw(&mut store, raw)
+    }
+
+    // (Not actually memory unsafe since we have indexed GC heaps.)
+    pub(crate) fn _from_raw(store: &mut AutoAssertNoGc, raw: u32) -> Option<Rooted<ExternRef>> {
         let gc_ref = VMGcRef::from_raw_u32(raw)?;
         let gc_ref = store.unwrap_gc_store_mut().clone_gc_ref(&gc_ref);
-        Some(Self::from_cloned_gc_ref(&mut store, gc_ref))
+        Some(Self::from_cloned_gc_ref(store, gc_ref))
     }
 
     /// Converts this [`ExternRef`] to a raw value suitable to store within a
@@ -413,7 +421,11 @@ impl ExternRef {
     /// [`ValRaw`]: crate::ValRaw
     pub unsafe fn to_raw(&self, mut store: impl AsContextMut) -> Result<u32> {
         let mut store = AutoAssertNoGc::new(store.as_context_mut().0);
-        let gc_ref = self.inner.try_clone_gc_ref(&mut store)?;
+        self._to_raw(&mut store)
+    }
+
+    pub(crate) fn _to_raw(&self, store: &mut AutoAssertNoGc) -> Result<u32> {
+        let gc_ref = self.inner.try_clone_gc_ref(store)?;
         let raw = gc_ref.as_raw_u32();
         store.unwrap_gc_store_mut().expose_gc_ref_to_wasm(gc_ref);
         Ok(raw)
@@ -437,23 +449,11 @@ unsafe impl WasmTy for Rooted<ExternRef> {
     }
 
     fn store(self, store: &mut AutoAssertNoGc<'_>, ptr: &mut MaybeUninit<ValRaw>) -> Result<()> {
-        let gc_ref = self.inner.try_clone_gc_ref(store)?;
-        let r64 = gc_ref.as_r64();
-        store.gc_store_mut()?.expose_gc_ref_to_wasm(gc_ref);
-        debug_assert_ne!(r64, 0);
-        let externref = u32::try_from(r64).unwrap();
-        ptr.write(ValRaw::externref(externref));
-        Ok(())
+        self.wasm_ty_store(store, ptr, ValRaw::externref)
     }
 
     unsafe fn load(store: &mut AutoAssertNoGc<'_>, ptr: &ValRaw) -> Self {
-        let raw = ptr.get_externref();
-        debug_assert_ne!(raw, 0);
-        let gc_ref = VMGcRef::from_r64(raw.into())
-            .expect("valid r64")
-            .expect("non-null");
-        let gc_ref = store.unwrap_gc_store_mut().clone_gc_ref(&gc_ref);
-        ExternRef::from_cloned_gc_ref(store, gc_ref)
+        Self::wasm_ty_load(store, ptr.get_externref(), ExternRef::from_cloned_gc_ref)
     }
 }
 
@@ -479,19 +479,15 @@ unsafe impl WasmTy for Option<Rooted<ExternRef>> {
     }
 
     fn store(self, store: &mut AutoAssertNoGc<'_>, ptr: &mut MaybeUninit<ValRaw>) -> Result<()> {
-        match self {
-            Some(r) => r.store(store, ptr),
-            None => {
-                ptr.write(ValRaw::externref(0));
-                Ok(())
-            }
-        }
+        <Rooted<ExternRef>>::wasm_ty_option_store(self, store, ptr, ValRaw::externref)
     }
 
     unsafe fn load(store: &mut AutoAssertNoGc<'_>, ptr: &ValRaw) -> Self {
-        let gc_ref = VMGcRef::from_r64(ptr.get_externref().into()).expect("valid r64")?;
-        let gc_ref = store.unwrap_gc_store_mut().clone_gc_ref(&gc_ref);
-        Some(ExternRef::from_cloned_gc_ref(store, gc_ref))
+        <Rooted<ExternRef>>::wasm_ty_option_load(
+            store,
+            ptr.get_externref(),
+            ExternRef::from_cloned_gc_ref,
+        )
     }
 }
 
@@ -517,28 +513,11 @@ unsafe impl WasmTy for ManuallyRooted<ExternRef> {
     }
 
     fn store(self, store: &mut AutoAssertNoGc<'_>, ptr: &mut MaybeUninit<ValRaw>) -> Result<()> {
-        let gc_ref = self.inner.try_clone_gc_ref(store)?;
-        let r64 = gc_ref.as_r64();
-        store.gc_store_mut()?.expose_gc_ref_to_wasm(gc_ref);
-        debug_assert_ne!(r64, 0);
-        let externref = u32::try_from(r64).unwrap();
-        ptr.write(ValRaw::externref(externref));
-        Ok(())
+        self.wasm_ty_store(store, ptr, ValRaw::externref)
     }
 
     unsafe fn load(store: &mut AutoAssertNoGc<'_>, ptr: &ValRaw) -> Self {
-        let raw = ptr.get_externref();
-        debug_assert_ne!(raw, 0);
-        let gc_ref = VMGcRef::from_r64(raw.into())
-            .expect("valid r64")
-            .expect("non-null");
-        let gc_ref = store.unwrap_gc_store_mut().clone_gc_ref(&gc_ref);
-        RootSet::with_lifo_scope(store, |store| {
-            let rooted = ExternRef::from_cloned_gc_ref(store, gc_ref);
-            rooted
-                ._to_manually_rooted(store)
-                .expect("rooted is in scope")
-        })
+        Self::wasm_ty_load(store, ptr.get_externref(), ExternRef::from_cloned_gc_ref)
     }
 }
 
@@ -565,27 +544,14 @@ unsafe impl WasmTy for Option<ManuallyRooted<ExternRef>> {
     }
 
     fn store(self, store: &mut AutoAssertNoGc<'_>, ptr: &mut MaybeUninit<ValRaw>) -> Result<()> {
-        match self {
-            Some(r) => r.store(store, ptr),
-            None => {
-                ptr.write(ValRaw::externref(0));
-                Ok(())
-            }
-        }
+        <ManuallyRooted<ExternRef>>::wasm_ty_option_store(self, store, ptr, ValRaw::externref)
     }
 
     unsafe fn load(store: &mut AutoAssertNoGc<'_>, ptr: &ValRaw) -> Self {
-        let raw = ptr.get_externref();
-        debug_assert_ne!(raw, 0);
-        let gc_ref = VMGcRef::from_r64(raw.into()).expect("valid r64")?;
-        let gc_ref = store.unwrap_gc_store_mut().clone_gc_ref(&gc_ref);
-        RootSet::with_lifo_scope(store, |store| {
-            let rooted = ExternRef::from_cloned_gc_ref(store, gc_ref);
-            Some(
-                rooted
-                    ._to_manually_rooted(store)
-                    .expect("rooted is in scope"),
-            )
-        })
+        <ManuallyRooted<ExternRef>>::wasm_ty_option_load(
+            store,
+            ptr.get_externref(),
+            ExternRef::from_cloned_gc_ref,
+        )
     }
 }

@@ -260,6 +260,8 @@ wasmtime_option_group! {
         pub memory64: Option<bool>,
         /// Configure support for the component-model proposal.
         pub component_model: Option<bool>,
+        /// Configure support for 33+ flags in the component model.
+        pub component_model_more_flags: Option<bool>,
         /// Configure support for the function-references proposal.
         pub function_references: Option<bool>,
         /// Configure support for the exceptions proposal.
@@ -268,6 +270,8 @@ wasmtime_option_group! {
         pub typed_continuations: Option<bool>,
         /// Configure support for the GC proposal.
         pub gc: Option<bool>,
+        /// Configure support for the custom-page-sizes proposal.
+        pub custom_page_sizes: Option<bool>,
     }
 
     enum Wasm {
@@ -681,6 +685,9 @@ impl CommonOptions {
         if let Some(enable) = self.wasm.typed_continuations {
             config.wasm_typed_continuations(enable);
         }
+        if let Some(enable) = self.wasm.custom_page_sizes.or(all) {
+            config.wasm_custom_page_sizes(enable);
+        }
 
         macro_rules! handle_conditionally_compiled {
             ($(($feature:tt, $field:tt, $method:tt))*) => ($(
@@ -697,6 +704,7 @@ impl CommonOptions {
 
         handle_conditionally_compiled! {
             ("component-model", component_model, wasm_component_model)
+            ("component-model", component_model_more_flags, wasm_component_model_more_flags)
             ("threads", threads, wasm_threads)
             ("gc", gc, wasm_gc)
             ("gc", reference_types, wasm_reference_types)
