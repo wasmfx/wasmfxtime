@@ -7,7 +7,7 @@ use crate::{
     prelude::*,
     store::{AutoAssertNoGc, StoreContextMut, StoreOpaque},
     AsContext, AsContextMut, GcHeapOutOfMemory, GcRefImpl, GcRootIndex, HeapType, ManuallyRooted,
-    RefType, RootSet, Rooted, StructType, Val, ValRaw, ValType, WasmTy,
+    RefType, Rooted, StructType, Val, ValRaw, ValType, WasmTy,
 };
 use crate::{AnyRef, FieldType};
 use core::mem::{self, MaybeUninit};
@@ -534,7 +534,7 @@ impl StructRef {
     }
 
     pub(crate) fn type_index(&self, store: &StoreOpaque) -> Result<VMSharedTypeIndex> {
-        let gc_ref = self.inner.unchecked_try_gc_ref(store)?;
+        let gc_ref = self.inner.try_gc_ref(store)?;
         let header = store.gc_store()?.header(gc_ref);
         debug_assert!(header.kind().matches(VMGcKind::StructRef));
         Ok(header.ty().expect("structrefs should have concrete types"))
@@ -595,23 +595,11 @@ unsafe impl WasmTy for Rooted<StructRef> {
     }
 
     fn store(self, store: &mut AutoAssertNoGc<'_>, ptr: &mut MaybeUninit<ValRaw>) -> Result<()> {
-        let gc_ref = self.inner.try_clone_gc_ref(store)?;
-        let r64 = gc_ref.as_r64();
-        store.gc_store_mut()?.expose_gc_ref_to_wasm(gc_ref);
-        debug_assert_ne!(r64, 0);
-        let anyref = u32::try_from(r64).unwrap();
-        ptr.write(ValRaw::anyref(anyref));
-        Ok(())
+        self.wasm_ty_store(store, ptr, ValRaw::anyref)
     }
 
     unsafe fn load(store: &mut AutoAssertNoGc<'_>, ptr: &ValRaw) -> Self {
-        let raw = ptr.get_anyref();
-        debug_assert_ne!(raw, 0);
-        let gc_ref = VMGcRef::from_r64(raw.into())
-            .expect("valid r64")
-            .expect("non-null");
-        let gc_ref = store.unwrap_gc_store_mut().clone_gc_ref(&gc_ref);
-        StructRef::from_cloned_gc_ref(store, gc_ref)
+        Self::wasm_ty_load(store, ptr.get_anyref(), StructRef::from_cloned_gc_ref)
     }
 }
 
@@ -651,19 +639,15 @@ unsafe impl WasmTy for Option<Rooted<StructRef>> {
     }
 
     fn store(self, store: &mut AutoAssertNoGc<'_>, ptr: &mut MaybeUninit<ValRaw>) -> Result<()> {
-        match self {
-            Some(r) => r.store(store, ptr),
-            None => {
-                ptr.write(ValRaw::anyref(0));
-                Ok(())
-            }
-        }
+        <Rooted<StructRef>>::wasm_ty_option_store(self, store, ptr, ValRaw::anyref)
     }
 
     unsafe fn load(store: &mut AutoAssertNoGc<'_>, ptr: &ValRaw) -> Self {
-        let gc_ref = VMGcRef::from_r64(ptr.get_anyref().into()).expect("valid r64")?;
-        let gc_ref = store.unwrap_gc_store_mut().clone_gc_ref(&gc_ref);
-        Some(StructRef::from_cloned_gc_ref(store, gc_ref))
+        <Rooted<StructRef>>::wasm_ty_option_load(
+            store,
+            ptr.get_anyref(),
+            StructRef::from_cloned_gc_ref,
+        )
     }
 }
 
@@ -708,28 +692,11 @@ unsafe impl WasmTy for ManuallyRooted<StructRef> {
     }
 
     fn store(self, store: &mut AutoAssertNoGc<'_>, ptr: &mut MaybeUninit<ValRaw>) -> Result<()> {
-        let gc_ref = self.inner.try_clone_gc_ref(store)?;
-        let r64 = gc_ref.as_r64();
-        store.gc_store_mut()?.expose_gc_ref_to_wasm(gc_ref);
-        debug_assert_ne!(r64, 0);
-        let anyref = u32::try_from(r64).unwrap();
-        ptr.write(ValRaw::anyref(anyref));
-        Ok(())
+        self.wasm_ty_store(store, ptr, ValRaw::anyref)
     }
 
     unsafe fn load(store: &mut AutoAssertNoGc<'_>, ptr: &ValRaw) -> Self {
-        let raw = ptr.get_anyref();
-        debug_assert_ne!(raw, 0);
-        let gc_ref = VMGcRef::from_r64(raw.into())
-            .expect("valid r64")
-            .expect("non-null");
-        let gc_ref = store.unwrap_gc_store_mut().clone_gc_ref(&gc_ref);
-        RootSet::with_lifo_scope(store, |store| {
-            let rooted = StructRef::from_cloned_gc_ref(store, gc_ref);
-            rooted
-                ._to_manually_rooted(store)
-                .expect("rooted is in scope")
-        })
+        Self::wasm_ty_load(store, ptr.get_anyref(), StructRef::from_cloned_gc_ref)
     }
 }
 
@@ -772,27 +739,14 @@ unsafe impl WasmTy for Option<ManuallyRooted<StructRef>> {
     }
 
     fn store(self, store: &mut AutoAssertNoGc<'_>, ptr: &mut MaybeUninit<ValRaw>) -> Result<()> {
-        match self {
-            Some(r) => r.store(store, ptr),
-            None => {
-                ptr.write(ValRaw::anyref(0));
-                Ok(())
-            }
-        }
+        <ManuallyRooted<StructRef>>::wasm_ty_option_store(self, store, ptr, ValRaw::anyref)
     }
 
     unsafe fn load(store: &mut AutoAssertNoGc<'_>, ptr: &ValRaw) -> Self {
-        let raw = ptr.get_anyref();
-        debug_assert_ne!(raw, 0);
-        let gc_ref = VMGcRef::from_r64(raw.into()).expect("valid r64")?;
-        let gc_ref = store.unwrap_gc_store_mut().clone_gc_ref(&gc_ref);
-        RootSet::with_lifo_scope(store, |store| {
-            let rooted = StructRef::from_cloned_gc_ref(store, gc_ref);
-            Some(
-                rooted
-                    ._to_manually_rooted(store)
-                    .expect("rooted is in scope"),
-            )
-        })
+        <ManuallyRooted<StructRef>>::wasm_ty_option_load(
+            store,
+            ptr.get_anyref(),
+            StructRef::from_cloned_gc_ref,
+        )
     }
 }
