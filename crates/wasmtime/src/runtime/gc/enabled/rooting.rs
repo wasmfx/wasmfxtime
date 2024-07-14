@@ -417,7 +417,7 @@ impl RootSet {
     ///
     /// Calls to `{enter,exit}_lifo_scope` must happen in a strict LIFO order.
     #[inline]
-    pub(crate) fn exit_lifo_scope(&mut self, gc_store: &mut GcStore, scope: usize) {
+    pub(crate) fn exit_lifo_scope(&mut self, gc_store: Option<&mut GcStore>, scope: usize) {
         debug_assert!(self.lifo_roots.len() >= scope);
 
         // If we actually have roots to unroot, call an out-of-line slow path.
@@ -428,7 +428,7 @@ impl RootSet {
 
     #[inline(never)]
     #[cold]
-    fn exit_lifo_scope_slow(&mut self, gc_store: &mut GcStore, scope: usize) {
+    fn exit_lifo_scope_slow(&mut self, mut gc_store: Option<&mut GcStore>, scope: usize) {
         self.lifo_generation += 1;
 
         // TODO: In the case where we have a tracing GC that doesn't need to
@@ -438,7 +438,13 @@ impl RootSet {
 
         let mut lifo_roots = mem::take(&mut self.lifo_roots);
         for root in lifo_roots.drain(scope..) {
-            gc_store.drop_gc_ref(root.gc_ref);
+            // Only drop the GC reference if we actually have a GC store. How
+            // can we have a GC reference but not a GC store? If we've only
+            // create `i31refs`, we never force a GC store's allocation. This is
+            // fine because `i31ref`s never need drop barriers.
+            if let Some(gc_store) = &mut gc_store {
+                gc_store.drop_gc_ref(root.gc_ref);
+            }
         }
         self.lifo_roots = lifo_roots;
     }
@@ -725,6 +731,24 @@ impl<T: GcRef> Rooted<T> {
         }
     }
 
+    /// Create a new `Rooted<T>` from a `GcRootIndex`.
+    ///
+    /// Note that `Rooted::from_gc_root_index(my_rooted.index)` is not
+    /// necessarily an identity funciton, as it allows changing the `T` type
+    /// parameter.
+    ///
+    /// The given index should be a LIFO index of a GC reference pointing to an
+    /// instance of the GC type that `T` represents. Failure to uphold this
+    /// invariant is memory safe but will result in general incorrectness such
+    /// as panics and wrong results.
+    pub(crate) fn from_gc_root_index(inner: GcRootIndex) -> Rooted<T> {
+        debug_assert!(inner.index.is_lifo());
+        Rooted {
+            inner,
+            _phantom: marker::PhantomData,
+        }
+    }
+
     #[inline]
     pub(crate) fn comes_from_same_store(&self, store: &StoreOpaque) -> bool {
         debug_assert!(self.inner.index.is_lifo());
@@ -918,6 +942,15 @@ impl<T: GcRef> Rooted<T> {
         let gc_ref = self.try_gc_ref(store.as_context().0)?;
         gc_ref.hash(state);
         Ok(())
+    }
+
+    /// Cast `self` to a `Rooted<U>`.
+    ///
+    /// It is the caller's responsibility to ensure that `self` is actually a
+    /// `U`. Failure to uphold this invariant will be memory safe but will
+    /// result in general incorrectness such as panics and wrong results.
+    pub(crate) fn unchecked_cast<U: GcRef>(self) -> Rooted<U> {
+        Rooted::from_gc_root_index(self.inner)
     }
 }
 
@@ -1553,6 +1586,20 @@ where
             },
             _phantom: marker::PhantomData,
         }
+    }
+
+    /// Cast `self` to a `ManuallyRooted<U>`.
+    ///
+    /// It is the caller's responsibility to ensure that `self` is actually a
+    /// `U`. Failure to uphold this invariant will be memory safe but will
+    /// result in general incorrectness such as panics and wrong results.
+    pub(crate) fn unchecked_cast<U: GcRef>(self) -> ManuallyRooted<U> {
+        let u = ManuallyRooted {
+            inner: self.inner,
+            _phantom: core::marker::PhantomData,
+        };
+        core::mem::forget(self);
+        u
     }
 }
 

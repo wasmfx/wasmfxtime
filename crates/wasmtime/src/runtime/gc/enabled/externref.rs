@@ -108,7 +108,7 @@ use core::mem::MaybeUninit;
 #[derive(Debug, Clone)]
 #[repr(transparent)]
 pub struct ExternRef {
-    inner: GcRootIndex,
+    pub(crate) inner: GcRootIndex,
 }
 
 unsafe impl GcRefImpl for ExternRef {
@@ -280,7 +280,7 @@ impl ExternRef {
         gc_ref: VMGcRef,
     ) -> Rooted<Self> {
         assert!(
-            gc_ref.is_extern_ref(),
+            gc_ref.is_extern_ref(&*store.unwrap_gc_store().gc_heap),
             "GC reference {gc_ref:#p} is not an externref"
         );
         Rooted::new(store, gc_ref)
@@ -394,9 +394,14 @@ impl ExternRef {
     /// [`ValRaw`]: crate::ValRaw
     pub unsafe fn from_raw(mut store: impl AsContextMut, raw: u32) -> Option<Rooted<ExternRef>> {
         let mut store = AutoAssertNoGc::new(store.as_context_mut().0);
+        Self::_from_raw(&mut store, raw)
+    }
+
+    // (Not actually memory unsafe since we have indexed GC heaps.)
+    pub(crate) fn _from_raw(store: &mut AutoAssertNoGc, raw: u32) -> Option<Rooted<ExternRef>> {
         let gc_ref = VMGcRef::from_raw_u32(raw)?;
         let gc_ref = store.unwrap_gc_store_mut().clone_gc_ref(&gc_ref);
-        Some(Self::from_cloned_gc_ref(&mut store, gc_ref))
+        Some(Self::from_cloned_gc_ref(store, gc_ref))
     }
 
     /// Converts this [`ExternRef`] to a raw value suitable to store within a
@@ -413,7 +418,11 @@ impl ExternRef {
     /// [`ValRaw`]: crate::ValRaw
     pub unsafe fn to_raw(&self, mut store: impl AsContextMut) -> Result<u32> {
         let mut store = AutoAssertNoGc::new(store.as_context_mut().0);
-        let gc_ref = self.inner.try_clone_gc_ref(&mut store)?;
+        self._to_raw(&mut store)
+    }
+
+    pub(crate) fn _to_raw(&self, store: &mut AutoAssertNoGc) -> Result<u32> {
+        let gc_ref = self.inner.try_clone_gc_ref(store)?;
         let raw = gc_ref.as_raw_u32();
         store.unwrap_gc_store_mut().expose_gc_ref_to_wasm(gc_ref);
         Ok(raw)

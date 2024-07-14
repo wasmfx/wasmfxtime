@@ -203,6 +203,7 @@ struct WasmFeatures {
     typed_continuations: bool,
     gc: bool,
     custom_page_sizes: bool,
+    component_model_more_flags: bool,
 }
 
 impl Metadata<'_> {
@@ -229,6 +230,7 @@ impl Metadata<'_> {
             shared_everything_threads,
             component_model_values,
             component_model_nested_names,
+            component_model_more_flags,
 
             // Always on; we don't currently have knobs for these.
             mutable_global: _,
@@ -267,6 +269,7 @@ impl Metadata<'_> {
                 typed_continuations,
                 gc,
                 custom_page_sizes,
+                component_model_more_flags,
             },
         }
     }
@@ -473,6 +476,7 @@ impl Metadata<'_> {
             typed_continuations,
             gc,
             custom_page_sizes,
+            component_model_more_flags,
         } = self.features;
 
         use wasmparser::WasmFeatures as F;
@@ -558,6 +562,11 @@ impl Metadata<'_> {
             custom_page_sizes,
             other.contains(F::CUSTOM_PAGE_SIZES),
             "WebAssembly custom-page-sizes support",
+        )?;
+        Self::check_bool(
+            component_model_more_flags,
+            other.contains(F::COMPONENT_MODEL_MORE_FLAGS),
+            "WebAssembly component model support for more than 32 flags",
         )?;
 
         Ok(())

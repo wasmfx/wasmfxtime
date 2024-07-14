@@ -1,8 +1,9 @@
-use crate::prelude::*;
+use crate::type_registry::RegisteredType;
 use crate::{linker::DefinitionType, Engine, FuncType};
+use crate::{prelude::*, ArrayType, StructType};
 use wasmtime_environ::{
-    EntityType, Global, Memory, ModuleTypes, Table, TypeTrace, VMSharedTypeIndex,
-    WasmCompositeType, WasmFieldType, WasmHeapType, WasmRefType, WasmSubType, WasmValType,
+    EntityType, Global, Memory, ModuleTypes, Table, TypeTrace, VMSharedTypeIndex, WasmHeapType,
+    WasmRefType, WasmSubType, WasmValType,
 };
 
 pub struct MatchCx<'a> {
@@ -19,14 +20,28 @@ impl MatchCx<'_> {
         // Avoid matching on structure for subtyping checks when we have
         // precisely the same type.
         let matches = expected == actual || {
-            let expected = FuncType::from_shared_type_index(self.engine, expected);
-            let actual = FuncType::from_shared_type_index(self.engine, actual);
-            actual.matches(&expected)
+            let expected = RegisteredType::root(self.engine, expected).unwrap();
+            let actual = RegisteredType::root(self.engine, actual).unwrap();
+            if expected.is_array() && actual.is_array() {
+                let expected = ArrayType::from_registered_type(expected);
+                let actual = ArrayType::from_registered_type(actual);
+                actual.matches(&expected)
+            } else if expected.is_func() && actual.is_func() {
+                let expected = FuncType::from_registered_type(expected);
+                let actual = FuncType::from_registered_type(actual);
+                actual.matches(&expected)
+            } else if expected.is_struct() && actual.is_struct() {
+                let expected = StructType::from_registered_type(expected);
+                let actual = StructType::from_registered_type(actual);
+                actual.matches(&expected)
+            } else {
+                false
+            }
         };
         if matches {
             return Ok(());
         }
-        let msg = "function types incompatible";
+        let msg = "types incompatible";
         let expected = match self.engine.signatures().borrow(expected) {
             Some(ty) => ty,
             None => panic!("{expected:?} is not registered"),
@@ -114,63 +129,7 @@ fn concrete_type_mismatch(
     expected: &WasmSubType,
     actual: &WasmSubType,
 ) -> anyhow::Error {
-    let render_field = |ty: &WasmFieldType| {
-        if ty.mutable {
-            format!("(mut {})", ty.element_type)
-        } else {
-            ty.element_type.to_string()
-        }
-    };
-
-    let render = |ty: &WasmSubType| match &ty.composite_type {
-        WasmCompositeType::Array(ty) => {
-            format!("(array {})", render_field(&ty.0))
-        }
-        WasmCompositeType::Func(ty) => {
-            let params = if ty.params().is_empty() {
-                String::new()
-            } else {
-                format!(
-                    " (param {})",
-                    ty.params()
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )
-            };
-            let returns = if ty.returns().is_empty() {
-                String::new()
-            } else {
-                format!(
-                    " (result {})",
-                    ty.returns()
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )
-            };
-            format!("(func{params}{returns})")
-        }
-        WasmCompositeType::Cont(c) => {
-            format!("(cont {:?}", c)
-        }
-        WasmCompositeType::Struct(ty) => {
-            let mut s = "(struct".to_string();
-            for f in ty.fields.iter() {
-                s.push_str(&format!(" {}", render_field(f)));
-            }
-            s.push(')');
-            s
-        }
-    };
-
-    anyhow!(
-        "{msg}: expected type `{}`, found type `{}`",
-        render(expected),
-        render(actual)
-    )
+    anyhow!("{msg}: expected type `{expected}`, found type `{actual}`")
 }
 
 fn global_ty(expected: &Global, actual: &Global) -> Result<()> {

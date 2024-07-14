@@ -279,7 +279,9 @@ fn run_wast(wast: &Path, strategy: Strategy, pooling: bool) -> anyhow::Result<()
         cfg.cranelift_debug_verifier(true);
     }
 
-    cfg.wasm_component_model(feature_found(wast, "component-model"));
+    let component_model = feature_found(wast, "component-model");
+    cfg.wasm_component_model(component_model)
+        .wasm_component_model_more_flags(component_model);
 
     if feature_found(wast, "canonicalize-nan") && is_cranelift {
         cfg.cranelift_nan_canonicalization(true);
@@ -317,8 +319,10 @@ fn run_wast(wast: &Path, strategy: Strategy, pooling: bool) -> anyhow::Result<()
             cfg.static_memory_maximum_size(0);
         }
         cfg.dynamic_memory_reserved_for_growth(0);
-        cfg.static_memory_guard_size(0);
-        cfg.dynamic_memory_guard_size(0);
+
+        let small_guard = 64 * 1024;
+        cfg.static_memory_guard_size(small_guard);
+        cfg.dynamic_memory_guard_size(small_guard);
     }
 
     let _pooling_lock = if pooling {
