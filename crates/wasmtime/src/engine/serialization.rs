@@ -204,6 +204,7 @@ struct WasmFeatures {
     gc: bool,
     custom_page_sizes: bool,
     component_model_more_flags: bool,
+    component_model_multiple_returns: bool,
 }
 
 impl Metadata<'_> {
@@ -231,6 +232,8 @@ impl Metadata<'_> {
             component_model_values,
             component_model_nested_names,
             component_model_more_flags,
+            component_model_multiple_returns,
+            legacy_exceptions,
 
             // Always on; we don't currently have knobs for these.
             mutable_global: _,
@@ -246,6 +249,7 @@ impl Metadata<'_> {
         assert!(!component_model_values);
         assert!(!component_model_nested_names);
         assert!(!shared_everything_threads);
+        assert!(!legacy_exceptions);
 
         Metadata {
             target: engine.compiler().triple().to_string(),
@@ -270,6 +274,7 @@ impl Metadata<'_> {
                 gc,
                 custom_page_sizes,
                 component_model_more_flags,
+                component_model_multiple_returns,
             },
         }
     }
@@ -477,6 +482,7 @@ impl Metadata<'_> {
             gc,
             custom_page_sizes,
             component_model_more_flags,
+            component_model_multiple_returns,
         } = self.features;
 
         use wasmparser::WasmFeatures as F;
@@ -567,6 +573,11 @@ impl Metadata<'_> {
             component_model_more_flags,
             other.contains(F::COMPONENT_MODEL_MORE_FLAGS),
             "WebAssembly component model support for more than 32 flags",
+        )?;
+        Self::check_bool(
+            component_model_multiple_returns,
+            other.contains(F::COMPONENT_MODEL_MULTIPLE_RETURNS),
+            "WebAssembly component model support for multiple returns",
         )?;
 
         Ok(())
