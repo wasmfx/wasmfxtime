@@ -768,6 +768,9 @@ fn parse_float(s: &str, w: u8, t: u8) -> Result<u128, &'static str> {
 impl Ieee16 {
     const SIGNIFICAND_BITS: u8 = 10;
     const EXPONENT_BITS: u8 = 5;
+    const SIGN_MASK: u16 = 1 << (Self::EXPONENT_BITS + Self::SIGNIFICAND_BITS);
+    const SIGNIFICAND_MASK: u16 = u16::MAX >> (Self::EXPONENT_BITS + 1);
+    const EXPONENT_MASK: u16 = !Self::SIGN_MASK & !Self::SIGNIFICAND_MASK;
 
     /// Create a new `Ieee16` containing the bits of `x`.
     pub fn with_bits(x: u16) -> Self {
@@ -779,6 +782,16 @@ impl Ieee16 {
         self.0
     }
 
+    /// Computes the absolute value of self.
+    pub fn abs(self) -> Self {
+        Self::with_bits(self.bits() & !Self::SIGN_MASK)
+    }
+
+    /// Returns a number composed of the magnitude of self and the sign of sign.
+    pub fn copysign(self, sign: Self) -> Self {
+        Self::with_bits((self.bits() & !Self::SIGN_MASK) | (sign.bits() & Self::SIGN_MASK))
+    }
+
     /// Returns true if self is positive or negative zero
     pub fn is_zero(&self) -> bool {
         self.partial_cmp(&Self::with_bits(0)) == Some(Ordering::Equal)
@@ -788,14 +801,12 @@ impl Ieee16 {
 impl PartialOrd for Ieee16 {
     fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
         // FIXME(#8312): Use Rust `f16` comparisons once `f16` support is stabalised.
-        let significand_mask = u16::MAX >> (Self::EXPONENT_BITS + 1);
-        let sign_mask = 1 << (Self::EXPONENT_BITS + Self::SIGNIFICAND_BITS);
-        let exponent_mask = !sign_mask & !significand_mask;
-
-        let lhs_abs = self.bits() & !sign_mask;
-        let rhs_abs = rhs.bits() & !sign_mask;
-        if (lhs_abs & exponent_mask == exponent_mask && lhs_abs & significand_mask != 0)
-            && (rhs_abs & exponent_mask == exponent_mask && rhs_abs & significand_mask != 0)
+        let lhs_abs = self.bits() & !Self::SIGN_MASK;
+        let rhs_abs = rhs.bits() & !Self::SIGN_MASK;
+        if (lhs_abs & Self::EXPONENT_MASK == Self::EXPONENT_MASK
+            && lhs_abs & Self::SIGNIFICAND_MASK != 0)
+            && (rhs_abs & Self::EXPONENT_MASK == Self::EXPONENT_MASK
+                && rhs_abs & Self::SIGNIFICAND_MASK != 0)
         {
             // One of the floats is a NaN.
             return None;
@@ -804,8 +815,8 @@ impl PartialOrd for Ieee16 {
             // Zeros are always equal regardless of sign.
             return Some(Ordering::Equal);
         }
-        let lhs_positive = self.bits() & sign_mask == 0;
-        let rhs_positive = rhs.bits() & sign_mask == 0;
+        let lhs_positive = self.bits() & Self::SIGN_MASK == 0;
+        let rhs_positive = rhs.bits() & Self::SIGN_MASK == 0;
         if lhs_positive != rhs_positive {
             // Different signs: negative < positive
             return lhs_positive.partial_cmp(&rhs_positive);
@@ -840,6 +851,20 @@ impl FromStr for Ieee16 {
             Ok(b) => Ok(Self(b as u16)),
             Err(s) => Err(s),
         }
+    }
+}
+
+impl IntoBytes for Ieee16 {
+    fn into_bytes(self) -> Vec<u8> {
+        self.bits().to_le_bytes().to_vec()
+    }
+}
+
+impl Neg for Ieee16 {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Self::with_bits(self.bits() ^ Self::SIGN_MASK)
     }
 }
 
@@ -890,6 +915,11 @@ impl Ieee32 {
         self.as_f32().is_nan()
     }
 
+    /// Returns `None` if `self` is a NaN and `Some(self)` otherwise.
+    pub fn non_nan(self) -> Option<Self> {
+        Some(self).filter(|f| !f.is_nan())
+    }
+
     /// Converts Self to a rust f32
     pub fn as_f32(self) -> f32 {
         f32::from_bits(self.0)
@@ -902,17 +932,21 @@ impl Ieee32 {
 
     /// Computes the absolute value of self.
     pub fn abs(self) -> Self {
-        Self::with_float(self.as_f32().abs())
+        Self(self.0 & !(1u32 << 31))
     }
 
     /// Returns a number composed of the magnitude of self and the sign of sign.
     pub fn copysign(self, sign: Self) -> Self {
-        Self::with_float(self.as_f32().copysign(sign.as_f32()))
+        if self.is_negative() == sign.is_negative() {
+            self
+        } else {
+            self.neg()
+        }
     }
 
     /// Returns true if self has a negative sign, including -0.0, NaNs with negative sign bit and negative infinity.
     pub fn is_negative(&self) -> bool {
-        self.as_f32().is_sign_negative()
+        self.0 & (1 << 31) != 0
     }
 
     /// Returns true if self is positive or negative zero
@@ -938,17 +972,7 @@ impl Ieee32 {
     /// Returns the nearest integer to `self`. Rounds half-way cases to the number
     /// with an even least significant digit.
     pub fn round_ties_even(self) -> Self {
-        // TODO: Replace with the native implementation once
-        // https://github.com/rust-lang/rust/issues/96710 is stabilized
-        let toint_32: f32 = 1.0 / f32::EPSILON;
-
-        let f = self.as_f32();
-        let e = self.0 >> 23 & 0xff;
-        if e >= 0x7f_u32 + 23 {
-            self
-        } else {
-            Self::with_float((f.abs() + toint_32 - toint_32).copysign(f))
-        }
+        Self::with_float(self.as_f32().round_ties_even())
     }
 }
 
@@ -992,7 +1016,7 @@ impl Neg for Ieee32 {
     type Output = Ieee32;
 
     fn neg(self) -> Self::Output {
-        Self::with_float(self.as_f32().neg())
+        Self(self.0 ^ (1 << 31))
     }
 }
 
@@ -1108,6 +1132,11 @@ impl Ieee64 {
         self.as_f64().is_nan()
     }
 
+    /// Returns `None` if `self` is a NaN and `Some(self)` otherwise.
+    pub fn non_nan(self) -> Option<Self> {
+        Some(self).filter(|f| !f.is_nan())
+    }
+
     /// Converts Self to a rust f64
     pub fn as_f64(self) -> f64 {
         f64::from_bits(self.0)
@@ -1120,17 +1149,21 @@ impl Ieee64 {
 
     /// Computes the absolute value of self.
     pub fn abs(self) -> Self {
-        Self::with_float(self.as_f64().abs())
+        Self(self.0 & !(1u64 << 63))
     }
 
     /// Returns a number composed of the magnitude of self and the sign of sign.
     pub fn copysign(self, sign: Self) -> Self {
-        Self::with_float(self.as_f64().copysign(sign.as_f64()))
+        if self.is_negative() == sign.is_negative() {
+            self
+        } else {
+            self.neg()
+        }
     }
 
     /// Returns true if self has a negative sign, including -0.0, NaNs with negative sign bit and negative infinity.
     pub fn is_negative(&self) -> bool {
-        self.as_f64().is_sign_negative()
+        self.0 & (1 << 63) != 0
     }
 
     /// Returns true if self is positive or negative zero
@@ -1156,17 +1189,7 @@ impl Ieee64 {
     /// Returns the nearest integer to `self`. Rounds half-way cases to the number
     /// with an even least significant digit.
     pub fn round_ties_even(self) -> Self {
-        // TODO: Replace with the native implementation once
-        // https://github.com/rust-lang/rust/issues/96710 is stabilized
-        let toint_64: f64 = 1.0 / f64::EPSILON;
-
-        let f = self.as_f64();
-        let e = self.0 >> 52 & 0x7ff_u64;
-        if e >= 0x3ff_u64 + 52 {
-            self
-        } else {
-            Self::with_float((f.abs() + toint_64 - toint_64).copysign(f))
-        }
+        Self::with_float(self.as_f64().round_ties_even())
     }
 }
 
@@ -1216,7 +1239,7 @@ impl Neg for Ieee64 {
     type Output = Ieee64;
 
     fn neg(self) -> Self::Output {
-        Self::with_float(self.as_f64().neg())
+        Self(self.0 ^ (1 << 63))
     }
 }
 
@@ -1287,6 +1310,9 @@ impl Not for Ieee64 {
 impl Ieee128 {
     const SIGNIFICAND_BITS: u8 = 112;
     const EXPONENT_BITS: u8 = 15;
+    const SIGN_MASK: u128 = 1 << (Self::EXPONENT_BITS + Self::SIGNIFICAND_BITS);
+    const SIGNIFICAND_MASK: u128 = u128::MAX >> (Self::EXPONENT_BITS + 1);
+    const EXPONENT_MASK: u128 = !Self::SIGN_MASK & !Self::SIGNIFICAND_MASK;
 
     /// Create a new `Ieee128` containing the bits of `x`.
     pub fn with_bits(x: u128) -> Self {
@@ -1298,6 +1324,16 @@ impl Ieee128 {
         self.0
     }
 
+    /// Computes the absolute value of self.
+    pub fn abs(self) -> Self {
+        Self::with_bits(self.bits() & !Self::SIGN_MASK)
+    }
+
+    /// Returns a number composed of the magnitude of self and the sign of sign.
+    pub fn copysign(self, sign: Self) -> Self {
+        Self::with_bits((self.bits() & !Self::SIGN_MASK) | (sign.bits() & Self::SIGN_MASK))
+    }
+
     /// Returns true if self is positive or negative zero
     pub fn is_zero(&self) -> bool {
         self.partial_cmp(&Self::with_bits(0)) == Some(Ordering::Equal)
@@ -1307,14 +1343,12 @@ impl Ieee128 {
 impl PartialOrd for Ieee128 {
     fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
         // FIXME(#8312): Use Rust `f128` comparisons once `f128` support is stabalised.
-        let significand_mask = u128::MAX >> (Self::EXPONENT_BITS + 1);
-        let sign_mask = 1 << (Self::EXPONENT_BITS + Self::SIGNIFICAND_BITS);
-        let exponent_mask = !sign_mask & !significand_mask;
-
-        let lhs_abs = self.bits() & !sign_mask;
-        let rhs_abs = rhs.bits() & !sign_mask;
-        if (lhs_abs & exponent_mask == exponent_mask && lhs_abs & significand_mask != 0)
-            && (rhs_abs & exponent_mask == exponent_mask && rhs_abs & significand_mask != 0)
+        let lhs_abs = self.bits() & !Self::SIGN_MASK;
+        let rhs_abs = rhs.bits() & !Self::SIGN_MASK;
+        if (lhs_abs & Self::EXPONENT_MASK == Self::EXPONENT_MASK
+            && lhs_abs & Self::SIGNIFICAND_MASK != 0)
+            && (rhs_abs & Self::EXPONENT_MASK == Self::EXPONENT_MASK
+                && rhs_abs & Self::SIGNIFICAND_MASK != 0)
         {
             // One of the floats is a NaN.
             return None;
@@ -1323,8 +1357,8 @@ impl PartialOrd for Ieee128 {
             // Zeros are always equal regardless of sign.
             return Some(Ordering::Equal);
         }
-        let lhs_positive = self.bits() & sign_mask == 0;
-        let rhs_positive = rhs.bits() & sign_mask == 0;
+        let lhs_positive = self.bits() & Self::SIGN_MASK == 0;
+        let rhs_positive = rhs.bits() & Self::SIGN_MASK == 0;
         if lhs_positive != rhs_positive {
             // Different signs: negative < positive
             return lhs_positive.partial_cmp(&rhs_positive);
@@ -1354,6 +1388,20 @@ impl FromStr for Ieee128 {
             Ok(b) => Ok(Self(b)),
             Err(s) => Err(s),
         }
+    }
+}
+
+impl IntoBytes for Ieee128 {
+    fn into_bytes(self) -> Vec<u8> {
+        self.bits().to_le_bytes().to_vec()
+    }
+}
+
+impl Neg for Ieee128 {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Self::with_bits(self.bits() ^ Self::SIGN_MASK)
     }
 }
 
