@@ -115,7 +115,7 @@ The following module implements a generator and consumer using stack switching.
 ```
 
 See
-[examples/generator.wat](https://github.com/frank-emrich/wasmtime/blob/main/examples/generator.wat)
+[examples/generator.wat](https://github.com/wasmfx/wasmfxtime/blob/main/examples/generator.wat)
 for the full version of the file, including the definition of `$println_u32`.
 
 Running the full version with 
