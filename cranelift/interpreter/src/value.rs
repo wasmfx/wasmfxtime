@@ -4,6 +4,7 @@
 #![allow(trivial_numeric_casts)]
 
 use core::fmt::{self, Display, Formatter};
+use core::ops::Neg;
 use cranelift_codegen::data_value::{DataValue, DataValueCastFailure};
 use cranelift_codegen::ir::immediates::{Ieee128, Ieee16, Ieee32, Ieee64};
 use cranelift_codegen::ir::{types, Type};
@@ -800,12 +801,11 @@ impl DataValueExt for DataValue {
             DataValue::I128(a) => DataValue::I128(!a),
             DataValue::F32(a) => DataValue::F32(!a),
             DataValue::F64(a) => DataValue::F64(!a),
-            DataValue::V128(a) => {
-                let mut a2 = a.clone();
-                for a in a2.iter_mut() {
-                    *a = !*a;
+            DataValue::V128(mut a) => {
+                for byte in a.iter_mut() {
+                    *byte = !*byte;
                 }
-                DataValue::V128(a2)
+                DataValue::V128(a)
             }
             _ => unimplemented!(),
         })

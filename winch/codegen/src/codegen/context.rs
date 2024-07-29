@@ -2,7 +2,7 @@ use wasmtime_environ::{VMOffsets, WasmHeapType, WasmValType};
 
 use super::ControlStackFrame;
 use crate::{
-    abi::{vmctx, ABIOperand, ABIResults, RetArea, ABI},
+    abi::{scratch, vmctx, ABIOperand, ABIResults, RetArea},
     frame::Frame,
     isa::reg::RegClass,
     masm::{MacroAssembler, OperandSize, RegImm, SPOffset, ShiftKind, StackSlot},
@@ -70,11 +70,12 @@ impl<'a> CodeGenContext<'a> {
         match ty {
             I32 | I64 => self.reg_for_class(RegClass::Int, masm),
             F32 | F64 => self.reg_for_class(RegClass::Float, masm),
+            // All of our supported architectures use the float registers for vector operations.
+            V128 => self.reg_for_class(RegClass::Float, masm),
             Ref(rt) => match rt.heap_type {
                 WasmHeapType::Func => self.reg_for_class(RegClass::Int, masm),
                 ht => unimplemented!("Support for WasmHeapType: {ht}"),
             },
-            t => unimplemented!("Support for WasmType: {t}"),
         }
     }
 
@@ -173,7 +174,8 @@ impl<'a> CodeGenContext<'a> {
     /// Pops the value stack top and stores it at the specified address.
     pub fn pop_to_addr<M: MacroAssembler>(&mut self, masm: &mut M, addr: M::Address) {
         let val = self.stack.pop().expect("a value at stack top");
-        let size: OperandSize = val.ty().into();
+        let ty = val.ty();
+        let size: OperandSize = ty.into();
         match val {
             Val::Reg(tr) => {
                 masm.store(tr.reg.into(), addr, size);
@@ -183,15 +185,16 @@ impl<'a> CodeGenContext<'a> {
             Val::I64(v) => masm.store(RegImm::i64(v), addr, size),
             Val::F32(v) => masm.store(RegImm::f32(v.bits()), addr, size),
             Val::F64(v) => masm.store(RegImm::f64(v.bits()), addr, size),
+            Val::V128(v) => masm.store(RegImm::v128(v), addr, size),
             Val::Local(local) => {
                 let slot = self.frame.get_wasm_local(local.index);
-                let scratch = <M::ABI as ABI>::scratch_reg();
+                let scratch = scratch!(M);
                 let local_addr = masm.local_address(&slot);
                 masm.load(local_addr, scratch, size);
                 masm.store(scratch.into(), addr, size);
             }
             Val::Memory(_) => {
-                let scratch = <M::ABI as ABI>::scratch_reg();
+                let scratch = scratch!(M, &ty);
                 masm.pop(scratch, size);
                 masm.store(scratch.into(), addr, size);
             }
@@ -207,6 +210,7 @@ impl<'a> CodeGenContext<'a> {
             Val::I64(imm) => masm.mov(RegImm::i64(*imm), dst, size),
             Val::F32(imm) => masm.mov(RegImm::f32(imm.bits()), dst, size),
             Val::F64(imm) => masm.mov(RegImm::f64(imm.bits()), dst, size),
+            Val::V128(imm) => masm.mov(RegImm::v128(*imm), dst, size),
             Val::Local(local) => {
                 let slot = self.frame.get_wasm_local(local.index);
                 let addr = masm.local_address(&slot);
@@ -576,7 +580,7 @@ impl<'a> CodeGenContext<'a> {
             Val::Local(local) => {
                 let slot = frame.get_wasm_local(local.index);
                 let addr = masm.local_address(&slot);
-                let scratch = <M::ABI as ABI>::scratch_for(&slot.ty);
+                let scratch = scratch!(M, &slot.ty);
                 masm.load(addr, scratch, slot.ty.into());
                 let stack_slot = masm.push(scratch, slot.ty.into());
                 *v = Val::mem(slot.ty, stack_slot);

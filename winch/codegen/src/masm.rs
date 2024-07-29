@@ -1,4 +1,4 @@
-use crate::abi::{self, align_to, LocalSlot};
+use crate::abi::{self, align_to, scratch, LocalSlot};
 use crate::codegen::{CodeGenContext, FuncEnv};
 use crate::isa::reg::Reg;
 use cranelift_codegen::{
@@ -252,6 +252,8 @@ pub(crate) enum Imm {
     F32(u32),
     /// F64 immediate.
     F64(u64),
+    /// V128 immediate.
+    V128(i128),
 }
 
 impl Imm {
@@ -273,6 +275,11 @@ impl Imm {
     /// Create a new F64 immediate.
     pub fn f64(bits: u64) -> Self {
         Self::F64(bits)
+    }
+
+    /// Create a new V128 immediate.
+    pub fn v128(bits: i128) -> Self {
+        Self::V128(bits)
     }
 
     /// Convert the immediate to i32, if possible.
@@ -417,6 +424,11 @@ impl RegImm {
     #[allow(dead_code)]
     pub fn f64(bits: u64) -> Self {
         RegImm::Imm(Imm::f64(bits))
+    }
+
+    /// V128 immediate.
+    pub fn v128(bits: i128) -> Self {
+        RegImm::Imm(Imm::v128(bits))
     }
 }
 
@@ -592,7 +604,7 @@ pub(crate) trait MacroAssembler {
         debug_assert!(bytes % 4 == 0);
         let mut remaining = bytes;
         let word_bytes = <Self::ABI as abi::ABI>::word_bytes();
-        let scratch = <Self::ABI as abi::ABI>::scratch_reg();
+        let scratch = scratch!(Self);
 
         let mut dst_offs = dst.as_u32() - bytes;
         let mut src_offs = src.as_u32() - bytes;
@@ -869,7 +881,7 @@ pub(crate) trait MacroAssembler {
             // Add an upper bound to this generation;
             // given a considerably large amount of slots
             // this will be inefficient.
-            let zero = <Self::ABI as abi::ABI>::scratch_reg();
+            let zero = scratch!(Self);
             self.zero(zero);
             let zero = RegImm::reg(zero);
 

@@ -197,6 +197,7 @@ jobs:
       audit: ${{ steps.calculate.outputs.audit }}
       preview1-adapter: ${{ steps.calculate.outputs.preview1-adapter }}
       run-dwarf: ${{ steps.calculate.outputs.run-dwarf }}
+      run-wasi-keyvalue: ${{ steps.calculate.outputs.run-wasi-keyvalue }}
     steps:
     - uses: actions/checkout@v4
     - id: calculate
@@ -241,6 +242,9 @@ jobs:
           if grep -q debug names.log; then
             echo run-dwarf=true >> $GITHUB_OUTPUT
           fi
+          if grep -q wasi-keyvalue names.log; then
+            echo run-wasi-keyvalue=true >> $GITHUB_OUTPUT
+          fi
         fi
         matrix="$(node ./ci/build-test-matrix.js ./commits.log ./names.log $run_full)"
         echo "test-matrix={\"include\":$(echo $matrix)}" >> $GITHUB_OUTPUT
@@ -256,6 +260,7 @@ jobs:
             echo audit=true >> $GITHUB_OUTPUT
             echo preview1-adapter=true >> $GITHUB_OUTPUT
             echo run-dwarf=true >> $GITHUB_OUTPUT
+            echo run-wasi-keyvalue=true >> $GITHUB_OUTPUT
         fi
 
   # Build all documentation of Wasmtime, including the C API documentation,
@@ -431,10 +436,10 @@ jobs:
     # Checks for no_std support, ensure that crates can build on a no_std
     # target
     # NOTE(dhil): Currently, we only support x86_64 Linux.
-    #- run: rustup target add x86_64-unknown-none
-    - run: cargo check -p wasmtime --no-default-features --features runtime,gc,component-model
-    #  env:
-    #    CARGO_BUILD_TARGET: x86_64-unknown-none
+    # - run: rustup target add x86_64-unknown-none
+    # - run: cargo check --target x86_64-unknown-none -p wasmtime --no-default-features --features runtime,gc,component-model
+    # - run: cargo check --target x86_64-unknown-none -p cranelift-control --no-default-features
+    # - run: cargo check --target x86_64-unknown-none -p pulley-interpreter --features encode,decode,disas,interp
 
     # Check that wasmtime compiles with panic=abort since there's some `#[cfg]`
     # for specifically panic=abort there.
@@ -599,7 +604,7 @@ jobs:
         toolchain: ${{ matrix.rust }}
 
     # Install targets in order to build various tests throughout the repo
-    - run: rustup target add wasm32-wasi wasm32-unknown-unknown ${{ matrix.target }}
+    - run: rustup target add wasm32-wasip1 wasm32-unknown-unknown ${{ matrix.target }}
     - run: echo CARGO_BUILD_TARGET=${{ matrix.target }} >> $GITHUB_ENV
       if: matrix.target != ''
 
@@ -616,22 +621,30 @@ jobs:
 
     - run: cargo fetch --locked
 
-    - uses: actions/cache@v4
-      with:
-        path: ${{ runner.tool_cache }}/qemu
-        key: qemu-${{ matrix.target }}-${{ env.QEMU_BUILD_VERSION }}-patchcpuinfo
-      if: matrix.target != '' && matrix.os == 'ubuntu-latest'
     - name: Install cross-compilation tools
       run: |
         set -ex
+
         sudo apt-get update
         sudo apt-get install -y ${{ matrix.gcc_package }} ninja-build
 
         # Configure Cargo for cross compilation and tell it how it can run
         # cross executables
         upcase=$(echo ${{ matrix.target }} | awk '{ print toupper($0) }' | sed 's/-/_/g')
-        echo CARGO_TARGET_${upcase}_RUNNER=${{ runner.tool_cache }}/qemu/bin/${{ matrix.qemu }} >> $GITHUB_ENV
         echo CARGO_TARGET_${upcase}_LINKER=${{ matrix.gcc }} >> $GITHUB_ENV
+      if: matrix.gcc != ''
+
+    - uses: actions/cache@v4
+      with:
+        path: ${{ runner.tool_cache }}/qemu
+        key: qemu-${{ matrix.target }}-${{ env.QEMU_BUILD_VERSION }}-patchcpuinfo
+      if: matrix.qemu != ''
+    - name: Install qemu
+      run: |
+        set -ex
+
+        upcase=$(echo ${{ matrix.target }} | awk '{ print toupper($0) }' | sed 's/-/_/g')
+        echo CARGO_TARGET_${upcase}_RUNNER=${{ runner.tool_cache }}/qemu/bin/${{ matrix.qemu }} >> $GITHUB_ENV
 
         # QEMU emulation is not always the speediest, so total testing time
         # goes down if we build the libs in release mode when running tests.
@@ -655,7 +668,7 @@ jobs:
         ./configure --target-list=${{ matrix.qemu_target }} --prefix=${{ runner.tool_cache}}/qemu --disable-tools --disable-slirp --disable-fdt --disable-capstone --disable-docs
         ninja -C build install
         touch ${{ runner.tool_cache }}/qemu/built
-      if: matrix.gcc != ''
+      if: matrix.qemu != ''
 
     # Record some CPU details; this is helpful information if tests fail due
     # to CPU-specific features.
@@ -735,10 +748,48 @@ jobs:
       if: (matrix.os == 'windows-latest') && (matrix.feature == 'winml')
 
     # Install Rust targets.
-    - run: rustup target add wasm32-wasi
+    - run: rustup target add wasm32-wasip1
 
     # Run the tests!
     - run: cargo test -p wasmtime-wasi-nn --features ${{ matrix.feature }}
+      env:
+        RUST_BACKTRACE: 1
+
+    # common logic to cancel the entire run if this job fails
+    - run: gh run cancel ${{ github.run_id }}
+      if: failure() && github.event_name != 'pull_request'
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+  # Test the `wasmtime-wasi-keyvalue` crate. Split out from the main tests
+  # because it needs additional database service.
+  test_wasi_keyvalue:
+    name: Test wasi-keyvalue
+    runs-on: ubuntu-latest
+    needs: determine
+    if: needs.determine.outputs.run-wasi-keyvalue
+    # Setup redis server
+    services:
+      redis:
+        # Docker Hub image
+        image: redis
+        # Set health checks to wait until redis has started
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          # Maps port 6379 on service container to the host
+          - 6379:6379
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - uses: ./.github/actions/install-rust
+    # Install Rust targets
+    - run: rustup target add wasm32-wasi
+    - run: cargo test --all-features -p wasmtime-wasi-keyvalue
       env:
         RUST_BACKTRACE: 1
 
@@ -785,7 +836,7 @@ jobs:
       with:
         submodules: true
     - uses: ./.github/actions/install-rust
-    - run: rustup target add wasm32-wasi wasm32-unknown-unknown
+    - run: rustup target add wasm32-wasip1 wasm32-unknown-unknown
     - run: |
         sudo apt-get update && sudo apt-get install -y gdb lldb-15 llvm
         # workaround for https://bugs.launchpad.net/ubuntu/+source/llvm-defaults/+bug/1972855
@@ -834,7 +885,7 @@ jobs:
       with:
         submodules: true
     - uses: ./.github/actions/install-rust
-    - run: rustup target add wasm32-wasi wasm32-unknown-unknown
+    - run: rustup target add wasm32-wasip1 wasm32-unknown-unknown
 
     - name: Install wasm-tools
       run: |
@@ -856,7 +907,7 @@ jobs:
       if: failure() && github.event_name != 'pull_request'
       env:
         GH_TOKEN: ${{ github.token }}
-  
+
   build-preview1-component-adapter-provider:
     name: Build wasi-preview1-component-adapter-provider
     needs: build-preview1-component-adapter
@@ -869,7 +920,7 @@ jobs:
     - uses: ./.github/actions/build-adapter-provider
       with:
         run-id: ${{ github.run_id }}
-    
+
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
@@ -921,8 +972,8 @@ jobs:
       with:
         submodules: true
     - uses: ./.github/actions/install-rust
-    - run: rustup target add wasm32-wasi wasm32-unknown-unknown
-    - run: cargo build --target wasm32-wasi --no-default-features --features compile,cranelift,all-arch
+    - run: rustup target add wasm32-wasip1 wasm32-unknown-unknown
+    - run: cargo build --target wasm32-wasip1 --no-default-features --features compile,cranelift,all-arch
       env:
         VERSION: ${{ github.sha }}
 
@@ -943,7 +994,7 @@ jobs:
       with:
         submodules: true
     - uses: ./.github/actions/install-rust
-    - run: rustup target add wasm32-wasi
+    - run: rustup target add wasm32-wasip1
     - run: cargo test --benches --release
 
     # common logic to cancel the entire run if this job fails
@@ -1010,7 +1061,11 @@ jobs:
   miri:
     strategy:
       matrix:
-        crate: ["wasmtime", "wasmtime-cli", "wasmtime-environ"]
+        crate:
+          - "wasmtime"
+          - "wasmtime-cli"
+          - "wasmtime-environ"
+          - "pulley-interpreter --all-features"
     needs: determine
     if: needs.determine.outputs.run-full && github.repository == 'bytecodealliance/wasmtime'
     name: Miri
