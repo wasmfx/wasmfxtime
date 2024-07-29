@@ -18,6 +18,7 @@ use std::time::Duration;
 // note that this list must be topologically sorted by dependencies
 const CRATES_TO_PUBLISH: &[&str] = &[
     // cranelift
+    "pulley-interpreter",
     "cranelift-bitset",
     "cranelift-isle",
     "cranelift-entity",
@@ -68,6 +69,7 @@ const CRATES_TO_PUBLISH: &[&str] = &[
     "wasmtime-wasi-http",
     "wasmtime-wasi-nn",
     "wasmtime-wasi-runtime-config",
+    "wasmtime-wasi-keyvalue",
     "wasmtime-wasi-threads",
     "wasmtime-wast",
     "wasmtime-c-api-macros",
@@ -88,6 +90,7 @@ const PUBLIC_CRATES: &[&str] = &[
     "wasmtime-wasi",
     "wasmtime-wasi-nn",
     "wasmtime-wasi-runtime-config",
+    "wasmtime-wasi-keyvalue",
     "wasmtime-wasi-threads",
     "wasmtime-cli",
     // all cranelift crates are considered "public" in that they can't
@@ -487,8 +490,17 @@ fn publish(krate: &Crate) -> bool {
 fn verify(crates: &[Crate]) {
     verify_capi();
 
-    drop(fs::remove_dir_all(".cargo"));
-    drop(fs::remove_dir_all("vendor"));
+    if Path::new(".cargo").exists() {
+        panic!(
+            "`.cargo` already exists on the file system, remove it and then run the script again"
+        );
+    }
+    if Path::new("vendor").exists() {
+        panic!(
+            "`vendor` already exists on the file system, remove it and then run the script again"
+        );
+    }
+
     let vendor = cmd_output(Command::new("cargo").arg("vendor").stderr(Stdio::inherit()));
     assert!(vendor.status.success());
 

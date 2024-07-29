@@ -570,7 +570,7 @@ pub fn make_api_calls(api: generators::api::ApiCalls) {
                 let funcs = instance
                     .exports(&mut *store)
                     .filter_map(|e| match e.into_extern() {
-                        Extern::Func(f) => Some(f.clone()),
+                        Extern::Func(f) => Some(f),
                         _ => None,
                     })
                     .collect::<Vec<_>>();
@@ -900,6 +900,9 @@ pub fn dynamic_component_api_target(input: &mut arbitrary::Unstructured) -> arbi
     };
 
     let mut config = component_test_util::config();
+    if case.results.len() > 1 {
+        config.wasm_component_model_multiple_returns(true);
+    }
     config.debug_adapter_modules(input.arbitrary()?);
     let engine = Engine::new(&config).unwrap();
     let mut store = Store::new(&engine, (Vec::new(), None));

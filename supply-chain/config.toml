@@ -79,6 +79,12 @@ audit-as-crates-io = true
 [policy.isle-fuzz]
 criteria = []
 
+[policy.pulley-interpreter]
+audit-as-crates-io = true
+
+[policy.pulley-interpreter-fuzz]
+criteria = []
+
 [policy.wasi-common]
 audit-as-crates-io = true
 
@@ -211,6 +217,10 @@ criteria = "safe-to-deploy"
 [[exemptions.cast]]
 version = "0.2.7"
 criteria = "safe-to-run"
+
+[[exemptions.combine]]
+version = "4.6.7"
+criteria = "safe-to-deploy"
 
 [[exemptions.console]]
 version = "0.15.0"
@@ -483,6 +493,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rand_xorshift]]
 version = "0.3.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.redis]]
+version = "0.25.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]

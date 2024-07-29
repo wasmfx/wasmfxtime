@@ -14,7 +14,7 @@ pub use crate::runtime::vm::ValRaw;
 ///
 /// Note that we inline the `enum Ref { ... }` variants into `enum Val { ... }`
 /// here as a size optimization.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Val {
     // NB: the ordering here is intended to match the ordering in
     // `ValType` to improve codegen when learning the type of a value.
@@ -166,9 +166,7 @@ impl Val {
             | (Val::F64(_), ValType::F64)
             | (Val::V128(_), ValType::V128) => true,
 
-            (Val::FuncRef(f), ValType::Ref(ref_ty)) => {
-                Ref::from(f.clone())._matches_ty(store, ref_ty)?
-            }
+            (Val::FuncRef(f), ValType::Ref(ref_ty)) => Ref::from(*f)._matches_ty(store, ref_ty)?,
             (Val::ExternRef(e), ValType::Ref(ref_ty)) => {
                 Ref::from(*e)._matches_ty(store, ref_ty)?
             }
@@ -968,10 +966,9 @@ mod tests {
             if cfg!(any(
                 target_arch = "x86_64",
                 target_arch = "aarch64",
-                target_arch = "riscv64"
+                target_arch = "riscv64",
+                target_arch = "s390x"
             )) {
-                32
-            } else if cfg!(target_arch = "s390x") {
                 24
             } else {
                 panic!("unsupported architecture")

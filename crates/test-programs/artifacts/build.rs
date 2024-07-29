@@ -30,7 +30,7 @@ fn build_and_generate_tests() {
     // Build the test programs:
     let mut cmd = cargo();
     cmd.arg("build")
-        .arg("--target=wasm32-wasi")
+        .arg("--target=wasm32-wasip1")
         .arg("--package=test-programs")
         .env("CARGO_TARGET_DIR", &out_dir)
         .env("CARGO_PROFILE_DEV_DEBUG", "2")
@@ -59,7 +59,7 @@ fn build_and_generate_tests() {
     for target in targets {
         let camel = target.to_shouty_snake_case();
         let wasm = out_dir
-            .join("wasm32-wasi")
+            .join("wasm32-wasip1")
             .join("debug")
             .join(format!("{target}.wasm"));
 
@@ -77,6 +77,7 @@ fn build_and_generate_tests() {
             s if s.starts_with("piped_") => "piped",
             s if s.starts_with("dwarf_") => "dwarf",
             s if s.starts_with("runtime_config_") => "runtime_config",
+            s if s.starts_with("keyvalue_") => "keyvalue",
             // If you're reading this because you hit this panic, either add it
             // to a test suite above or add a new "suite". The purpose of the
             // categorization above is to have a static assertion that tests
