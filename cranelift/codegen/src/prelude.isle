@@ -239,6 +239,10 @@
 
 ;; Floating point operations
 
+(decl pure partial f16_min (Ieee16 Ieee16) Ieee16)
+(extern constructor f16_min f16_min)
+(decl pure partial f16_max (Ieee16 Ieee16) Ieee16)
+(extern constructor f16_max f16_max)
 (decl pure f16_neg (Ieee16) Ieee16)
 (extern constructor f16_neg f16_neg)
 (decl pure f16_abs (Ieee16) Ieee16)
@@ -301,6 +305,10 @@
 (extern constructor f64_abs f64_abs)
 (decl pure f64_copysign (Ieee64 Ieee64) Ieee64)
 (extern constructor f64_copysign f64_copysign)
+(decl pure partial f128_min (Ieee128 Ieee128) Ieee128)
+(extern constructor f128_min f128_min)
+(decl pure partial f128_max (Ieee128 Ieee128) Ieee128)
+(extern constructor f128_max f128_max)
 (decl pure f128_neg (Ieee128) Ieee128)
 (extern constructor f128_neg f128_neg)
 (decl pure f128_abs (Ieee128) Ieee128)
@@ -622,7 +630,11 @@
 (decl pure imm64_masked (Type u64) Imm64)
 (extern constructor imm64_masked imm64_masked)
 
-;; Extract a `u64` from an `Ieee32`.
+;; Extract a `u16` from an `Ieee16`.
+(decl u16_from_ieee16 (u16) Ieee16)
+(extern extractor infallible u16_from_ieee16 u16_from_ieee16)
+
+;; Extract a `u32` from an `Ieee32`.
 (decl u32_from_ieee32 (u32) Ieee32)
 (extern extractor infallible u32_from_ieee32 u32_from_ieee32)
 

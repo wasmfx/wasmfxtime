@@ -74,19 +74,38 @@ impl Imm64 {
         self.0
     }
 
-    /// Sign extend this immediate as if it were a signed integer of the given
-    /// power-of-two width.
-    pub fn sign_extend_from_width(&mut self, bit_width: u32) {
+    /// Mask this immediate to the given power-of-two bit width.
+    #[must_use]
+    pub(crate) fn mask_to_width(&self, bit_width: u32) -> Self {
         debug_assert!(bit_width.is_power_of_two());
 
         if bit_width >= 64 {
-            return;
+            return *self;
+        }
+
+        let bit_width = i64::from(bit_width);
+        let mask = (1 << bit_width) - 1;
+        let masked = self.0 & mask;
+        Imm64(masked)
+    }
+
+    /// Sign extend this immediate as if it were a signed integer of the given
+    /// power-of-two width.
+    #[must_use]
+    pub(crate) fn sign_extend_from_width(&self, bit_width: u32) -> Self {
+        debug_assert!(
+            bit_width.is_power_of_two(),
+            "{bit_width} is not a power of two"
+        );
+
+        if bit_width >= 64 {
+            return *self;
         }
 
         let bit_width = i64::from(bit_width);
         let delta = 64 - bit_width;
         let sign_extended = (self.0 << delta) >> delta;
-        *self = Imm64(sign_extended);
+        Imm64(sign_extended)
     }
 }
 
@@ -111,8 +130,8 @@ impl From<i64> for Imm64 {
 impl Display for Imm64 {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let x = self.0;
-        if -10_000 < x && x < 10_000 {
-            // Use decimal for small numbers.
+        if x < 10_000 {
+            // Use decimal for small and negative numbers.
             write!(f, "{}", x)
         } else {
             write_hex(x as u64, f)
@@ -218,9 +237,9 @@ fn parse_u64(s: &str) -> Result<u64, &'static str> {
 
     if s.starts_with("-0x") {
         return Err("Invalid character in hexadecimal number");
-    } else if s.starts_with("0x") {
+    } else if let Some(num) = s.strip_prefix("0x") {
         // Hexadecimal.
-        for ch in s[2..].chars() {
+        for ch in num.chars() {
             match ch.to_digit(16) {
                 Some(digit) => {
                     digits += 1;
@@ -512,11 +531,13 @@ macro_rules! ieee_float {
             const SIGN_MASK: $bits_ty = 1 << (Self::EXPONENT_BITS + Self::SIGNIFICAND_BITS);
             const SIGNIFICAND_MASK: $bits_ty = $bits_ty::MAX >> (Self::EXPONENT_BITS + 1);
             const EXPONENT_MASK: $bits_ty = !Self::SIGN_MASK & !Self::SIGNIFICAND_MASK;
+            /// The positive WebAssembly canonical NaN.
+            pub const NAN: Self = Self::with_bits(Self::EXPONENT_MASK | (1 << (Self::SIGNIFICAND_BITS - 1)));
 
             /// Create a new
             #[doc = concat!("`", stringify!($name), "`")]
             /// containing the bits of `bits`.
-            pub fn with_bits(bits: $bits_ty) -> Self {
+            pub const fn with_bits(bits: $bits_ty) -> Self {
                 Self { bits }
             }
 
@@ -550,6 +571,42 @@ macro_rules! ieee_float {
                 Self::with_bits((self.bits() & !Self::SIGN_MASK) | (sign.bits() & Self::SIGN_MASK))
             }
 
+            /// Returns the minimum of `self` and `other`, following the WebAssembly/IEEE 754-2019 definition.
+            pub fn minimum(self, other: Self) -> Self {
+                // FIXME: Replace with Rust float method once it is stabilised.
+                if self.is_nan() || other.is_nan() {
+                    Self::NAN
+                } else if self.is_zero() && other.is_zero() {
+                    if self.is_negative() {
+                        self
+                    } else {
+                        other
+                    }
+                } else if self <= other {
+                    self
+                } else {
+                    other
+                }
+            }
+
+            /// Returns the maximum of `self` and `other`, following the WebAssembly/IEEE 754-2019 definition.
+            pub fn maximum(self, other: Self) -> Self {
+                // FIXME: Replace with Rust float method once it is stabilised.
+                if self.is_nan() || other.is_nan() {
+                    Self::NAN
+                } else if self.is_zero() && other.is_zero() {
+                    if self.is_positive() {
+                        self
+                    } else {
+                        other
+                    }
+                } else if self >= other {
+                    self
+                } else {
+                    other
+                }
+            }
+
             /// Create an
             #[doc = concat!("`", stringify!($name), "`")]
             /// number representing `2.0^n`.
@@ -581,6 +638,11 @@ macro_rules! ieee_float {
             /// this means checking that all the exponent bits are set and the significand is non-zero.
             pub fn is_nan(self) -> bool {
                 self.abs().bits() > Self::EXPONENT_MASK
+            }
+
+            /// Returns true if `self` has a negative sign, including 0.0, NaNs with positive sign bit and positive infinity.
+            pub fn is_positive(self) -> bool {
+                !self.is_negative()
             }
 
             /// Returns true if `self` has a negative sign, including -0.0, NaNs with negative sign bit and negative infinity.
@@ -641,8 +703,8 @@ macro_rules! ieee_float {
                         // Zeros are always equal regardless of sign.
                         return Some(Ordering::Equal);
                     }
-                    let lhs_positive = !self.is_negative();
-                    let rhs_positive = !rhs.is_negative();
+                    let lhs_positive = self.is_positive();
+                    let rhs_positive = rhs.is_positive();
                     if lhs_positive != rhs_positive {
                         // Different signs: negative < positive
                         return lhs_positive.partial_cmp(&rhs_positive);
@@ -891,10 +953,10 @@ fn parse_float(s: &str, w: u8, t: u8) -> Result<u128, &'static str> {
     debug_assert!(1 + w + t <= 128, "Too large IEEE format for u128");
     debug_assert!((t + w + 1).is_power_of_two(), "Unexpected IEEE format size");
 
-    let (sign_bit, s2) = if s.starts_with('-') {
-        (1u128 << (t + w), &s[1..])
-    } else if s.starts_with('+') {
-        (0, &s[1..])
+    let (sign_bit, s2) = if let Some(num) = s.strip_prefix('-') {
+        (1u128 << (t + w), num)
+    } else if let Some(num) = s.strip_prefix('+') {
+        (0, num)
     } else {
         (0, s)
     };
@@ -916,18 +978,18 @@ fn parse_float(s: &str, w: u8, t: u8) -> Result<u128, &'static str> {
             // Canonical quiet NaN: e = max, t = quiet.
             return Ok(sign_bit | max_e_bits | quiet_bit);
         }
-        if s2.starts_with("NaN:0x") {
+        if let Some(nan) = s2.strip_prefix("NaN:0x") {
             // Quiet NaN with payload.
-            return match u128::from_str_radix(&s2[6..], 16) {
+            return match u128::from_str_radix(nan, 16) {
                 Ok(payload) if payload < quiet_bit => {
                     Ok(sign_bit | max_e_bits | quiet_bit | payload)
                 }
                 _ => Err("Invalid NaN payload"),
             };
         }
-        if s2.starts_with("sNaN:0x") {
+        if let Some(nan) = s2.strip_prefix("sNaN:0x") {
             // Signaling NaN with payload.
-            return match u128::from_str_radix(&s2[7..], 16) {
+            return match u128::from_str_radix(nan, 16) {
                 Ok(payload) if 0 < payload && payload < quiet_bit => {
                     Ok(sign_bit | max_e_bits | payload)
                 }
@@ -1050,7 +1112,7 @@ mod tests {
         assert_eq!(Imm64(9999).to_string(), "9999");
         assert_eq!(Imm64(10000).to_string(), "0x2710");
         assert_eq!(Imm64(-9999).to_string(), "-9999");
-        assert_eq!(Imm64(-10000).to_string(), "0xffff_ffff_ffff_d8f0");
+        assert_eq!(Imm64(-10000).to_string(), "-10000");
         assert_eq!(Imm64(0xffff).to_string(), "0xffff");
         assert_eq!(Imm64(0x10000).to_string(), "0x0001_0000");
     }
@@ -1070,6 +1132,7 @@ mod tests {
     }
 
     // Verify that `text` can be parsed as a `T` into a value that displays as `want`.
+    #[track_caller]
     fn parse_ok<T: FromStr + Display>(text: &str, want: &str)
     where
         <T as FromStr>::Err: Display,
@@ -1103,11 +1166,11 @@ mod tests {
 
         // Probe limits.
         parse_ok::<Imm64>("0xffffffff_ffffffff", "-1");
-        parse_ok::<Imm64>("0x80000000_00000000", "0x8000_0000_0000_0000");
-        parse_ok::<Imm64>("-0x80000000_00000000", "0x8000_0000_0000_0000");
+        parse_ok::<Imm64>("0x80000000_00000000", "-9223372036854775808");
+        parse_ok::<Imm64>("-0x80000000_00000000", "-9223372036854775808");
         parse_err::<Imm64>("-0x80000000_00000001", "Negative number too small");
         parse_ok::<Imm64>("18446744073709551615", "-1");
-        parse_ok::<Imm64>("-9223372036854775808", "0x8000_0000_0000_0000");
+        parse_ok::<Imm64>("-9223372036854775808", "-9223372036854775808");
         // Overflow both the `checked_add` and `checked_mul`.
         parse_err::<Imm64>("18446744073709551616", "Too large decimal number");
         parse_err::<Imm64>("184467440737095516100", "Too large decimal number");
