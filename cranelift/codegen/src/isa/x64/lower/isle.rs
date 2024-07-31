@@ -65,7 +65,7 @@ pub(crate) fn lower_branch(
     // TODO: reuse the ISLE context across lowerings so we can reuse its
     // internal heap allocations.
     let mut isle_ctx = IsleContext { lower_ctx, backend };
-    generated_code::constructor_lower_branch(&mut isle_ctx, branch, &targets.to_vec())
+    generated_code::constructor_lower_branch(&mut isle_ctx, branch, &targets)
 }
 
 impl Context for IsleContext<'_, '_, MInst, X64Backend> {
@@ -599,7 +599,7 @@ impl Context for IsleContext<'_, '_, MInst, X64Backend> {
             Some(RegisterClass::Gpr {
                 single_register: ty != I128,
             })
-        } else if ty == F32 || ty == F64 || (ty.is_vector() && ty.bits() == 128) {
+        } else if ty.is_float() || (ty.is_vector() && ty.bits() == 128) {
             Some(RegisterClass::Xmm)
         } else {
             None
