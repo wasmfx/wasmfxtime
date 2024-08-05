@@ -308,7 +308,7 @@ fn inter_instance_suspend() -> Result<()> {
 
           (func $resume (export "resume") (param $f (ref $ct))
             (block $handler (result (ref $ct))
-              (resume $ct (tag $tag $handler) (local.get $f))
+              (resume $ct (on $tag $handler) (local.get $f))
               (unreachable)
             )
             (drop)
@@ -547,7 +547,7 @@ mod host {
 
             (func $b (export "b") (param $x i32) (result i32)
                 (block $h (result (ref $ct))
-                  (resume $ct (tag $t $h) (local.get $x) (cont.new $ct (ref.func $c)))
+                  (resume $ct (on $t $h) (local.get $x) (cont.new $ct (ref.func $c)))
                   (unreachable)
                 )
                 (drop)
@@ -619,7 +619,7 @@ mod host {
                 (block $h (result (ref $ct))
                     (return
                         (resume $ct
-                            (tag $t $h)
+                            (on $t $h)
                             (i32.const 123)
                             (cont.new $ct (ref.func $a))))
                 )
@@ -836,7 +836,7 @@ mod traps {
 
             (func $c (export "c")
                 (block $handler (result  (ref $ct))
-                    (resume $ct (tag $t $handler) (cont.new $ct (ref.func $d)))
+                    (resume $ct (on $t $handler) (cont.new $ct (ref.func $d)))
                     (return)
                 )
                 (unreachable)
@@ -887,7 +887,7 @@ mod traps {
 
             (func $c (export "c") (result (ref $ct))
                 (block $handler (result  (ref $ct))
-                    (resume $ct (tag $t $handler) (cont.new $ct (ref.func $d)))
+                    (resume $ct (on $t $handler) (cont.new $ct (ref.func $d)))
 
                     ;; We never want to get here, but also don't want to use
                     ;; (unreachable), which is the trap we deliberately use in
@@ -940,7 +940,7 @@ mod traps {
 
             (func $a (export "a")
                 (block $handler (result  (ref $ct))
-                    (resume $ct (tag $t $handler) (cont.new $ct (ref.func $b)))
+                    (resume $ct (on $t $handler) (cont.new $ct (ref.func $b)))
                     ;; We don't actually want to get here
                     (return)
                 )
@@ -997,7 +997,7 @@ mod traps {
 
             (func $b (export "b")
                 (block $handler (result  (ref $ct))
-                    (resume $ct (tag $t $handler) (cont.new $ct (ref.func $c)))
+                    (resume $ct (on $t $handler) (cont.new $ct (ref.func $c)))
                     ;; We don't actually want to get here
                     (return)
                 )
@@ -1158,7 +1158,7 @@ mod misc {
     (local.set $k (cont.new $ct (ref.func $loop)))
     (loop $go-again
       (block $on-yield (result (ref $ct))
-        (resume $ct (tag $yield $on-yield) (local.get $k))
+        (resume $ct (on $yield $on-yield) (local.get $k))
         (unreachable)
       )
       (local.set $k)

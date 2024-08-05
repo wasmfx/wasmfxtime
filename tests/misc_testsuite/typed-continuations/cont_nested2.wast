@@ -37,14 +37,14 @@
     (local $v i32)
 
     (block $on_e1 (result i32 (ref $ct))
-      (resume $ct (tag $e1 $on_e1) (i32.const 7) (cont.new $ct (ref.func $g1)))
+      (resume $ct (on $e1 $on_e1) (i32.const 7) (cont.new $ct (ref.func $g1)))
       (unreachable))
     (local.set $k1)
     (call $scramble (i32.const 11)) ;; scramble the value received via $e1 from $g1
     (local.set $v)
 
     (block $on_e1_2 (result i32 (ref $ct))
-      (resume $ct (tag $e1 $on_e1_2) (local.get $v) (cont.new $ct (ref.func $g1)))
+      (resume $ct (on $e1 $on_e1_2) (local.get $v) (cont.new $ct (ref.func $g1)))
       (unreachable))
     (drop) ;; drop continuation, we don't intend to resume the second invocation of g1
     (call $scramble (i32.const 13))

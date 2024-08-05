@@ -38,10 +38,10 @@
         ;; We know that $e0, e2, e3 won't actually be performed here, but add a handler
         ;; to test the switching logic
         (resume $g_ct
-          (tag $e0 $on_e0_e2_e3)
-          (tag $e1 $on_e1)
-          (tag $e2 $on_e0_e2_e3)
-          (tag $e3 $on_e0_e2_e3)
+          (on $e0 $on_e0_e2_e3)
+          (on $e1 $on_e1)
+          (on $e2 $on_e0_e2_e3)
+          (on $e3 $on_e0_e2_e3)
           (cont.new $g_ct (ref.func $g)))
         (unreachable))
       ;; after $on_e1
@@ -49,7 +49,7 @@
       ;; stack now contains the value that $g passed to $e1, we manipulate it
       (i32.add (i32.const 13))
       (local.get $c)
-      (resume $cont_int_to_int (tag $e2 $on_e0_e2_e3))
+      (resume $cont_int_to_int (on $e2 $on_e0_e2_e3))
       (unreachable))
     ;; after $on_e0_e2_e3
     ;; stack contains value that $g passed to $e2 and continuation

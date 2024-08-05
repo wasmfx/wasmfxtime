@@ -29,7 +29,7 @@
   (func $g2
     (block $on_e2 (result (ref $ct))
       (call $update_marker (i32.const 5))
-      (resume $ct (tag $e2 $on_e2) (cont.new $ct (ref.func $g1)))
+      (resume $ct (on $e2 $on_e2) (cont.new $ct (ref.func $g1)))
       (return))
     (unreachable))
   (elem declare func $g2)
@@ -37,7 +37,7 @@
   (func $g3
     (block $on_e1 (result (ref $ct))
       (call $update_marker (i32.const 7))
-      (resume $ct (tag $e1 $on_e1) (cont.new $ct (ref.func $g2)))
+      (resume $ct (on $e1 $on_e1) (cont.new $ct (ref.func $g2)))
       (unreachable))
     (call $update_marker (i32.const 11))
     (resume $ct))

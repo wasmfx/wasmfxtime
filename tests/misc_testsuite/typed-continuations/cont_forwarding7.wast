@@ -23,7 +23,7 @@
   (func $g2 (param $x i32) (result i32)
     (block $on_e2 (result (ref $ct1))
       (i32.add (local.get $x) (i32.const 1))
-      (resume $ct0 (tag $e2 $on_e2) (cont.new $ct0 (ref.func $g1)))
+      (resume $ct0 (on $e2 $on_e2) (cont.new $ct0 (ref.func $g1)))
       (i32.add (i32.const 1))
       ;; suspend to $e1 again, this time from the direct child of the handler of $e1
       (suspend $e1)
@@ -39,7 +39,7 @@
 
     (loop $loop (param i32 (ref $ct0))
       (block $on_e1 (param i32 (ref $ct0)) (result i32 (ref $ct0))
-        (resume $ct0 (tag $e1 $on_e1))
+        (resume $ct0 (on $e1 $on_e1))
         (return))
       (local.set $k1)
       (i32.add (i32.const 1))

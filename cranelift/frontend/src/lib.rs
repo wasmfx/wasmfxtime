@@ -167,13 +167,41 @@ extern crate alloc;
 extern crate std;
 
 #[cfg(not(feature = "std"))]
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 #[cfg(feature = "std")]
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub use crate::frontend::{FuncInstBuilder, FunctionBuilder, FunctionBuilderContext};
 pub use crate::switch::Switch;
 pub use crate::variable::Variable;
+
+#[cfg(test)]
+macro_rules! assert_eq_output {
+    ( $left:expr, $right:expr $(,)? ) => {{
+        let left = $left;
+        let left = left.trim();
+
+        let right = $right;
+        let right = right.trim();
+
+        assert_eq!(
+            left,
+            right,
+            "assertion failed, output not equal:\n\
+             \n\
+             =========== Diff ===========\n\
+             {}\n\
+             =========== Left ===========\n\
+             {left}\n\
+             =========== Right ===========\n\
+             {right}\n\
+             ",
+            similar::TextDiff::from_lines(left, right)
+                .unified_diff()
+                .header("left", "right")
+        )
+    }};
+}
 
 mod frontend;
 mod ssa;

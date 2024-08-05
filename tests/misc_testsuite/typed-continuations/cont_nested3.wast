@@ -23,7 +23,7 @@
 
   (func $g2 (result (ref $ct))
     (block $on_e1 (result (ref $ct))
-      (resume $ct (tag $e1 $on_e1) (cont.new $ct (ref.func $g1)))
+      (resume $ct (on $e1 $on_e1) (cont.new $ct (ref.func $g1)))
       (unreachable))
     ;; continuation becomes return value
     )
