@@ -27,6 +27,14 @@ impl<K: EntityRef> Default for EntitySet<K> {
     }
 }
 
+impl<K: EntityRef> Extend<K> for EntitySet<K> {
+    fn extend<T: IntoIterator<Item = K>>(&mut self, iter: T) {
+        for k in iter {
+            self.insert(k);
+        }
+    }
+}
+
 /// Shared `EntitySet` implementation for all value types.
 impl<K> EntitySet<K>
 where
@@ -43,6 +51,12 @@ where
             bitset: CompoundBitSet::with_capacity(capacity),
             unused: PhantomData,
         }
+    }
+
+    /// Ensure that the set has enough capacity to hold `capacity` total
+    /// elements.
+    pub fn ensure_capacity(&mut self, capacity: usize) {
+        self.bitset.ensure_capacity(capacity);
     }
 
     /// Get the element at `k` if it exists.

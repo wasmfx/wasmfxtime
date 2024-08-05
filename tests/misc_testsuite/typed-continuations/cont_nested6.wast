@@ -36,7 +36,7 @@
 
   (func $test (export "test") (result i32)
     (block $on_e1 (result (ref $ct))
-      (resume $ct (tag $e1 $on_e1) (cont.new $ct (ref.func $g2)))
+      (resume $ct (on $e1 $on_e1) (cont.new $ct (ref.func $g2)))
       (unreachable))
     (drop)
     (global.get $marker)))

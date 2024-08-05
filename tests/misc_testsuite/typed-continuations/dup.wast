@@ -11,8 +11,8 @@
   (func $dup (export "dup") (result i32)
     (block $on_t-1 (result (ref $ct))
       (block $on_t-2 (result (ref $ct))
-        (resume $ct (tag $t $on_t-1)
-                    ;;(tag $t $on_t-2)
+        (resume $ct (on $t $on_t-1)
+                    ;;(on $t $on_t-2)
                     (cont.new $ct (ref.func $f)))
         (return (i32.const 128))
       ) ;; on_t-2 [ (ref $ct) ]

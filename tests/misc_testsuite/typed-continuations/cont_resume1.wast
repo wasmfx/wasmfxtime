@@ -16,7 +16,7 @@
     (local $k (ref null $ct))
     (global.set $i (i32.const 99))
     (block $on_yield (result (ref $ct))
-      (resume $ct_init (tag $yield $on_yield) (cont.new $ct_init (ref.func $g)))
+      (resume $ct_init (on $yield $on_yield) (cont.new $ct_init (ref.func $g)))
       (unreachable))
     ;; on_yield
     (local.set $k)

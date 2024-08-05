@@ -14,7 +14,7 @@
   (func (export "run") (result i32)
     (call $print (i32.const 1))
     (block $on_h (result (ref $ct))
-      (resume $ct (tag $h $on_h)
+      (resume $ct (on $h $on_h)
                   (cont.new $ct (ref.func $f)))
       (unreachable))
     (drop)

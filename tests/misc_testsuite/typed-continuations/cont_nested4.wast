@@ -23,7 +23,7 @@
 
   (func $g2
     (block $on_e1 (result (ref $ct))
-      (resume $ct (tag $e1 $on_e1) (cont.new $ct (ref.func $g1)))
+      (resume $ct (on $e1 $on_e1) (cont.new $ct (ref.func $g1)))
       (unreachable))
     (suspend $e2)
     ;; continuation becomes return value
@@ -34,7 +34,7 @@
 
   (func $test (export "test") (result i32)
     (block $on_e2 (result (ref $ct) (ref $ct))
-      (resume $ct (tag $e2 $on_e2) (cont.new $ct (ref.func $g2)))
+      (resume $ct (on $e2 $on_e2) (cont.new $ct (ref.func $g2)))
       (unreachable))
     (drop) ;; drop the continuation (i.e., for resuming g2)
     (resume $ct) ;; resume continuation received as payload of $e2 (i.e., continuing execution of $g1)

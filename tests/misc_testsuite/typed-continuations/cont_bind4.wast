@@ -66,7 +66,7 @@
       (i32.const 9)
       (cont.new  $ct0 (ref.func $g))
       (cont.bind $ct0 $ct1) ;; binding 9 here as value of parameter $x of $g
-      (resume $ct1 (tag $e $on_e1))
+      (resume $ct1 (on $e $on_e1))
       (unreachable))
     (local.set $k1)
     (call $check_stack (i32.const 10))
@@ -77,7 +77,7 @@
 
 
     (block $on_e2 (result i32 (ref $ct0))
-      (resume $ct1 (tag $e $on_e2) (local.get $k2))
+      (resume $ct1 (on $e $on_e2) (local.get $k2))
       (unreachable))
     (local.set $k1)
     (call $check_stack (i32.const 20))
@@ -86,7 +86,7 @@
     (cont.bind $ct0 $ct1 (local.get $k1)) ;; binding 25
     (local.set $k2)
     (block $on_f (result i32 i32 (ref $ct2))
-      (resume $ct1 (tag $f $on_f) (local.get $k2))
+      (resume $ct1 (on $f $on_f) (local.get $k2))
       (unreachable))
     (local.set $k3)
     (call $check_stack2 (i32.const 25) (i32.const 30))

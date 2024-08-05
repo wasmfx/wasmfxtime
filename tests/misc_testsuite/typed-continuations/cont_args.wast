@@ -53,7 +53,7 @@
     ;; remove this eventually
     (global.set  $i (i32.const 0))
     (block $on_e1 (result (ref $res_unit_to_int))
-      (resume $f1_ct (tag $e1_unit_to_unit $on_e1) (i32.const 100) (cont.new $f1_ct (ref.func $f1)))
+      (resume $f1_ct (on $e1_unit_to_unit $on_e1) (i32.const 100) (cont.new $f1_ct (ref.func $f1)))
       ;; unreachable: we never intend to invoke the resumption when handling
       ;; $e1 invoked from $f2
       (unreachable))
@@ -66,7 +66,7 @@
     (global.set  $i (i32.const 0))
     ;;(local $finish_f3 (ref $res_unit_to_unit))
     (block $on_e1 (result (ref $res_unit_to_int))
-      (resume $f1_ct (tag $e1_unit_to_unit $on_e1) (i32.const 49) (cont.new $f1_ct (ref.func $f1)))
+      (resume $f1_ct (on $e1_unit_to_unit $on_e1) (i32.const 49) (cont.new $f1_ct (ref.func $f1)))
       (unreachable))
     ;; after on_e1, stack: [resumption]
     ;;(local.set $finish_f2)
@@ -85,7 +85,7 @@
     (local $k (ref $res_int_to_int))
 
     (block $on_e3 (result i32 (ref $res_int_to_int))
-      (resume $f3_ct (tag $e3_int_to_int $on_e3) (i32.const 49) (cont.new $f3_ct (ref.func $f3)))
+      (resume $f3_ct (on $e3_int_to_int $on_e3) (i32.const 49) (cont.new $f3_ct (ref.func $f3)))
       (unreachable))
     ;; after on_e3, expected stack: [50 resumption]
     (local.set $k)

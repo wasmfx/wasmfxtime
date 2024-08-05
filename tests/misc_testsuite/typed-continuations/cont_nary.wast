@@ -62,7 +62,7 @@
       (global.get $big)
       (i32.const 100)
       (i64.mul (global.get $big) (i64.const 10))
-      (resume $f_ct (tag $e $on_e) (cont.new $f_ct (ref.func $f)))
+      (resume $f_ct (on $e $on_e) (cont.new $f_ct (ref.func $f)))
       (unreachable))
     ;; after on_e
     (local.set $k)

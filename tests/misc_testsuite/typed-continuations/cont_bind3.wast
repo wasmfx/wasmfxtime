@@ -25,7 +25,7 @@
     (i32.const 35) ;; to be consumed by second call to cont.resume
     (i32.const 45) ;; to be consumed by second call to cont.bind
     (block $on_e (result i32 i32 (ref $ct1))
-      (resume $ct0 (tag $e $on_e) (cont.new  $ct0 (ref.func $g)))
+      (resume $ct0 (on $e $on_e) (cont.new  $ct0 (ref.func $g)))
       (unreachable))
     ;; on_e:
     (local.set $k)

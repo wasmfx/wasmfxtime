@@ -32,12 +32,12 @@
     (call $update_marker (i32.const 5))
 
     (block $on_e1 (result (ref $ct))
-      (resume $ct (tag $e1 $on_e1) (cont.new $ct (ref.func $g1)))
+      (resume $ct (on $e1 $on_e1) (cont.new $ct (ref.func $g1)))
       (unreachable))
     (local.set $k1)
     (call $update_marker (i32.const 7))
     (block $on_e1_2 (result (ref $ct))
-      (resume $ct (tag $e1 $on_e1_2) (cont.new $ct (ref.func $g1)))
+      (resume $ct (on $e1 $on_e1_2) (cont.new $ct (ref.func $g1)))
       (unreachable))
     (local.set $k2)
     (call $update_marker (i32.const 11))
@@ -58,7 +58,7 @@
   (func $test (export "test") (result i32)
     (call $update_marker (i32.const 23))
     (block $on_e2 (result (ref $ct) (ref $ct))
-      (resume $ct (tag $e2 $on_e2) (cont.new $ct (ref.func $g3)))
+      (resume $ct (on $e2 $on_e2) (cont.new $ct (ref.func $g3)))
       (unreachable))
     (drop) ;; we won't resume g3, but want the payload
     (call $update_marker (i32.const 31))

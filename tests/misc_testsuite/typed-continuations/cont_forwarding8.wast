@@ -25,7 +25,7 @@
     (local $k1 (ref $ct0))
     (block $on_e2 (result i32 (ref $ct0))
       (i32.add (local.get $x) (i32.const 1))
-      (resume $ct0 (tag $e2 $on_e2) (cont.new $ct0 (ref.func $g1)))
+      (resume $ct0 (on $e2 $on_e2) (cont.new $ct0 (ref.func $g1)))
       (unreachable))
     (local.set $k1)
 
@@ -33,7 +33,7 @@
     ;; "outer" one for $e1 intact.
     (i32.add (i32.const 1))
     (block $on_e2_2 (param i32) (result i32 (ref $ct0))
-      (resume $ct0 (tag $e2 $on_e2_2) (local.get $k1))
+      (resume $ct0 (on $e2 $on_e2_2) (local.get $k1))
       (i32.add (i32.const 1))
       (suspend $e1)
       (i32.add (i32.const 1))
@@ -48,7 +48,7 @@
 
      (loop $loop (param i32 (ref $ct0))
        (block $on_e1 (param i32 (ref $ct0)) (result i32 (ref $ct0))
-         (resume $ct0 (tag $e1 $on_e1))
+         (resume $ct0 (on $e1 $on_e1))
          (return))
        (local.set $k1)
        (i32.add (i32.const 1))

@@ -21,7 +21,7 @@
       (i32.const 51) ;; consumed by resume
       (cont.new $ct1 (ref.func $g))
       (cont.bind $ct1 $ct1)
-      (resume $ct1 (tag $e $on_e))
+      (resume $ct1 (on $e $on_e))
       (unreachable))
     ;; on_e
     (resume $ct0))
