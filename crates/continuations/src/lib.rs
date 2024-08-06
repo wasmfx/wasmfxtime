@@ -181,9 +181,9 @@ pub mod offsets {
         /// Offset of `parent_chain` field
         pub const PARENT_CHAIN: usize = LIMITS + 4 * core::mem::size_of::<usize>();
         /// Offset of `fiber` field
-        pub const FIBER: usize = PARENT_CHAIN + 2 * core::mem::size_of::<usize>();
+        pub const FIBER_STACK: usize = PARENT_CHAIN + 2 * core::mem::size_of::<usize>();
         /// Offset of `args` field
-        pub const ARGS: usize = FIBER + super::CONTINUATION_FIBER_SIZE;
+        pub const ARGS: usize = FIBER_STACK + super::FIBER_STACK_SIZE;
         /// Offset of `tag_return_values` field
         pub const TAG_RETURN_VALUES: usize = ARGS + core::mem::size_of::<Payloads>();
         /// Offset of `state` field
@@ -202,9 +202,9 @@ pub mod offsets {
         pub const LAST_WASM_ENTRY_SP: usize = offset_of!(StackLimits, last_wasm_entry_sp);
     }
 
-    /// Size of wasmtime_runtime::continuation::ContinuationFiber.
+    /// Size of wasmtime_runtime::continuation::FiberStack.
     /// We test there that this value is correct.
-    pub const CONTINUATION_FIBER_SIZE: usize = 4 * core::mem::size_of::<usize>();
+    pub const FIBER_STACK_SIZE: usize = 3 * core::mem::size_of::<usize>();
 
     /// Size of type `wasmtime_runtime::continuation::StackChain`.
     /// We test there that this value is correct.

@@ -6,7 +6,6 @@
 cfg_if::cfg_if! {
     if #[cfg(not(feature = "wasmfx_baseline"))] {
 
-        use std::cell::Cell;
         use std::io;
         use std::ops::Range;
         use wasmtime_continuations::ControlEffect;
@@ -24,6 +23,7 @@ cfg_if::cfg_if! {
 
         /// Represents an execution stack to use for a fiber.
         #[derive(Debug)]
+        #[repr(C)]
         pub struct FiberStack(imp::FiberStack);
 
         impl FiberStack {
@@ -66,75 +66,27 @@ cfg_if::cfg_if! {
             pub fn range(&self) -> Option<Range<usize>> {
                 self.0.range()
             }
-        }
 
-        pub struct Fiber {
-            stack: FiberStack,
-            inner: imp::Fiber,
-            done: Cell<bool>,
-        }
+            /// Resumes execution of this fiber.
+            pub fn resume(&self) -> ControlEffect {
+                self.0.resume()
+            }
 
-        impl Fiber {
-            /// Creates a new fiber which will execute `func` on the given stack.
-            ///
-            /// This function returns a `Fiber` which, when resumed, will execute `func`
-            /// to completion. When desired the `func` can suspend itself via
-            /// `Fiber::suspend`.
-            pub fn new(
-                stack: FiberStack,
+            pub fn suspend(&self, payload: ControlEffect) {
+                self.0.suspend(payload)
+            }
+
+            pub fn initialize(
+                &self,
                 func_ref: *const VMFuncRef,
                 caller_vmctx: *mut VMContext,
                 args_ptr: *mut ValRaw,
                 args_capacity: usize,
-            ) -> io::Result<Self> {
-                let inner = imp::Fiber::new(&stack.0, func_ref, caller_vmctx, args_ptr, args_capacity)?;
-
-                Ok(Self {
-                    stack,
-                    inner,
-                    done: Cell::new(false),
-                })
-            }
-
-            /// Resumes execution of this fiber.
-            ///
-            /// This function will transfer execution to the fiber and resume from where
-            /// it last left off.
-            ///
-            /// Returns `true` if the fiber finished or `false` if the fiber was
-            /// suspended in the middle of execution.
-            ///
-            /// # Panics
-            ///
-            /// Panics if the current thread is already executing a fiber or if this
-            /// fiber has already finished.
-            ///
-            /// Note that if the fiber itself panics during execution then the panic
-            /// will be propagated to this caller.
-            pub fn resume(&self) -> ControlEffect {
-                assert!(!self.done.replace(true), "cannot resume a finished fiber");
-                let reason = self.inner.resume(&self.stack.0);
-                if ControlEffect::is_suspend(reason) {
-                    self.done.set(false)
-                }
-                reason
-            }
-
-            /// Returns whether this fiber has finished executing.
-            pub fn done(&self) -> bool {
-                self.done.get()
-            }
-
-            /// Gets the stack associated with this fiber.
-            pub fn stack(&self) -> &FiberStack {
-                &self.stack
+            ) {
+                self.0.initialize(func_ref, caller_vmctx, args_ptr, args_capacity)
             }
         }
 
-        impl Drop for Fiber {
-            fn drop(&mut self) {
-                debug_assert!(self.done.get(), "fiber dropped without finishing");
-            }
-        }
+
     }
 }
