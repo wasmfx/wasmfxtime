@@ -385,7 +385,7 @@ pub mod baseline {
     pub struct VMContRef {
         /// Revision counter.
         pub revision: u64,
-        pub fiber: Box<ContinuationFiber>,
+        pub fiber: Option<Box<ContinuationFiber>>,
         pub suspend: *mut Yield,
         pub limits: StackLimits,
         pub parent_chain: StackChain,
@@ -397,7 +397,7 @@ pub mod baseline {
 
     impl VMContRef {
         pub fn fiber_stack(&self) -> &FiberStack {
-            self.fiber.stack()
+            self.fiber.as_ref().unwrap().stack()
         }
     }
 
@@ -463,7 +463,9 @@ pub mod baseline {
                     )
                 }
             };
-            Box::new(fiber.map_err(|error| TrapReason::user_without_backtrace(error.into()))?)
+            Some(Box::new(fiber.map_err(|error| {
+                TrapReason::user_without_backtrace(error.into())
+            })?))
         };
 
         let contref = Box::new(VMContRef {
@@ -480,7 +482,14 @@ pub mod baseline {
 
         // TODO(dhil): we need memory clean up of
         // continuation reference objects.
-        debug_assert!(!contref.fiber.stack().top().unwrap().is_null());
+        debug_assert!(!contref
+            .fiber
+            .as_ref()
+            .unwrap()
+            .stack()
+            .top()
+            .unwrap()
+            .is_null());
         Ok(Box::into_raw(contref))
     }
 
@@ -518,6 +527,8 @@ pub mod baseline {
         // Resume the current continuation.
         contref
             .fiber
+            .as_ref()
+            .unwrap()
             .resume(instance)
             .map(move |()| {
                 // This lambda is run whenever the continuation ran to
@@ -574,8 +585,7 @@ pub mod baseline {
         // Note that continuation objects do not own their parents, so
         // we let the parent object leak.
         let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
-        instance.wasmfx_deallocate_stack(contref.fiber.stack());
-        let _: Box<ContinuationFiber> = contref.fiber;
+        instance.wasmfx_deallocate_stack(contref.fiber.as_ref().unwrap().stack());
         let _: Vec<u128> = contref.args;
         let _: Vec<u128> = contref.values;
     }
