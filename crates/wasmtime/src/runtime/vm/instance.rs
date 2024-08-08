@@ -1385,7 +1385,15 @@ impl Instance {
     }
 
     // TODO
-    pub(crate) fn wasmfx_allocate_stack(&mut self) -> Result<wasmfx_allocator::FiberStack, Error> {
+    pub(crate) fn wasmfx_allocate_continuation(
+        &mut self,
+    ) -> Result<
+        (
+            *mut wasmfx_allocator::VMContRef,
+            wasmfx_allocator::FiberStack,
+        ),
+        Error,
+    > {
         match &self.wasmfx_allocator {
             Some(allocator) => allocator.allocate(),
             None => {
@@ -1396,8 +1404,11 @@ impl Instance {
         }
     }
 
-    pub(crate) fn wasmfx_deallocate_stack(&mut self, stack: &wasmfx_allocator::FiberStack) {
-        self.wasmfx_allocator.as_ref().unwrap().deallocate(stack)
+    pub(crate) fn wasmfx_deallocate_continuation(
+        &mut self,
+        contref: *mut wasmfx_allocator::VMContRef,
+    ) {
+        self.wasmfx_allocator.as_ref().unwrap().deallocate(contref)
     }
 }
 

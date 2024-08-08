@@ -121,6 +121,44 @@ pub mod optimized {
         pub fn fiber_stack(&self) -> &FiberStack {
             &self.stack
         }
+
+        pub fn dummy() -> Self {
+            let limits = StackLimits::with_stack_limit(Default::default());
+            let parent_chain = StackChain::Absent;
+            let stack = FiberStack::unallocated();
+            let args = Payloads::new(0);
+            let tag_return_values = Payloads::new(0);
+            let state = State::Allocated;
+            let revision = 0;
+
+            Self {
+                limits,
+                parent_chain,
+                stack,
+                args,
+                tag_return_values,
+                state,
+                revision,
+            }
+        }
+    }
+
+    impl Drop for VMContRef {
+        fn drop(&mut self) {
+            // Note that continuation references do not own their parents, and we
+            // don't drop them here.
+
+
+            // `Payloads` must be deallocated explicitly, they are considered non-owning.
+            self.args.deallocate();
+            self.tag_return_values.deallocate();
+
+            // We would like to enforce the invariant that any continuation that
+            // was created for a cont.new (rather than, say, just living in a
+            // pool and never being touched), either ran to completion or was
+            // cancelled. But failint to doso should yield a custom error,
+            // instead of panicking here.
+        }
     }
 
     /// TODO
@@ -150,43 +188,35 @@ pub mod optimized {
         Ok(())
     }
 
-    /// TODO
+    /// Drops the given continuation, which either means deallocating it
+    /// (together with its stack) or returning it (and its stack) to a pool for
+    /// later reuse.
+    ///
+    /// If pooling is enabled, then all `VMContObj`s pointing to this
+    /// `VMContRef` must have outdated revision counters. The pool guarantees
+    /// that the revision counter stays unchanged if this `VMContRef` is reused.
+    ///
+    /// If pooling is disabled, then there must be no `VMContObj`s pointing to
+    /// this `VMContRef` anymore.
+    /// FIXME(frank-emrich) This second condition can currently be violated: We
+    /// call this immediately once a continuation returns, at which point such
+    /// `VMContObj`s may exist.
     #[inline(always)]
     pub fn drop_cont_ref(instance: &mut Instance, contref: *mut VMContRef) {
-        // Note that continuation references do not own their parents, hence we ignore
-        // parent fields here.
+        {
+            let contref = unsafe { contref.as_mut().unwrap() };
+            // A continuation must have run to completion before dropping it.
+            assert!(contref.state == State::Returned);
 
-        let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
-
-        // A continuation must have run to completion before deallocating it.
-        assert!(contref.state == State::Returned);
-
-        instance.wasmfx_deallocate_stack(&contref.stack);
-        if contref.args.data.is_null() {
-            debug_assert!(contref.args.length as usize == 0);
-            debug_assert!(contref.args.capacity as usize == 0);
-        } else {
-            unsafe {
-                let _: Vec<u128> = Vec::from_raw_parts(
-                    contref.args.data,
-                    contref.args.length as usize,
-                    contref.args.capacity as usize,
-                );
-            };
+            // `Payloads` must be deallocated explicitly, they are considered
+            // non-owning.
+            contref.args.deallocate();
+            contref.tag_return_values.deallocate();
         }
-        let payloads = &contref.tag_return_values;
-        if payloads.data.is_null() {
-            debug_assert!(payloads.length as usize == 0);
-            debug_assert!(payloads.capacity as usize == 0);
-        } else {
-            let _: Vec<u128> = unsafe {
-                Vec::from_raw_parts(
-                    payloads.data,
-                    payloads.length as usize,
-                    payloads.capacity as usize,
-                )
-            };
-        }
+
+        // The WasmFX allocator decides if "droppin" a continuation means
+        // putting it back into the pool or actually deallocating it.
+        instance.wasmfx_deallocate_continuation(contref);
     }
 
     /// TODO
@@ -200,7 +230,6 @@ pub mod optimized {
         let caller_vmctx = instance.vmctx();
 
         let capacity = cmp::max(param_count, result_count);
-        let payload = Payloads::new(capacity);
 
         let wasmfx_config = unsafe { &*(*instance.store()).wasmfx_config() };
         // TODO(frank-emrich) Currently, the general `stack_limit` configuration
@@ -208,38 +237,43 @@ pub mod optimized {
         let stack_size = wasmfx_config.stack_size;
         let red_zone_size = wasmfx_config.red_zone_size;
 
-        let stack = {
-            let stack = instance.wasmfx_allocate_stack().map_err(|_error| {
-                TrapReason::user_without_backtrace(anyhow::anyhow!(
-                    "Fiber stack allocation failed!"
-                ))
-            })?;
-            stack.initialize(
-                func.cast::<VMFuncRef>(),
-                caller_vmctx,
-                payload.data as *mut ValRaw,
-                payload.capacity as usize,
-            );
-            stack
-        };
+        let (contref, mut stack) = instance.wasmfx_allocate_continuation().map_err(|_error| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!("Fiber stack allocation failed!"))
+        })?;
 
         let tsp = stack.top().unwrap();
         let stack_limit = unsafe { tsp.sub(stack_size - red_zone_size) } as usize;
-        let contref = Box::new(VMContRef {
-            revision: 0,
-            limits: StackLimits::with_stack_limit(stack_limit),
-            stack,
-            parent_chain: StackChain::Absent,
-            args: payload,
-            tag_return_values: Payloads::new(0),
-            state: State::Allocated,
-        });
+        let limits = StackLimits::with_stack_limit(stack_limit);
+
+        {
+            let contref = unsafe { contref.as_mut().unwrap() };
+            contref.limits = limits;
+            contref.parent_chain = StackChain::Absent;
+            contref.state = State::Allocated;
+            contref.args.ensure_capacity(capacity);
+
+            // In order to give the pool a uniform interface for the optimized
+            // and baseline implementation, it returns the `FiberStack` as a
+            // standalone value, without being attached to the `VMContRef`.
+            // We attach them here, the previous `FiberStack` attached to the
+            // `VMContRef` while in the pool should be an empty dummy
+            // `FiberStack`.
+            std::mem::swap(&mut contref.stack, &mut stack);
+            debug_assert!(stack.is_unallocated());
+            debug_assert!(!contref.stack.is_unallocated());
+
+            contref.stack.initialize(
+                func.cast::<VMFuncRef>(),
+                caller_vmctx,
+                contref.args.data as *mut ValRaw,
+                contref.args.capacity as usize,
+            );
+        };
 
         // TODO(dhil): we need memory clean up of
         // continuation reference objects.
-        let pointer = Box::into_raw(contref);
-        debug_println!("Created contref @ {:p}", pointer);
-        Ok(pointer)
+        debug_println!("Created contref @ {:p}", contref);
+        Ok(contref)
     }
 
     /// TODO

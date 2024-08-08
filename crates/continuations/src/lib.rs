@@ -5,7 +5,10 @@ use core::{
     marker::{Send, Sync},
     ptr,
 };
+
 extern crate alloc;
+use alloc::vec::Vec;
+use core::mem::drop;
 
 /// Default size for continuation stacks
 pub const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
@@ -87,6 +90,9 @@ unsafe impl Sync for StackLimits {}
 
 #[repr(C)]
 #[derive(Debug, Clone)]
+/// This is a Vector-like type. However, we consider `Payloads` objects NOT to
+/// own the underlying data buffer. As a result, it does not implement Drop, all
+/// (de)allocation must be done manually.
 pub struct Payloads {
     /// Number of currently occupied slots.
     pub length: types::payloads::Length,
@@ -102,7 +108,7 @@ impl Payloads {
         let data = if capacity == 0 {
             ptr::null_mut()
         } else {
-            let mut args = alloc::vec::Vec::with_capacity(capacity as usize);
+            let mut args = Vec::with_capacity(capacity as usize);
             let args_ptr = args.as_mut_ptr();
             args.leak();
             args_ptr
@@ -111,6 +117,33 @@ impl Payloads {
             length: 0,
             capacity,
             data,
+        }
+    }
+
+    /// Ensures that we can hold at least the required number of elements.
+    /// Does not preserve existing elements and can therefore only be called on empty `Payloads`.
+    pub fn ensure_capacity(&mut self, required_capacity: u32) {
+        assert_eq!(self.length, 0);
+        if self.capacity < required_capacity {
+            self.deallocate();
+
+            *self = Self::new(required_capacity)
+        }
+    }
+
+    pub fn deallocate(&mut self) {
+        if self.data.is_null() {
+            debug_assert_eq!(self.length, 0);
+            debug_assert_eq!(self.capacity, 0);
+        } else {
+            drop(unsafe {
+                Vec::from_raw_parts(self.data, self.length as usize, self.capacity as usize)
+            });
+
+            // Just for safety:
+            self.data = core::ptr::null_mut();
+            self.capacity = 0;
+            self.length = 0;
         }
     }
 }
@@ -126,7 +159,7 @@ pub const STACK_CHAIN_MAIN_STACK_DISCRIMINANT: usize = 1;
 pub const STACK_CHAIN_CONTINUATION_DISCRIMINANT: usize = 2;
 
 /// Encodes the life cycle of a `VMContRef`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(i32)]
 pub enum State {
     /// The `VMContRef` has been created, but `resume` has never been

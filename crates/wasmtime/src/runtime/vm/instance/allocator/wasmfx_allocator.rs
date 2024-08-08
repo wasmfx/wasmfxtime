@@ -4,10 +4,17 @@
 // * pooling: preallocates a chunk of memory eagerly
 //
 
+use crate::prelude::*;
 use anyhow::Result;
 use wasmtime_continuations::WasmFXConfig;
 
-pub use crate::runtime::vm::continuation::imp::FiberStack;
+pub use crate::runtime::vm::continuation::imp::{FiberStack, VMContRef};
+
+pub trait ContinuationAllocator {
+    fn allocate(&self) -> Result<(*mut VMContRef, FiberStack)>;
+
+    fn deallocate(&self, contref: *mut VMContRef);
+}
 
 // This module is dead code if the pooling allocator is toggled.
 #[allow(dead_code)]
@@ -25,8 +32,10 @@ pub mod wasmfx_on_demand {
                 stack_size: config.stack_size,
             })
         }
+    }
 
-        pub fn allocate(&self) -> Result<FiberStack> {
+    impl ContinuationAllocator for InnerAllocator {
+        fn allocate(&self) -> Result<(*mut VMContRef, FiberStack)> {
             let stack = {
                 cfg_if::cfg_if! {
                     if #[cfg(all(feature = "unsafe_wasmfx_stacks", not(feature = "wasmfx_baseline")))] {
@@ -36,11 +45,14 @@ pub mod wasmfx_on_demand {
                     }
                 }
             };
-            stack.map_err(|_| anyhow::anyhow!("Fiber stack allocation failed"))
+            let stack = stack.map_err(|_| anyhow::anyhow!("Fiber stack allocation failed"));
+            let contref = Box::into_raw(Box::new(VMContRef::dummy()));
+            Ok((contref, stack?))
         }
 
-        pub fn deallocate(&self, _stack: &FiberStack) {
-            // The on-demand allocator has no further bookkeeping for fiber stacks
+        fn deallocate(&self, contref: *mut VMContRef) {
+            // In on-demand mode, we actually deallocate the continuation by dropping it.
+            let _ = unsafe { Box::from_raw(contref) };
         }
     }
 }
@@ -214,16 +226,16 @@ impl WasmFXAllocator {
         })
     }
 
-    pub fn allocate(&self) -> Result<FiberStack> {
+    pub fn allocate(&self) -> Result<(*mut VMContRef, FiberStack)> {
         self.inner.allocate()
     }
 
-    pub fn deallocate(&self, stack: &FiberStack) {
+    pub fn deallocate(&self, contref: *mut VMContRef) {
         cfg_if::cfg_if! {
             if #[cfg(feature = "wasmfx_pooling_allocator")] {
                 unsafe { self.inner.deallocate(stack) }
             } else {
-                self.inner.deallocate(stack)
+                self.inner.deallocate(contref)
             }
         }
     }

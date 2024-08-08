@@ -174,6 +174,19 @@ impl FiberStack {
         }
     }
 
+    pub fn unallocated() -> Self {
+        Self {
+            top: std::ptr::null_mut(),
+            len: 0,
+            allocator: Allocator::Custom,
+        }
+    }
+
+    pub fn is_unallocated(&self) -> bool {
+        debug_assert_eq!(self.len == 0, self.top == std::ptr::null_mut());
+        self.len == 0
+    }
+
     #[allow(clippy::missing_safety_doc)]
     pub unsafe fn from_raw_parts(base: *mut u8, len: usize) -> io::Result<Self> {
         Ok(Self {

@@ -32,6 +32,16 @@ cfg_if::cfg_if! {
                 Ok(Self(imp::FiberStack::new(size)?))
             }
 
+            /// Returns a stack of size 0.
+            pub fn unallocated() -> Self {
+                Self(imp::FiberStack::unallocated())
+            }
+
+            /// Is this stack unallocated/of size 0?
+            pub fn is_unallocated(&self) -> bool {
+                imp::FiberStack::is_unallocated(&self.0)
+            }
+
             /// Creates a new fiber stack of the given size (using malloc).
             pub fn malloc(size: usize) -> io::Result<Self> {
                 Ok(Self(imp::FiberStack::malloc(size)?))
