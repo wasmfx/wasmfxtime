@@ -79,7 +79,7 @@ pub(crate) mod typed_continuation_helpers {
             let val = match ty {
                 I8 | I32 => builder.ins().uextend(I64, val),
                 I64 => val,
-                _ => panic!("Cannot print type {}", ty),
+                _ => panic!("Cannot print type {ty}"),
             };
             call_builtin!(builder, env, tc_print_int(val));
         };
@@ -111,7 +111,7 @@ pub(crate) mod typed_continuation_helpers {
                 match matched_ph {
                     "{}" => print_int(env, builder, vals[i]),
                     "{:p}" => print_pointer(env, builder, vals[i]),
-                    u => panic!("Unsupported placeholder in debug_print input string: {}", u),
+                    u => panic!("Unsupported placeholder in debug_print input string: {u}"),
                 }
                 prev_end = end;
                 i += 1;

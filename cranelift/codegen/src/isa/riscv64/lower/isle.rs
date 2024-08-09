@@ -6,7 +6,7 @@ pub mod generated_code;
 use generated_code::MInst;
 
 // Types that the generated ISLE code uses via `use super::*`.
-use self::generated_code::{VecAluOpRR, VecLmul};
+use self::generated_code::{FpuOPWidth, VecAluOpRR, VecLmul};
 use crate::isa::riscv64::abi::Riscv64ABICallSite;
 use crate::isa::riscv64::lower::args::{
     FReg, VReg, WritableFReg, WritableVReg, WritableXReg, XReg,
@@ -117,6 +117,16 @@ impl generated_code::Context for RV64IsleContext<'_, '_, MInst, Riscv64Backend> 
         InstOutput::new()
     }
 
+    fn fpu_op_width_from_ty(&mut self, ty: Type) -> FpuOPWidth {
+        match ty {
+            F16 => FpuOPWidth::H,
+            F32 => FpuOPWidth::S,
+            F64 => FpuOPWidth::D,
+            F128 => FpuOPWidth::Q,
+            _ => unimplemented!("Unimplemented FPU Op Width: {ty}"),
+        }
+    }
+
     fn vreg_new(&mut self, r: Reg) -> VReg {
         VReg::new(r).unwrap()
     }
@@ -161,6 +171,68 @@ impl generated_code::Context for RV64IsleContext<'_, '_, MInst, Riscv64Backend> 
     }
     fn freg_to_reg(&mut self, arg0: FReg) -> Reg {
         *arg0
+    }
+
+    fn min_vec_reg_size(&mut self) -> u64 {
+        self.min_vec_reg_size
+    }
+
+    #[inline]
+    fn ty_vec_fits_in_register(&mut self, ty: Type) -> Option<Type> {
+        if ty.is_vector() && (ty.bits() as u64) <= self.min_vec_reg_size() {
+            Some(ty)
+        } else {
+            None
+        }
+    }
+
+    fn ty_supported(&mut self, ty: Type) -> Option<Type> {
+        let lane_type = ty.lane_type();
+        let supported = match ty {
+            // Scalar integers are always supported
+            ty if ty.is_int() => true,
+            // So are references
+            ty if ty.is_ref() => true,
+            // Floating point types depend on certain extensions
+            F32 => self.backend.isa_flags.has_f(),
+            // F64 depends on the D extension
+            F64 => self.backend.isa_flags.has_d(),
+
+            // The base vector extension supports all integer types, up to 64 bits
+            // as long as they fit in a register
+            ty if self.ty_vec_fits_in_register(ty).is_some()
+                && lane_type.is_int()
+                && lane_type.bits() <= 64 =>
+            {
+                true
+            }
+
+            // If the vector type has floating point lanes, then we only support it for
+            // 32 or 64 bit lanes with the base extension
+            ty if self.ty_vec_fits_in_register(ty).is_some()
+                && lane_type.is_float()
+                && (lane_type.bits() == 32 || lane_type.bits() == 64) =>
+            {
+                true
+            }
+
+            // Otherwise do not match
+            _ => false,
+        };
+
+        if supported {
+            Some(ty)
+        } else {
+            None
+        }
+    }
+
+    fn ty_supported_float(&mut self, ty: Type) -> Option<Type> {
+        self.ty_supported(ty).filter(|ty| ty.is_float())
+    }
+
+    fn ty_supported_vec(&mut self, ty: Type) -> Option<Type> {
+        self.ty_supported(ty).filter(|ty| ty.is_vector())
     }
 
     fn load_ra(&mut self) -> Reg {
@@ -332,7 +404,7 @@ impl generated_code::Context for RV64IsleContext<'_, '_, MInst, Riscv64Backend> 
         if let Some(res) = Imm12::maybe_from_i64(val as i64) {
             res
         } else {
-            panic!("Unable to make an Imm12 value from {}", val)
+            panic!("Unable to make an Imm12 value from {val}")
         }
     }
     fn imm12_const_add(&mut self, val: i32, add: i32) -> Imm12 {
@@ -527,19 +599,6 @@ impl generated_code::Context for RV64IsleContext<'_, '_, MInst, Riscv64Backend> 
                 ..vs.vtype
             },
             ..vs
-        }
-    }
-
-    fn min_vec_reg_size(&mut self) -> u64 {
-        self.min_vec_reg_size
-    }
-
-    #[inline]
-    fn ty_vec_fits_in_register(&mut self, ty: Type) -> Option<Type> {
-        if ty.is_vector() && (ty.bits() as u64) <= self.min_vec_reg_size() {
-            Some(ty)
-        } else {
-            None
         }
     }
 
