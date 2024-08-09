@@ -1003,15 +1003,15 @@ fn tc_reallocate(
 fn tc_print_str(_instance: &mut Instance, s: *const u8, len: u64) {
     let str = unsafe { std::slice::from_raw_parts(s, len as usize) };
     let s = std::str::from_utf8(str).unwrap();
-    print!("{}", s);
+    print!("{s}");
 }
 
 fn tc_print_int(_instance: &mut Instance, arg: u64) {
-    print!("{}", arg);
+    print!("{arg}");
 }
 
 fn tc_print_pointer(_instance: &mut Instance, arg: *const u8) {
-    print!("{:p}", arg);
+    print!("{arg:p}");
 }
 
 //
