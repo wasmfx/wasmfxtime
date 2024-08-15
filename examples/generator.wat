@@ -105,7 +105,7 @@
     (loop $loop
       (block $on_yield (result i32 (ref $ct))
         ;; Resume continuation $c
-        (resume $ct (tag $yield $on_yield) (local.get $c))
+        (resume $ct (on $yield $on_yield) (local.get $c))
         ;; Generator returned: no more data
         (return)
       )
