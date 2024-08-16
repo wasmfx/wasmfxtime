@@ -433,6 +433,29 @@ pub mod baseline {
         pub fn fiber_stack(&self) -> &FiberStack {
             self.fiber.as_ref().unwrap().stack()
         }
+
+        pub fn dummy() -> Self {
+            let limits = StackLimits::with_stack_limit(Default::default());
+            let parent_chain = StackChain::Absent;
+            let parent = core::ptr::null_mut();
+            let suspend = core::ptr::null_mut();
+            let args = Vec::new();
+            let values = Vec::new();
+            let fiber = None;
+            let revision = 0;
+
+            Self {
+                revision,
+                limits,
+                parent_chain,
+                parent,
+                suspend,
+                fiber,
+                args,
+                values,
+                _marker: core::marker::PhantomPinned,
+            }
+        }
     }
 
     // We use thread local state to simulate the VMContext. The use of
@@ -462,10 +485,11 @@ pub mod baseline {
         let capacity = cmp::max(param_count, result_count);
         let mut values: Vec<u128> = Vec::with_capacity(capacity);
 
-        let fiber = {
-            let stack = instance
-                .wasmfx_allocate_stack()
+        let (contref, fiber) = {
+            let (contref, stack) = instance
+                .wasmfx_allocate_continuation()
                 .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+
             let fiber = match unsafe { func.cast::<VMFuncRef>().as_ref() } {
                 None => Fiber::new(stack, |_instance: &mut Instance, _suspend: &mut Yield| {
                     panic!("Attempt to invoke null VMFuncRef!");
@@ -497,34 +521,44 @@ pub mod baseline {
                     )
                 }
             };
-            Some(Box::new(fiber.map_err(|error| {
-                TrapReason::user_without_backtrace(error.into())
-            })?))
+            let fiber = fiber.map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+            (contref, fiber)
         };
 
-        let contref = Box::new(VMContRef {
-            revision: 0,
-            limits: StackLimits::with_stack_limit(0),
-            parent_chain: StackChain::Absent,
-            parent: core::ptr::null_mut(),
-            suspend: core::ptr::null_mut(),
-            fiber,
-            args: Vec::with_capacity(param_count),
-            values,
-            _marker: core::marker::PhantomPinned,
-        });
+        {
+            let contref = unsafe { contref.as_mut().unwrap() };
 
-        // TODO(dhil): we need memory clean up of
-        // continuation reference objects.
-        debug_assert!(!contref
-            .fiber
-            .as_ref()
-            .unwrap()
-            .stack()
-            .top()
-            .unwrap()
-            .is_null());
-        Ok(Box::into_raw(contref))
+            debug_assert!(contref.fiber.is_none());
+            contref.fiber = Some(Box::new(fiber));
+
+            // We gave the data pointer of `values` to the trampoline and *must*
+            // therefore use it.
+            contref.values = values;
+
+            contref.args.clear();
+            if contref.args.capacity() < param_count {
+                contref.args.reserve(param_count - contref.args.capacity());
+            }
+            contref.limits = StackLimits::with_stack_limit(0);
+            contref.parent = core::ptr::null_mut();
+            contref.parent_chain = StackChain::Absent;
+            contref.suspend = core::ptr::null_mut();
+
+            // Note that we keep the revision counter unchanged.
+
+            // TODO(dhil): we need memory clean up of
+            // continuation reference objects.
+            debug_assert!(!contref
+                .fiber
+                .as_ref()
+                .unwrap()
+                .stack()
+                .top()
+                .unwrap()
+                .is_null());
+        };
+
+        Ok(contref)
     }
 
     /// Continues a given continuation.
@@ -618,10 +652,8 @@ pub mod baseline {
     pub fn drop_continuation_reference(instance: &mut Instance, contref: *mut VMContRef) {
         // Note that continuation objects do not own their parents, so
         // we let the parent object leak.
-        let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
-        instance.wasmfx_deallocate_stack(contref.fiber.as_ref().unwrap().stack());
-        let _: Vec<u128> = contref.args;
-        let _: Vec<u128> = contref.values;
+
+        instance.wasmfx_deallocate_continuation(contref);
     }
 
     /// Clears the argument buffer on a given continuation reference.
