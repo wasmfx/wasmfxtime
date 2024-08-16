@@ -608,6 +608,7 @@ dependencies = [
  "hashbrown 0.14.3",
  "log",
  "postcard",
+ "pulley-interpreter",
  "regalloc2",
  "rustc-hash",
  "serde",
@@ -665,6 +666,7 @@ dependencies = [
  "gimli",
  "log",
  "num_cpus",
+ "pulley-interpreter",
  "serde",
  "serde_derive",
  "similar",
@@ -4353,8 +4355,8 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.29.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.29.0#6cb4d00ace4f0f6b3a912818542529f463ff8fae"
+version = "0.30.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.30.0#3f4883f42fd179145e47741539145d0198a88e68"
 dependencies = [
  "wit-bindgen-rt",
  "wit-bindgen-rust-macro",
@@ -4362,8 +4364,8 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen-core"
-version = "0.29.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.29.0#6cb4d00ace4f0f6b3a912818542529f463ff8fae"
+version = "0.30.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.30.0#3f4883f42fd179145e47741539145d0198a88e68"
 dependencies = [
  "anyhow",
  "heck 0.5.0",
@@ -4372,16 +4374,16 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen-rt"
-version = "0.29.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.29.0#6cb4d00ace4f0f6b3a912818542529f463ff8fae"
+version = "0.30.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.30.0#3f4883f42fd179145e47741539145d0198a88e68"
 dependencies = [
  "bitflags 2.4.1",
 ]
 
 [[package]]
 name = "wit-bindgen-rust"
-version = "0.29.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.29.0#6cb4d00ace4f0f6b3a912818542529f463ff8fae"
+version = "0.30.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.30.0#3f4883f42fd179145e47741539145d0198a88e68"
 dependencies = [
  "anyhow",
  "heck 0.5.0",
@@ -4395,8 +4397,8 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen-rust-macro"
-version = "0.29.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.29.0#6cb4d00ace4f0f6b3a912818542529f463ff8fae"
+version = "0.30.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.30.0#3f4883f42fd179145e47741539145d0198a88e68"
 dependencies = [
  "anyhow",
  "prettyplease",

@@ -2,7 +2,7 @@ use super::address_transform::AddressTransform;
 use super::expression::{compile_expression, CompiledExpression, FunctionFrameInfo};
 use super::range_info_builder::RangeInfoBuilder;
 use super::refs::{PendingDebugInfoRefs, PendingUnitRefs};
-use super::{DebugInputContext, Reader, TransformError};
+use super::{Reader, TransformError};
 use anyhow::{bail, Error};
 use cranelift_codegen::isa::TargetIsa;
 use gimli::{write, AttributeValue, DebugLineOffset, DebuggingInformationEntry, Unit};
@@ -36,7 +36,6 @@ pub(crate) fn clone_die_attributes<'a, R>(
     dwarf: &gimli::Dwarf<R>,
     unit: &Unit<R, R::Offset>,
     entry: &DebuggingInformationEntry<R>,
-    context: &DebugInputContext<R>,
     addr_tr: &'a AddressTransform,
     frame_info: Option<&FunctionFrameInfo>,
     out_unit: &mut write::Unit,
@@ -61,34 +60,39 @@ where
         // FIXME for CU: currently address_transform operate on a single
         // function range, and when CU spans multiple ranges the
         // transformation may be incomplete.
-        RangeInfoBuilder::from(dwarf, unit, entry, context, cu_low_pc)?
+        RangeInfoBuilder::from(dwarf, unit, entry, cu_low_pc)?
     };
     range_info.build(addr_tr, out_unit, current_scope_id);
 
     let mut attrs = entry.attrs();
     while let Some(attr) = attrs.next()? {
-        let attr_value = match attr.value() {
-            AttributeValue::Addr(_) | AttributeValue::DebugAddrIndex(_)
-                if attr.name() == gimli::DW_AT_low_pc =>
-            {
+        match attr.name() {
+            gimli::DW_AT_low_pc | gimli::DW_AT_high_pc | gimli::DW_AT_ranges => {
+                // Handled by RangeInfoBuilder.
                 continue;
             }
-            AttributeValue::Udata(_) if attr.name() == gimli::DW_AT_high_pc => {
+            gimli::DW_AT_str_offsets_base
+            | gimli::DW_AT_addr_base
+            | gimli::DW_AT_rnglists_base
+            | gimli::DW_AT_loclists_base
+            | gimli::DW_AT_dwo_name
+            | gimli::DW_AT_GNU_addr_base
+            | gimli::DW_AT_GNU_ranges_base
+            | gimli::DW_AT_GNU_dwo_name
+            | gimli::DW_AT_GNU_dwo_id => {
+                // DWARF encoding details that we don't need to copy.
                 continue;
             }
-            AttributeValue::RangeListsRef(_) if attr.name() == gimli::DW_AT_ranges => {
-                continue;
-            }
-            AttributeValue::DebugAddrBase(_) | AttributeValue::DebugStrOffsetsBase(_) => {
-                continue;
-            }
-
+            _ => {}
+        }
+        let attr_value = attr.value();
+        let out_attr_value = match attr_value {
             AttributeValue::Addr(u) => {
                 let addr = addr_tr.translate(u).unwrap_or(write::Address::Constant(0));
                 write::AttributeValue::Address(addr)
             }
             AttributeValue::DebugAddrIndex(i) => {
-                let u = context.debug_addr.get_address(4, unit.addr_base, i)?;
+                let u = dwarf.debug_addr.get_address(4, unit.addr_base, i)?;
                 let addr = addr_tr.translate(u).unwrap_or(write::Address::Constant(0));
                 write::AttributeValue::Address(addr)
             }
@@ -131,24 +135,25 @@ where
             }
             AttributeValue::DebugStrRef(_) | AttributeValue::DebugStrOffsetsIndex(_) => {
                 let s = dwarf
-                    .attr_string(unit, attr.value().clone())?
+                    .attr_string(unit, attr_value)?
                     .to_string_lossy()?
                     .into_owned();
                 write::AttributeValue::StringRef(out_strings.add(s))
             }
-            AttributeValue::RangeListsRef(r) => {
-                let r = dwarf.ranges_offset_from_raw(unit, r);
-                let range_info = RangeInfoBuilder::from_ranges_ref(unit, r, context, cu_low_pc)?;
+            AttributeValue::RangeListsRef(_) | AttributeValue::DebugRngListsIndex(_) => {
+                let r = dwarf.attr_ranges_offset(unit, attr_value)?.unwrap();
+                let range_info = RangeInfoBuilder::from_ranges_ref(dwarf, unit, r, cu_low_pc)?;
                 let range_list_id = range_info.build_ranges(addr_tr, &mut out_unit.ranges);
                 write::AttributeValue::RangeListRef(range_list_id)
             }
-            AttributeValue::LocationListsRef(r) => {
+            AttributeValue::LocationListsRef(_) | AttributeValue::DebugLocListsIndex(_) => {
+                let r = dwarf.attr_locations_offset(unit, attr_value)?.unwrap();
                 let low_pc = 0;
-                let mut locs = context.loclists.locations(
+                let mut locs = dwarf.locations.locations(
                     r,
                     unit_encoding,
                     low_pc,
-                    &context.debug_addr,
+                    &dwarf.debug_addr,
                     unit.addr_base,
                 )?;
                 let frame_base =
@@ -298,7 +303,7 @@ where
             a => bail!("Unexpected attribute: {:?}", a),
         };
         let current_scope = out_unit.get_mut(current_scope_id);
-        current_scope.set(attr.name(), attr_value);
+        current_scope.set(attr.name(), out_attr_value);
     }
     Ok(())
 }
