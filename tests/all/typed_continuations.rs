@@ -671,7 +671,7 @@ mod traps {
                 })
                 .rev();
 
-            let expected_func_name_it = expected_backtrace.iter().map(|name| *name);
+            let expected_func_name_it = expected_backtrace.iter().copied();
 
             assert!(actual_func_name_it.eq(expected_func_name_it));
         }
