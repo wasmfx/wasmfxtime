@@ -133,7 +133,8 @@ jobs:
   cargo_vet:
     name: Cargo vet
     needs: determine
-    if: needs.determine.outputs.audit
+    # TODO(dhil): Disabled as we don't care too much about publishing crates
+    if: false && needs.determine.outputs.audit
     runs-on: ubuntu-latest
     outputs:
       outcome: ${{ steps.vet.outcome }}
@@ -146,6 +147,11 @@ jobs:
     - id: vet
       run: cargo vet --locked
       continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+    # Double-check that if versions are bumped that `cargo vet` still works.
+    # This is intended to weed out mistakes such as #9115 from happening again.
+    - run: rustc scripts/publish.rs && ./publish bump-patch && cargo vet
+      name: Ensure `cargo vet` works if versions are bumped
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
@@ -464,7 +470,7 @@ jobs:
 
     # Run clippy configuration
     - run: rustup component add clippy
-    - run: cargo clippy --workspace
+    - run: cargo clippy --workspace --all-targets
 
     # Re-vendor all WIT files and ensure that they're all up-to-date by ensuring
     # that there's no git changes.

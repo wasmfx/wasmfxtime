@@ -8,6 +8,7 @@ documentation = "https://docs.rs/cranelift-filetests"
 repository = "https://github.com/bytecodealliance/wasmtime"
 publish = false
 edition.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
@@ -36,3 +37,4 @@ serde = { workspace = true }
 serde_derive = { workspace = true }
 cranelift.workspace = true
 smallvec = { workspace = true }
+pulley-interpreter = { workspace = true, features = ["disas", "std"] }

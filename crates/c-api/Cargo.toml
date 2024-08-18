@@ -7,8 +7,9 @@ license = "Apache-2.0 WITH LLVM-exception"
 repository = "https://github.com/bytecodealliance/wasmtime"
 readme = "README.md"
 edition.workspace = true
+rust-version.workspace = true
 links = "wasmtime-c-api"
-include = ["include", "src", "build.rs"]
+include = ["include", "src", "build.rs", "CMakeLists.txt", "cmake", "doxygen.conf.in"]
 
 [lints]
 workspace = true
@@ -39,6 +40,7 @@ wasmtime-wasi = { workspace = true, optional = true, features = ["preview1"] }
 futures = { workspace = true, optional = true }
 
 [features]
+# WASMTIME_FEATURE_LIST
 async = ['wasmtime/async', 'futures']
 profiling = ["wasmtime/profiling"]
 cache = ["wasmtime/cache"]
@@ -72,8 +74,5 @@ wasmfx_pooling_allocator = [
 # Enable the old-style unsafe malloc'd stacks
 unsafe_wasmfx_stacks = ["wasmtime/unsafe_wasmfx_stacks"]
 
-
-# ... if you add a line above this be sure to also change:
-#
-#   crates/c-api/artifact/Cargo.toml
-
+# ... if you add a line above this be sure to change the other locations
+# marked WASMTIME_FEATURE_LIST

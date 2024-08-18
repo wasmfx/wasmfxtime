@@ -16,7 +16,6 @@ use crate::ir::{condcodes, ArgumentExtension};
 use crate::isa;
 use crate::isa::aarch64::inst::{FPULeftShiftImm, FPURightShiftImm, ReturnCallInfo};
 use crate::isa::aarch64::AArch64Backend;
-use crate::isle_common_prelude_methods;
 use crate::machinst::isle::*;
 use crate::{
     binemit::CodeOffset,
@@ -148,6 +147,10 @@ impl Context for IsleContext<'_, '_, MInst, AArch64Backend> {
         } else {
             None
         }
+    }
+
+    fn use_fp16(&mut self) -> bool {
+        self.backend.isa_flags.has_fp16()
     }
 
     fn move_wide_const_from_u64(&mut self, ty: Type, n: u64) -> Option<MoveWideConst> {
