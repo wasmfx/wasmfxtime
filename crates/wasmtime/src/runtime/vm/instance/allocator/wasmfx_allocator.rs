@@ -227,6 +227,32 @@ pub mod wasmfx_pooling {
             self.index_allocator.free(SlotId(index as u32));
         }
     }
+
+    impl Drop for InnerAllocator {
+        fn drop(&mut self) {
+            cfg_if::cfg_if! {
+                if #[cfg(all(feature = "wasmfx_baseline"))] {
+                    // We are about to drop all the `VMContRef`s in the
+                    // `continuations` vector. However, if any of the continuations
+                    // have not run to completion, dropping the corresponding
+                    // `Fiber` will panic. Since we are not currently enforcing that
+                    // all continuations created with cont.new must be run to
+                    // completion or cancelled, we must avoid those panics.
+                    //
+                    // To this end, we `forget` the Fiber. Since the corresponding
+                    // `FiberStack` is custom allocated, its drop implementation
+                    // does nothing anyway.
+                    for cont in self.continuations.drain(..) {
+                        cont.fiber.map(|b| {
+                            // Note that we consume the Box to get the `Fiber`,
+                            // meaning that the former doesn't leak.
+                            core::mem::forget(*b);
+                        });
+                    }
+                }
+            }
+        }
+    }
 }
 
 cfg_if::cfg_if! {
