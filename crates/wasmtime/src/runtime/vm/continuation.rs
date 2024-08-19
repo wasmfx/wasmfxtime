@@ -474,6 +474,11 @@ pub mod baseline {
         }
     }
 
+    // These are required so the WasmFX pooling allocator can store a Vec of
+    // `VMContRef`s.
+    unsafe impl Send for VMContRef {}
+    unsafe impl Sync for VMContRef {}
+
     // We use thread local state to simulate the VMContext. The use of
     // thread local state is necessary to reliably pass the testsuite,
     // as the test driver is multi-threaded.
