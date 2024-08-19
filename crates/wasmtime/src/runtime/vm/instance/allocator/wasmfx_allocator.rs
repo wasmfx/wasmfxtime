@@ -11,9 +11,14 @@ use wasmtime_continuations::WasmFXConfig;
 pub use crate::runtime::vm::continuation::imp::{FiberStack, VMContRef};
 
 pub trait ContinuationAllocator {
-    fn allocate(&self) -> Result<(*mut VMContRef, FiberStack)>;
+    /// Note that for technical reasons, we return the continuation and `FiberStack` separately.
+    /// In particular, the stack field of the continuation does not correspond to that stack yet.
+    ///
+    /// This allows users of the allocator interface to initialize a stack/fiber
+    /// object of the required type from the `FiberStack` and then save it in the `VMContRef`.
+    fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)>;
 
-    fn deallocate(&self, contref: *mut VMContRef);
+    fn deallocate(&mut self, contref: *mut VMContRef);
 }
 
 // This module is dead code if the pooling allocator is toggled.
@@ -35,7 +40,7 @@ pub mod wasmfx_on_demand {
     }
 
     impl ContinuationAllocator for InnerAllocator {
-        fn allocate(&self) -> Result<(*mut VMContRef, FiberStack)> {
+        fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)> {
             let stack = {
                 cfg_if::cfg_if! {
                     if #[cfg(all(feature = "unsafe_wasmfx_stacks", not(feature = "wasmfx_baseline")))] {
@@ -50,7 +55,7 @@ pub mod wasmfx_on_demand {
             Ok((contref, stack?))
         }
 
-        fn deallocate(&self, contref: *mut VMContRef) {
+        fn deallocate(&mut self, contref: *mut VMContRef) {
             // In on-demand mode, we actually deallocate the continuation by dropping it.
             let _ = unsafe { Box::from_raw(contref) };
         }
@@ -58,8 +63,8 @@ pub mod wasmfx_on_demand {
 }
 
 // This module is dead code if the on-demand allocator is toggled.
-#[allow(dead_code)]
-#[cfg(feature = "wasmfx_pooling_allocator")]
+// #[allow(dead_code)]
+// #[cfg(feature = "wasmfx_pooling_allocator")]
 pub mod wasmfx_pooling {
     use super::*;
 
@@ -71,19 +76,21 @@ pub mod wasmfx_pooling {
     use crate::vm::Mmap;
     use anyhow::{anyhow, bail, Context, Result};
 
-    /// Represents a pool of execution stacks.
+    /// Represents a pool of `VMContRef`s and their corresponding execution stacks.
     ///
-    /// Each index into the pool represents a single execution stack. The maximum number of
-    /// stacks is the same as the maximum number of instances.
+    /// Each index into the pool represents a single pair of `VMContRef` and its
+    /// corresponding execution stack. The maximum number of stacks is the same
+    /// as the maximum number of instances.
+    ///
     ///
     /// As stacks grow downwards, each stack starts (lowest address) with a guard page
     /// that can be used to detect stack overflow.
     ///
     /// The top of the stack (starting stack pointer) is returned when a stack is allocated
     /// from the pool.
-    #[derive(Debug)]
     pub struct InnerAllocator {
-        mapping: Mmap,
+        continuations: Vec<VMContRef>,
+        stack_mapping: Mmap,
         stack_size: usize,
         max_stacks: usize,
         page_size: usize,
@@ -94,7 +101,7 @@ pub mod wasmfx_pooling {
         pub fn new(config: &WasmFXConfig) -> Result<Self> {
             use rustix::mm::{mprotect, MprotectFlags};
 
-            let total_stacks = 1024 /* total amount of stacks */;
+            let total_stacks : u32 = 1024 /* total amount of stacks */;
 
             let page_size = crate::vm::host_page_size();
 
@@ -113,7 +120,7 @@ pub mod wasmfx_pooling {
                 anyhow!("total size of execution stacks exceeds addressable memory")
             })?;
 
-            let mapping = Mmap::accessible_reserved(allocation_size, allocation_size)
+            let stack_mapping = Mmap::accessible_reserved(allocation_size, allocation_size)
                 .context("failed to create stack pool mapping")?;
 
             // Set up the stack guard pages.
@@ -121,24 +128,30 @@ pub mod wasmfx_pooling {
                 unsafe {
                     for i in 0..max_stacks {
                         // Make the stack guard page inaccessible.
-                        let bottom_of_stack = mapping.as_ptr().add(i * stack_size).cast_mut();
+                        let bottom_of_stack = stack_mapping.as_ptr().add(i * stack_size).cast_mut();
                         mprotect(bottom_of_stack.cast(), page_size, MprotectFlags::empty())
                             .context("failed to protect stack guard page")?;
                     }
                 }
             }
 
+            let mut continuations = Vec::with_capacity(total_stacks as usize);
+            continuations.resize_with(total_stacks as usize, VMContRef::dummy);
+
             Ok(Self {
-                mapping,
+                continuations,
+                stack_mapping,
                 stack_size,
                 max_stacks,
                 page_size,
                 index_allocator: SimpleIndexAllocator::new(total_stacks),
             })
         }
+    }
 
+    impl ContinuationAllocator for InnerAllocator {
         /// Allocate a new fiber.
-        pub fn allocate(&self) -> Result<FiberStack> {
+        fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)> {
             if self.stack_size == 0 {
                 bail!("pooling allocator not configured to enable fiber stack allocation");
             }
@@ -161,7 +174,7 @@ pub mod wasmfx_pooling {
                 let size_without_guard = self.stack_size - self.page_size;
 
                 let bottom_of_stack = self
-                    .mapping
+                    .stack_mapping
                     .as_ptr()
                     .add((index * self.stack_size) + self.page_size)
                     .cast_mut();
@@ -169,7 +182,8 @@ pub mod wasmfx_pooling {
                 commit_pages(bottom_of_stack, size_without_guard)?;
 
                 let stack = super::FiberStack::from_raw_parts(bottom_of_stack, size_without_guard)?;
-                Ok(stack)
+                let continuation = &mut self.continuations[index];
+                Ok((continuation as *mut VMContRef, stack))
             }
         }
 
@@ -179,13 +193,22 @@ pub mod wasmfx_pooling {
         ///
         /// The fiber must have been allocated by this pool, must be in an allocated
         /// state, and must never be used again.
-        pub unsafe fn deallocate(&self, stack: &FiberStack) {
-            let top = stack
+        fn deallocate(&mut self, continuation: *mut VMContRef) {
+            let continuation = unsafe { continuation.as_mut().unwrap() };
+
+            // While in storage, the continuation only stores a dummy stack.
+            let fiber_stack = continuation.detach_stack();
+
+            // Let's make sure that the fiber_stack is indeed custom allocated,
+            // so that it going out of scope here does not attempt to deallocate it
+            debug_assert!(fiber_stack.is_from_raw_parts());
+
+            let top = fiber_stack
                 .top()
                 .expect("fiber stack not allocated from the pool") as usize;
 
-            let base = self.mapping.as_ptr() as usize;
-            let len = self.mapping.len();
+            let base = self.stack_mapping.as_ptr() as usize;
+            let len = self.stack_mapping.len();
             assert!(
                 top > base && top <= (base + len),
                 "fiber stack top pointer not in range"
@@ -214,7 +237,6 @@ cfg_if::cfg_if! {
     }
 }
 
-#[derive(Debug)]
 pub struct WasmFXAllocator {
     inner: imp::InnerAllocator,
 }
@@ -226,17 +248,11 @@ impl WasmFXAllocator {
         })
     }
 
-    pub fn allocate(&self) -> Result<(*mut VMContRef, FiberStack)> {
+    pub fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)> {
         self.inner.allocate()
     }
 
-    pub fn deallocate(&self, contref: *mut VMContRef) {
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "wasmfx_pooling_allocator")] {
-                unsafe { self.inner.deallocate(stack) }
-            } else {
-                self.inner.deallocate(contref)
-            }
-        }
+    pub fn deallocate(&mut self, contref: *mut VMContRef) {
+        self.inner.deallocate(contref)
     }
 }

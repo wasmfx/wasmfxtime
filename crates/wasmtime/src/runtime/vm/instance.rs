@@ -1394,12 +1394,12 @@ impl Instance {
         ),
         Error,
     > {
-        match &self.wasmfx_allocator {
+        match &mut self.wasmfx_allocator {
             Some(allocator) => allocator.allocate(),
             None => {
                 let wasmfx_config = unsafe { &*(*self.store()).wasmfx_config() };
                 self.wasmfx_allocator = Some(Box::new(WasmFXAllocator::new(wasmfx_config)?));
-                self.wasmfx_allocator.as_ref().unwrap().allocate()
+                self.wasmfx_allocator.as_mut().unwrap().allocate()
             }
         }
     }
@@ -1408,7 +1408,7 @@ impl Instance {
         &mut self,
         contref: *mut wasmfx_allocator::VMContRef,
     ) {
-        self.wasmfx_allocator.as_ref().unwrap().deallocate(contref)
+        self.wasmfx_allocator.as_mut().unwrap().deallocate(contref)
     }
 }
 

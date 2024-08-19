@@ -108,7 +108,7 @@ use wasmtime_continuations::ControlEffect;
 
 use crate::runtime::vm::{VMContext, VMFuncRef, VMOpaqueContext, ValRaw};
 
-#[derive(Debug)]
+#[derive(Debug,PartialEq, Eq)]
 pub enum Allocator {
     Malloc,
     Mmap,
@@ -194,6 +194,11 @@ impl FiberStack {
             len,
             allocator: Allocator::Custom,
         })
+    }
+
+
+    pub fn is_from_raw_parts(&self) -> bool {
+        self.allocator == Allocator::Custom
     }
 
     pub fn top(&self) -> Option<*mut u8> {

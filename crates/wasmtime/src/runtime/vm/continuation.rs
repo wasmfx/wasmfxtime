@@ -122,6 +122,10 @@ pub mod optimized {
             &self.stack
         }
 
+        pub fn detach_stack(&mut self) -> FiberStack {
+            core::mem::replace(&mut self.stack, FiberStack::unallocated())
+        }
+
         pub fn dummy() -> Self {
             let limits = StackLimits::with_stack_limit(Default::default());
             let parent_chain = StackChain::Absent;
@@ -160,6 +164,11 @@ pub mod optimized {
             // instead of panicking here.
         }
     }
+
+    // These are required so the WasmFX pooling allocator can store a Vec of
+    // `VMContRef`s.
+    unsafe impl Send for VMContRef {}
+    unsafe impl Sync for VMContRef {}
 
     /// TODO
     pub fn cont_ref_forward_tag_return_values_buffer(
@@ -432,6 +441,13 @@ pub mod baseline {
     impl VMContRef {
         pub fn fiber_stack(&self) -> &FiberStack {
             self.fiber.as_ref().unwrap().stack()
+        }
+
+        pub fn detach_stack(&mut self) -> FiberStack {
+            self.fiber
+                .take()
+                .expect("Only call detach_stack if a stack is actually present")
+                .into_stack()
         }
 
         pub fn dummy() -> Self {

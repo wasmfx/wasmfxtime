@@ -63,6 +63,12 @@ cfg_if::cfg_if! {
                 Ok(Self(imp::FiberStack::from_raw_parts(bottom, len)?))
             }
 
+            /// Is this a manually-managed stack created from raw parts? If so, it is up
+            /// to whoever created it to manage the stack's memory allocation.
+            pub fn is_from_raw_parts(&self) -> bool {
+                self.0.is_from_raw_parts()
+            }
+
             /// Gets the top of the stack.
             ///
             /// Returns `None` if the platform does not support getting the top of the
