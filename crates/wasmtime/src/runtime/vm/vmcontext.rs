@@ -251,6 +251,44 @@ mod test_vmglobal_import {
     }
 }
 
+/// The fields compiled code needs to access to utilize a WebAssembly
+/// tag imported from another instance.
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+pub struct VMTagImport {
+    /// A pointer to the imported tag description.
+    pub from: *mut VMTagDefinition,
+    /// A pointer to the `VMContext` that owns the tag description.
+    pub vmctx: *mut VMContext,
+}
+
+// Declare that this type is send/sync, it's the responsibility of users of
+// `VMGlobalImport` to uphold this guarantee.
+unsafe impl Send for VMTagImport {}
+unsafe impl Sync for VMTagImport {}
+
+#[cfg(test)]
+mod test_vmtag_import {
+    use super::VMTagImport;
+    use memoffset::offset_of;
+    use std::mem::size_of;
+    use wasmtime_environ::{Module, VMOffsets};
+
+    #[test]
+    fn check_vmtag_import_offsets() {
+        let module = Module::new();
+        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        assert_eq!(
+            size_of::<VMTagImport>(),
+            usize::from(offsets.size_of_vmtag_import())
+        );
+        assert_eq!(
+            offset_of!(VMTagImport, from),
+            usize::from(offsets.vmtag_import_from())
+        );
+    }
+}
+
 /// The fields compiled code needs to access to utilize a WebAssembly linear
 /// memory defined within the instance, namely the start address and the
 /// size in bytes.
@@ -619,6 +657,38 @@ mod test_vmshared_type_index {
         assert_eq!(
             size_of::<VMSharedTypeIndex>(),
             usize::from(offsets.size_of_vmshared_type_index())
+        );
+    }
+}
+
+/// A WebAssembly tag defined within the instance.
+///
+#[derive(Debug)]
+#[repr(C, align(8))]
+pub struct VMTagDefinition {
+    /// Function signature's type id.
+    pub type_index: VMSharedTypeIndex,
+}
+
+impl VMTagDefinition {
+    pub fn new(type_index: VMSharedTypeIndex) -> Self {
+        Self { type_index }
+    }
+}
+
+#[cfg(test)]
+mod test_vmtag_definition {
+    use super::VMTagDefinition;
+    use std::mem::size_of;
+    use wasmtime_environ::{Module, PtrSize, VMOffsets};
+
+    #[test]
+    fn check_vmtag_definition_offsets() {
+        let module = Module::new();
+        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        assert_eq!(
+            size_of::<VMTagDefinition>(),
+            usize::from(offsets.ptr.size_of_vmtag_definition())
         );
     }
 }

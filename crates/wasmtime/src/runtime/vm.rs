@@ -74,7 +74,7 @@ pub use crate::runtime::vm::traphandlers::*;
 pub use crate::runtime::vm::vmcontext::{
     VMArrayCallFunction, VMArrayCallHostFuncContext, VMContext, VMFuncRef, VMFunctionBody,
     VMFunctionImport, VMGlobalDefinition, VMGlobalImport, VMMemoryDefinition, VMMemoryImport,
-    VMOpaqueContext, VMRuntimeLimits, VMTableImport, VMWasmCallFunction, ValRaw,
+    VMOpaqueContext, VMRuntimeLimits, VMTableImport, VMTagImport, VMWasmCallFunction, ValRaw,
 };
 
 pub use send_sync_ptr::SendSyncPtr;

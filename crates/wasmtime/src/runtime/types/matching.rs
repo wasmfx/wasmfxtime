@@ -79,7 +79,13 @@ impl MatchCx<'_> {
                 }
                 _ => bail!("expected func, but found {}", actual.desc()),
             },
-            EntityType::Tag(_) => unimplemented!(),
+            EntityType::Tag(expected) => match actual {
+                DefinitionType::Tag(actual) => self.type_reference(
+                    expected.signature.unwrap_engine_type_index(),
+                    actual.signature.unwrap_engine_type_index(),
+                ),
+                _ => bail!("expected tag, but found {}", actual.desc()),
+            },
         }
     }
 }

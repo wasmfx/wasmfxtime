@@ -93,7 +93,7 @@ wasmtime_environ::foreach_builtin_function!(declare_function_signatures);
 pub struct FuncEnvironment<'module_environment> {
     /// NOTE(frank-emrich) pub for use in crate::wasmfx::* modules
     pub(crate) isa: &'module_environment (dyn TargetIsa + 'module_environment),
-    module: &'module_environment Module,
+    pub(crate) module: &'module_environment Module,
     types: &'module_environment ModuleTypesBuilder,
     wasm_func_ty: &'module_environment WasmFuncType,
     sig_ref_to_ty: SecondaryMap<ir::SigRef, Option<&'module_environment WasmFuncType>>,
@@ -2810,7 +2810,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn translate_suspend(
         &mut self,
         builder: &mut FunctionBuilder,
-        tag_index: ir::Value,
+        tag_index: u32,
         suspend_args: &[ir::Value],
         tag_return_types: &[WasmValType],
     ) -> Vec<ir::Value> {
@@ -2833,12 +2833,16 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
     fn tag_params(&self, tag_index: u32) -> &[WasmValType] {
         let idx = self.module.tags[TagIndex::from_u32(tag_index)].signature;
-        self.types[idx].unwrap_func().params()
+        self.types[idx.unwrap_module_type_index()]
+            .unwrap_func()
+            .params()
     }
 
     fn tag_returns(&self, tag_index: u32) -> &[WasmValType] {
         let idx = self.module.tags[TagIndex::from_u32(tag_index)].signature;
-        self.types[idx].unwrap_func().returns()
+        self.types[idx.unwrap_module_type_index()]
+            .unwrap_func()
+            .returns()
     }
 
     fn use_x86_blendv_for_relaxed_laneselect(&self, ty: Type) -> bool {

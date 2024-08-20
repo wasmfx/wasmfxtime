@@ -467,6 +467,9 @@ pub struct Module {
     /// Number of imported or aliased globals in the module.
     pub num_imported_globals: usize,
 
+    /// Number of imported or aliased tags in the module.
+    pub num_imported_tags: usize,
+
     /// Number of functions that "escape" from this module may need to have a
     /// `VMFuncRef` constructed for them.
     ///
@@ -490,7 +493,7 @@ pub struct Module {
     pub globals: PrimaryMap<GlobalIndex, Global>,
 
     /// WebAssembly exceptions and typed control tags.
-    pub tags: PrimaryMap<TagIndex, FunctionType>,
+    pub tags: PrimaryMap<TagIndex, Tag>,
 
     /// WebAssembly global initializers for locally-defined globals.
     pub global_initializers: PrimaryMap<DefinedGlobalIndex, ConstExpr>,
@@ -634,6 +637,29 @@ impl Module {
         }
     }
 
+    /// Test whether the given tag index is for an imported tag.
+    #[inline]
+    pub fn is_imported_tag(&self, index: TagIndex) -> bool {
+        index.index() < self.num_imported_tags
+    }
+
+    /// Convert a `DefinedTagIndex` into a `TagIndex`.
+    #[inline]
+    pub fn tag_index(&self, defined_tag: DefinedTagIndex) -> TagIndex {
+        TagIndex::new(self.num_imported_tags + defined_tag.index())
+    }
+
+    /// Convert a `TagIndex` into a `DefinedTagIndex`. Returns None if the
+    /// index is an imported tag.
+    #[inline]
+    pub fn defined_tag_index(&self, tag: TagIndex) -> Option<DefinedTagIndex> {
+        if tag.index() < self.num_imported_tags {
+            None
+        } else {
+            Some(DefinedTagIndex::new(tag.index() - self.num_imported_tags))
+        }
+    }
+
     /// Test whether the given global index is for an imported global.
     #[inline]
     pub fn is_imported_global(&self, index: GlobalIndex) -> bool {
@@ -659,6 +685,7 @@ impl Module {
             EntityIndex::Function(i) => {
                 EntityType::Function(EngineOrModuleTypeIndex::Module(self.functions[i].signature))
             }
+            EntityIndex::Tag(i) => EntityType::Tag(self.tags[i]),
         }
     }
 
@@ -673,11 +700,9 @@ impl Module {
     }
 
     /// TODO
-    pub fn push_tag(&mut self, signature: ModuleInternedTypeIndex) -> TagIndex {
-        self.tags.push(FunctionType {
-            signature,
-            func_ref: FuncRefIndex::reserved_value(),
-        })
+    pub fn push_tag(&mut self, idx: TypeIndex, signature: ModuleInternedTypeIndex) -> TagIndex {
+        self.tags
+            .push(Tag::new(idx, EngineOrModuleTypeIndex::Module(signature)))
     }
 
     /// Returns an iterator over all of the defined function indices in this

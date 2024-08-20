@@ -1307,6 +1307,11 @@ entity_impl!(ElemIndex);
 pub struct TagIndex(u32);
 entity_impl!(TagIndex);
 
+/// Index type of a defined tag inside the WebAssembly module.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub struct DefinedTagIndex(u32);
+entity_impl!(DefinedTagIndex);
+
 /// Index into the global list of modules found within an entire component.
 ///
 /// Module translations are saved on the side to get fully compiled after
@@ -1326,6 +1331,8 @@ pub enum EntityIndex {
     Memory(MemoryIndex),
     /// Global index.
     Global(GlobalIndex),
+    /// Tag index.
+    Tag(TagIndex),
 }
 
 impl From<FuncIndex> for EntityIndex {
@@ -1349,6 +1356,12 @@ impl From<MemoryIndex> for EntityIndex {
 impl From<GlobalIndex> for EntityIndex {
     fn from(idx: GlobalIndex) -> EntityIndex {
         EntityIndex::Global(idx)
+    }
+}
+
+impl From<TagIndex> for EntityIndex {
+    fn from(idx: TagIndex) -> EntityIndex {
+        EntityIndex::Tag(idx)
     }
 }
 
@@ -1379,7 +1392,8 @@ impl TypeTrace for EntityType {
             Self::Global(g) => g.trace(func),
             Self::Table(t) => t.trace(func),
             Self::Function(idx) => func(*idx),
-            Self::Memory(_) | Self::Tag(_) => Ok(()),
+            Self::Tag(t) => t.trace(func),
+            Self::Memory(_) => Ok(()),
         }
     }
 
@@ -1391,7 +1405,8 @@ impl TypeTrace for EntityType {
             Self::Global(g) => g.trace_mut(func),
             Self::Table(t) => t.trace_mut(func),
             Self::Function(idx) => func(idx),
-            Self::Memory(_) | Self::Tag(_) => Ok(()),
+            Self::Tag(t) => t.trace_mut(func),
+            Self::Memory(_) => Ok(()),
         }
     }
 }
@@ -1414,9 +1429,9 @@ impl EntityType {
     }
 
     /// Assert that this entity is a tag
-    pub fn unwrap_tag(&self) -> &Tag {
+    pub fn unwrap_tag(&self) -> Tag {
         match self {
-            EntityType::Tag(g) => g,
+            EntityType::Tag(g) => *g,
             _ => panic!("not a tag"),
         }
     }
@@ -1786,14 +1801,43 @@ impl From<wasmparser::MemoryType> for Memory {
 pub struct Tag {
     /// The event signature type.
     pub ty: TypeIndex,
+    /// The tag signature type.
+    pub signature: EngineOrModuleTypeIndex,
+}
+
+impl Tag {
+    pub fn new(idx: TypeIndex, signature: EngineOrModuleTypeIndex) -> Self {
+        Self { ty: idx, signature }
+    }
+
+    pub fn partial(idx: u32) -> Self {
+        Tag::new(
+            TypeIndex::from_u32(idx),
+            EngineOrModuleTypeIndex::Module(ModuleInternedTypeIndex(u32::MAX - 1)),
+        )
+    }
+}
+
+impl TypeTrace for Tag {
+    fn trace<F, E>(&self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        func(self.signature)
+    }
+
+    fn trace_mut<F, E>(&mut self, func: &mut F) -> Result<(), E>
+    where
+        F: FnMut(&mut EngineOrModuleTypeIndex) -> Result<(), E>,
+    {
+        func(&mut self.signature)
+    }
 }
 
 impl From<wasmparser::TagType> for Tag {
     fn from(ty: wasmparser::TagType) -> Tag {
         match ty.kind {
-            wasmparser::TagKind::Exception => Tag {
-                ty: TypeIndex::from_u32(ty.func_type_idx),
-            },
+            wasmparser::TagKind::Exception => Tag::partial(ty.func_type_idx),
         }
     }
 }

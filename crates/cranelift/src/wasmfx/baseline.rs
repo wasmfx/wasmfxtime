@@ -443,12 +443,13 @@ pub(crate) fn translate_cont_new<'a>(
 pub(crate) fn translate_suspend<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    tag_index: ir::Value,
+    tag_index: u32,
     suspend_args: &[ir::Value],
     tag_return_types: &[WasmValType],
 ) -> Vec<ir::Value> {
+    let tag_index_val = builder.ins().iconst(I32, tag_index as i64);
     typed_continuations_store_payloads(env, builder, suspend_args);
-    call_builtin!(builder, env, tc_baseline_suspend(tag_index));
+    call_builtin!(builder, env, tc_baseline_suspend(tag_index_val));
     let contref = typed_continuations_load_continuation_reference(env, builder);
 
     let return_values =

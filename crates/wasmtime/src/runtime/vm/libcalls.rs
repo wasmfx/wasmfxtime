@@ -935,7 +935,7 @@ fn tc_resume(
     instance: &mut Instance,
     contref: *mut u8,
     parent_stack_limits: *mut u8,
-) -> Result<u64, TrapReason> {
+) -> Result<*mut u8, TrapReason> {
     crate::vm::continuation::optimized::resume(
         instance,
         contref.cast::<crate::vm::continuation::optimized::VMContRef>(),
@@ -944,8 +944,8 @@ fn tc_resume(
     .map(|reason| reason.into())
 }
 
-fn tc_suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {
-    crate::vm::continuation::optimized::suspend(instance, tag_index)
+fn tc_suspend(instance: &mut Instance, tag_addr: *mut u8) -> Result<(), TrapReason> {
+    crate::vm::continuation::optimized::suspend(instance, tag_addr)
 }
 
 fn tc_cont_ref_forward_tag_return_values_buffer(

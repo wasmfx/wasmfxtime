@@ -140,3 +140,84 @@ pub(crate) fn typed_continuations_drop_cont_ref<'a>(
 ) {
     call_builtin!(builder, env, tc_drop_cont_ref(contref));
 }
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct TaggedPointer(pub ir::Value);
+
+impl TaggedPointer {
+    const LOW_TAG_MASK: i64 = 0b11;
+    const LOW_TAG_INVERSE_MASK: i64 = !0b11;
+
+    pub fn new(val: ir::Value) -> Self {
+        Self(val)
+    }
+
+    pub fn get_low_tag<'a>(
+        self,
+        _env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+    ) -> ir::Value {
+        builder.ins().band_imm(self.0, Self::LOW_TAG_MASK)
+    }
+
+    pub fn unmask<'a>(
+        self,
+        _env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+    ) -> ir::Value {
+        builder.ins().band_imm(self.0, Self::LOW_TAG_INVERSE_MASK)
+    }
+}
+
+/// Universal control effect. This structure encodes return signal,
+/// resume signal, suspension signal, and suspension tags into a
+/// pointer. This instance is used at compile time. There is a runtime
+/// counterpart in `continuations/src/lib.rs`.
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct ControlEffect(pub TaggedPointer);
+
+impl ControlEffect {
+    pub fn new(val: ir::Value) -> Self {
+        Self(TaggedPointer::new(val))
+    }
+
+    pub fn signal<'a>(
+        self,
+        env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+    ) -> ir::Value {
+        TaggedPointer::get_low_tag(self.0, env, builder)
+    }
+
+    pub fn value<'a>(
+        self,
+        env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+    ) -> ir::Value {
+        TaggedPointer::unmask(self.0, env, builder)
+    }
+}
+
+pub(crate) fn tag_address<'a>(
+    env: &mut crate::func_environ::FuncEnvironment<'a>,
+    builder: &mut FunctionBuilder,
+    index: u32,
+) -> ir::Value {
+    let vmctx = env.vmctx_val(&mut builder.cursor());
+    let tag_index = wasmtime_environ::TagIndex::from_u32(index);
+    let pointer_type = env.pointer_type();
+    if let Some(def_index) = env.module.defined_tag_index(tag_index) {
+        let offset = i32::try_from(env.offsets.vmctx_vmtag_definition(def_index)).unwrap();
+        builder.ins().iadd_imm(vmctx, offset as i64)
+    } else {
+        let offset = i32::try_from(env.offsets.vmctx_vmtag_import_from(tag_index)).unwrap();
+        builder.ins().load(
+            pointer_type,
+            ir::MemFlags::trusted().with_readonly(),
+            vmctx,
+            ir::immediates::Offset32::new(offset),
+        )
+    }
+}

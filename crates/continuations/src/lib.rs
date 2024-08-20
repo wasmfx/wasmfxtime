@@ -41,15 +41,6 @@ pub mod types {
         /// Type of the entries in the actual buffer
         pub type DataEntries = u128;
     }
-
-    /// Types used by `wasmtime_fibre::SwitchDirection` struct
-    pub mod switch_reason {
-        /// Type of `discriminant` field
-        pub type Discriminant = u32;
-
-        /// Type of `data` field
-        pub type Data = u32;
-    }
 }
 
 /// Runtime configuration options for WasmFX that can be set via the command
@@ -165,114 +156,6 @@ impl From<State> for i32 {
     }
 }
 
-// Runtime representation of tags
-pub type TagId = u32;
-
-/// See SwitchDirection below for overall use of this type.
-#[repr(u32)]
-#[derive(Debug, Clone)]
-pub enum SwitchDirectionEnum {
-    // Used to indicate that the contination has returned normally.
-    Return = 0,
-
-    // Indicates that we are suspendinga continuation due to invoking suspend.
-    // The payload is the tag to suspend with
-    Suspend = 1,
-
-    // Indicates that we are resuming a continuation via resume.
-    Resume = 2,
-}
-
-impl SwitchDirectionEnum {
-    pub fn discriminant_val(&self) -> u32 {
-        // This is well-defined for an enum with repr(u32).
-        unsafe { *(self as *const SwitchDirectionEnum as *const u32) }
-    }
-}
-
-/// Values of this type are passed to `wasmtime_fibre_switch` to indicate why we
-/// are switching. A nicer way of representing this type would be the following
-/// enum:
-///
-///```
-///  #[repr(C, u32)]
-///  pub enum SwitchDirection {
-///      // Used to indicate that the contination has returned normally.
-///      Return = 0,
-///
-///      // Indicates that we are suspendinga continuation due to invoking suspend.
-///      // The payload is the tag to suspend with
-///      Suspend(u32) = 1,
-///
-///      // Indicates that we are resuming a continuation via resume.
-///      Resume = 2,
-///  }
-///```
-///
-/// However, we want to convert values of type `SwitchDirection` to and from u64
-/// easily, which is why we need to ensure that it contains no uninitialised
-/// memory, to avoid undefined behavior.
-///
-/// We allow converting values of this type to and from u64.
-/// In that representation, bits 0 to 31 (where 0 is the LSB) contain the
-/// discriminant (as u32), while bits 32 to 63 contain the `data`.
-#[repr(C)]
-#[derive(Debug, Clone)]
-pub struct SwitchDirection {
-    pub discriminant: SwitchDirectionEnum,
-
-    // Stores tag value if `discriminant` is `suspend`, 0 otherwise.
-    pub data: u32,
-}
-
-impl SwitchDirection {
-    pub fn return_() -> SwitchDirection {
-        SwitchDirection {
-            discriminant: SwitchDirectionEnum::Return,
-            data: 0,
-        }
-    }
-
-    pub fn resume() -> SwitchDirection {
-        SwitchDirection {
-            discriminant: SwitchDirectionEnum::Resume,
-            data: 0,
-        }
-    }
-
-    pub fn suspend(tag: u32) -> SwitchDirection {
-        SwitchDirection {
-            discriminant: SwitchDirectionEnum::Suspend,
-            data: tag,
-        }
-    }
-}
-
-impl From<SwitchDirection> for u64 {
-    fn from(val: SwitchDirection) -> u64 {
-        // TODO(frank-emrich) This assumes little endian data layout. Should
-        // make this more explicit.
-        unsafe { core::mem::transmute::<SwitchDirection, u64>(val) }
-    }
-}
-
-impl From<u64> for SwitchDirection {
-    fn from(val: u64) -> SwitchDirection {
-        #[cfg(debug_assertions)]
-        {
-            let discriminant = val as u32;
-            debug_assert!(discriminant <= 2);
-            if discriminant != SwitchDirectionEnum::Suspend.discriminant_val() {
-                let data = val >> 32;
-                debug_assert_eq!(data, 0);
-            }
-        }
-        // TODO(frank-emrich) This assumes little endian data layout. Should
-        // make this more explicit.
-        unsafe { core::mem::transmute::<u64, SwitchDirection>(val) }
-    }
-}
-
 /// Defines offsets of the fields in the continuation-related types
 pub mod offsets {
     /// Offsets of fields in `Payloads`
@@ -326,4 +209,92 @@ pub mod offsets {
     /// Size of type `wasmtime_runtime::continuation::StackChain`.
     /// We test there that this value is correct.
     pub const STACK_CHAIN_SIZE: usize = 2 * core::mem::size_of::<usize>();
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TaggedPointer(usize);
+
+impl TaggedPointer {
+    const LOW_TAG_MASK: usize = 0b11;
+
+    pub fn untagged(val: usize) -> Self {
+        Self(val)
+    }
+
+    pub fn low_tag(self, tag: usize) -> Self {
+        assert!(tag <= Self::LOW_TAG_MASK);
+        Self(self.0 | tag)
+    }
+
+    pub fn get_low_tag(self) -> usize {
+        self.0 & Self::LOW_TAG_MASK
+    }
+
+    pub fn low_untag(self) -> Self {
+        Self(self.0 & !Self::LOW_TAG_MASK)
+    }
+}
+
+impl From<TaggedPointer> for usize {
+    fn from(val: TaggedPointer) -> usize {
+        val.0
+    }
+}
+
+impl From<usize> for TaggedPointer {
+    fn from(val: usize) -> TaggedPointer {
+        TaggedPointer::untagged(val)
+    }
+}
+
+/// Universal control effect. This structure encodes return signal,
+/// resume signal, suspension signal, and suspension tags into a
+/// pointer. This instance is used at runtime. There is a codegen
+/// counterpart in `cranelift/src/wasmfx/shared.rs`.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ControlEffect(TaggedPointer);
+
+impl ControlEffect {
+    pub fn suspend(ptr: *const u8) -> Self {
+        let tptr = TaggedPointer::untagged(ptr as usize);
+        Self(TaggedPointer::low_tag(tptr, 0b01))
+    }
+
+    pub fn return_() -> Self {
+        Self((0b00 as usize).into())
+    }
+
+    pub fn resume() -> Self {
+        Self((0b11 as usize).into())
+    }
+
+    fn new(raw: usize) -> Self {
+        Self(TaggedPointer::untagged(raw))
+    }
+
+    pub fn is_suspend(self) -> bool {
+        TaggedPointer::get_low_tag(self.0) == 0b01
+    }
+}
+
+impl From<u64> for ControlEffect {
+    fn from(val: u64) -> ControlEffect {
+        ControlEffect::new(val as usize)
+    }
+}
+
+impl From<ControlEffect> for u64 {
+    fn from(val: ControlEffect) -> u64 {
+        let raw: usize = val.0.into();
+        raw as u64
+    }
+}
+
+impl From<ControlEffect> for *mut u8 {
+    fn from(val: ControlEffect) -> *mut u8 {
+        let raw: usize = val.0.into();
+        raw as *mut u8
+    }
 }

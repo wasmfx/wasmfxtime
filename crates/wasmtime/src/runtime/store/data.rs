@@ -27,6 +27,7 @@ pub struct StoreData {
     globals: Vec<crate::runtime::vm::ExportGlobal>,
     instances: Vec<crate::instance::InstanceData>,
     memories: Vec<crate::runtime::vm::ExportMemory>,
+    tags: Vec<crate::runtime::vm::ExportTag>,
     #[cfg(feature = "component-model")]
     pub(crate) components: crate::component::ComponentStoreData,
 }
@@ -53,6 +54,7 @@ impl_store_data! {
     globals => crate::runtime::vm::ExportGlobal,
     instances => crate::instance::InstanceData,
     memories => crate::runtime::vm::ExportMemory,
+    tags => crate::runtime::vm::ExportTag,
 }
 
 impl StoreData {
@@ -64,6 +66,7 @@ impl StoreData {
             globals: Vec::new(),
             instances: Vec::new(),
             memories: Vec::new(),
+            tags: Vec::new(),
             #[cfg(feature = "component-model")]
             components: Default::default(),
         }

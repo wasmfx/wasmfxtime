@@ -1306,6 +1306,8 @@ pub enum ExternType {
     Table(TableType),
     /// This external type is the type of a WebAssembly memory.
     Memory(MemoryType),
+    /// This external type is the type of a WebAssembly tag.
+    Tag(TagType),
 }
 
 macro_rules! extern_type_accessors {
@@ -1338,6 +1340,7 @@ impl ExternType {
         (Global(GlobalType) global unwrap_global)
         (Table(TableType) table unwrap_table)
         (Memory(MemoryType) memory unwrap_memory)
+        (Tag(TagType) tag unwrap_tag)
     }
 
     pub(crate) fn from_wasmtime(
@@ -1365,7 +1368,26 @@ impl ExternType {
             EntityType::Global(ty) => GlobalType::from_wasmtime_global(engine, ty).into(),
             EntityType::Memory(ty) => MemoryType::from_wasmtime_memory(ty).into(),
             EntityType::Table(ty) => TableType::from_wasmtime_table(engine, ty).into(),
-            EntityType::Tag(_) => unimplemented!("wasm tag support"),
+            EntityType::Tag(_idx) => {
+                todo!()
+                // let ty = match idx {
+                //     EngineOrModuleTypeIndex::Engine(e) => {
+                //         FuncType::from_shared_type_index(engine, *e).into()
+                //     }
+                //     EngineOrModuleTypeIndex::Module(m) => {
+                //         let subty = &types[*m];
+                //         FuncType::from_wasm_func_type(
+                //             engine,
+                //             subty.is_final,
+                //             subty.supertype,
+                //             subty.unwrap_func().clone(),
+                //         )
+                //             .into()
+                //     }
+                //     EngineOrModuleTypeIndex::RecGroup(_) => unreachable!(),
+                // };
+                // TagType::from_wasmtime_tag(engine, ty).into()
+            }
         }
     }
 }
@@ -1391,6 +1413,12 @@ impl From<MemoryType> for ExternType {
 impl From<TableType> for ExternType {
     fn from(ty: TableType) -> ExternType {
         ExternType::Table(ty)
+    }
+}
+
+impl From<TagType> for ExternType {
+    fn from(ty: TagType) -> ExternType {
+        ExternType::Tag(ty)
     }
 }
 
@@ -2980,6 +3008,13 @@ impl MemoryType {
     pub(crate) fn wasmtime_memory(&self) -> &Memory {
         &self.ty
     }
+}
+
+// Tag types
+/// A descriptor for a tag in a WebAssembly module.
+#[derive(Debug, Clone, Hash)]
+pub struct TagType {
+    ty: WasmFuncType,
 }
 
 // Import Types

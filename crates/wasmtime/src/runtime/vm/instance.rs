@@ -11,11 +11,11 @@ use crate::runtime::vm::table::{Table, TableElement, TableElementType};
 use crate::runtime::vm::vmcontext::{
     VMBuiltinFunctionsArray, VMContext, VMFuncRef, VMFunctionImport, VMGlobalDefinition,
     VMGlobalImport, VMMemoryDefinition, VMMemoryImport, VMOpaqueContext, VMRuntimeLimits,
-    VMTableDefinition, VMTableImport,
+    VMTableDefinition, VMTableImport, VMTagDefinition, VMTagImport,
 };
 use crate::runtime::vm::{
-    ExportFunction, ExportGlobal, ExportMemory, ExportTable, GcStore, Imports, ModuleRuntimeInfo,
-    SendSyncPtr, Store, VMFunctionBody, VMGcRef, WasmFault,
+    ExportFunction, ExportGlobal, ExportMemory, ExportTable, ExportTag, GcStore, Imports,
+    ModuleRuntimeInfo, SendSyncPtr, Store, VMFunctionBody, VMGcRef, WasmFault,
 };
 use alloc::sync::Arc;
 use core::alloc::Layout;
@@ -27,10 +27,10 @@ use core::{mem, ptr};
 use sptr::Strict;
 use wasmtime_environ::{
     packed_option::ReservedValue, DataIndex, DefinedGlobalIndex, DefinedMemoryIndex,
-    DefinedTableIndex, ElemIndex, EntityIndex, EntityRef, EntitySet, FuncIndex, GlobalIndex,
-    HostPtr, MemoryIndex, MemoryPlan, Module, ModuleInternedTypeIndex, PrimaryMap, PtrSize,
-    TableIndex, TableInitialValue, TableSegmentElements, Trap, VMOffsets, VMSharedTypeIndex,
-    WasmHeapTopType, VMCONTEXT_MAGIC,
+    DefinedTableIndex, DefinedTagIndex, ElemIndex, EntityIndex, EntityRef, EntitySet, FuncIndex,
+    GlobalIndex, HostPtr, MemoryIndex, MemoryPlan, Module, ModuleInternedTypeIndex, PrimaryMap,
+    PtrSize, TableIndex, TableInitialValue, TableSegmentElements, TagIndex, Trap, VMOffsets,
+    VMSharedTypeIndex, WasmHeapTopType, VMCONTEXT_MAGIC,
 };
 #[cfg(feature = "wmemcheck")]
 use wasmtime_wmemcheck::Wmemcheck;
@@ -301,6 +301,11 @@ impl Instance {
         unsafe { &*self.vmctx_plus_offset(self.offsets().vmctx_vmglobal_import(index)) }
     }
 
+    /// Return the indexed `VMTagImport`.
+    fn imported_tag(&self, index: TagIndex) -> &VMTagImport {
+        unsafe { &*self.vmctx_plus_offset(self.offsets().vmctx_vmtag_import(index)) }
+    }
+
     /// Return the indexed `VMTableDefinition`.
     #[allow(dead_code)]
     fn table(&mut self, index: DefinedTableIndex) -> VMTableDefinition {
@@ -422,6 +427,11 @@ impl Instance {
                 };
                 (def_idx, global)
             })
+    }
+
+    /// Return the indexed `VMTagDefinition`.
+    fn tag_ptr(&mut self, index: DefinedTagIndex) -> *mut VMTagDefinition {
+        unsafe { self.vmctx_plus_offset_mut(self.offsets().vmctx_vmtag_definition(index)) }
     }
 
     /// Return a pointer to the interrupts structure
@@ -558,6 +568,18 @@ impl Instance {
             definition,
             vmctx,
             table: self.module().table_plans[index].clone(),
+        }
+    }
+
+    fn get_exported_tag(&mut self, index: TagIndex) -> ExportTag {
+        ExportTag {
+            definition: if let Some(def_index) = self.module().defined_tag_index(index) {
+                self.tag_ptr(def_index)
+            } else {
+                self.imported_tag(index).from
+            },
+            vmctx: self.vmctx(),
+            tag: self.module().tags[index],
         }
     }
 
@@ -1239,6 +1261,12 @@ impl Instance {
             self.vmctx_plus_offset_mut(offsets.vmctx_imported_globals_begin()),
             imports.globals.len(),
         );
+        debug_assert_eq!(imports.tags.len(), module.num_imported_tags);
+        ptr::copy_nonoverlapping(
+            imports.tags.as_ptr(),
+            self.vmctx_plus_offset_mut(offsets.vmctx_imported_tags_begin()),
+            imports.tags.len(),
+        );
 
         // N.B.: there is no need to initialize the funcrefs array because we
         // eagerly construct each element in it whenever asked for a reference
@@ -1280,6 +1308,20 @@ impl Instance {
         // Initialize the defined globals
         let mut const_evaluator = ConstExprEvaluator::default();
         self.initialize_vmctx_globals(&mut const_evaluator, module);
+
+        // Initialize the defined tags
+        for index in 0..module.tags.len() - module.num_imported_tags {
+            let defined_index = DefinedTagIndex::new(index);
+            let tag_index = module.tag_index(defined_index);
+            let tag = module.tags[tag_index];
+            let to = self.tag_ptr(defined_index);
+            ptr::write(
+                to,
+                VMTagDefinition::new(
+                    self.engine_type_index(tag.signature.unwrap_module_type_index()),
+                ),
+            );
+        }
     }
 
     unsafe fn initialize_vmctx_globals(
@@ -1413,6 +1455,11 @@ impl InstanceHandle {
         self.instance_mut().get_exported_table(export)
     }
 
+    /// Lookup a tag by index.
+    pub fn get_exported_tag(&mut self, export: TagIndex) -> ExportTag {
+        self.instance_mut().get_exported_tag(export)
+    }
+
     /// Lookup an item with the given index.
     pub fn get_export_by_index(&mut self, export: EntityIndex) -> Export {
         match export {
@@ -1420,6 +1467,7 @@ impl InstanceHandle {
             EntityIndex::Global(i) => Export::Global(self.get_exported_global(i)),
             EntityIndex::Table(i) => Export::Table(self.get_exported_table(i)),
             EntityIndex::Memory(i) => Export::Memory(self.get_exported_memory(i)),
+            EntityIndex::Tag(i) => Export::Tag(self.get_exported_tag(i)),
         }
     }
 

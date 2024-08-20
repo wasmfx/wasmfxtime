@@ -80,8 +80,8 @@ pub mod optimized {
     };
     use core::cmp;
     use core::mem;
-    use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
-    pub use wasmtime_continuations::{Payloads, StackLimits, State, SwitchDirection};
+    use wasmtime_continuations::{debug_println, ControlEffect, ENABLE_DEBUG_PRINTING};
+    pub use wasmtime_continuations::{Payloads, StackLimits, State};
     use wasmtime_environ::prelude::*;
 
     /// Fibers used for continuations
@@ -243,7 +243,7 @@ pub mod optimized {
         instance: &mut Instance,
         contref: *mut VMContRef,
         parent_stack_limits: *mut StackLimits,
-    ) -> Result<SwitchDirection, TrapReason> {
+    ) -> Result<ControlEffect, TrapReason> {
         let cont = unsafe {
             contref.as_ref().ok_or_else(|| {
                 TrapReason::user_without_backtrace(anyhow::anyhow!(
@@ -300,7 +300,7 @@ pub mod optimized {
 
     /// TODO
     #[inline(always)]
-    pub fn suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {
+    pub fn suspend(instance: &mut Instance, tag_addr: *mut u8) -> Result<(), TrapReason> {
         let chain_ptr = instance.typed_continuations_stack_chain();
 
         // TODO(dhil): This should be handled in generated code.
@@ -335,7 +335,7 @@ pub mod optimized {
         );
 
         let suspend = crate::runtime::vm::fibre::unix::Suspend::from_top_ptr(stack_ptr);
-        let payload = SwitchDirection::suspend(tag_index);
+        let payload = ControlEffect::suspend(tag_addr as *const u8);
         Ok(suspend.switch(payload))
     }
 
