@@ -42,7 +42,7 @@
 //! <https://openresearch-repository.anu.edu.au/bitstream/1885/42030/2/hon-thesis.pdf>
 
 use super::free_list::FreeList;
-use super::{VMStructDataMut, VMStructRef};
+use super::{VMArrayRef, VMGcObjectDataMut, VMStructRef};
 use crate::prelude::*;
 use crate::runtime::vm::{
     ExternRefHostDataId, ExternRefHostDataTable, GarbageCollection, GcArrayLayout, GcHeap,
@@ -111,12 +111,18 @@ unsafe impl GcRuntime for DrcCollector {
         let mut size = VMDrcHeader::HEADER_SIZE;
         let mut align = VMDrcHeader::HEADER_ALIGN;
         let length_field_offset = field(&mut size, &mut align, 4);
-        let elems_offset = align_up(&mut size, &mut align, size_of_wasm_ty(&ty.0.element_type));
+        debug_assert_eq!(
+            length_field_offset,
+            u32::try_from(core::mem::offset_of!(VMDrcArrayHeader, length)).unwrap(),
+        );
+        let elem_size = size_of_wasm_ty(&ty.0.element_type);
+        let elems_offset = align_up(&mut size, &mut align, elem_size);
         GcArrayLayout {
             size,
             align,
             length_field_offset,
             elems_offset,
+            elem_size,
         }
     }
 
@@ -369,7 +375,7 @@ impl DrcHeap {
                 gc_ref.is_i31() || activations_table_set.contains(&gc_ref),
                 "every on-stack gc_ref inside a Wasm frame should \
                  have an entry in the VMGcRefActivationsTable; \
-                 {gc_ref:?} is not in the table",
+                 {gc_ref:#p} is not in the table",
             );
             if gc_ref.is_i31() {
                 continue;
@@ -401,10 +407,8 @@ impl DrcHeap {
             .iter_mut()
             .take(num_filled)
             .map(|slot| {
-                let r64 = *slot.get_mut();
-                VMGcRef::from_r64(r64)
-                    .expect("valid r64")
-                    .expect("non-null")
+                let raw = *slot.get_mut();
+                VMGcRef::from_raw_u32(raw).expect("non-null")
             })
     }
 
@@ -432,10 +436,8 @@ impl DrcHeap {
         // borrows.
         let mut alloc = mem::take(&mut self.activations_table.alloc);
         for slot in alloc.chunk.iter_mut().take(num_filled) {
-            let r64 = mem::take(slot.get_mut());
-            let gc_ref = VMGcRef::from_r64(r64)
-                .expect("valid r64")
-                .expect("non-null");
+            let raw = mem::take(slot.get_mut());
+            let gc_ref = VMGcRef::from_raw_u32(raw).expect("non-null");
             f(self, gc_ref);
             *slot.get_mut() = 0;
         }
@@ -580,6 +582,21 @@ impl VMDrcHeader {
     }
 }
 
+/// The common header for all arrays in the DRC collector.
+#[repr(C)]
+struct VMDrcArrayHeader {
+    header: VMDrcHeader,
+    length: u32,
+}
+
+unsafe impl GcHeapObject for VMDrcArrayHeader {
+    #[inline]
+    fn is(header: &VMGcHeader) -> bool {
+        header.kind() == VMGcKind::ArrayRef
+    }
+}
+
+/// The representation of an `externref` in the DRC collector.
 #[repr(C)]
 struct VMDrcExternRef {
     header: VMDrcHeader,
@@ -688,13 +705,46 @@ unsafe impl GcHeap for DrcHeap {
         self.dealloc(structref.into());
     }
 
-    fn struct_data(&mut self, structref: &VMStructRef, size: u32) -> VMStructDataMut<'_> {
-        let start = structref.as_gc_ref().as_heap_index().unwrap().get();
+    fn gc_object_data(&mut self, gc_ref: &VMGcRef) -> VMGcObjectDataMut<'_> {
+        let start = gc_ref.as_heap_index().unwrap().get();
         let start = usize::try_from(start).unwrap();
-        let size = usize::try_from(size).unwrap();
+        let size = self
+            .index::<VMDrcHeader>(gc_ref.as_typed_unchecked())
+            .object_size();
         let end = start + size;
         let data = &mut self.heap_slice_mut()[start..end];
-        VMStructDataMut::new(data)
+        VMGcObjectDataMut::new(data)
+    }
+
+    fn alloc_uninit_array(
+        &mut self,
+        ty: VMSharedTypeIndex,
+        length: u32,
+        layout: &GcArrayLayout,
+    ) -> Result<Option<VMArrayRef>> {
+        let size = usize::try_from(layout.size_for_len(length)).unwrap();
+        let align = usize::try_from(layout.align).unwrap();
+        let layout = Layout::from_size_align(size, align).unwrap();
+        let gc_ref = match self.alloc(
+            VMGcHeader::from_kind_and_index(VMGcKind::ArrayRef, ty),
+            layout,
+        )? {
+            None => return Ok(None),
+            Some(gc_ref) => gc_ref,
+        };
+        self.index_mut::<VMDrcArrayHeader>(gc_ref.as_typed_unchecked())
+            .length = length;
+        Ok(Some(gc_ref.into_arrayref_unchecked()))
+    }
+
+    fn dealloc_uninit_array(&mut self, arrayref: VMArrayRef) {
+        self.dealloc(arrayref.into())
+    }
+
+    fn array_len(&self, arrayref: &VMArrayRef) -> u32 {
+        debug_assert!(arrayref.as_gc_ref().is_typed::<VMDrcArrayHeader>(self));
+        self.index::<VMDrcArrayHeader>(arrayref.as_gc_ref().as_typed_unchecked())
+            .length
     }
 
     fn gc<'a>(
@@ -777,7 +827,7 @@ impl<'a> GarbageCollection<'a> for DrcCollection<'a> {
 /// The type of `VMGcRefActivationsTable`'s bump region's elements.
 ///
 /// These are written to by Wasm.
-type TableElem = UnsafeCell<u64>;
+type TableElem = UnsafeCell<u32>;
 
 /// A table that over-approximizes the set of `VMGcRef`s that any Wasm
 /// activation on this thread is currently using.
@@ -943,7 +993,7 @@ impl VMGcRefActivationsTable {
                 0,
                 "slots >= the `next` bump finger are always `None`"
             );
-            ptr::write(next.as_ptr(), UnsafeCell::new(gc_ref.into_r64()));
+            ptr::write(next.as_ptr(), UnsafeCell::new(gc_ref.as_raw_u32()));
 
             let next = NonNull::new_unchecked(next.as_ptr().add(1));
             debug_assert!(next <= self.alloc.end);
@@ -982,7 +1032,7 @@ impl VMGcRefActivationsTable {
         // filled-in slots.
         let num_filled = self.num_filled_in_bump_chunk();
         for slot in self.alloc.chunk.iter().take(num_filled) {
-            if let Some(elem) = VMGcRef::from_r64(unsafe { *slot.get() }).expect("valid r64") {
+            if let Some(elem) = VMGcRef::from_raw_u32(unsafe { *slot.get() }) {
                 f(&elem);
             }
         }
