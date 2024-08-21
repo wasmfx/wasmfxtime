@@ -270,8 +270,7 @@ unsafe impl Sync for VMTagImport {}
 #[cfg(test)]
 mod test_vmtag_import {
     use super::VMTagImport;
-    use memoffset::offset_of;
-    use std::mem::size_of;
+    use core::mem::{offset_of, size_of};
     use wasmtime_environ::{Module, VMOffsets};
 
     #[test]
