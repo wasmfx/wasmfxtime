@@ -3,9 +3,9 @@ use crate::{
     runtime::vm::{GcHeap, GcStore, VMGcRef},
     store::AutoAssertNoGc,
     vm::GcStructLayout,
-    AnyRef, ExternRef, HeapType, RootedGcRefImpl, StorageType, Val, ValType, V128,
+    AnyRef, ExternRef, HeapType, RootedGcRefImpl, StorageType, Val, ValType,
 };
-use core::{fmt, mem};
+use core::fmt;
 use wasmtime_environ::VMGcKind;
 
 /// A `VMGcRef` that we know points to a `struct`.
@@ -139,7 +139,7 @@ impl VMStructRef {
         field: usize,
     ) -> Val {
         let offset = layout.fields[field];
-        let data = store.unwrap_gc_store_mut().struct_data(self, layout.size);
+        let data = store.unwrap_gc_store_mut().gc_object_data(self.as_gc_ref());
         match ty {
             StorageType::I8 => Val::I32(data.read_u8(offset).into()),
             StorageType::I16 => Val::I32(data.read_u16(offset).into()),
@@ -185,7 +185,7 @@ impl VMStructRef {
         debug_assert!(val._matches_ty(&store, &ty.unpack())?);
 
         let offset = layout.fields[field];
-        let mut data = store.gc_store_mut()?.struct_data(self, layout.size);
+        let mut data = store.gc_store_mut()?.gc_object_data(self.as_gc_ref());
         match val {
             Val::I32(i) if ty.is_i8() => data.write_i8(offset, i as i8),
             Val::I32(i) if ty.is_i16() => data.write_i16(offset, i as i16),
@@ -215,7 +215,7 @@ impl VMStructRef {
                     None => None,
                 };
                 store.gc_store_mut()?.write_gc_ref(&mut gc_ref, e.as_ref());
-                let mut data = store.gc_store_mut()?.struct_data(self, layout.size);
+                let mut data = store.gc_store_mut()?.gc_object_data(self.as_gc_ref());
                 data.write_u32(offset, gc_ref.map_or(0, |r| r.as_raw_u32()));
             }
             Val::AnyRef(a) => {
@@ -226,7 +226,7 @@ impl VMStructRef {
                     None => None,
                 };
                 store.gc_store_mut()?.write_gc_ref(&mut gc_ref, a.as_ref());
-                let mut data = store.gc_store_mut()?.struct_data(self, layout.size);
+                let mut data = store.gc_store_mut()?.gc_object_data(self.as_gc_ref());
                 data.write_u32(offset, gc_ref.map_or(0, |r| r.as_raw_u32()));
             }
 
@@ -272,31 +272,31 @@ impl VMStructRef {
         match val {
             Val::I32(i) if ty.is_i8() => store
                 .gc_store_mut()?
-                .struct_data(self, layout.size)
+                .gc_object_data(self.as_gc_ref())
                 .write_i8(offset, i as i8),
             Val::I32(i) if ty.is_i16() => store
                 .gc_store_mut()?
-                .struct_data(self, layout.size)
+                .gc_object_data(self.as_gc_ref())
                 .write_i16(offset, i as i16),
             Val::I32(i) => store
                 .gc_store_mut()?
-                .struct_data(self, layout.size)
+                .gc_object_data(self.as_gc_ref())
                 .write_i32(offset, i),
             Val::I64(i) => store
                 .gc_store_mut()?
-                .struct_data(self, layout.size)
+                .gc_object_data(self.as_gc_ref())
                 .write_i64(offset, i),
             Val::F32(f) => store
                 .gc_store_mut()?
-                .struct_data(self, layout.size)
+                .gc_object_data(self.as_gc_ref())
                 .write_u32(offset, f),
             Val::F64(f) => store
                 .gc_store_mut()?
-                .struct_data(self, layout.size)
+                .gc_object_data(self.as_gc_ref())
                 .write_u64(offset, f),
             Val::V128(v) => store
                 .gc_store_mut()?
-                .struct_data(self, layout.size)
+                .gc_object_data(self.as_gc_ref())
                 .write_v128(offset, v),
 
             // NB: We don't need to do a write barrier when initializing a
@@ -309,7 +309,7 @@ impl VMStructRef {
                 };
                 store
                     .gc_store_mut()?
-                    .struct_data(self, layout.size)
+                    .gc_object_data(self.as_gc_ref())
                     .write_u32(offset, x);
             }
             Val::AnyRef(x) => {
@@ -319,7 +319,7 @@ impl VMStructRef {
                 };
                 store
                     .gc_store_mut()?
-                    .struct_data(self, layout.size)
+                    .gc_object_data(self.as_gc_ref())
                     .write_u32(offset, x);
             }
 
@@ -332,150 +332,5 @@ impl VMStructRef {
             }
         }
         Ok(())
-    }
-}
-
-/// A plain-old-data type that can be stored in a `ValType` or a `StorageType`.
-///
-/// Safety: implementations must be POD and all bit patterns must be valid.
-pub trait PodValType<const SIZE: usize>: Copy {
-    /// Read an instance of `Self` from the given little-endian bytes.
-    fn read_le(le_bytes: &[u8; SIZE]) -> Self;
-
-    /// Write `self` into the given memory location, as little-endian bytes.
-    fn write_le(&self, into: &mut [u8; SIZE]);
-}
-
-macro_rules! impl_pod_val_type {
-    ( $( $t:ty , )* ) => {
-        $(
-            impl PodValType<{core::mem::size_of::<$t>()}> for $t {
-                fn read_le(le_bytes: &[u8; core::mem::size_of::<$t>()]) -> Self {
-                    <$t>::from_le_bytes(*le_bytes)
-                }
-                fn write_le(&self, into: &mut [u8; core::mem::size_of::<$t>()]) {
-                    *into = self.to_le_bytes();
-                }
-            }
-        )*
-    };
-}
-
-impl_pod_val_type! {
-    u8,
-    u16,
-    u32,
-    u64,
-    i8,
-    i16,
-    i32,
-    i64,
-}
-
-impl PodValType<{ mem::size_of::<V128>() }> for V128 {
-    fn read_le(le_bytes: &[u8; mem::size_of::<V128>()]) -> Self {
-        u128::from_le_bytes(*le_bytes).into()
-    }
-    fn write_le(&self, into: &mut [u8; mem::size_of::<V128>()]) {
-        *into = self.as_u128().to_le_bytes();
-    }
-}
-
-/// The backing storage for a GC-managed struct.
-///
-/// Methods on this type do not, generally, check against things like type
-/// mismatches or that the given offset to read from even falls on a field
-/// boundary. Omitting these checks is memory safe, due to our untrusted,
-/// indexed GC heaps. Providing incorrect offsets will result in general
-/// incorrectness, such as wrong answers or even panics, however.
-///
-/// Finally, these methods *will* panic on out-of-bounds accesses, either out of
-/// the GC heap's bounds or out of this struct's bounds. The former is necessary
-/// for preserving the memory safety of indexed GC heaps in the face of (for
-/// example) collector bugs, but the latter is just a defensive technique to
-/// catch bugs early and prevent action at a distance as much as possible.
-pub struct VMStructDataMut<'a> {
-    data: &'a mut [u8],
-}
-
-macro_rules! impl_pod_methods {
-    ( $( $t:ty, $read:ident, $write:ident; )* ) => {
-        $(
-            /// Read from a `
-            #[doc = stringify!($t)]
-            /// ` field in this struct.
-            ///
-            /// Panics on out-of-bounds accesses.
-            #[inline]
-            pub fn $read(&self, offset: u32) -> $t {
-                self.read_pod::<{ mem::size_of::<$t>() }, $t>(offset)
-            }
-
-            /// Write to a `
-            #[doc = stringify!($t)]
-            /// ` field in this struct.
-            ///
-            /// Panics on out-of-bounds accesses.
-            #[inline]
-            pub fn $write(&mut self, offset: u32, val: $t) {
-                self.write_pod::<{ mem::size_of::<$t>() }, $t>(offset, val);
-            }
-        )*
-    };
-}
-
-impl<'a> VMStructDataMut<'a> {
-    /// Construct a `VMStructDataMut` from the given slice of bytes.
-    #[inline]
-    pub fn new(data: &'a mut [u8]) -> Self {
-        Self { data }
-    }
-
-    /// Read a POD field out of this struct.
-    ///
-    /// Panics on out-of-bounds accesses.
-    ///
-    /// Don't generally use this method, use `read_u8`, `read_i64`,
-    /// etc... instead.
-    #[inline]
-    fn read_pod<const N: usize, T>(&self, offset: u32) -> T
-    where
-        T: PodValType<N>,
-    {
-        assert_eq!(N, mem::size_of::<T>());
-        let offset = usize::try_from(offset).unwrap();
-        let end = offset.checked_add(N).unwrap();
-        let bytes = self.data.get(offset..end).expect("out of bounds field");
-        T::read_le(bytes.try_into().unwrap())
-    }
-
-    /// Read a POD field out of this struct.
-    ///
-    /// Panics on out-of-bounds accesses.
-    ///
-    /// Don't generally use this method, use `write_u8`, `write_i64`,
-    /// etc... instead.
-    #[inline]
-    fn write_pod<const N: usize, T>(&mut self, offset: u32, val: T)
-    where
-        T: PodValType<N>,
-    {
-        assert_eq!(N, mem::size_of::<T>());
-        let offset = usize::try_from(offset).unwrap();
-        let end = offset.checked_add(N).unwrap();
-        let into = self.data.get_mut(offset..end).expect("out of bounds field");
-        val.write_le(into.try_into().unwrap());
-    }
-
-    impl_pod_methods! {
-        u8, read_u8, write_u8;
-        u16, read_u16, write_u16;
-        u32, read_u32, write_u32;
-        u64, read_u64, write_u64;
-        i8, read_i8, write_i8;
-        i16, read_i16, write_i16;
-        i32, read_i32, write_i32;
-        i64, read_i64, write_i64;
-        V128, read_v128, write_v128;
     }
 }
