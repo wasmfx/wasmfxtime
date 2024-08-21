@@ -826,7 +826,7 @@ pub mod stack_chain {
 #[cfg(feature = "wasmfx_baseline")]
 pub mod optimized {
     use crate::runtime::vm::{Instance, TrapReason};
-    pub use wasmtime_continuations::{StackLimits, SwitchDirection};
+    pub use wasmtime_continuations::{ControlEffect, StackLimits};
 
     pub type VMContRef = super::baseline::VMContRef;
 
@@ -857,12 +857,12 @@ pub mod optimized {
         _instance: &mut Instance,
         _contref: *mut VMContRef,
         _parent_stack_limits: *mut StackLimits,
-    ) -> Result<SwitchDirection, TrapReason> {
+    ) -> Result<ControlEffect, TrapReason> {
         panic!("attempt to execute continuation::optimized::resume with `typed_continuation_baseline_implementation` toggled!")
     }
 
     #[inline(always)]
-    pub fn suspend(_instance: &mut Instance, _tag_index: u32) -> Result<(), TrapReason> {
+    pub fn suspend(_instance: &mut Instance, _tag_addr: *mut u8) -> Result<(), TrapReason> {
         panic!("attempt to execute continuation::optimized::suspend with `typed_continuation_baseline_implementation` toggled!")
     }
 }
