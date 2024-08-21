@@ -259,15 +259,15 @@ pub struct ControlEffect(TaggedPointer);
 impl ControlEffect {
     pub fn suspend(ptr: *const u8) -> Self {
         let tptr = TaggedPointer::untagged(ptr as usize);
-        Self(TaggedPointer::low_tag(tptr, 0b01))
+        Self(TaggedPointer::low_tag(tptr, 0b01_usize))
     }
 
     pub fn return_() -> Self {
-        Self((0b00 as usize).into())
+        Self((0b00_usize).into())
     }
 
     pub fn resume() -> Self {
-        Self((0b11 as usize).into())
+        Self((0b11_usize).into())
     }
 
     fn new(raw: usize) -> Self {
