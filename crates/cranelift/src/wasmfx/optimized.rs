@@ -1379,7 +1379,7 @@ pub(crate) fn translate_resume<'a>(
     // Here we translate a resume instruction into several basic
     // blocks as follows:
     //
-    //        prelude_block
+    //        previous block
     //              |
     //              |
     //        resume_block <-----------\
@@ -1393,8 +1393,10 @@ pub(crate) fn translate_resume<'a>(
     //                      |          |
     //                 forward_block --/
     //
-    // * prelude_block pushes the continuation arguments onto the
-    //   buffer in the libcall context.
+    // * previous block is the current active builder block upon
+    //   entering `translate_resume`, in this block we push the
+    //   continuation arguments onto the buffer in the libcall
+    //   context.
     // * resume_block continues a given `contref`. It jumps to
     //   the `control_block`.
     // * control_block handles the control effect of resume, i.e. on
@@ -1414,14 +1416,14 @@ pub(crate) fn translate_resume<'a>(
     // NOTE1: The dispatch block is the head of a collection of blocks
     // which encodes a right-leaning (almost binary) decision tree,
     // that is a series of nested if-then-else. The `then` branch
-    // contains a "leaf" node which setups the jump to a user-defined
+    // contains a "leaf" node which sets up the jump to a user-defined
     // handler block, whilst the `else` branch contains another
     // decision tree or the forward_block.
     let resume_block = builder.create_block();
     let return_block = builder.create_block();
     let control_block = builder.create_block();
     let dispatch_block = builder.create_block();
-    let forwarding_block = builder.create_block();
+    let forward_block = builder.create_block();
 
     let vmctx = env.vmctx_val(&mut builder.cursor());
 
@@ -1565,11 +1567,11 @@ pub(crate) fn translate_resume<'a>(
         tag
     };
 
-    // Forwarding block: The last block in the if-then-else dispatch
+    // Forward block: The last block in the if-then-else dispatch
     // chain. Control flows to this block when the table on (resume
     // ...) does not have a matching mapping (on ...).
     {
-        builder.switch_to_block(forwarding_block);
+        builder.switch_to_block(forward_block);
 
         let parent_contref = parent_stack_chain.unwrap_continuation_or_trap(
             env,
@@ -1635,7 +1637,7 @@ pub(crate) fn translate_resume<'a>(
         // Fill the preamble block.
         builder.switch_to_block(target_preamble_block);
         // Load and push arguments.
-        let param_types = env.tag_params(handle_tag); // TODO(dhil): Check whether this function behaves correctly for imported tags.
+        let param_types = env.tag_params(handle_tag);
         let param_types: Vec<ir::Type> = param_types
             .iter()
             .map(|wty| crate::value_type(env.isa, *wty))
@@ -1668,8 +1670,8 @@ pub(crate) fn translate_resume<'a>(
     // The last tail_block unconditionally jumps to the forwarding
     // block.
     builder.switch_to_block(tail_block);
-    builder.ins().jump(forwarding_block, &[]);
-    builder.seal_block(forwarding_block);
+    builder.ins().jump(forward_block, &[]);
+    builder.seal_block(forward_block);
 
     // Return block: Jumped to by resume block if continuation
     // returned normally.
@@ -1690,7 +1692,10 @@ pub(crate) fn translate_resume<'a>(
 
         // The continuation has returned and all `VMContObjs` to it
         // should have been be invalidated. We may safely deallocate
-        // it.
+        // it. NOTE(dhil): it is only safe to deallocate the stack
+        // object if there are no lingering references to it,
+        // otherwise we have to keep it alive (though it can be
+        // repurposed).
         shared::typed_continuations_drop_cont_ref(env, builder, resume_contref);
 
         return values;

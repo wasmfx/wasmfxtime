@@ -258,7 +258,7 @@ mod test_vmglobal_import {
 pub struct VMTagImport {
     /// A pointer to the imported tag description.
     pub from: *mut VMTagDefinition,
-    /// A pointer to the `VMContext` that owns the tag description.
+    /// A pointer to the owning instance.
     pub vmctx: *mut VMContext,
 }
 
@@ -663,7 +663,7 @@ mod test_vmshared_type_index {
 /// A WebAssembly tag defined within the instance.
 ///
 #[derive(Debug)]
-#[repr(C, align(8))]
+#[repr(C, align(16))]
 pub struct VMTagDefinition {
     /// Function signature's type id.
     pub type_index: VMSharedTypeIndex,
@@ -689,6 +689,13 @@ mod test_vmtag_definition {
             size_of::<VMTagDefinition>(),
             usize::from(offsets.ptr.size_of_vmtag_definition())
         );
+    }
+
+    #[test]
+    fn check_vmtag_begins_aligned() {
+        let module = Module::new();
+        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        assert_eq!(offsets.vmctx_tags_begin() % 16, 0);
     }
 }
 

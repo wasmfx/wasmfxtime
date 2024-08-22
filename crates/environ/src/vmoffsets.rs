@@ -161,7 +161,7 @@ pub trait PtrSize {
     /// Return the size of `VMTagDefinition`.
     #[inline]
     fn size_of_vmtag_definition(&self) -> u8 {
-        8
+        16
     }
 
     /// This is the size of the largest value type (i.e. a V128).
