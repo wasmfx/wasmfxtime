@@ -257,7 +257,7 @@ mod test_vmglobal_import {
 #[repr(C)]
 pub struct VMTagImport {
     /// A pointer to the imported tag description.
-    pub from: *mut VMTagDefinition,
+    pub from: *mut VMTagDefinition, // TODO(dhil): May not be heap aligned!
     /// A pointer to the owning instance.
     pub vmctx: *mut VMContext,
 }
@@ -663,7 +663,7 @@ mod test_vmshared_type_index {
 /// A WebAssembly tag defined within the instance.
 ///
 #[derive(Debug)]
-#[repr(C, align(16))]
+#[repr(C)]
 pub struct VMTagDefinition {
     /// Function signature's type id.
     pub type_index: VMSharedTypeIndex,

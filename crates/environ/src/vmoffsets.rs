@@ -161,7 +161,7 @@ pub trait PtrSize {
     /// Return the size of `VMTagDefinition`.
     #[inline]
     fn size_of_vmtag_definition(&self) -> u8 {
-        16
+        4
     }
 
     /// This is the size of the largest value type (i.e. a V128).
@@ -550,6 +550,7 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
                 = cmul(ret.num_defined_globals, ret.ptr.size_of_vmglobal_definition()),
             size(defined_tags)
                 = cmul(ret.num_defined_tags, ret.ptr.size_of_vmtag_definition()),
+            align(16),
             size(defined_func_refs) = cmul(
                 ret.num_escaped_funcs,
                 ret.ptr.size_of_vm_func_ref(),
