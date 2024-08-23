@@ -146,8 +146,9 @@ pub(crate) fn typed_continuations_drop_cont_ref<'a>(
 pub struct TaggedPointer(pub ir::Value);
 
 impl TaggedPointer {
-    const LOW_TAG_MASK: i64 = 0b11;
-    const LOW_TAG_INVERSE_MASK: i64 = !0b11;
+    const LOW_TAG_BITS: i64 = 2;
+    const LOW_TAG_MASK: i64 = (1 << Self::LOW_TAG_BITS) - 1;
+    const LOW_TAG_INVERSE_MASK: i64 = !Self::LOW_TAG_MASK;
 
     pub fn new(val: ir::Value) -> Self {
         Self(val)

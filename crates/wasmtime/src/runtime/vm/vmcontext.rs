@@ -257,7 +257,7 @@ mod test_vmglobal_import {
 #[repr(C)]
 pub struct VMTagImport {
     /// A pointer to the imported tag description.
-    pub from: *mut VMTagDefinition, // TODO(dhil): May not be heap aligned!
+    pub from: *mut VMTagDefinition,
     /// A pointer to the owning instance.
     pub vmctx: *mut VMContext,
 }

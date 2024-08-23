@@ -216,7 +216,8 @@ pub mod offsets {
 pub struct TaggedPointer(usize);
 
 impl TaggedPointer {
-    const LOW_TAG_MASK: usize = 0b11;
+    const LOW_TAG_BITS: usize = 2;
+    const LOW_TAG_MASK: usize = (1 << Self::LOW_TAG_BITS) - 1;
 
     pub fn untagged(val: usize) -> Self {
         Self(val)

@@ -1712,6 +1712,7 @@ pub(crate) fn translate_suspend<'a>(
     typed_continuations_store_payloads(env, builder, suspend_args);
 
     let tag_addr = shared::tag_address(env, builder, tag_index);
+    emit_debug_println!(env, builder, "[suspend] suspending with tag {:p}", tag_addr);
     call_builtin!(builder, env, tc_suspend(tag_addr));
 
     let contref = typed_continuations_load_continuation_reference(env, builder);
