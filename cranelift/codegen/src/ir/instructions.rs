@@ -450,6 +450,14 @@ impl InstructionData {
             Self::CallIndirect {
                 sig_ref, ref args, ..
             } => CallInfo::Indirect(sig_ref, &args.as_slice(pool)[1..]),
+            Self::Ternary {
+                opcode: Opcode::StackSwitch,
+                ..
+            } => {
+                // `StackSwitch` is not actually a call, but has the .call() side
+                // effect as it continues execution elsewhere.
+                CallInfo::NotACall
+            }
             _ => {
                 debug_assert!(!self.opcode().is_call());
                 CallInfo::NotACall
@@ -642,8 +650,6 @@ pub struct ValueTypeSet {
     pub ints: BitSet8,
     /// Allowed float widths
     pub floats: BitSet8,
-    /// Allowed ref widths
-    pub refs: BitSet8,
     /// Allowed dynamic vectors minimum lane sizes
     pub dynamic_lanes: BitSet16,
 }
@@ -658,8 +664,6 @@ impl ValueTypeSet {
             self.ints.contains(l2b)
         } else if scalar.is_float() {
             self.floats.contains(l2b)
-        } else if scalar.is_ref() {
-            self.refs.contains(l2b)
         } else {
             false
         }
@@ -968,7 +972,6 @@ mod tests {
             lanes: BitSet16::from_range(0, 8),
             ints: BitSet8::from_range(4, 7),
             floats: BitSet8::from_range(0, 0),
-            refs: BitSet8::from_range(5, 7),
             dynamic_lanes: BitSet16::from_range(0, 4),
         };
         assert!(!vts.contains(I8));
@@ -979,15 +982,12 @@ mod tests {
         assert!(!vts.contains(F16));
         assert!(!vts.contains(F32));
         assert!(!vts.contains(F128));
-        assert!(vts.contains(R32));
-        assert!(vts.contains(R64));
         assert_eq!(vts.example().to_string(), "i32");
 
         let vts = ValueTypeSet {
             lanes: BitSet16::from_range(0, 8),
             ints: BitSet8::from_range(0, 0),
             floats: BitSet8::from_range(5, 7),
-            refs: BitSet8::from_range(0, 0),
             dynamic_lanes: BitSet16::from_range(0, 8),
         };
         assert_eq!(vts.example().to_string(), "f32");
@@ -996,7 +996,6 @@ mod tests {
             lanes: BitSet16::from_range(1, 8),
             ints: BitSet8::from_range(0, 0),
             floats: BitSet8::from_range(5, 7),
-            refs: BitSet8::from_range(0, 0),
             dynamic_lanes: BitSet16::from_range(0, 8),
         };
         assert_eq!(vts.example().to_string(), "f32x2");
@@ -1005,7 +1004,6 @@ mod tests {
             lanes: BitSet16::from_range(2, 8),
             ints: BitSet8::from_range(3, 7),
             floats: BitSet8::from_range(0, 0),
-            refs: BitSet8::from_range(0, 0),
             dynamic_lanes: BitSet16::from_range(0, 8),
         };
         assert_eq!(vts.example().to_string(), "i32x4");
@@ -1015,12 +1013,9 @@ mod tests {
             lanes: BitSet16::from_range(0, 9),
             ints: BitSet8::from_range(3, 7),
             floats: BitSet8::from_range(0, 0),
-            refs: BitSet8::from_range(0, 0),
             dynamic_lanes: BitSet16::from_range(0, 8),
         };
         assert!(vts.contains(I32));
         assert!(vts.contains(I32X4));
-        assert!(!vts.contains(R32));
-        assert!(!vts.contains(R64));
     }
 }

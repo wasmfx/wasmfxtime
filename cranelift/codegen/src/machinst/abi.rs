@@ -1664,38 +1664,6 @@ impl<M: ABIMachineSpec> Callee<M> {
 /// These methods of `Callee` may only be called after
 /// regalloc.
 impl<M: ABIMachineSpec> Callee<M> {
-    /// Generate a stack map, given a list of spillslots and the emission state
-    /// at a given program point (prior to emission of the safepointing
-    /// instruction).
-    pub fn spillslots_to_stack_map(
-        &self,
-        slots: &[SpillSlot],
-        state: &<M::I as MachInstEmit>::State,
-    ) -> StackMap {
-        let frame_layout = state.frame_layout();
-        let outgoing_args_size = frame_layout.outgoing_args_size;
-        let clobbers_and_slots = frame_layout.fixed_frame_storage_size + frame_layout.clobber_size;
-        trace!(
-            "spillslots_to_stackmap: slots = {:?}, state = {:?}",
-            slots,
-            state
-        );
-        let map_size = outgoing_args_size + clobbers_and_slots;
-        let bytes = M::word_bytes();
-        let map_words = (map_size + bytes - 1) / bytes;
-        let mut bits = std::iter::repeat(false)
-            .take(map_words as usize)
-            .collect::<Vec<bool>>();
-
-        let first_spillslot_word = ((self.stackslots_size + outgoing_args_size) / bytes) as usize;
-        for &slot in slots {
-            let slot = slot.index();
-            bits[first_spillslot_word + slot] = true;
-        }
-
-        StackMap::from_slice(&bits[..])
-    }
-
     /// Compute the final frame layout, post-regalloc.
     ///
     /// This must be called before gen_prologue or gen_epilogue.
@@ -2128,37 +2096,27 @@ impl<M: ABIMachineSpec> CallSite<M> {
                             reg, ty, extension, ..
                         } => {
                             let ext = M::get_ext_mode(ctx.sigs()[self.sig].call_conv, extension);
-                            let vreg = if ext != ir::ArgumentExtension::None
-                                && ty_bits(ty) < word_bits
-                            {
-                                assert_eq!(word_rc, reg.class());
-                                let signed = match ext {
-                                    ir::ArgumentExtension::Uext => false,
-                                    ir::ArgumentExtension::Sext => true,
-                                    _ => unreachable!(),
+                            let vreg =
+                                if ext != ir::ArgumentExtension::None && ty_bits(ty) < word_bits {
+                                    assert_eq!(word_rc, reg.class());
+                                    let signed = match ext {
+                                        ir::ArgumentExtension::Uext => false,
+                                        ir::ArgumentExtension::Sext => true,
+                                        _ => unreachable!(),
+                                    };
+                                    let extend_result =
+                                        ctx.alloc_tmp(M::word_type()).only_reg().unwrap();
+                                    ctx.emit(M::gen_extend(
+                                        extend_result,
+                                        *from_reg,
+                                        signed,
+                                        ty_bits(ty) as u8,
+                                        word_bits as u8,
+                                    ));
+                                    extend_result.to_reg()
+                                } else {
+                                    *from_reg
                                 };
-                                let extend_result =
-                                    ctx.alloc_tmp(M::word_type()).only_reg().unwrap();
-                                ctx.emit(M::gen_extend(
-                                    extend_result,
-                                    *from_reg,
-                                    signed,
-                                    ty_bits(ty) as u8,
-                                    word_bits as u8,
-                                ));
-                                extend_result.to_reg()
-                            } else if ty.is_ref() {
-                                // Reference-typed args need to be
-                                // passed as a copy; the original vreg
-                                // is constrained to the stack and
-                                // this copy is in a reg.
-                                let ref_copy = ctx.alloc_tmp(M::word_type()).only_reg().unwrap();
-                                ctx.emit(M::gen_move(ref_copy, *from_reg, M::word_type()));
-
-                                ref_copy.to_reg()
-                            } else {
-                                *from_reg
-                            };
 
                             let preg = reg.into();
                             self.uses.push(CallArgPair { vreg, preg });
