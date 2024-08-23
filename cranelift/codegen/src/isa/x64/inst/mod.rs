@@ -2,7 +2,7 @@
 
 pub use emit_state::EmitState;
 
-use crate::binemit::{Addend, CodeOffset, Reloc, StackMap};
+use crate::binemit::{Addend, CodeOffset, Reloc};
 use crate::ir::{types, ExternalName, LibCall, TrapCode, Type};
 use crate::isa::x64::abi::X64ABIMachineSpec;
 use crate::isa::x64::inst::regs::{pretty_print_reg, show_ireg_sized};
@@ -22,6 +22,7 @@ mod emit_state;
 #[cfg(test)]
 mod emit_tests;
 pub mod regs;
+mod stack_switch;
 pub mod unwind;
 
 use args::*;
@@ -137,6 +138,7 @@ impl Inst {
             | Inst::Setcc { .. }
             | Inst::ShiftR { .. }
             | Inst::SignExtendData { .. }
+            | Inst::StackSwitchBasic { .. }
             | Inst::TrapIf { .. }
             | Inst::TrapIfAnd { .. }
             | Inst::TrapIfOr { .. }
@@ -1732,6 +1734,19 @@ impl PrettyPrint for Inst {
                 s
             }
 
+            Inst::StackSwitchBasic {
+                store_context_ptr,
+                load_context_ptr,
+                in_payload0,
+                out_payload0,
+            } => {
+                let store_context_ptr = pretty_print_reg(**store_context_ptr, 8);
+                let load_context_ptr = pretty_print_reg(**load_context_ptr, 8);
+                let in_payload0 = pretty_print_reg(**in_payload0, 8);
+                let out_payload0 = pretty_print_reg(*out_payload0.to_reg(), 8);
+                format!("{out_payload0} = stack_switch_basic {store_context_ptr}, {load_context_ptr}, {in_payload0}")
+            }
+
             Inst::JmpKnown { dst } => {
                 let op = ljustify("jmp".to_string());
                 let dst = dst.to_string();
@@ -2371,6 +2386,27 @@ fn x64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             }
             collector.reg_clobbers(*clobbers);
         }
+        Inst::StackSwitchBasic {
+            store_context_ptr,
+            load_context_ptr,
+            in_payload0,
+            out_payload0,
+        } => {
+            collector.reg_use(load_context_ptr);
+            collector.reg_use(store_context_ptr);
+            collector.reg_fixed_use(in_payload0, stack_switch::payload_register());
+            collector.reg_fixed_def(out_payload0, stack_switch::payload_register());
+
+            let mut clobbers = crate::isa::x64::abi::ALL_CLOBBERS;
+            // The return/payload reg must not be included in the clobber set
+            clobbers.remove(
+                stack_switch::payload_register()
+                    .to_real_reg()
+                    .unwrap()
+                    .into(),
+            );
+            collector.reg_clobbers(clobbers);
+        }
 
         Inst::ReturnCallKnown { callee, info } => {
             let ReturnCallInfo { uses, tmp, .. } = &mut **info;
@@ -2628,8 +2664,6 @@ impl MachInst for Inst {
             types::I16 => Ok((&[RegClass::Int], &[types::I16])),
             types::I32 => Ok((&[RegClass::Int], &[types::I32])),
             types::I64 => Ok((&[RegClass::Int], &[types::I64])),
-            types::R32 => panic!("32-bit reftype pointer should never be seen on x86-64"),
-            types::R64 => Ok((&[RegClass::Int], &[types::R64])),
             types::F16 => Ok((&[RegClass::Float], &[types::F16])),
             types::F32 => Ok((&[RegClass::Float], &[types::F32])),
             types::F64 => Ok((&[RegClass::Float], &[types::F64])),

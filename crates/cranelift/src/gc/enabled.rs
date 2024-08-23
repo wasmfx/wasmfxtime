@@ -49,7 +49,7 @@ pub fn gc_ref_table_grow_builtin(
     func_env: &mut FuncEnvironment<'_>,
     func: &mut ir::Function,
 ) -> WasmResult<ir::FuncRef> {
-    debug_assert!(ty.is_vmgcref_type_and_not_i31());
+    debug_assert!(ty.is_vmgcref_type());
     Ok(func_env.builtin_functions.table_grow_gc_ref(func))
 }
 
@@ -58,7 +58,7 @@ pub fn gc_ref_table_fill_builtin(
     func_env: &mut FuncEnvironment<'_>,
     func: &mut ir::Function,
 ) -> WasmResult<ir::FuncRef> {
-    debug_assert!(ty.is_vmgcref_type_and_not_i31());
+    debug_assert!(ty.is_vmgcref_type());
     Ok(func_env.builtin_functions.table_fill_gc_ref(func))
 }
 
@@ -457,7 +457,7 @@ impl GcCompiler for DrcCompiler {
         // into `dst`, or we are in unreachable code and should just trap.
         if let WasmHeapType::None = ty.heap_type {
             if ty.nullable {
-                let null = builder.ins().null(ref_ty);
+                let null = builder.ins().iconst(ref_ty, 0);
                 builder.ins().store(flags, null, dst, 0);
             } else {
                 // NB: Don't use an unconditional trap instruction, since that

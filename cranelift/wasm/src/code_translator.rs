@@ -2501,7 +2501,9 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         }
 
         Operator::TryTable { .. } | Operator::ThrowRef => {
-            unimplemented!("exception operators not yet implemented")
+            return Err(wasm_unsupported!(
+                "exception operators are not yet implemented"
+            ));
         }
 
         Operator::RefEq
@@ -2533,7 +2535,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         | Operator::StructGetU { .. }
         | Operator::StructSet { .. }
         | Operator::StructGet { .. } => {
-            unimplemented!("GC operators not yet implemented")
+            return Err(wasm_unsupported!("GC operators are not yet implemented"));
         }
 
         Operator::ContNew { type_index } => {
@@ -2644,7 +2646,9 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         | Operator::ArrayAtomicRmwXchg { .. }
         | Operator::ArrayAtomicRmwCmpxchg { .. }
         | Operator::RefI31Shared { .. } => {
-            unimplemented!("shared-everything-threads not yet implemented")
+            return Err(wasm_unsupported!(
+                "shared-everything-threads operators are not yet implemented"
+            ));
         }
     };
     Ok(())

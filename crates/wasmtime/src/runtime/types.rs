@@ -1368,25 +1368,24 @@ impl ExternType {
             EntityType::Global(ty) => GlobalType::from_wasmtime_global(engine, ty).into(),
             EntityType::Memory(ty) => MemoryType::from_wasmtime_memory(ty).into(),
             EntityType::Table(ty) => TableType::from_wasmtime_table(engine, ty).into(),
-            EntityType::Tag(_idx) => {
-                todo!()
-                // let ty = match idx {
-                //     EngineOrModuleTypeIndex::Engine(e) => {
-                //         FuncType::from_shared_type_index(engine, *e).into()
-                //     }
-                //     EngineOrModuleTypeIndex::Module(m) => {
-                //         let subty = &types[*m];
-                //         FuncType::from_wasm_func_type(
-                //             engine,
-                //             subty.is_final,
-                //             subty.supertype,
-                //             subty.unwrap_func().clone(),
-                //         )
-                //             .into()
-                //     }
-                //     EngineOrModuleTypeIndex::RecGroup(_) => unreachable!(),
-                // };
-                // TagType::from_wasmtime_tag(engine, ty).into()
+            EntityType::Tag(ty) => {
+                let ty: FuncType = match ty.signature {
+                    EngineOrModuleTypeIndex::Engine(e) => {
+                        FuncType::from_shared_type_index(engine, e).into()
+                    }
+                    EngineOrModuleTypeIndex::Module(m) => {
+                        let subty = &types[m];
+                        FuncType::from_wasm_func_type(
+                            engine,
+                            subty.is_final,
+                            subty.supertype,
+                            subty.unwrap_func().clone(),
+                        )
+                        .into()
+                    }
+                    EngineOrModuleTypeIndex::RecGroup(_) => unreachable!(),
+                };
+                TagType::from_wasmtime_tag(ty.registered_type).into()
             }
         }
     }
@@ -3014,7 +3013,13 @@ impl MemoryType {
 /// A descriptor for a tag in a WebAssembly module.
 #[derive(Debug, Clone, Hash)]
 pub struct TagType {
-    ty: WasmFuncType,
+    ty: RegisteredType,
+}
+
+impl TagType {
+    pub(crate) fn from_wasmtime_tag(ty: RegisteredType) -> Self {
+        Self { ty }
+    }
 }
 
 // Import Types
