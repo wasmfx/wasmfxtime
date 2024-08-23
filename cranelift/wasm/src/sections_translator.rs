@@ -27,9 +27,7 @@ use wasmtime_types::ConstExpr;
 
 fn tag(e: TagType) -> Tag {
     match e.kind {
-        wasmparser::TagKind::Exception => Tag {
-            ty: TypeIndex::from_u32(e.func_type_idx),
-        },
+        wasmparser::TagKind::Exception => Tag::partial(e.func_type_idx),
     }
 }
 

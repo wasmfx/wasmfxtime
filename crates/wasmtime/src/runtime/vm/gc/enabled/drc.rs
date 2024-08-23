@@ -1094,10 +1094,12 @@ mod tests {
             num_imported_tables: 0,
             num_imported_memories: 0,
             num_imported_globals: 0,
+            num_imported_tags: 0,
             num_defined_tables: 0,
             num_defined_memories: 0,
             num_owned_memories: 0,
             num_defined_globals: 0,
+            num_defined_tags: 0,
             num_escaped_funcs: 0,
         });
 
@@ -1122,10 +1124,12 @@ mod tests {
             num_imported_tables: 0,
             num_imported_memories: 0,
             num_imported_globals: 0,
+            num_imported_tags: 0,
             num_defined_tables: 0,
             num_defined_memories: 0,
             num_owned_memories: 0,
             num_defined_globals: 0,
+            num_defined_tags: 0,
             num_escaped_funcs: 0,
         });
         assert_eq!(
@@ -1149,10 +1153,12 @@ mod tests {
             num_imported_tables: 0,
             num_imported_memories: 0,
             num_imported_globals: 0,
+            num_imported_tags: 0,
             num_defined_tables: 0,
             num_defined_memories: 0,
             num_owned_memories: 0,
             num_defined_globals: 0,
+            num_defined_tags: 0,
             num_escaped_funcs: 0,
         });
         assert_eq!(

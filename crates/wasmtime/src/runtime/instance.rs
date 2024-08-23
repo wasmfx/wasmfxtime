@@ -2,7 +2,7 @@ use crate::linker::{Definition, DefinitionType};
 use crate::prelude::*;
 use crate::runtime::vm::{
     Imports, InstanceAllocationRequest, ModuleRuntimeInfo, StorePtr, VMFuncRef, VMFunctionImport,
-    VMGlobalImport, VMMemoryImport, VMOpaqueContext, VMTableImport,
+    VMGlobalImport, VMMemoryImport, VMOpaqueContext, VMTableImport, VMTagImport,
 };
 use crate::store::{InstanceId, StoreOpaque, Stored};
 use crate::types::matching;
@@ -14,7 +14,8 @@ use alloc::sync::Arc;
 use core::ptr::NonNull;
 use wasmparser::WasmFeatures;
 use wasmtime_environ::{
-    EntityIndex, EntityType, FuncIndex, GlobalIndex, MemoryIndex, PrimaryMap, TableIndex, TypeTrace,
+    EntityIndex, EntityType, FuncIndex, GlobalIndex, MemoryIndex, PrimaryMap, TableIndex, TagIndex,
+    TypeTrace,
 };
 
 /// An instantiated WebAssembly module.
@@ -651,6 +652,7 @@ pub(crate) struct OwnedImports {
     tables: PrimaryMap<TableIndex, VMTableImport>,
     memories: PrimaryMap<MemoryIndex, VMMemoryImport>,
     globals: PrimaryMap<GlobalIndex, VMGlobalImport>,
+    tags: PrimaryMap<TagIndex, VMTagImport>,
 }
 
 impl OwnedImports {
@@ -666,6 +668,7 @@ impl OwnedImports {
             tables: PrimaryMap::new(),
             memories: PrimaryMap::new(),
             globals: PrimaryMap::new(),
+            tags: PrimaryMap::new(),
         }
     }
 
@@ -675,6 +678,7 @@ impl OwnedImports {
         self.tables.reserve(raw.num_imported_tables);
         self.memories.reserve(raw.num_imported_memories);
         self.globals.reserve(raw.num_imported_globals);
+        self.tags.reserve(raw.num_imported_tags);
     }
 
     #[cfg(feature = "component-model")]
@@ -683,6 +687,7 @@ impl OwnedImports {
         self.tables.clear();
         self.memories.clear();
         self.globals.clear();
+        self.tags.clear();
     }
 
     fn push(&mut self, item: &Extern, store: &mut StoreOpaque, module: &Module) {
@@ -701,6 +706,9 @@ impl OwnedImports {
             }
             Extern::SharedMemory(i) => {
                 self.memories.push(i.vmimport(store));
+            }
+            Extern::Tag(i) => {
+                self.tags.push(i.vmimport(store));
             }
         }
     }
@@ -734,6 +742,12 @@ impl OwnedImports {
                     index: m.index,
                 });
             }
+            crate::runtime::vm::Export::Tag(t) => {
+                self.tags.push(VMTagImport {
+                    from: t.definition,
+                    vmctx: t.vmctx,
+                });
+            }
         }
     }
 
@@ -743,6 +757,7 @@ impl OwnedImports {
             globals: self.globals.values().as_slice(),
             memories: self.memories.values().as_slice(),
             functions: self.functions.values().as_slice(),
+            tags: self.tags.values().as_slice(),
         }
     }
 }

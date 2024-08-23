@@ -647,7 +647,7 @@ pub trait FuncEnvironment: TargetEnvironment {
     fn translate_suspend(
         &mut self,
         builder: &mut FunctionBuilder,
-        tag_index: ir::Value,
+        tag_index: u32,
         suspend_args: &[ir::Value],
         tag_return_types: &[wasmtime_types::WasmValType],
     ) -> Vec<ir::Value>;

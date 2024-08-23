@@ -2579,9 +2579,8 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let params = state.peekn(param_types.len());
             let param_count = params.len();
 
-            let tag_index_val = builder.ins().iconst(I32, *tag_index as i64);
             let return_values =
-                environ.translate_suspend(builder, tag_index_val, params, &return_types);
+                environ.translate_suspend(builder, *tag_index, params, &return_types);
 
             state.popn(param_count);
             state.pushn(&return_values);

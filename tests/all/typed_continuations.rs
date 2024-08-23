@@ -279,10 +279,8 @@ mod wasi {
     }
 }
 
-/// Test that we can handle a `suspend` from another instance. Note that this
-/// test is working around the fact that wasmtime does not support exporting
-/// tags at the moment. Thus, instead of sharing a tag between two modules, we
-/// instantiate the same module twice to share a tag.
+/// Test that two distinct instantiations of the same module yield
+/// different control tag identities.
 #[test]
 fn inter_instance_suspend() -> Result<()> {
     let mut config = Config::default();
@@ -339,7 +337,8 @@ fn inter_instance_suspend() -> Result<()> {
     let other_inst1 = Instance::new(&mut store, &module_other, &[])?;
     let other_inst2 = Instance::new(&mut store, &module_other, &[])?;
 
-    // Crucially, suspend and resume are from two instances of the same module.
+    // Crucially, suspend and resume are from two separate instances
+    // of the same module.
     let suspend = other_inst1.get_func(&mut store, "suspend").unwrap();
     let resume = other_inst2.get_func(&mut store, "resume").unwrap();
 
@@ -347,8 +346,8 @@ fn inter_instance_suspend() -> Result<()> {
     let main_instance = Instance::new(&mut store, &module_main, &[suspend.into(), resume.into()])?;
     let entry_func = main_instance.get_func(&mut store, "entry").unwrap();
 
-    entry_func.call(&mut store, &[], &mut [])?;
-
+    let result = entry_func.call(&mut store, &[], &mut []);
+    assert!(result.is_err());
     Ok(())
 }
 

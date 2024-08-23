@@ -104,7 +104,7 @@ use std::alloc::{alloc, dealloc, Layout};
 use std::io;
 use std::ops::Range;
 use std::ptr;
-use wasmtime_continuations::SwitchDirection;
+use wasmtime_continuations::ControlEffect;
 
 use crate::runtime::vm::{VMContext, VMFuncRef, VMOpaqueContext, ValRaw};
 
@@ -263,7 +263,7 @@ extern "C" fn fiber_start(
 
         // Switch back to parent, indicating that the continuation returned.
         let inner = Suspend(top_of_stack);
-        let reason = SwitchDirection::return_();
+        let reason = ControlEffect::return_();
         inner.switch(reason);
     }
 }
@@ -290,16 +290,16 @@ impl Fiber {
         Ok(Self)
     }
 
-    pub(crate) fn resume(&self, stack: &FiberStack) -> SwitchDirection {
+    pub(crate) fn resume(&self, stack: &FiberStack) -> ControlEffect {
         unsafe {
-            let reason = SwitchDirection::resume().into();
-            SwitchDirection::from(wasmtime_fibre_switch(stack.top, reason))
+            let reason = ControlEffect::resume().into();
+            ControlEffect::from(wasmtime_fibre_switch(stack.top, reason))
         }
     }
 }
 
 impl Suspend {
-    pub fn switch(&self, payload: SwitchDirection) {
+    pub fn switch(&self, payload: ControlEffect) {
         unsafe {
             let arg = payload.into();
             wasmtime_fibre_switch(self.0, arg);
