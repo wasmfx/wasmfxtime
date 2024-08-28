@@ -1802,16 +1802,16 @@ impl Config {
                     | WasmFeatures::THREADS
                     | WasmFeatures::RELAXED_SIMD
                     | WasmFeatures::TAIL_CALL
-                    | WasmFeatures::TYPED_CONTINUATIONS;
+                    | WasmFeatures::TYPED_CONTINUATIONS
+                    | WasmFeatures::GC_TYPES;
                 match self.compiler_target().architecture {
                     target_lexicon::Architecture::Aarch64(_) => {
                         // no support for simd on aarch64
                         unsupported |= WasmFeatures::SIMD;
-                        // technically this is mostly supported in the sense of
-                        // multi-tables work well enough but enough of MVP wasm
-                        // currently panics that this is used here instead to
-                        // disable most spec tests which require reference
-                        // types.
+
+                        // things like multi-table are technically supported on
+                        // winch on aarch64 but this helps gate most spec tests
+                        // by default which otherwise currently cause panics.
                         unsupported |= WasmFeatures::REFERENCE_TYPES;
                     }
 
@@ -1837,32 +1837,26 @@ impl Config {
     /// `wasm_*` methods on `Config` are applied. Everything is then validated
     /// later in `Config::validate`.
     fn features(&self) -> WasmFeatures {
-        let mut features = WasmFeatures::empty();
+        // Wasmtime by default supports all of the wasm 2.0 version of the
+        // specification.
+        let mut features = WasmFeatures::wasm2();
 
         // On-by-default features that wasmtime has. Note that these are all
         // subject to the criteria at
         // https://docs.wasmtime.dev/contributing-implementing-wasm-proposals.html
-        features |= WasmFeatures::FLOATS;
-        features |= WasmFeatures::GC_TYPES;
-        features |= WasmFeatures::MULTI_VALUE;
-        features |= WasmFeatures::BULK_MEMORY;
-        features |= WasmFeatures::SIGN_EXTENSION;
-        features |= WasmFeatures::MUTABLE_GLOBAL;
-        features |= WasmFeatures::SATURATING_FLOAT_TO_INT;
         features |= WasmFeatures::MULTI_MEMORY;
-        features |= WasmFeatures::SIMD;
         features |= WasmFeatures::RELAXED_SIMD;
         features |= WasmFeatures::TAIL_CALL;
         features |= WasmFeatures::EXTENDED_CONST;
-        if cfg!(feature = "gc") {
-            features |= WasmFeatures::REFERENCE_TYPES;
-        }
-        if cfg!(feature = "threads") {
-            features |= WasmFeatures::THREADS;
-        }
-        if cfg!(feature = "component-model") {
-            features |= WasmFeatures::COMPONENT_MODEL;
-        }
+
+        // Set some features to their conditionally-enabled defaults depending
+        // on crate compile-time features.
+        features.set(WasmFeatures::GC_TYPES, cfg!(feature = "gc"));
+        features.set(WasmFeatures::THREADS, cfg!(feature = "threads"));
+        features.set(
+            WasmFeatures::COMPONENT_MODEL,
+            cfg!(feature = "component-model"),
+        );
 
         // From the default set of proposals remove any that the current
         // compiler backend may panic on if the module contains them.

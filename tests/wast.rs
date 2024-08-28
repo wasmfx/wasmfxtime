@@ -73,9 +73,15 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
     if strategy == Strategy::Winch {
         let unsupported = [
             // externref/reference-types related
+            "component-model/modules.wast",
+            "extended-const/elem.wast",
+            "extended-const/global.wast",
             "memory64/threads.wast",
             "misc_testsuite/externref-id-function.wast",
+            "misc_testsuite/externref-segment.wast",
             "misc_testsuite/externref-segments.wast",
+            "misc_testsuite/externref-table-dropped-segment-issue-8281.wast",
+            "misc_testsuite/linking-errors.wast",
             "misc_testsuite/many_table_gets_lead_to_gc.wast",
             "misc_testsuite/mutable_externref_globals.wast",
             "misc_testsuite/no-mixup-stack-maps.wast",
@@ -86,18 +92,18 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
             "spec_testsuite/data-invalid.wast",
             "spec_testsuite/elem.wast",
             "spec_testsuite/global.wast",
+            "spec_testsuite/linking.wast",
             "spec_testsuite/ref_func.wast",
             "spec_testsuite/ref_is_null.wast",
             "spec_testsuite/ref_null.wast",
             "spec_testsuite/select.wast",
+            "spec_testsuite/table-sub.wast",
             "spec_testsuite/table_fill.wast",
             "spec_testsuite/table_get.wast",
             "spec_testsuite/table_grow.wast",
             "spec_testsuite/table_set.wast",
             "spec_testsuite/table_size.wast",
             "spec_testsuite/unreached-invalid.wast",
-            "extended-const/elem.wast",
-            "extended-const/global.wast",
             // simd-related failures
             "annotations/simd_lane.wast",
             "memory64/simd.wast",
@@ -182,6 +188,10 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
             "relaxed-simd",
             "threads",
             "typed-continuations",
+            // Winch technically supports memory64 but the upstream tests have
+            // gc/function-references/exceptions/etc all merged in now so Winch
+            // can no longer run those tests without panicking.
+            "memory64",
         ];
         if let Some(parent) = test.parent() {
             if unsupported_proposals
@@ -192,6 +202,30 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
             }
         }
     }
+    let unsupported_gc_tests = [
+        "array_copy.wast",
+        "array_fill.wast",
+        "array_init_data.wast",
+        "array_init_elem.wast",
+        "array.wast",
+        "binary_gc.wast",
+        "br_on_cast_fail.wast",
+        "br_on_cast.wast",
+        "extern.wast",
+        "ref_cast.wast",
+        "ref_eq.wast",
+        "ref_test.wast",
+        "return_call_indirect.wast",
+        "return_call.wast",
+        "struct.wast",
+        "table_sub.wast",
+        "type_canon.wast",
+        "type_equivalence.wast",
+        "type-rec.wast",
+        "type-subtyping.wast",
+        "unreached_valid.wast",
+        "i31.wast",
+    ];
 
     for part in test.iter() {
         // Not implemented in Wasmtime yet
@@ -202,9 +236,9 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
                 || test.ends_with("imports.wast"));
         }
 
-        // Wasmtime doesn't implement the table64 extension yet.
         if part == "memory64" {
             if [
+                // Wasmtime doesn't implement the table64 extension yet.
                 "call_indirect.wast",
                 "table_copy.wast",
                 "table_get.wast",
@@ -215,10 +249,21 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
                 "table_copy_mixed.wast",
                 "table_grow.wast",
                 "table_size.wast",
+                // wasmtime doesn't implement exceptions yet
+                "imports.wast",
+                "ref_null.wast",
+                "exports.wast",
+                "throw.wast",
+                "throw_ref.wast",
+                "try_table.wast",
+                "tag.wast",
             ]
             .iter()
             .any(|i| test.ends_with(i))
             {
+                return true;
+            }
+            if unsupported_gc_tests.iter().any(|i| test.ends_with(i)) {
                 return true;
             }
         }
@@ -226,32 +271,7 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
         // Implementation of the GC proposal is a work-in-progress, this is
         // a list of all currently known-to-fail tests.
         if part == "gc" {
-            return [
-                "array_copy.wast",
-                "array_fill.wast",
-                "array_init_data.wast",
-                "array_init_elem.wast",
-                "array.wast",
-                "binary_gc.wast",
-                "br_on_cast_fail.wast",
-                "br_on_cast.wast",
-                "extern.wast",
-                "ref_cast.wast",
-                "ref_eq.wast",
-                "ref_test.wast",
-                "return_call_indirect.wast",
-                "return_call.wast",
-                "struct.wast",
-                "table_sub.wast",
-                "type_canon.wast",
-                "type_equivalence.wast",
-                "type-rec.wast",
-                "type-subtyping.wast",
-                "unreached_valid.wast",
-                "i31.wast",
-            ]
-            .iter()
-            .any(|i| test.ends_with(i));
+            return unsupported_gc_tests.iter().any(|i| test.ends_with(i));
         }
 
         if part == "typed-continuations" {
@@ -282,19 +302,20 @@ fn run_wast(wast: &Path, strategy: Strategy, pooling: bool) -> anyhow::Result<()
     let custom_page_sizes = feature_found(wast, "custom-page-sizes");
     let multi_memory = feature_found(wast, "multi-memory")
         || feature_found(wast, "component-model")
-        || custom_page_sizes;
+        || custom_page_sizes
+        || memory64;
     let threads = feature_found(wast, "threads");
     let typed_continuations = feature_found(wast, "typed-continuations");
     let exceptions = feature_found(wast, "exception-handling") || typed_continuations;
-    let gc = feature_found(wast, "gc");
+    let gc = feature_found(wast, "gc") || memory64;
     let function_references =
-        gc || typed_continuations || feature_found(wast, "function-references");
+        gc || memory64 || typed_continuations || feature_found(wast, "function-references");
     let reference_types = !(threads && feature_found(wast, "proposals"));
     let relaxed_simd = feature_found(wast, "relaxed-simd");
     let tail_call = feature_found(wast, "tail-call") || feature_found(wast, "function-references");
     let use_shared_memory = feature_found_src(&wast_bytes, "shared_memory")
         || feature_found_src(&wast_bytes, "shared)");
-    let extended_const = feature_found(wast, "extended-const");
+    let extended_const = feature_found(wast, "extended-const") || memory64;
 
     if pooling && use_shared_memory {
         log::warn!("skipping pooling test with shared memory");
