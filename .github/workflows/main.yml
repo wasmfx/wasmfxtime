@@ -706,6 +706,9 @@ jobs:
     # Crude check for whether
     # `unsafe_disable_continuation_linearity_check` makes the test
     # `cont_twice` fail.
+    # We run it with continuation pooling enabled, so that the involved
+    # `VMContRef` should still be allocated, meaning that we can reliably detect
+    # that the test is resuming an already returned fiber.
     # We expect the test case to trigger an internal assertion failure (rather
     # than a proper Wasm trap), which turns into a SIGILL (4).
     # However, we are happy as long as the test fails in some way, meaning that
@@ -715,9 +718,9 @@ jobs:
         # By default, Github actions run commands with pipefail enabled. We don't want that, as the command below is supposed to fail:
         set +e
         # Let's keep the build step separate from the run step below, because the former should not fail:
-        cargo build --features=unsafe_disable_continuation_linearity_check
+        cargo build --features=unsafe_disable_continuation_linearity_check,wasmfx_pooling_allocator
         # We want this to fail and are happy with any non-zero exit code:
-        cargo run --features=unsafe_disable_continuation_linearity_check -- wast -W=exceptions,function-references,typed-continuations tests/misc_testsuite/typed-continuations/cont_twice.wast ; test $? -ne 0
+        cargo run --features=unsafe_disable_continuation_linearity_check,wasmfx_pooling_allocator -- wast -W=exceptions,function-references,typed-continuations tests/misc_testsuite/typed-continuations/cont_twice.wast ; test $? -ne 0
 
     # NB: the test job here is explicitly lacking in cancellation of this run if
     # something goes wrong. These take the longest anyway and otherwise if
