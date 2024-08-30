@@ -38,7 +38,7 @@ pub mod wasmfx_on_demand {
                 }
             };
             let stack = stack.map_err(|_| anyhow::anyhow!("Fiber stack allocation failed"));
-            let contref = Box::into_raw(Box::new(VMContRef::dummy()));
+            let contref = Box::into_raw(Box::new(VMContRef::empty()));
             Ok((contref, stack?))
         }
 
@@ -122,7 +122,7 @@ pub mod wasmfx_pooling {
             }
 
             let mut continuations = Vec::with_capacity(total_stacks as usize);
-            continuations.resize_with(total_stacks as usize, VMContRef::dummy);
+            continuations.resize_with(total_stacks as usize, VMContRef::empty);
 
             Ok(Self {
                 continuations,

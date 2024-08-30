@@ -125,7 +125,9 @@ pub mod optimized {
             core::mem::replace(&mut self.stack, FiberStack::unallocated())
         }
 
-        pub fn dummy() -> Self {
+        /// This is effectively a `Default` implementation, without calling it
+        /// so. Used to create `VMContRef`s when initializing pooling allocator.
+        pub fn empty() -> Self {
             let limits = StackLimits::with_stack_limit(Default::default());
             let parent_chain = StackChain::Absent;
             let stack = FiberStack::unallocated();
@@ -448,7 +450,9 @@ pub mod baseline {
                 .into_stack()
         }
 
-        pub fn dummy() -> Self {
+        /// This is effectively a `Default` implementation, without calling it
+        /// so. Used to create `VMContRef`s when initializing pooling allocator.
+        pub fn empty() -> Self {
             let limits = StackLimits::with_stack_limit(Default::default());
             let parent_chain = StackChain::Absent;
             let parent = core::ptr::null_mut();
