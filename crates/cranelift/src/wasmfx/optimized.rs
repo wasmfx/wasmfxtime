@@ -1433,6 +1433,15 @@ pub(crate) fn translate_resume<'a>(
 
         let mut vmcontref = tc::VMContRef::new(resume_contref, env.pointer_type());
 
+        if cfg!(debug_assertions) {
+            // This should be impossible due to the linearity check.
+            // We keep this check mostly for the test that runs a continuation
+            // twice with `unsafe_disable_continuation_linearity_check` enabled.
+            let zero = builder.ins().iconst(I64, 0);
+            let has_returned = vmcontref.has_returned(builder);
+            emit_debug_assert_eq!(env, builder, has_returned, zero);
+        }
+
         let revision = vmcontref.get_revision(env, builder);
         if cfg!(not(feature = "unsafe_disable_continuation_linearity_check")) {
             let evidence = builder.ins().icmp(IntCC::Equal, revision, witness);
