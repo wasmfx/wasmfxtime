@@ -10,17 +10,6 @@ use wasmtime_continuations::WasmFXConfig;
 
 pub use crate::runtime::vm::continuation::imp::{FiberStack, VMContRef};
 
-pub trait ContinuationAllocator {
-    /// Note that for technical reasons, we return the continuation and `FiberStack` separately.
-    /// In particular, the stack field of the continuation does not correspond to that stack yet.
-    ///
-    /// This allows users of the allocator interface to initialize a stack/fiber
-    /// object of the required type from the `FiberStack` and then save it in the `VMContRef`.
-    fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)>;
-
-    fn deallocate(&mut self, contref: *mut VMContRef);
-}
-
 // This module is dead code if the pooling allocator is toggled.
 #[allow(dead_code)]
 pub mod wasmfx_on_demand {
@@ -37,10 +26,8 @@ pub mod wasmfx_on_demand {
                 stack_size: config.stack_size,
             })
         }
-    }
 
-    impl ContinuationAllocator for InnerAllocator {
-        fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)> {
+        pub fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)> {
             let stack = {
                 cfg_if::cfg_if! {
                     if #[cfg(all(feature = "unsafe_wasmfx_stacks", not(feature = "wasmfx_baseline")))] {
@@ -55,7 +42,7 @@ pub mod wasmfx_on_demand {
             Ok((contref, stack?))
         }
 
-        fn deallocate(&mut self, contref: *mut VMContRef) {
+        pub fn deallocate(&mut self, contref: *mut VMContRef) {
             // In on-demand mode, we actually deallocate the continuation by dropping it.
             let _ = unsafe { Box::from_raw(contref) };
         }
@@ -146,11 +133,9 @@ pub mod wasmfx_pooling {
                 index_allocator: SimpleIndexAllocator::new(total_stacks),
             })
         }
-    }
 
-    impl ContinuationAllocator for InnerAllocator {
         /// Allocate a new fiber.
-        fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)> {
+        pub fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)> {
             if self.stack_size == 0 {
                 bail!("pooling allocator not configured to enable fiber stack allocation");
             }
@@ -192,7 +177,7 @@ pub mod wasmfx_pooling {
         ///
         /// The fiber must have been allocated by this pool, must be in an allocated
         /// state, and must never be used again.
-        fn deallocate(&mut self, continuation: *mut VMContRef) {
+        pub fn deallocate(&mut self, continuation: *mut VMContRef) {
             let continuation = unsafe { continuation.as_mut().unwrap() };
 
             // While in storage, the continuation only stores a dummy stack.
@@ -273,10 +258,23 @@ impl WasmFXAllocator {
         })
     }
 
+    /// Note that for technical reasons, we return the continuation and `FiberStack` separately.
+    /// In particular, the stack field of the continuation does not correspond to that stack, yet.
+    /// Instead, the `VMContRef` returned here has an empty stack (i.e., `None`
+    /// in the baseline implementation, or an empty dummy stack in the optimized
+    /// implementation.
+    ///
+    /// Note that the `revision` counter of the returned `VMContRef` may be
+    /// non-zero and must not be decremented.
+    ///
+    /// This allows users of the allocator interface to initialize a stack/fiber
+    /// object of the required type from the `FiberStack` and then save it in the `VMContRef`.
     pub fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)> {
         self.inner.allocate()
     }
 
+    /// This may not actually deallocate the underlying memory, but simply
+    /// return the `VMContRef` to a pool.
     pub fn deallocate(&mut self, contref: *mut VMContRef) {
         self.inner.deallocate(contref)
     }
