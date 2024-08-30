@@ -81,7 +81,6 @@ pub mod optimized {
     use core::mem;
     use wasmtime_continuations::{debug_println, ControlEffect, ENABLE_DEBUG_PRINTING};
     pub use wasmtime_continuations::{Payloads, StackLimits, State};
-    use wasmtime_environ::prelude::*;
 
     /// Fibers used for continuations
     pub type FiberStack = crate::runtime::vm::fibre::FiberStack;
@@ -151,7 +150,6 @@ pub mod optimized {
         fn drop(&mut self) {
             // Note that continuation references do not own their parents, and we
             // don't drop them here.
-
 
             // `Payloads` must be deallocated explicitly, they are considered non-owning.
             self.args.deallocate();
