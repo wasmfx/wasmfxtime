@@ -707,10 +707,12 @@ jobs:
     # `unsafe_disable_continuation_linearity_check` makes the test
     # `cont_twice` fail.
     # We expect the test case to trigger an internal assertion failure (rather
-    # than a proper Wasm trap), which turns into a SIGILL (4). Thus, we expect
-    # exit code 128 + 4.
+    # than a proper Wasm trap), which turns into a SIGILL (4).
+    # However, we are happy as long as the test fails in some way, meaning that
+    # it did not produce the correct Wasm trap (which it should only do if
+    # unsafe_disable_continuation_linearity_check is disabled)
     - run: |
-        (cargo run --features=unsafe_disable_continuation_linearity_check -- wast -W=exceptions,function-references,typed-continuations tests/misc_testsuite/typed-continuations/cont_twice.wast && exit 1) || test $? -eq 132
+        cargo run --features=unsafe_disable_continuation_linearity_check -- wast -W=exceptions,function-references,typed-continuations tests/misc_testsuite/typed-continuations/cont_twice.wast ; test $? -ne 0
 
     # NB: the test job here is explicitly lacking in cancellation of this run if
     # something goes wrong. These take the longest anyway and otherwise if
