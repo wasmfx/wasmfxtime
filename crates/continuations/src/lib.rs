@@ -180,10 +180,10 @@ pub mod offsets {
         pub const LIMITS: usize = 0;
         /// Offset of `parent_chain` field
         pub const PARENT_CHAIN: usize = LIMITS + 4 * core::mem::size_of::<usize>();
-        /// Offset of `fiber` field
-        pub const FIBER_STACK: usize = PARENT_CHAIN + 2 * core::mem::size_of::<usize>();
+        /// Offset of `stack` field
+        pub const STACK: usize = PARENT_CHAIN + 2 * core::mem::size_of::<usize>();
         /// Offset of `args` field
-        pub const ARGS: usize = FIBER_STACK + super::FIBER_STACK_SIZE;
+        pub const ARGS: usize = STACK + super::FIBER_STACK_SIZE;
         /// Offset of `tag_return_values` field
         pub const TAG_RETURN_VALUES: usize = ARGS + core::mem::size_of::<Payloads>();
         /// Offset of `state` field
