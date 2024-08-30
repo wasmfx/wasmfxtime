@@ -348,7 +348,7 @@ pub mod optimized {
             offset_of!(VMContRef, parent_chain),
             vm_cont_ref::PARENT_CHAIN
         );
-        assert_eq!(offset_of!(VMContRef, fiber), vm_cont_ref::FIBER);
+        assert_eq!(offset_of!(VMContRef, fiber_stack), vm_cont_ref::FIBER_STACK);
         assert_eq!(offset_of!(VMContRef, args), vm_cont_ref::ARGS);
         assert_eq!(
             offset_of!(VMContRef, tag_return_values),
