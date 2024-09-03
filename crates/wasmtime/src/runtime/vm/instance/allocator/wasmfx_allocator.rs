@@ -43,8 +43,8 @@ pub mod wasmfx_on_demand {
         }
 
         pub fn deallocate(&mut self, contref: *mut VMContRef) {
-            // In on-demand mode, we actually deallocate the continuation by dropping it.
-            let _ = unsafe { Box::from_raw(contref) };
+            // In on-demand mode, we actually deallocate the continuation.
+            unsafe { core::mem::drop(Box::from_raw(contref)) };
         }
     }
 }
