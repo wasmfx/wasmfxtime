@@ -208,6 +208,14 @@ pub mod wasmfx_pooling {
             let index = (start_of_stack - base) / self.stack_size;
             assert!(index < self.max_stacks);
 
+            // If the `FiberStack` has the given `index` in the pool, then the
+            // `VMContRef` must also be at that index in the `continuations`
+            // vector.
+            assert_eq!(
+                continuation as *mut VMContRef,
+                &mut self.continuations[index] as *mut VMContRef
+            );
+
             self.index_allocator.free(SlotId(index as u32));
         }
     }
