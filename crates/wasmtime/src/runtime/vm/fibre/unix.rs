@@ -116,6 +116,7 @@ pub enum Allocator {
 }
 
 #[derive(Debug)]
+#[repr(C)]
 pub struct FiberStack {
     // The top of the stack; for stacks allocated by the fiber implementation itself,
     // the base address of the allocation will be `top.sub(len.unwrap())`
@@ -190,6 +191,43 @@ impl FiberStack {
         let base = unsafe { self.top.sub(self.len) as usize };
         Some(base..base + self.len)
     }
+
+    pub fn initialize(
+        &self,
+        func_ref: *const VMFuncRef,
+        caller_vmctx: *mut VMContext,
+        args_ptr: *mut ValRaw,
+        args_capacity: usize,
+    ) {
+        unsafe {
+            wasmtime_fibre_init(
+                self.top,
+                func_ref,
+                caller_vmctx,
+                args_ptr,
+                args_capacity,
+                wasmtime_fibre_switch as *const u8,
+            );
+        }
+    }
+
+    pub(crate) fn resume(&self) -> ControlEffect {
+        unsafe {
+            let reason = ControlEffect::resume().into();
+            ControlEffect::from(wasmtime_fibre_switch(self.top, reason))
+        }
+    }
+
+    pub fn suspend(&self, payload: ControlEffect) {
+        suspend_fiber(self.top, payload)
+    }
+}
+
+pub fn suspend_fiber(top_of_stack: *mut u8, payload: ControlEffect) {
+    unsafe {
+        let arg = payload.into();
+        wasmtime_fibre_switch(top_of_stack, arg);
+    }
 }
 
 impl Drop for FiberStack {
@@ -209,10 +247,6 @@ impl Drop for FiberStack {
         }
     }
 }
-
-pub struct Fiber;
-
-pub struct Suspend(*mut u8);
 
 extern "C" {
     // We allow "improper ctypes" here (i.e., passing values as parameters in an
@@ -262,55 +296,8 @@ extern "C" fn fiber_start(
         array_call_trampoline(callee_vmxtx, caller_vmxtx, args_ptr, args_capacity);
 
         // Switch back to parent, indicating that the continuation returned.
-        let inner = Suspend(top_of_stack);
         let reason = ControlEffect::return_();
-        inner.switch(reason);
-    }
-}
-
-impl Fiber {
-    pub fn new(
-        stack: &FiberStack,
-        func_ref: *const VMFuncRef,
-        caller_vmctx: *mut VMContext,
-        args_ptr: *mut ValRaw,
-        args_capacity: usize,
-    ) -> io::Result<Self> {
-        unsafe {
-            wasmtime_fibre_init(
-                stack.top,
-                func_ref,
-                caller_vmctx,
-                args_ptr,
-                args_capacity,
-                wasmtime_fibre_switch as *const u8,
-            );
-        }
-
-        Ok(Self)
-    }
-
-    pub(crate) fn resume(&self, stack: &FiberStack) -> ControlEffect {
-        unsafe {
-            let reason = ControlEffect::resume().into();
-            ControlEffect::from(wasmtime_fibre_switch(stack.top, reason))
-        }
-    }
-}
-
-impl Suspend {
-    pub fn switch(&self, payload: ControlEffect) {
-        unsafe {
-            let arg = payload.into();
-            wasmtime_fibre_switch(self.0, arg);
-        }
-    }
-
-    // NOTE(dhil): This function is never applied when using the
-    // baseline implementation.
-    #[allow(dead_code)]
-    pub fn from_top_ptr(ptr: *mut u8) -> Self {
-        Suspend(ptr)
+        suspend_fiber(top_of_stack, reason)
     }
 }
 

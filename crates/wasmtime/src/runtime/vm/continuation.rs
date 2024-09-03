@@ -74,7 +74,6 @@ unsafe impl Sync for VMContObj {}
 pub mod optimized {
     use super::stack_chain::StackChain;
     use crate::runtime::vm::{
-        fibre::Fiber,
         vmcontext::{VMFuncRef, ValRaw},
         Instance, TrapReason,
     };
@@ -85,7 +84,6 @@ pub mod optimized {
     use wasmtime_environ::prelude::*;
 
     /// Fibers used for continuations
-    pub type ContinuationFiber = Fiber;
     pub type FiberStack = crate::runtime::vm::fibre::FiberStack;
 
     /// TODO
@@ -98,8 +96,8 @@ pub mod optimized {
         /// main stack, or absent (in case of a suspended continuation).
         pub parent_chain: StackChain,
 
-        /// The underlying `Fiber`.
-        pub fiber: ContinuationFiber,
+        /// The underlying stack.
+        pub stack: FiberStack,
 
         /// Used to store
         /// 1. The arguments to the function passed to cont.new
@@ -117,6 +115,12 @@ pub mod optimized {
 
         /// Revision counter.
         pub revision: u64,
+    }
+
+    impl VMContRef {
+        pub fn fiber_stack(&self) -> &FiberStack {
+            &self.stack
+        }
     }
 
     /// TODO
@@ -153,7 +157,11 @@ pub mod optimized {
         // parent fields here.
 
         let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
-        instance.wasmfx_deallocate_stack(contref.fiber.stack());
+
+        // A continuation must have run to completion before deallocating it.
+        assert!(contref.state == State::Returned);
+
+        instance.wasmfx_deallocate_stack(&contref.stack);
         if contref.args.data.is_null() {
             debug_assert!(contref.args.length as usize == 0);
             debug_assert!(contref.args.capacity as usize == 0);
@@ -200,30 +208,27 @@ pub mod optimized {
         let stack_size = wasmfx_config.stack_size;
         let red_zone_size = wasmfx_config.red_zone_size;
 
-        let fiber = {
+        let stack = {
             let stack = instance.wasmfx_allocate_stack().map_err(|_error| {
                 TrapReason::user_without_backtrace(anyhow::anyhow!(
                     "Fiber stack allocation failed!"
                 ))
             })?;
-            Fiber::new(
-                stack,
+            stack.initialize(
                 func.cast::<VMFuncRef>(),
                 caller_vmctx,
                 payload.data as *mut ValRaw,
                 payload.capacity as usize,
-            )
-            .map_err(|_error| {
-                TrapReason::user_without_backtrace(anyhow::anyhow!("Fiber construction failed!"))
-            })?
+            );
+            stack
         };
 
-        let tsp = fiber.stack().top().unwrap();
+        let tsp = stack.top().unwrap();
         let stack_limit = unsafe { tsp.sub(stack_size - red_zone_size) } as usize;
         let contref = Box::new(VMContRef {
             revision: 0,
             limits: StackLimits::with_stack_limit(stack_limit),
-            fiber,
+            stack,
             parent_chain: StackChain::Absent,
             args: payload,
             tag_return_values: Payloads::new(0),
@@ -295,7 +300,7 @@ pub mod optimized {
             *runtime_limits.last_wasm_entry_sp.get() = (*contref).limits.last_wasm_entry_sp;
         }
 
-        Ok(cont.fiber.resume())
+        Ok(cont.stack.resume())
     }
 
     /// TODO
@@ -321,22 +326,15 @@ pub mod optimized {
             }
         }?;
 
-        let fiber = &running.fiber;
-
-        let stack_ptr = fiber.stack().top().ok_or_else(|| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Failed to retrieve stack top pointer!"
-            ))
-        })?;
+        let stack = &running.stack;
         debug_println!(
             "Suspending while running {:p}, parent is {:?}",
             running,
             running.parent_chain
         );
 
-        let suspend = crate::runtime::vm::fibre::unix::Suspend::from_top_ptr(stack_ptr);
         let payload = ControlEffect::suspend(tag_addr as *const u8);
-        Ok(suspend.switch(payload))
+        Ok(stack.suspend(payload))
     }
 
     // Tests
@@ -350,7 +348,7 @@ pub mod optimized {
             offset_of!(VMContRef, parent_chain),
             vm_cont_ref::PARENT_CHAIN
         );
-        assert_eq!(offset_of!(VMContRef, fiber), vm_cont_ref::FIBER);
+        assert_eq!(offset_of!(VMContRef, stack), vm_cont_ref::STACK);
         assert_eq!(offset_of!(VMContRef, args), vm_cont_ref::ARGS);
         assert_eq!(
             offset_of!(VMContRef, tag_return_values),
@@ -358,10 +356,7 @@ pub mod optimized {
         );
         assert_eq!(offset_of!(VMContRef, state), vm_cont_ref::STATE);
 
-        assert_eq!(
-            core::mem::size_of::<ContinuationFiber>(),
-            CONTINUATION_FIBER_SIZE
-        );
+        assert_eq!(core::mem::size_of::<FiberStack>(), FIBER_STACK_SIZE);
         assert_eq!(core::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
 
         assert_eq!(offset_of!(VMContRef, revision), vm_cont_ref::REVISION);
@@ -398,6 +393,12 @@ pub mod baseline {
         pub args: Vec<u128>,
         pub values: Vec<u128>,
         pub _marker: core::marker::PhantomPinned,
+    }
+
+    impl VMContRef {
+        pub fn fiber_stack(&self) -> &FiberStack {
+            self.fiber.stack()
+        }
     }
 
     // We use thread local state to simulate the VMContext. The use of

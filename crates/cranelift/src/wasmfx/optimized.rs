@@ -1452,6 +1452,15 @@ pub(crate) fn translate_resume<'a>(
         let next_revision = vmcontref.incr_revision(env, builder, revision);
         emit_debug_println!(env, builder, "[resume] new revision = {}", next_revision);
 
+        if cfg!(debug_assertions) {
+            // This should be impossible due to the linearity check.
+            // We keep this check mostly for the test that runs a continuation
+            // twice with `unsafe_disable_continuation_linearity_check` enabled.
+            let zero = builder.ins().iconst(I8, 0);
+            let has_returned = vmcontref.has_returned(builder);
+            emit_debug_assert_eq!(env, builder, has_returned, zero);
+        }
+
         if resume_args.len() > 0 {
             // We store the arguments in the `VMContRef` to be resumed.
             let count = builder.ins().iconst(I32, resume_args.len() as i64);
