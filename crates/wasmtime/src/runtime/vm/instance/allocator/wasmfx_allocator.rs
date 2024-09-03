@@ -51,6 +51,11 @@ pub mod wasmfx_on_demand {
 
 // This module is dead code if the on-demand allocator is toggled.
 #[allow(dead_code)]
+// We want to compile this module unconditionally, even if the
+// `wasmfx_pooling_allocator` feature is disabled. However, its implementation
+// depends on code only available if Wasmtime's own `pooling-allocator` feature
+// is enabled.
+#[cfg(feature = "pooling-allocator")]
 pub mod wasmfx_pooling {
     use super::*;
 
