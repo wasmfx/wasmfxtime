@@ -146,6 +146,10 @@ impl Payloads {
             self.length = 0;
         }
     }
+
+    pub fn clear(&mut self) {
+        self.length = 0;
+    }
 }
 
 /// Discriminant of variant `Absent` in

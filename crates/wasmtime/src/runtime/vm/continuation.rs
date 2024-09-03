@@ -217,10 +217,18 @@ pub mod optimized {
             // A continuation must have run to completion before dropping it.
             assert!(contref.state == State::Returned);
 
-            // `Payloads` must be deallocated explicitly, they are considered
-            // non-owning.
-            contref.args.deallocate();
-            contref.tag_return_values.deallocate();
+            // Note that we *could* deallocate the `Payloads` (i.e., `args` and
+            // `tag_return_values`) here, but choose not to:
+            // - If we are using on-demand allocation of `VMContRef`s, the
+            //   `Payloads` get deallocated as part of `Drop`-ing the `VMContRef`.
+            // - If we are using the pooling allocator, we deliberately return
+            //   the `contref` to the pool with its `Payloads` still allocated.
+            //   When the `contref` is handed out subsequently on another
+            //   allocation requesdt, we can resize the `Payloads` if needed.
+            //
+            // So instead we just clear the elements.
+            contref.args.clear();
+            contref.tag_return_values.clear();
         }
 
         // The WasmFX allocator decides if "deallocating" a continuation means
