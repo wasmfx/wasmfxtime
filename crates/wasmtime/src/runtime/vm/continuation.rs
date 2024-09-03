@@ -160,7 +160,7 @@ pub mod optimized {
             // We would like to enforce the invariant that any continuation that
             // was created for a cont.new (rather than, say, just living in a
             // pool and never being touched), either ran to completion or was
-            // cancelled. But failint to doso should yield a custom error,
+            // cancelled. But failing to do so should yield a custom error,
             // instead of panicking here.
         }
     }
@@ -223,7 +223,7 @@ pub mod optimized {
             contref.tag_return_values.deallocate();
         }
 
-        // The WasmFX allocator decides if "droppin" a continuation means
+        // The WasmFX allocator decides if "deallocating" a continuation means
         // putting it back into the pool or actually deallocating it.
         instance.wasmfx_deallocate_continuation(contref);
     }

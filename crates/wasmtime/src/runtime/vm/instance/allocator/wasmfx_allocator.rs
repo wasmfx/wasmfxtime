@@ -216,20 +216,25 @@ pub mod wasmfx_pooling {
         fn drop(&mut self) {
             cfg_if::cfg_if! {
                 if #[cfg(all(feature = "wasmfx_baseline"))] {
+                    // This is a workaround for the following quirk:
+                    //
                     // We are about to drop all the `VMContRef`s in the
                     // `continuations` vector. However, if any of the continuations
                     // have not run to completion, dropping the corresponding
-                    // `Fiber` will panic. Since we are not currently enforcing that
-                    // all continuations created with cont.new must be run to
-                    // completion or cancelled, we must avoid those panics.
+                    // `Fiber` will panic (at least in the baseline implementation).
+                    // Since we are not currently enforcing that all
+                    // continuations created with cont.new must be run to
+                    // completion or cancelled in some other way, we must avoid
+                    // those panics.
                     //
-                    // To this end, we `forget` the Fiber. Since the corresponding
-                    // `FiberStack` is custom allocated, its drop implementation
-                    // does nothing anyway.
+                    // To this end, we `forget` the Fiber instead of properly
+                    // Drop-ping it. Since the corresponding `FiberStack` is
+                    // custom allocated, its Drop implementation does nothing
+                    // anyway, meaning that this does not leak memory.
                     for cont in self.continuations.drain(..) {
                         cont.fiber.map(|b| {
                             // Note that we consume the Box to get the `Fiber`,
-                            // meaning that the former doesn't leak.
+                            // meaning that the Box itself doesn't leak.
                             core::mem::forget(*b);
                         });
                     }
@@ -258,17 +263,18 @@ impl WasmFXAllocator {
         })
     }
 
-    /// Note that for technical reasons, we return the continuation and `FiberStack` separately.
-    /// In particular, the stack field of the continuation does not correspond to that stack, yet.
-    /// Instead, the `VMContRef` returned here has an empty stack (i.e., `None`
-    /// in the baseline implementation, or an empty dummy stack in the optimized
-    /// implementation.
+    /// Note that for technical reasons, we return the `VMContRef` and
+    /// `FiberStack` separately. In particular, the stack field of the
+    /// continuation does not correspond to/point to that stack, yet. Instead, the
+    /// `VMContRef` returned here has an empty stack (i.e., `None` in the
+    /// baseline implementation, or an empty dummy stack in the optimized
+    /// implementation).
+    /// This allows the baseline implementation of the allocator interface to
+    /// initialize a new `Fiber` from the `FiberStack`. then save it in the
+    /// `VMContRef`.
     ///
     /// Note that the `revision` counter of the returned `VMContRef` may be
     /// non-zero and must not be decremented.
-    ///
-    /// This allows users of the allocator interface to initialize a stack/fiber
-    /// object of the required type from the `FiberStack` and then save it in the `VMContRef`.
     pub fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)> {
         self.inner.allocate()
     }
