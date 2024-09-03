@@ -104,6 +104,7 @@ pub struct Payloads {
 }
 
 impl Payloads {
+    #[inline]
     pub fn new(capacity: u32) -> Self {
         let data = if capacity == 0 {
             ptr::null_mut()
@@ -122,6 +123,7 @@ impl Payloads {
 
     /// Ensures that we can hold at least the required number of elements.
     /// Does not preserve existing elements and can therefore only be called on empty `Payloads`.
+    #[inline]
     pub fn ensure_capacity(&mut self, required_capacity: u32) {
         assert_eq!(self.length, 0);
         if self.capacity < required_capacity {
@@ -130,7 +132,7 @@ impl Payloads {
             *self = Self::new(required_capacity)
         }
     }
-
+    #[inline]
     pub fn deallocate(&mut self) {
         if self.data.is_null() {
             debug_assert_eq!(self.length, 0);
@@ -147,6 +149,7 @@ impl Payloads {
         }
     }
 
+    #[inline]
     pub fn clear(&mut self) {
         self.length = 0;
     }
