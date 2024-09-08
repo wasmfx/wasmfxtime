@@ -1,0 +1,143 @@
+name: "Check for performance regressions"
+
+on:
+  pull_request:
+
+  push:
+    branches:
+      - main
+
+
+# Configuration
+env:
+  # benchfx main as of September 6, 2024
+  benchfx_commit: db338e74ff9bc6c4c22b54c169c05dd592429cf0
+
+  wasmtime_features: unsafe_wasmfx_stacks
+
+  benchmark_filters: "--filter=**/*_wasmfx --filter=**/*_asyncify --filter=micro/**/*"
+
+  # Maximum allowed performance regression of any benchmark in percent.
+  max_allowed_regression: 7
+
+jobs:
+  bench:
+    name: Setup and run benchmarks
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout wasmtime
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+        path: wasmtime
+        fetch-depth: 0
+
+    - name: Checkout benchfx
+      uses: actions/checkout@v4
+      with:
+        repository: 'wasmfx/benchfx'
+        ref: ${{ env.benchfx_commit }}
+        submodules: true
+        path: benchfx
+        fetch-depth: 0
+
+    - name: Install hyperfine
+      run: cargo install hyperfine
+
+    - name: Install other deps
+      run: sudo apt-get install cmake ocaml dune menhir libmenhir-ocaml-dev
+
+    - name: Show some context info
+      working-directory: ./wasmtime
+      run: |
+        echo "cargo --version: $(cargo --version)"
+        echo "rustc --version: $(rustc --version)"
+        echo "GITHUB_SHA:"
+        echo "$GITHUB_SHA"
+        git show --no-patch --oneline $GITHUB_SHA
+        echo "Will compare against following commit:"
+        echo "GITHUB_SHA^1:"
+        git rev-parse "${GITHUB_SHA}^1"
+        git show --no-patch --oneline "${GITHUB_SHA}^1"
+        echo "parent_github_sha=$(git rev-parse ${GITHUB_SHA}^1)" >> $GITHUB_ENV
+
+    - name: Initialize benchfx
+      working-directory: ./benchfx
+      shell: bash
+      run: |
+        ./harness.py --verbose setup \
+          --wasmtime-create-worktree-from-development-repo=$GITHUB_WORKSPACE/wasmtime
+
+        # The following is only necessary because we are about to restore the
+        # build directory inside the binaryen repo inside benchfx from the
+        # cache. But the binaryen repo is currently a bare repo and doesn't have
+        # the .gitignore file with an entry for "build", yet. But the harness
+        # refuses to work on anything other than a clean repo!
+        # Instead of checking out any revision to get just a proper .gitignore
+        # file, we check out the revision that the harness actually wants to
+        # use. This way, the harness will not "modify" any of the binaryen
+        # source files by switching to a different binaryen revision later. This
+        # helps with reusing the cached binaryen build artifacts.
+        BINARYEN_REVISION="$(./harness.py print-config | jq -r .BINARYEN_REVISION)"
+        pushd tools/external/binaryen
+        git switch --detach --recurse-submodules "$BINARYEN_REVISION"
+        popd
+
+
+    # We include the SHA of the base/parent commit in the cache key. This
+    # ensures that new cache entries are generated frequently instead of reusing
+    # an old version of the build artifacts. If no matching cache entry is
+    # found, the restore-keys value is chosen so that we may fall back to using
+    # cached data from a different Wasmtime commit. We always include the
+    # benchfx commit in all of the cache keys, meaning that updating benchfx
+    # itself effectively nukes the cache.
+    - name: Restore build artifacts from cache
+      uses: actions/cache@v4
+      id: cache
+      with:
+        key: benchfx-${{ env.benchfx_commit }}-wasmtime-${{ env.parent_github_sha }}
+        restore-keys: benchfx-${{ env.benchfx_commit }}
+        path: |
+          benchfx/tools/external/binaryen/build
+          benchfx/tools/external/wasmtime1/target
+          benchfx/tools/external/wasmtime2/target
+
+    # This is basically just a smoke test to make sure that the caching still
+    # does something sensible. If the internal folder structure that the harness
+    # uses ever changes, we would notice that here because the expected folders
+    # are not created anymore.
+    - name: Inspect caches
+      if: ${{ steps.cache.outputs.cache-hit }}
+      run: |
+        ls -la benchfx/tools/external/binaryen/build
+        ls -la benchfx/tools/external/wasmtime1/target
+        ls -la benchfx/tools/external/wasmtime2/target
+
+    - name: Prepare benchmarking (build binaryen, Wasmtime revs, benchmarks)
+      shell: bash
+      working-directory: ./benchfx
+      run: |
+        # The cache preserves mtimes, meaning that (the Makefile created by)
+        # cmake would consider all files from the cache as outdated. Since the
+        # harness fixes the binaryen commit, we know that the binaryen build
+        # artifacts are for the exact binaryen commit we want. Thus, we make
+        # them eligible for re-use by making them look sufficiently new. Note
+        # that cmake would detect any external changes that invalidate the
+        # cached build files (e.g., compiler/stdlib update, ...).
+        find tools/external/binaryen/build -exec touch {} \; || true
+
+        ./harness.py --verbose compare-revs --prepare-only \
+          --rev1-wasmtime-cargo-build-args="--features=$wasmtime_features" \
+          --rev2-wasmtime-cargo-build-args="--features=$wasmtime_features" \
+          "${GITHUB_SHA}^1" "$GITHUB_SHA"
+
+    - name: Run benchmarks
+      shell: bash
+      working-directory: ./benchfx
+      run: |
+        ./harness.py compare-revs \
+          $benchmark_filters \
+          --max-allowed-regression=$max_allowed_regression \
+          --rev1-wasmtime-cargo-build-args="--features=$wasmtime_features" \
+          --rev2-wasmtime-cargo-build-args="--features=$wasmtime_features" \
+          "${GITHUB_SHA}^1" "$GITHUB_SHA"
