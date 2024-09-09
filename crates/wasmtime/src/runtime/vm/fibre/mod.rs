@@ -32,6 +32,16 @@ cfg_if::cfg_if! {
                 Ok(Self(imp::FiberStack::new(size)?))
             }
 
+            /// Returns a stack of size 0.
+            pub fn unallocated() -> Self {
+                Self(imp::FiberStack::unallocated())
+            }
+
+            /// Is this stack unallocated/of size 0?
+            pub fn is_unallocated(&self) -> bool {
+                imp::FiberStack::is_unallocated(&self.0)
+            }
+
             /// Creates a new fiber stack of the given size (using malloc).
             pub fn malloc(size: usize) -> io::Result<Self> {
                 Ok(Self(imp::FiberStack::malloc(size)?))
@@ -51,6 +61,12 @@ cfg_if::cfg_if! {
             /// make the pages accessible for correct behavior.
             pub unsafe fn from_raw_parts(bottom: *mut u8, len: usize) -> io::Result<Self> {
                 Ok(Self(imp::FiberStack::from_raw_parts(bottom, len)?))
+            }
+
+            /// Is this a manually-managed stack created from raw parts? If so, it is up
+            /// to whoever created it to manage the stack's memory allocation.
+            pub fn is_from_raw_parts(&self) -> bool {
+                self.0.is_from_raw_parts()
             }
 
             /// Gets the top of the stack.

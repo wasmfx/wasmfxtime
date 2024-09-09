@@ -81,7 +81,6 @@ pub mod optimized {
     use core::mem;
     use wasmtime_continuations::{debug_println, ControlEffect, ENABLE_DEBUG_PRINTING};
     pub use wasmtime_continuations::{Payloads, StackLimits, State};
-    use wasmtime_environ::prelude::*;
 
     /// Fibers used for continuations
     pub type FiberStack = crate::runtime::vm::fibre::FiberStack;
@@ -121,7 +120,55 @@ pub mod optimized {
         pub fn fiber_stack(&self) -> &FiberStack {
             &self.stack
         }
+
+        pub fn detach_stack(&mut self) -> FiberStack {
+            core::mem::replace(&mut self.stack, FiberStack::unallocated())
+        }
+
+        /// This is effectively a `Default` implementation, without calling it
+        /// so. Used to create `VMContRef`s when initializing pooling allocator.
+        pub fn empty() -> Self {
+            let limits = StackLimits::with_stack_limit(Default::default());
+            let parent_chain = StackChain::Absent;
+            let stack = FiberStack::unallocated();
+            let args = Payloads::new(0);
+            let tag_return_values = Payloads::new(0);
+            let state = State::Allocated;
+            let revision = 0;
+
+            Self {
+                limits,
+                parent_chain,
+                stack,
+                args,
+                tag_return_values,
+                state,
+                revision,
+            }
+        }
     }
+
+    impl Drop for VMContRef {
+        fn drop(&mut self) {
+            // Note that continuation references do not own their parents, and we
+            // don't drop them here.
+
+            // `Payloads` must be deallocated explicitly, they are considered non-owning.
+            self.args.deallocate();
+            self.tag_return_values.deallocate();
+
+            // We would like to enforce the invariant that any continuation that
+            // was created for a cont.new (rather than, say, just living in a
+            // pool and never being touched), either ran to completion or was
+            // cancelled. But failing to do so should yield a custom error,
+            // instead of panicking here.
+        }
+    }
+
+    // These are required so the WasmFX pooling allocator can store a Vec of
+    // `VMContRef`s.
+    unsafe impl Send for VMContRef {}
+    unsafe impl Sync for VMContRef {}
 
     /// TODO
     pub fn cont_ref_forward_tag_return_values_buffer(
@@ -150,43 +197,43 @@ pub mod optimized {
         Ok(())
     }
 
-    /// TODO
+    /// Drops the given continuation, which either means deallocating it
+    /// (together with its stack) or returning it (and its stack) to a pool for
+    /// later reuse.
+    ///
+    /// If pooling is enabled, then all `VMContObj`s pointing to this
+    /// `VMContRef` must have outdated revision counters. The pool guarantees
+    /// that the revision counter stays unchanged if this `VMContRef` is reused.
+    ///
+    /// If pooling is disabled, then there must be no `VMContObj`s pointing to
+    /// this `VMContRef` anymore.
+    /// FIXME(frank-emrich) This second condition can currently be violated: We
+    /// call this immediately once a continuation returns, at which point such
+    /// `VMContObj`s may exist.
     #[inline(always)]
     pub fn drop_cont_ref(instance: &mut Instance, contref: *mut VMContRef) {
-        // Note that continuation references do not own their parents, hence we ignore
-        // parent fields here.
+        {
+            let contref = unsafe { contref.as_mut().unwrap() };
+            // A continuation must have run to completion before dropping it.
+            assert!(contref.state == State::Returned);
 
-        let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
-
-        // A continuation must have run to completion before deallocating it.
-        assert!(contref.state == State::Returned);
-
-        instance.wasmfx_deallocate_stack(&contref.stack);
-        if contref.args.data.is_null() {
-            debug_assert!(contref.args.length as usize == 0);
-            debug_assert!(contref.args.capacity as usize == 0);
-        } else {
-            unsafe {
-                let _: Vec<u128> = Vec::from_raw_parts(
-                    contref.args.data,
-                    contref.args.length as usize,
-                    contref.args.capacity as usize,
-                );
-            };
+            // Note that we *could* deallocate the `Payloads` (i.e., `args` and
+            // `tag_return_values`) here, but choose not to:
+            // - If we are using on-demand allocation of `VMContRef`s, the
+            //   `Payloads` get deallocated as part of `Drop`-ing the `VMContRef`.
+            // - If we are using the pooling allocator, we deliberately return
+            //   the `contref` to the pool with its `Payloads` still allocated.
+            //   When the `contref` is handed out subsequently on another
+            //   allocation requesdt, we can resize the `Payloads` if needed.
+            //
+            // So instead we just clear the elements.
+            contref.args.clear();
+            contref.tag_return_values.clear();
         }
-        let payloads = &contref.tag_return_values;
-        if payloads.data.is_null() {
-            debug_assert!(payloads.length as usize == 0);
-            debug_assert!(payloads.capacity as usize == 0);
-        } else {
-            let _: Vec<u128> = unsafe {
-                Vec::from_raw_parts(
-                    payloads.data,
-                    payloads.length as usize,
-                    payloads.capacity as usize,
-                )
-            };
-        }
+
+        // The WasmFX allocator decides if "deallocating" a continuation means
+        // putting it back into the pool or actually deallocating it.
+        instance.wasmfx_deallocate_continuation(contref);
     }
 
     /// TODO
@@ -200,7 +247,6 @@ pub mod optimized {
         let caller_vmctx = instance.vmctx();
 
         let capacity = cmp::max(param_count, result_count);
-        let payload = Payloads::new(capacity);
 
         let wasmfx_config = unsafe { &*(*instance.store()).wasmfx_config() };
         // TODO(frank-emrich) Currently, the general `stack_limit` configuration
@@ -208,38 +254,43 @@ pub mod optimized {
         let stack_size = wasmfx_config.stack_size;
         let red_zone_size = wasmfx_config.red_zone_size;
 
-        let stack = {
-            let stack = instance.wasmfx_allocate_stack().map_err(|_error| {
-                TrapReason::user_without_backtrace(anyhow::anyhow!(
-                    "Fiber stack allocation failed!"
-                ))
-            })?;
-            stack.initialize(
-                func.cast::<VMFuncRef>(),
-                caller_vmctx,
-                payload.data as *mut ValRaw,
-                payload.capacity as usize,
-            );
-            stack
-        };
+        let (contref, mut stack) = instance.wasmfx_allocate_continuation().map_err(|_error| {
+            TrapReason::user_without_backtrace(anyhow::anyhow!("Fiber stack allocation failed!"))
+        })?;
 
         let tsp = stack.top().unwrap();
         let stack_limit = unsafe { tsp.sub(stack_size - red_zone_size) } as usize;
-        let contref = Box::new(VMContRef {
-            revision: 0,
-            limits: StackLimits::with_stack_limit(stack_limit),
-            stack,
-            parent_chain: StackChain::Absent,
-            args: payload,
-            tag_return_values: Payloads::new(0),
-            state: State::Allocated,
-        });
+        let limits = StackLimits::with_stack_limit(stack_limit);
+
+        {
+            let contref = unsafe { contref.as_mut().unwrap() };
+            contref.limits = limits;
+            contref.parent_chain = StackChain::Absent;
+            contref.state = State::Allocated;
+            contref.args.ensure_capacity(capacity);
+
+            // In order to give the pool a uniform interface for the optimized
+            // and baseline implementation, it returns the `FiberStack` as a
+            // standalone value, without being attached to the `VMContRef`.
+            // We attach them here, the previous `FiberStack` attached to the
+            // `VMContRef` while in the pool should be an empty dummy
+            // `FiberStack`.
+            std::mem::swap(&mut contref.stack, &mut stack);
+            debug_assert!(stack.is_unallocated());
+            debug_assert!(!contref.stack.is_unallocated());
+
+            contref.stack.initialize(
+                func.cast::<VMFuncRef>(),
+                caller_vmctx,
+                contref.args.data as *mut ValRaw,
+                contref.args.capacity as usize,
+            );
+        };
 
         // TODO(dhil): we need memory clean up of
         // continuation reference objects.
-        let pointer = Box::into_raw(contref);
-        debug_println!("Created contref @ {:p}", pointer);
-        Ok(pointer)
+        debug_println!("Created contref @ {:p}", contref);
+        Ok(contref)
     }
 
     /// TODO
@@ -385,7 +436,7 @@ pub mod baseline {
     pub struct VMContRef {
         /// Revision counter.
         pub revision: u64,
-        pub fiber: Box<ContinuationFiber>,
+        pub fiber: Option<Box<ContinuationFiber>>,
         pub suspend: *mut Yield,
         pub limits: StackLimits,
         pub parent_chain: StackChain,
@@ -397,9 +448,46 @@ pub mod baseline {
 
     impl VMContRef {
         pub fn fiber_stack(&self) -> &FiberStack {
-            self.fiber.stack()
+            self.fiber.as_ref().unwrap().stack()
+        }
+
+        pub fn detach_stack(&mut self) -> FiberStack {
+            self.fiber
+                .take()
+                .expect("Only call detach_stack if a stack is actually present")
+                .into_stack()
+        }
+
+        /// This is effectively a `Default` implementation, without calling it
+        /// so. Used to create `VMContRef`s when initializing pooling allocator.
+        pub fn empty() -> Self {
+            let limits = StackLimits::with_stack_limit(Default::default());
+            let parent_chain = StackChain::Absent;
+            let parent = core::ptr::null_mut();
+            let suspend = core::ptr::null_mut();
+            let args = Vec::new();
+            let values = Vec::new();
+            let fiber = None;
+            let revision = 0;
+
+            Self {
+                revision,
+                limits,
+                parent_chain,
+                parent,
+                suspend,
+                fiber,
+                args,
+                values,
+                _marker: core::marker::PhantomPinned,
+            }
         }
     }
+
+    // These are required so the WasmFX pooling allocator can store a Vec of
+    // `VMContRef`s.
+    unsafe impl Send for VMContRef {}
+    unsafe impl Sync for VMContRef {}
 
     // We use thread local state to simulate the VMContext. The use of
     // thread local state is necessary to reliably pass the testsuite,
@@ -428,10 +516,11 @@ pub mod baseline {
         let capacity = cmp::max(param_count, result_count);
         let mut values: Vec<u128> = Vec::with_capacity(capacity);
 
-        let fiber = {
-            let stack = instance
-                .wasmfx_allocate_stack()
+        let (contref, fiber) = {
+            let (contref, stack) = instance
+                .wasmfx_allocate_continuation()
                 .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+
             let fiber = match unsafe { func.cast::<VMFuncRef>().as_ref() } {
                 None => Fiber::new(stack, |_instance: &mut Instance, _suspend: &mut Yield| {
                     panic!("Attempt to invoke null VMFuncRef!");
@@ -463,25 +552,44 @@ pub mod baseline {
                     )
                 }
             };
-            Box::new(fiber.map_err(|error| TrapReason::user_without_backtrace(error.into()))?)
+            let fiber = fiber.map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+            (contref, fiber)
         };
 
-        let contref = Box::new(VMContRef {
-            revision: 0,
-            limits: StackLimits::with_stack_limit(0),
-            parent_chain: StackChain::Absent,
-            parent: core::ptr::null_mut(),
-            suspend: core::ptr::null_mut(),
-            fiber,
-            args: Vec::with_capacity(param_count),
-            values,
-            _marker: core::marker::PhantomPinned,
-        });
+        {
+            let contref = unsafe { contref.as_mut().unwrap() };
 
-        // TODO(dhil): we need memory clean up of
-        // continuation reference objects.
-        debug_assert!(!contref.fiber.stack().top().unwrap().is_null());
-        Ok(Box::into_raw(contref))
+            debug_assert!(contref.fiber.is_none());
+            contref.fiber = Some(Box::new(fiber));
+
+            // We gave the data pointer of `values` to the trampoline and *must*
+            // therefore use it.
+            contref.values = values;
+
+            contref.args.clear();
+            if contref.args.capacity() < param_count {
+                contref.args.reserve(param_count - contref.args.capacity());
+            }
+            contref.limits = StackLimits::with_stack_limit(0);
+            contref.parent = core::ptr::null_mut();
+            contref.parent_chain = StackChain::Absent;
+            contref.suspend = core::ptr::null_mut();
+
+            // Note that we keep the revision counter unchanged.
+
+            // TODO(dhil): we need memory clean up of
+            // continuation reference objects.
+            debug_assert!(!contref
+                .fiber
+                .as_ref()
+                .unwrap()
+                .stack()
+                .top()
+                .unwrap()
+                .is_null());
+        };
+
+        Ok(contref)
     }
 
     /// Continues a given continuation.
@@ -518,6 +626,8 @@ pub mod baseline {
         // Resume the current continuation.
         contref
             .fiber
+            .as_ref()
+            .unwrap()
             .resume(instance)
             .map(move |()| {
                 // This lambda is run whenever the continuation ran to
@@ -573,11 +683,8 @@ pub mod baseline {
     pub fn drop_continuation_reference(instance: &mut Instance, contref: *mut VMContRef) {
         // Note that continuation objects do not own their parents, so
         // we let the parent object leak.
-        let contref: Box<VMContRef> = unsafe { Box::from_raw(contref) };
-        instance.wasmfx_deallocate_stack(contref.fiber.stack());
-        let _: Box<ContinuationFiber> = contref.fiber;
-        let _: Vec<u128> = contref.args;
-        let _: Vec<u128> = contref.values;
+
+        instance.wasmfx_deallocate_continuation(contref);
     }
 
     /// Clears the argument buffer on a given continuation reference.
