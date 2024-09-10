@@ -947,7 +947,6 @@ pub mod optimized {
     pub fn resume(
         _instance: &mut Instance,
         _contref: *mut VMContRef,
-        _parent_stack_limits: *mut StackLimits,
     ) -> Result<ControlEffect, TrapReason> {
         panic!("attempt to execute continuation::optimized::resume with `typed_continuation_baseline_implementation` toggled!")
     }
