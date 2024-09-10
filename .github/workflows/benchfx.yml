@@ -45,7 +45,9 @@ jobs:
       run: cargo install hyperfine
 
     - name: Install other deps
-      run: sudo apt-get install cmake ocaml dune menhir libmenhir-ocaml-dev
+      run: |
+        sudo apt-get update
+        sudo apt-get install cmake ocaml dune menhir libmenhir-ocaml-dev
 
     - name: Show some context info
       working-directory: ./wasmtime
