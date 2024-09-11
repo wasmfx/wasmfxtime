@@ -931,15 +931,10 @@ fn tc_cont_new(
     Ok(ans.cast::<u8>())
 }
 
-fn tc_resume(
-    instance: &mut Instance,
-    contref: *mut u8,
-    parent_stack_limits: *mut u8,
-) -> Result<*mut u8, TrapReason> {
+fn tc_resume(instance: &mut Instance, contref: *mut u8) -> Result<*mut u8, TrapReason> {
     crate::vm::continuation::optimized::resume(
         instance,
         contref.cast::<crate::vm::continuation::optimized::VMContRef>(),
-        parent_stack_limits.cast::<crate::vm::continuation::optimized::StackLimits>(),
     )
     .map(|reason| reason.into())
 }

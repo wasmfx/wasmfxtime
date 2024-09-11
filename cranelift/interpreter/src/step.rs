@@ -1283,6 +1283,7 @@ where
         Opcode::X86Pmulhrsw => unimplemented!("X86Pmulhrsw"),
         Opcode::X86Pmaddubsw => unimplemented!("X86Pmaddubsw"),
         Opcode::X86Cvtt2dq => unimplemented!("X86Cvtt2dq"),
+        Opcode::GetInstructionPointer => unimplemented!("GetInstructionPointer"),
         Opcode::StackSwitch => unimplemented!("StackSwitch"),
     })
 }
