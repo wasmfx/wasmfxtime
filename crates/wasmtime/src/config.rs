@@ -2134,6 +2134,24 @@ impl Config {
             bail!("cannot disable the simd proposal but enable the relaxed simd proposal");
         }
 
+        if features.contains(WasmFeatures::TYPED_CONTINUATIONS) {
+            let model = match target.operating_system {
+                target_lexicon::OperatingSystem::Windows => "update_windows_tib",
+                target_lexicon::OperatingSystem::Linux => "basic",
+                _ => bail!("typed-continuations feature not supported on this platform "),
+            };
+
+            if !self
+                .compiler_config
+                .ensure_setting_unset_or_given("stack_switch_model".into(), model.into())
+            {
+                bail!(
+                    "compiler option 'stack_switch_model' must be set to '{}' on this platform",
+                    model
+                );
+            }
+        }
+
         // Apply compiler settings and flags
         for (k, v) in self.compiler_config.settings.iter() {
             compiler.set(k, v)?;
