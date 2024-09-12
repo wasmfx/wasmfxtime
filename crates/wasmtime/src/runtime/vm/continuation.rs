@@ -839,7 +839,6 @@ pub mod stack_chain {
 #[cfg(feature = "wasmfx_baseline")]
 pub mod optimized {
     use crate::runtime::vm::{Instance, TrapReason};
-    pub use wasmtime_continuations::ControlEffect;
 
     pub type VMContRef = super::baseline::VMContRef;
 
