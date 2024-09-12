@@ -100,11 +100,6 @@ macro_rules! foreach_builtin_function {
 
             // Creates a new continuation from a funcref.
             tc_cont_new(vmctx: vmctx, r: pointer, param_count: i32, result_count: i32) -> pointer;
-            // Resumes a continuation. The result value is of type
-            // wasmtime_continuations::SwitchDirection.
-            tc_resume(vmctx: vmctx, contref: pointer) -> pointer;
-            // Suspends a continuation.
-            tc_suspend(vmctx: vmctx, tag: pointer);
 
             // Sets the tag return values of `child_contref` to those of `parent_contref`.
             // This is implemented by exchanging the pointers to the underlying buffers.

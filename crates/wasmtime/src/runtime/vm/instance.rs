@@ -1367,14 +1367,6 @@ impl Instance {
         fault
     }
 
-    // NOTE(dhil): This function is not called when `wasmfx_baseline` is toggled.
-    #[cfg(not(feature = "wasmfx_baseline"))]
-    pub(crate) fn typed_continuations_stack_chain(&mut self) -> *mut *mut StackChainCell {
-        unsafe {
-            self.vmctx_plus_offset_mut(self.offsets().vmctx_typed_continuations_stack_chain())
-        }
-    }
-
     #[allow(dead_code)]
     pub(crate) fn set_typed_continuations_stack_chain(&mut self, chain: *mut *mut StackChainCell) {
         unsafe {

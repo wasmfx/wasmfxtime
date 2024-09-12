@@ -322,6 +322,14 @@ pub(crate) mod typed_continuation_helpers {
         pointer_type: ir::Type,
     }
 
+    /// Compile-time representation of `crate::runtime::vm::fibre::FiberStack`.
+    pub struct FiberStack {
+        /// This is NOT the "top of stack" address of the stack itself. In line
+        /// with how the (runtime) `FiberStack` type works, this is a pointer to
+        /// the TOS address.
+        pointer_to_tos: ir::Value,
+    }
+
     impl VMContRef {
         pub fn new(address: ir::Value, pointer_type: ir::Type) -> VMContRef {
             VMContRef {
@@ -467,6 +475,17 @@ pub(crate) mod typed_continuation_helpers {
                 }
                 revision_plus1
             }
+        }
+
+        pub fn get_fiber_stack<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> FiberStack {
+            // The top of stack field is stored at offset 0 of the `FiberStack`.
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::STACK as i32;
+            let fiber_stack_top_of_stack_ptr = builder.ins().iadd_imm(self.address, offset as i64);
+            FiberStack::new(fiber_stack_top_of_stack_ptr)
         }
     }
 
@@ -1143,6 +1162,36 @@ pub(crate) mod typed_continuation_helpers {
             });
         }
     }
+
+    impl FiberStack {
+        /// The parameter is NOT the "top of stack" address of the stack itself. In line
+        /// with how the (runtime) `FiberStack` type works, this is a pointer to
+        /// the TOS address.
+        pub fn new(pointer_to_tos: ir::Value) -> Self {
+            Self { pointer_to_tos }
+        }
+
+        fn load_top_of_stack<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            let mem_flags = ir::MemFlags::trusted();
+            builder.ins().load(I64, mem_flags, self.pointer_to_tos, 0)
+        }
+
+        // Returns address of the control context stored in the stack memory, as
+        // used by stack_switch instructions.
+        pub fn load_control_context<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            let tos = self.load_top_of_stack(env, builder);
+            // Control context begins 24 bytes below top of stack (see unix.rs)
+            builder.ins().iadd_imm(tos, -0x18)
+        }
+    }
 }
 
 use typed_continuation_helpers as tc;
@@ -1334,6 +1383,9 @@ pub(crate) fn typed_continuations_store_payloads<'a>(
     }
 }
 
+/// We only use this when we want to get the current continuation for the
+/// purpose of suspending. Thus, if there is no such continuation (because we
+/// are on the main stack), we trap with an unhandled tag error.
 pub(crate) fn typed_continuations_load_continuation_reference<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
@@ -1341,11 +1393,7 @@ pub(crate) fn typed_continuations_load_continuation_reference<'a>(
     let vmctx = env.vmctx_val(&mut builder.cursor());
     let vmctx = tc::VMContext::new(vmctx, env.pointer_type());
     let active_stack_chain = vmctx.load_stack_chain(env, builder);
-    active_stack_chain.unwrap_continuation_or_trap(
-        env,
-        builder,
-        ir::TrapCode::User(crate::DEBUG_ASSERT_TRAP_CODE),
-    )
+    active_stack_chain.unwrap_continuation_or_trap(env, builder, ir::TrapCode::UnhandledTag)
 }
 
 pub(crate) fn translate_cont_bind<'a>(
@@ -1576,18 +1624,28 @@ pub(crate) fn translate_resume<'a>(
             tc::StackChain::from_continuation(builder, resume_contref, env.pointer_type());
         resume_stackchain.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
-        call_builtin!(
-            builder,
-            env,
-            let result =
-                tc_resume(
-                resume_contref)
-        );
+        let fiber_stack = co.get_fiber_stack(env, builder);
+        let control_context_ptr = fiber_stack.load_control_context(env, builder);
+
+        let resume_payload: u64 = wasmtime_continuations::ControlEffect::resume().into();
+        let resume_payload = builder.ins().iconst(I64, resume_payload as i64);
 
         emit_debug_println!(
             env,
             builder,
-            "[resume] libcall finished, result is {:p}",
+            "[resume] control_context_ptr_loc is {:p}",
+            control_context_ptr
+        );
+
+        let result =
+            builder
+                .ins()
+                .stack_switch(control_context_ptr, control_context_ptr, resume_payload);
+
+        emit_debug_println!(
+            env,
+            builder,
+            "[resume] continuing after stack_switch, result is {:p}",
             result
         );
 
@@ -1661,11 +1719,20 @@ pub(crate) fn translate_resume<'a>(
             ir::TrapCode::UnhandledTag,
         );
 
+        let cref = tc::VMContRef::new(parent_contref, env.pointer_type());
+        let fiber_stack = cref.get_fiber_stack(env, builder);
+        let control_context_ptr = fiber_stack.load_control_context(env, builder);
+
+        // We pass on the previosuly received ControlEffect value as is.
+        let suspend_payload = resume_result.0 .0;
+
         // We suspend, thus deferring handling to the parent.  We do
         // nothing about tag *parameters*, these remain unchanged
         // within the payload buffer associated with the whole
         // VMContext.
-        call_builtin!(builder, env, tc_suspend(suspend_tag_addr));
+        builder
+            .ins()
+            .stack_switch(control_context_ptr, control_context_ptr, suspend_payload);
 
         // "Tag return values" (i.e., values provided by cont.bind or
         // resume to the continuation) are actually stored in
@@ -1795,9 +1862,19 @@ pub(crate) fn translate_suspend<'a>(
 
     let tag_addr = shared::tag_address(env, builder, tag_index);
     emit_debug_println!(env, builder, "[suspend] suspending with tag {:p}", tag_addr);
-    call_builtin!(builder, env, tc_suspend(tag_addr));
 
+    // This traps with an unhandled tag code if we are on the main stack.
     let contref = typed_continuations_load_continuation_reference(env, builder);
+    let cref = tc::VMContRef::new(contref, env.pointer_type());
+
+    let fiber_stack = cref.get_fiber_stack(env, builder);
+    let control_context_ptr = fiber_stack.load_control_context(env, builder);
+
+    let suspend_payload = ControlEffect::make_suspend(env, builder, tag_addr).0 .0;
+
+    builder
+        .ins()
+        .stack_switch(control_context_ptr, control_context_ptr, suspend_payload);
 
     let return_values =
         typed_continuations_load_tag_return_values(env, builder, contref, tag_return_types);

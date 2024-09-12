@@ -154,6 +154,17 @@ impl TaggedPointer {
         Self(val)
     }
 
+    pub fn low_tag<'a>(
+        self,
+        _env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+        tag: usize,
+    ) -> Self {
+        assert!(tag as i64 <= Self::LOW_TAG_MASK);
+        let tagged = builder.ins().bor_imm(self.0, tag as i64);
+        Self(tagged)
+    }
+
     pub fn get_low_tag<'a>(
         self,
         _env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -182,6 +193,17 @@ pub struct ControlEffect(pub TaggedPointer);
 impl ControlEffect {
     pub fn new(val: ir::Value) -> Self {
         Self(TaggedPointer::new(val))
+    }
+
+    pub fn make_suspend<'a>(
+        env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+        tag_addr: ir::Value,
+    ) -> Self {
+        let untagged = Self::new(tag_addr);
+        // Need to keep this in sync with tag used by suspend in
+        // wasmtime_continuation::ControlEffect
+        Self(untagged.0.low_tag(env, builder, 0b01_usize))
     }
 
     pub fn signal<'a>(
