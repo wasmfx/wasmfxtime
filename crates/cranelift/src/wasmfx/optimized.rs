@@ -1180,8 +1180,8 @@ pub(crate) mod typed_continuation_helpers {
             builder.ins().load(I64, mem_flags, self.pointer_to_tos, 0)
         }
 
-        // Returns address of the control context stored in the stack memory, as
-        // used by stack_switch instructions.
+        /// Returns address of the control context stored in the stack memory,
+        /// as used by stack_switch instructions.
         pub fn load_control_context<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,

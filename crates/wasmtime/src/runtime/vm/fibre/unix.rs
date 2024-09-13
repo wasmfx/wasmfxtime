@@ -11,7 +11,7 @@
 //! 0xAfe8 +-----------------------+   <- beginning of "control context",
 //!        | 0                     |
 //! 0xAfe0 +-----------------------+   <- beginning of usable stack space
-//!        |                       |      (16-byte aligned)
+//!        |                       |      below (16-byte aligned)
 //!        |                       |
 //!        ~        ...            ~   <- actual native stack space to use
 //!        |                       |
@@ -22,22 +22,25 @@
 //!
 //! The "control context" indicates how to resume a computation. The layout is
 //! determined by Cranelift's stack_switch instruction, which reads and writes
-//! these fields. The fields used as follows, where we distinguish two cases:
+//! these fields. The fields are used as follows, where we distinguish two
+//! cases:
 //!
-//! 1
+//! 1.
 //! If the continuation is currently active (i.e., running directly, or ancestor
-//! of the running continuation), it stores the PC, RSP, and RBP of the *parent* of
-//! the running continuation.
+//! of the running continuation), it stores the PC, RSP, and RBP of the *parent*
+//! of the running continuation.
 //!
-//! 2 If the picture shows a suspended computation, then store the PC,
-//! RSP, and RBP at the time of the suspension.
+//! 2.
+//! If the picture shows a suspended computation, the fields store the PC, RSP,
+//! and RBP at the time of the suspension.
 //!
 //! Note that this design ensures that external tools can construct backtraces
-//! in the presence of stack switching by using frame pointers only:
-//! The wasmtime_fibre_start trampoline uses the address of the RBP field in the
-//! control context (0xAff0) as its frame pointer. This means that when passing
-//! the wasmtime_fibre_start frame while doing frame pointer walking, the parent
-//! of that frame is the last frame in the parent of this continuation.
+//! in the presence of stack switching by using frame pointers only: The
+//! wasmtime_fibre_start trampoline uses the address of the RBP field in the
+//! control context (0xAff0 above) as its frame pointer. This means that when
+//! passing the wasmtime_fibre_start frame while doing frame pointer walking,
+//! the parent of that frame is the last frame in the parent of this
+//! continuation.
 //!
 //! Wasmtime's own mechanism for constructing backtraces also relies on frame
 //! pointer chains. However, it understands continuations and does not rely on
