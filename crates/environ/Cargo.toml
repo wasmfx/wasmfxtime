@@ -25,7 +25,7 @@ cranelift-entity = { workspace = true }
 cranelift-bitset = { workspace = true, features = ['enable-serde'] }
 wasmtime-types = { workspace = true }
 wasmtime-continuations = { workspace = true }
-wasmparser = { workspace = true, features = ['validate', 'serde'] }
+wasmparser = { workspace = true, features = ['validate', 'serde', 'features'] }
 indexmap = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 serde_derive = { workspace = true }

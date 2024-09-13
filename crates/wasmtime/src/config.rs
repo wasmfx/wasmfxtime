@@ -597,6 +597,24 @@ impl Config {
     /// [`Store::set_epoch_deadline`](crate::Store::set_epoch_deadline). If this
     /// deadline is not configured then wasm will immediately trap.
     ///
+    /// ## Interaction with blocking host calls
+    ///
+    /// Epochs (and fuel) do not assist in handling WebAssembly code blocked in
+    /// a call to the host. For example if the WebAssembly function calls
+    /// `wasi:io/poll/poll` to sleep epochs will not assist in waking this up or
+    /// timing it out. Epochs intentionally only affect running WebAssembly code
+    /// itself and it's left to the embedder to determine how best to wake up
+    /// indefinitely blocking code in the host.
+    ///
+    /// The typical solution for this, however, is to use
+    /// [`Config::async_support(true)`](Config::async_support) and the `async`
+    /// variant of WASI host functions. This models computation as a Rust
+    /// `Future` which means that when blocking happens the future is only
+    /// suspended and control yields back to the main event loop. This gives the
+    /// embedder the opportunity to use `tokio::time::timeout` for example on a
+    /// wasm computation and have the desired effect of cancelling a blocking
+    /// operation when a timeout expires.
+    ///
     /// ## When to use fuel vs. epochs
     ///
     /// In general, epoch-based interruption results in faster
@@ -1839,7 +1857,7 @@ impl Config {
     fn features(&self) -> WasmFeatures {
         // Wasmtime by default supports all of the wasm 2.0 version of the
         // specification.
-        let mut features = WasmFeatures::wasm2();
+        let mut features = WasmFeatures::WASM2;
 
         // On-by-default features that wasmtime has. Note that these are all
         // subject to the criteria at
@@ -2865,7 +2883,7 @@ impl PoolingAllocationConfig {
     /// table; table elements are pointer-sized in the Wasmtime runtime.
     /// Therefore, the space reserved for each instance is `tables *
     /// table_elements * sizeof::<*const ()>`.
-    pub fn table_elements(&mut self, elements: u32) -> &mut Self {
+    pub fn table_elements(&mut self, elements: usize) -> &mut Self {
         self.config.limits.table_elements = elements;
         self
     }

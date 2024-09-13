@@ -123,7 +123,7 @@ mod test_utils {
     }
 
     pub fn make_panicking_host_func(store: &mut Store<()>, msg: &'static str) -> Func {
-        Func::wrap(store, move || std::panic::panic_any(msg))
+        Func::wrap(store, move || -> () { std::panic::panic_any(msg) })
     }
 }
 

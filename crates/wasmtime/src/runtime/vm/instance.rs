@@ -205,7 +205,7 @@ impl Instance {
                         let size = memory_plans
                             .iter()
                             .next()
-                            .map(|plan| plan.1.memory.minimum)
+                            .map(|plan| plan.1.memory.limits.min)
                             .unwrap_or(0)
                             * 64
                             * 1024;
@@ -699,9 +699,9 @@ impl Instance {
     pub(crate) fn table_grow(
         &mut self,
         table_index: TableIndex,
-        delta: u32,
+        delta: u64,
         init_value: TableElement,
-    ) -> Result<Option<u32>, Error> {
+    ) -> Result<Option<usize>, Error> {
         self.with_defined_table_index_and_instance(table_index, |i, instance| {
             instance.defined_table_grow(i, delta, init_value)
         })
@@ -710,9 +710,9 @@ impl Instance {
     fn defined_table_grow(
         &mut self,
         table_index: DefinedTableIndex,
-        delta: u32,
+        delta: u64,
         init_value: TableElement,
-    ) -> Result<Option<u32>, Error> {
+    ) -> Result<Option<usize>, Error> {
         let store = unsafe { &mut *self.store() };
         let table = &mut self
             .tables
@@ -845,9 +845,9 @@ impl Instance {
         &mut self,
         table_index: TableIndex,
         elem_index: ElemIndex,
-        dst: u32,
-        src: u32,
-        len: u32,
+        dst: u64,
+        src: u64,
+        len: u64,
     ) -> Result<(), Trap> {
         // TODO: this `clone()` shouldn't be necessary but is used for now to
         // inform `rustc` that the lifetime of the elements here are
@@ -875,9 +875,9 @@ impl Instance {
         const_evaluator: &mut ConstExprEvaluator,
         table_index: TableIndex,
         elements: &TableSegmentElements,
-        dst: u32,
-        src: u32,
-        len: u32,
+        dst: u64,
+        src: u64,
+        len: u64,
     ) -> Result<(), Trap> {
         // https://webassembly.github.io/bulk-memory-operations/core/exec/instructions.html#exec-table-init
 
@@ -907,7 +907,7 @@ impl Instance {
                 let mut context = ConstEvalContext::new(self, &module);
                 match module.table_plans[table_index]
                     .table
-                    .wasm_ty
+                    .ref_type
                     .heap_type
                     .top()
                 {
@@ -983,6 +983,7 @@ impl Instance {
 
         let src = self.validate_inbounds(src_mem.current_length(), src, len)?;
         let dst = self.validate_inbounds(dst_mem.current_length(), dst, len)?;
+        let len = usize::try_from(len).unwrap();
 
         // Bounds and casts are checked above, by this point we know that
         // everything is safe.
@@ -991,7 +992,7 @@ impl Instance {
             let src = src_mem.base.add(src);
             // FIXME audit whether this is safe in the presence of shared memory
             // (https://github.com/bytecodealliance/wasmtime/issues/4203).
-            ptr::copy(src, dst, len as usize);
+            ptr::copy(src, dst, len);
         }
 
         Ok(())
@@ -1006,7 +1007,7 @@ impl Instance {
         if end > max {
             Err(oob())
         } else {
-            Ok(ptr as usize)
+            Ok(ptr.try_into().unwrap())
         }
     }
 
@@ -1024,6 +1025,7 @@ impl Instance {
     ) -> Result<(), Trap> {
         let memory = self.get_memory(memory_index);
         let dst = self.validate_inbounds(memory.current_length(), dst, len)?;
+        let len = usize::try_from(len).unwrap();
 
         // Bounds and casts are checked above, by this point we know that
         // everything is safe.
@@ -1031,7 +1033,7 @@ impl Instance {
             let dst = memory.base.add(dst);
             // FIXME audit whether this is safe in the presence of shared memory
             // (https://github.com/bytecodealliance/wasmtime/issues/4203).
-            ptr::write_bytes(dst, val, len as usize);
+            ptr::write_bytes(dst, val, len);
         }
 
         Ok(())
@@ -1112,7 +1114,7 @@ impl Instance {
     pub(crate) fn get_table_with_lazy_init(
         &mut self,
         table_index: TableIndex,
-        range: impl Iterator<Item = u32>,
+        range: impl Iterator<Item = u64>,
     ) -> *mut Table {
         self.with_defined_table_index_and_instance(table_index, |idx, instance| {
             instance.get_defined_table_with_lazy_init(idx, range)
@@ -1126,7 +1128,7 @@ impl Instance {
     pub fn get_defined_table_with_lazy_init(
         &mut self,
         idx: DefinedTableIndex,
-        range: impl Iterator<Item = u32>,
+        range: impl Iterator<Item = u64>,
     ) -> *mut Table {
         let elt_ty = self.tables[idx].1.element_type();
 
@@ -1159,7 +1161,8 @@ impl Instance {
                     TableInitialValue::Null { precomputed } => precomputed,
                     TableInitialValue::Expr(_) => unreachable!(),
                 };
-                let func_index = precomputed.get(i as usize).cloned();
+                // Panicking here helps catch bugs rather than silently truncating by accident.
+                let func_index = precomputed.get(usize::try_from(i).unwrap()).cloned();
                 let func_ref = func_index
                     .and_then(|func_index| self.get_func_ref(func_index))
                     .unwrap_or(ptr::null_mut());
@@ -1506,7 +1509,7 @@ impl InstanceHandle {
     pub fn get_defined_table_with_lazy_init(
         &mut self,
         index: DefinedTableIndex,
-        range: impl Iterator<Item = u32>,
+        range: impl Iterator<Item = u64>,
     ) -> *mut Table {
         let index = self.instance().module().table_index(index);
         self.instance_mut().get_table_with_lazy_init(index, range)

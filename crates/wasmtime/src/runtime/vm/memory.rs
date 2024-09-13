@@ -653,7 +653,7 @@ impl Memory {
                 if !store.memory_growing(0, minimum.unwrap_or(absolute_max), maximum)? {
                     bail!(
                         "memory minimum size of {} pages exceeds memory limits",
-                        plan.memory.minimum
+                        plan.memory.limits.min
                     );
                 }
             }
@@ -664,7 +664,7 @@ impl Memory {
         let minimum = minimum.ok_or_else(|| {
             format_err!(
                 "memory minimum size of {} pages exceeds memory limits",
-                plan.memory.minimum
+                plan.memory.limits.min
             )
         })?;
 
@@ -811,5 +811,6 @@ pub fn validate_atomic_addr(
         return Err(Trap::MemoryOutOfBounds);
     }
 
-    Ok(def.base.wrapping_add(addr as usize))
+    let addr = usize::try_from(addr).unwrap();
+    Ok(def.base.wrapping_add(addr))
 }

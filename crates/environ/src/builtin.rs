@@ -7,9 +7,9 @@ macro_rules! foreach_builtin_function {
             memory32_grow(vmctx: vmctx, delta: i64, index: i32) -> pointer;
             // Returns an index for wasm's `table.copy` when both tables are locally
             // defined.
-            table_copy(vmctx: vmctx, dst_index: i32, src_index: i32, dst: i32, src: i32, len: i32);
+            table_copy(vmctx: vmctx, dst_index: i32, src_index: i32, dst: i64, src: i64, len: i64);
             // Returns an index for wasm's `table.init`.
-            table_init(vmctx: vmctx, table: i32, elem: i32, dst: i32, src: i32, len: i32);
+            table_init(vmctx: vmctx, table: i32, elem: i32, dst: i64, src: i64, len: i64);
             // Returns an index for wasm's `elem.drop`.
             elem_drop(vmctx: vmctx, elem: i32);
             // Returns an index for wasm's `memory.copy`
@@ -23,11 +23,11 @@ macro_rules! foreach_builtin_function {
             // Returns an index for wasm's `data.drop` instruction.
             data_drop(vmctx: vmctx, data: i32);
             // Returns a table entry after lazily initializing it.
-            table_get_lazy_init_func_ref(vmctx: vmctx, table: i32, index: i32) -> pointer;
+            table_get_lazy_init_func_ref(vmctx: vmctx, table: i32, index: i64) -> pointer;
             // Returns an index for Wasm's `table.grow` instruction for `funcref`s.
-            table_grow_func_ref(vmctx: vmctx, table: i32, delta: i32, init: pointer) -> i32;
+            table_grow_func_ref(vmctx: vmctx, table: i32, delta: i64, init: pointer) -> pointer;
             // Returns an index for Wasm's `table.fill` instruction for `funcref`s.
-            table_fill_func_ref(vmctx: vmctx, table: i32, dst: i32, val: pointer, len: i32);
+            table_fill_func_ref(vmctx: vmctx, table: i32, dst: i64, val: pointer, len: i64);
             // Returns an index for wasm's `memory.atomic.notify` instruction.
             #[cfg(feature = "threads")]
             memory_atomic_notify(vmctx: vmctx, memory: i32, addr: i64, count: i32) -> i32;
@@ -91,12 +91,11 @@ macro_rules! foreach_builtin_function {
 
             // Returns an index for Wasm's `table.grow` instruction for GC references.
             #[cfg(feature = "gc")]
-            table_grow_gc_ref(vmctx: vmctx, table: i32, delta: i32, init: reference) -> i32;
+            table_grow_gc_ref(vmctx: vmctx, table: i32, delta: i64, init: reference) -> pointer;
 
             // Returns an index for Wasm's `table.fill` instruction for GC references.
             #[cfg(feature = "gc")]
-            table_fill_gc_ref(vmctx: vmctx, table: i32, dst: i32, val: reference, len: i32);
-
+            table_fill_gc_ref(vmctx: vmctx, table: i32, dst: i64, val: reference, len: i64);
 
             // Creates a new continuation from a funcref.
             tc_cont_new(vmctx: vmctx, r: pointer, param_count: i32, result_count: i32) -> pointer;
@@ -168,9 +167,9 @@ macro_rules! foreach_builtin_function {
             // continuation reference and the revision count.
             // If `unsafe_disable_continuation_linearity_check` is enabled, the revision value is arbitrary.
             // To denote the continuation being `None`, `init_contref` may be 0.
-            table_grow_cont_obj(vmctx: vmctx, table: i32, delta: i32, init_contref: pointer, init_revision : i64) -> i32;
+            table_grow_cont_obj(vmctx: vmctx, table: i32, delta: i64, init_contref: pointer, init_revision : i64) -> pointer;
             // `value_contref` and `value_revision` together encode the Option<VMContObj>, as in previous libcall.
-            table_fill_cont_obj(vmctx: vmctx, table: i32, dst: i32, value_contref: pointer, value_revision : i64, len: i32);
+            table_fill_cont_obj(vmctx: vmctx, table: i32, dst: i64, value_contref: pointer, value_revision : i64, len: i64);
         }
     };
 }

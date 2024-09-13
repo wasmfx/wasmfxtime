@@ -79,12 +79,12 @@ mod test_vmfunction_import {
     use super::VMFunctionImport;
     use core::mem::offset_of;
     use std::mem::size_of;
-    use wasmtime_environ::{Module, VMOffsets};
+    use wasmtime_environ::{HostPtr, Module, VMOffsets};
 
     #[test]
     fn check_vmfunction_import_offsets() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(HostPtr, &module);
         assert_eq!(
             size_of::<VMFunctionImport>(),
             usize::from(offsets.size_of_vmfunction_import())
@@ -144,12 +144,12 @@ mod test_vmtable_import {
     use super::VMTableImport;
     use core::mem::offset_of;
     use std::mem::size_of;
-    use wasmtime_environ::{Module, VMOffsets};
+    use wasmtime_environ::{HostPtr, Module, VMOffsets};
 
     #[test]
     fn check_vmtable_import_offsets() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(HostPtr, &module);
         assert_eq!(
             size_of::<VMTableImport>(),
             usize::from(offsets.size_of_vmtable_import())
@@ -190,12 +190,12 @@ mod test_vmmemory_import {
     use super::VMMemoryImport;
     use core::mem::offset_of;
     use std::mem::size_of;
-    use wasmtime_environ::{Module, VMOffsets};
+    use wasmtime_environ::{HostPtr, Module, VMOffsets};
 
     #[test]
     fn check_vmmemory_import_offsets() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(HostPtr, &module);
         assert_eq!(
             size_of::<VMMemoryImport>(),
             usize::from(offsets.size_of_vmmemory_import())
@@ -234,12 +234,12 @@ mod test_vmglobal_import {
     use super::VMGlobalImport;
     use core::mem::offset_of;
     use std::mem::size_of;
-    use wasmtime_environ::{Module, VMOffsets};
+    use wasmtime_environ::{HostPtr, Module, VMOffsets};
 
     #[test]
     fn check_vmglobal_import_offsets() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(HostPtr, &module);
         assert_eq!(
             size_of::<VMGlobalImport>(),
             usize::from(offsets.size_of_vmglobal_import())
@@ -334,12 +334,12 @@ mod test_vmmemory_definition {
     use super::VMMemoryDefinition;
     use core::mem::offset_of;
     use std::mem::size_of;
-    use wasmtime_environ::{Module, PtrSize, VMOffsets};
+    use wasmtime_environ::{HostPtr, Module, PtrSize, VMOffsets};
 
     #[test]
     fn check_vmmemory_definition_offsets() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(HostPtr, &module);
         assert_eq!(
             size_of::<VMMemoryDefinition>(),
             usize::from(offsets.ptr.size_of_vmmemory_definition())
@@ -370,7 +370,7 @@ pub struct VMTableDefinition {
     pub base: *mut u8,
 
     /// The current number of elements in the table.
-    pub current_elements: u32,
+    pub current_elements: usize,
 }
 
 #[cfg(test)]
@@ -378,12 +378,12 @@ mod test_vmtable_definition {
     use super::VMTableDefinition;
     use core::mem::offset_of;
     use std::mem::size_of;
-    use wasmtime_environ::{Module, VMOffsets};
+    use wasmtime_environ::{HostPtr, Module, VMOffsets};
 
     #[test]
     fn check_vmtable_definition_offsets() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(HostPtr, &module);
         assert_eq!(
             size_of::<VMTableDefinition>(),
             usize::from(offsets.size_of_vmtable_definition())
@@ -414,7 +414,7 @@ pub struct VMGlobalDefinition {
 mod test_vmglobal_definition {
     use super::VMGlobalDefinition;
     use std::mem::{align_of, size_of};
-    use wasmtime_environ::{Module, PtrSize, VMOffsets};
+    use wasmtime_environ::{HostPtr, Module, PtrSize, VMOffsets};
 
     #[test]
     fn check_vmglobal_definition_alignment() {
@@ -428,7 +428,7 @@ mod test_vmglobal_definition {
     #[test]
     fn check_vmglobal_definition_offsets() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(HostPtr, &module);
         assert_eq!(
             size_of::<VMGlobalDefinition>(),
             usize::from(offsets.ptr.size_of_vmglobal_definition())
@@ -438,7 +438,7 @@ mod test_vmglobal_definition {
     #[test]
     fn check_vmglobal_begins_aligned() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(HostPtr, &module);
         assert_eq!(offsets.vmctx_globals_begin() % 16, 0);
     }
 
@@ -647,12 +647,12 @@ impl VMGlobalDefinition {
 mod test_vmshared_type_index {
     use super::VMSharedTypeIndex;
     use std::mem::size_of;
-    use wasmtime_environ::{Module, VMOffsets};
+    use wasmtime_environ::{HostPtr, Module, VMOffsets};
 
     #[test]
     fn check_vmshared_type_index() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(HostPtr, &module);
         assert_eq!(
             size_of::<VMSharedTypeIndex>(),
             usize::from(offsets.size_of_vmshared_type_index())
@@ -751,12 +751,12 @@ mod test_vm_func_ref {
     use super::VMFuncRef;
     use core::mem::offset_of;
     use std::mem::size_of;
-    use wasmtime_environ::{Module, PtrSize, VMOffsets};
+    use wasmtime_environ::{HostPtr, Module, PtrSize, VMOffsets};
 
     #[test]
     fn check_vm_func_ref_offsets() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(HostPtr, &module);
         assert_eq!(
             size_of::<VMFuncRef>(),
             usize::from(offsets.ptr.size_of_vm_func_ref())
@@ -915,13 +915,12 @@ impl Default for VMRuntimeLimits {
 mod test_vmruntime_limits {
     use super::VMRuntimeLimits;
     use core::mem::offset_of;
-    use std::mem::size_of;
-    use wasmtime_environ::{Module, PtrSize, VMOffsets};
+    use wasmtime_environ::{HostPtr, Module, PtrSize, VMOffsets};
 
     #[test]
     fn field_offsets() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(HostPtr, &module);
         assert_eq!(
             offset_of!(VMRuntimeLimits, stack_limit),
             usize::from(offsets.ptr.vmruntime_limits_stack_limit())

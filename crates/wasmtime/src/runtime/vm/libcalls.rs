@@ -62,7 +62,7 @@ use crate::runtime::vm::vmcontext::VMFuncRef;
 use crate::runtime::vm::{Instance, TrapReason, VMGcRef};
 #[cfg(feature = "threads")]
 use core::time::Duration;
-use wasmtime_environ::{DataIndex, ElemIndex, FuncIndex, MemoryIndex, TableIndex, Trap, Unsigned};
+use wasmtime_environ::{DataIndex, ElemIndex, FuncIndex, MemoryIndex, TableIndex, Trap};
 #[cfg(feature = "wmemcheck")]
 use wasmtime_wmemcheck::AccessError::{
     DoubleMalloc, InvalidFree, InvalidRead, InvalidWrite, OutOfBounds,
@@ -207,9 +207,9 @@ fn memory32_grow(
 unsafe fn table_grow_func_ref(
     instance: &mut Instance,
     table_index: u32,
-    delta: u32,
+    delta: u64,
     init_value: *mut u8,
-) -> Result<u32> {
+) -> Result<*mut u8> {
     let table_index = TableIndex::from_u32(table_index);
 
     let element = match instance.table_element_type(table_index) {
@@ -218,10 +218,11 @@ unsafe fn table_grow_func_ref(
         TableElementType::Cont => unreachable!(),
     };
 
-    Ok(match instance.table_grow(table_index, delta, element)? {
+    let result = match instance.table_grow(table_index, delta, element)? {
         Some(r) => r,
-        None => (-1_i32).unsigned(),
-    })
+        None => usize::MAX,
+    };
+    Ok(result as *mut _)
 }
 
 /// Implementation of `table.grow` for GC-reference tables.
@@ -229,9 +230,9 @@ unsafe fn table_grow_func_ref(
 unsafe fn table_grow_gc_ref(
     instance: &mut Instance,
     table_index: u32,
-    delta: u32,
+    delta: u64,
     init_value: u32,
-) -> Result<u32> {
+) -> Result<*mut u8> {
     let table_index = TableIndex::from_u32(table_index);
 
     let element = match instance.table_element_type(table_index) {
@@ -239,26 +240,25 @@ unsafe fn table_grow_gc_ref(
         TableElementType::GcRef => VMGcRef::from_raw_u32(init_value)
             .map(|r| (*instance.store()).gc_store().clone_gc_ref(&r))
             .into(),
-        TableElementType::Cont => {
-            panic!("Wrong table growing function")
-        }
+        TableElementType::Cont => unreachable!(),
     };
 
-    Ok(match instance.table_grow(table_index, delta, element)? {
+    let result = match instance.table_grow(table_index, delta, element)? {
         Some(r) => r,
-        None => (-1_i32).unsigned(),
-    })
+        None => usize::MAX,
+    };
+    Ok(result as *mut _)
 }
 
 unsafe fn table_grow_cont_obj(
     instance: &mut Instance,
     table_index: u32,
-    delta: u32,
+    delta: u64,
     // The following two values together form the intitial Option<VMContObj>.
     // A None value is indicated by the pointer being null.
     init_value_contref: *mut u8,
     init_value_revision: u64,
-) -> Result<u32> {
+) -> Result<*mut u8> {
     use core::ptr::NonNull;
     let init_value = if init_value_contref.is_null() {
         None
@@ -276,19 +276,20 @@ unsafe fn table_grow_cont_obj(
         _ => panic!("Wrong table growing function"),
     };
 
-    Ok(match instance.table_grow(table_index, delta, element)? {
+    let result = match instance.table_grow(table_index, delta, element)? {
         Some(r) => r,
-        None => (-1_i32).unsigned(),
-    })
+        None => usize::MAX,
+    };
+    Ok(result as *mut _)
 }
 
 /// Implementation of `table.fill` for `funcref`s.
 unsafe fn table_fill_func_ref(
     instance: &mut Instance,
     table_index: u32,
-    dst: u32,
+    dst: u64,
     val: *mut u8,
-    len: u32,
+    len: u64,
 ) -> Result<(), Trap> {
     let table_index = TableIndex::from_u32(table_index);
     let table = &mut *instance.get_table(table_index);
@@ -306,9 +307,9 @@ unsafe fn table_fill_func_ref(
 unsafe fn table_fill_gc_ref(
     instance: &mut Instance,
     table_index: u32,
-    dst: u32,
+    dst: u64,
     val: u32,
-    len: u32,
+    len: u64,
 ) -> Result<(), Trap> {
     let table_index = TableIndex::from_u32(table_index);
     let table = &mut *instance.get_table(table_index);
@@ -328,10 +329,10 @@ unsafe fn table_fill_gc_ref(
 unsafe fn table_fill_cont_obj(
     instance: &mut Instance,
     table_index: u32,
-    dst: u32,
+    dst: u64,
     value_contref: *mut u8,
     value_revision: u64,
-    len: u32,
+    len: u64,
 ) -> Result<(), Trap> {
     use core::ptr::NonNull;
     let table_index = TableIndex::from_u32(table_index);
@@ -358,15 +359,15 @@ unsafe fn table_copy(
     instance: &mut Instance,
     dst_table_index: u32,
     src_table_index: u32,
-    dst: u32,
-    src: u32,
-    len: u32,
+    dst: u64,
+    src: u64,
+    len: u64,
 ) -> Result<(), Trap> {
     let dst_table_index = TableIndex::from_u32(dst_table_index);
     let src_table_index = TableIndex::from_u32(src_table_index);
     let dst_table = instance.get_table(dst_table_index);
     // Lazy-initialize the whole range in the source table first.
-    let src_range = src..(src.checked_add(len).unwrap_or(u32::MAX));
+    let src_range = src..(src.checked_add(len).unwrap_or(u64::MAX));
     let src_table = instance.get_table_with_lazy_init(src_table_index, src_range);
     let gc_store = (*instance.store()).gc_store();
     Table::copy(gc_store, dst_table, src_table, dst, src, len)
@@ -377,9 +378,9 @@ fn table_init(
     instance: &mut Instance,
     table_index: u32,
     elem_index: u32,
-    dst: u32,
-    src: u32,
-    len: u32,
+    dst: u64,
+    src: u64,
+    len: u64,
 ) -> Result<(), Trap> {
     let table_index = TableIndex::from_u32(table_index);
     let elem_index = ElemIndex::from_u32(elem_index);
@@ -415,6 +416,7 @@ fn memory_fill(
     len: u64,
 ) -> Result<(), Trap> {
     let memory_index = MemoryIndex::from_u32(memory_index);
+    #[allow(clippy::cast_possible_truncation)]
     instance.memory_fill(memory_index, dst, val as u8, len)
 }
 
@@ -450,7 +452,7 @@ fn data_drop(instance: &mut Instance, data_index: u32) {
 unsafe fn table_get_lazy_init_func_ref(
     instance: &mut Instance,
     table_index: u32,
-    index: u32,
+    index: u64,
 ) -> *mut u8 {
     let table_index = TableIndex::from_u32(table_index);
     let table = instance.get_table_with_lazy_init(table_index, core::iter::once(index));
