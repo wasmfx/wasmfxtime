@@ -965,12 +965,16 @@ fn tc_drop_cont_ref(instance: &mut Instance, contref: *mut u8) {
 
 fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> Result<*mut u8, TrapReason> {
     debug_assert!(size > 0);
-    let layout =
-        std::alloc::Layout::from_size_align(size as usize, align as usize).map_err(|_error| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Continuation layout construction failed!"
-            ))
-        })?;
+    let size = usize::try_from(size)
+        .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("size too large!")))?;
+    let align = usize::try_from(align).map_err(|_error| {
+        TrapReason::user_without_backtrace(anyhow::anyhow!("align too large!"))
+    })?;
+    let layout = std::alloc::Layout::from_size_align(size, align).map_err(|_error| {
+        TrapReason::user_without_backtrace(anyhow::anyhow!(
+            "Continuation layout construction failed!"
+        ))
+    })?;
     let ptr = unsafe { alloc::alloc::alloc(layout) };
     // TODO(dhil): We can consider making this a debug-build only
     // check.
@@ -990,12 +994,16 @@ fn tc_deallocate(
     align: u64,
 ) -> Result<(), TrapReason> {
     debug_assert!(size > 0);
-    let layout =
-        std::alloc::Layout::from_size_align(size as usize, align as usize).map_err(|_error| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Continuation layout construction failed!"
-            ))
-        })?;
+    let size = usize::try_from(size)
+        .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("size too large!")))?;
+    let align = usize::try_from(align).map_err(|_error| {
+        TrapReason::user_without_backtrace(anyhow::anyhow!("align too large!"))
+    })?;
+    let layout = std::alloc::Layout::from_size_align(size, align).map_err(|_error| {
+        TrapReason::user_without_backtrace(anyhow::anyhow!(
+            "Continuation layout construction failed!"
+        ))
+    })?;
     Ok(unsafe { std::alloc::dealloc(ptr, layout) })
 }
 
@@ -1016,7 +1024,9 @@ fn tc_reallocate(
 }
 
 fn tc_print_str(_instance: &mut Instance, s: *const u8, len: u64) {
-    let str = unsafe { std::slice::from_raw_parts(s, len as usize) };
+    let len = usize::try_from(len)
+        .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("len too large!")));
+    let str = unsafe { std::slice::from_raw_parts(s, len.unwrap()) };
     let s = std::str::from_utf8(str).unwrap();
     print!("{s}");
 }
@@ -1038,11 +1048,17 @@ fn tc_baseline_cont_new(
     param_count: u64,
     result_count: u64,
 ) -> Result<*mut u8, TrapReason> {
+    let param_count = usize::try_from(param_count).map_err(|_error| {
+        TrapReason::user_without_backtrace(anyhow::anyhow!("param_count too large!"))
+    })?;
+    let result_count = usize::try_from(result_count).map_err(|_error| {
+        TrapReason::user_without_backtrace(anyhow::anyhow!("result_count too large!"))
+    })?;
     let ans = crate::runtime::vm::continuation::baseline::cont_new(
         instance,
         func,
-        param_count as usize,
-        result_count as usize,
+        param_count,
+        result_count,
     )?;
     let ans_ptr = ans.cast::<u8>();
     assert!(ans as usize == ans_ptr as usize);
@@ -1081,12 +1097,14 @@ fn tc_baseline_continuation_arguments_ptr(
     contref: *mut u8,
     nargs: u64,
 ) -> *mut u8 {
+    let nargs = usize::try_from(nargs)
+        .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("nargs too large!")));
     let contref_ptr = contref.cast::<crate::runtime::vm::continuation::baseline::VMContRef>();
     assert!(contref_ptr as usize == contref as usize);
     let ans = crate::runtime::vm::continuation::baseline::get_arguments_ptr(
         instance,
         unsafe { &mut *(contref_ptr) },
-        nargs as usize,
+        nargs.unwrap(),
     );
     return ans.cast::<u8>();
 }
@@ -1111,8 +1129,10 @@ fn tc_baseline_clear_arguments(instance: &mut Instance, contref: *mut u8) {
 }
 
 fn tc_baseline_get_payloads_ptr(instance: &mut Instance, nargs: u64) -> *mut u8 {
+    let nargs = usize::try_from(nargs)
+        .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("nargs too large!")));
     let ans =
-        crate::runtime::vm::continuation::baseline::get_payloads_ptr(instance, nargs as usize);
+        crate::runtime::vm::continuation::baseline::get_payloads_ptr(instance, nargs.unwrap());
     let ans_ptr = ans.cast::<u8>();
     assert!(ans as usize == ans_ptr as usize);
     return ans_ptr;

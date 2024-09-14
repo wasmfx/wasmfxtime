@@ -276,7 +276,7 @@ mod test_vmtag_import {
     #[test]
     fn check_vmtag_import_offsets() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(u8::try_from(size_of::<*mut u8>()).unwrap(), &module);
         assert_eq!(
             size_of::<VMTagImport>(),
             usize::from(offsets.size_of_vmtag_import())
@@ -684,7 +684,7 @@ mod test_vmtag_definition {
     #[test]
     fn check_vmtag_definition_offsets() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(u8::try_from(size_of::<*mut u8>()).unwrap(), &module);
         assert_eq!(
             size_of::<VMTagDefinition>(),
             usize::from(offsets.ptr.size_of_vmtag_definition())
@@ -694,7 +694,7 @@ mod test_vmtag_definition {
     #[test]
     fn check_vmtag_begins_aligned() {
         let module = Module::new();
-        let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
+        let offsets = VMOffsets::new(u8::try_from(size_of::<*mut u8>()).unwrap(), &module);
         assert_eq!(offsets.vmctx_tags_begin() % 16, 0);
     }
 }
