@@ -4,7 +4,8 @@ use super::GcCompiler;
 use crate::func_environ::FuncEnvironment;
 use cranelift_codegen::ir;
 use cranelift_frontend::FunctionBuilder;
-use cranelift_wasm::{wasm_unsupported, WasmHeapType, WasmRefType, WasmResult, WasmValType};
+use cranelift_wasm::{wasm_unsupported, WasmHeapType, WasmRefType, WasmResult};
+use wasmtime_environ::GcTypeLayouts;
 
 /// Get the default GC compiler.
 pub fn gc_compiler(_: &FuncEnvironment<'_>) -> Box<dyn GcCompiler> {
@@ -60,31 +61,16 @@ pub fn gc_ref_table_fill_builtin(
     ))
 }
 
-pub fn gc_ref_global_get_builtin(
-    ty: WasmValType,
-    _func_env: &mut FuncEnvironment<'_>,
-    _func: &mut ir::Function,
-) -> WasmResult<ir::FuncRef> {
-    Err(wasm_unsupported!(
-        "support for `{ty}` disabled at compile time because the `gc` cargo \
-         feature was not enabled"
-    ))
-}
-
-pub fn gc_ref_global_set_builtin(
-    ty: WasmValType,
-    _func_env: &mut FuncEnvironment<'_>,
-    _func: &mut ir::Function,
-) -> WasmResult<ir::FuncRef> {
-    Err(wasm_unsupported!(
-        "support for `{ty}` disabled at compile time because the `gc` cargo \
-         feature was not enabled"
-    ))
-}
-
 struct DisabledGcCompiler;
 
 impl GcCompiler for DisabledGcCompiler {
+    fn layouts(&self) -> &dyn GcTypeLayouts {
+        panic!(
+            "support for GC types disabled at compile time because the `gc` cargo \
+             feature was not enabled"
+        )
+    }
+
     fn translate_read_gc_reference(
         &mut self,
         _func_env: &mut FuncEnvironment<'_>,

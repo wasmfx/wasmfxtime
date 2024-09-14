@@ -62,6 +62,7 @@ use crate::runtime::vm::vmcontext::VMFuncRef;
 use crate::runtime::vm::{Instance, TrapReason, VMGcRef};
 #[cfg(feature = "threads")]
 use core::time::Duration;
+use wasmtime_environ::Unsigned;
 use wasmtime_environ::{DataIndex, ElemIndex, FuncIndex, MemoryIndex, TableIndex, Trap};
 #[cfg(feature = "wmemcheck")]
 use wasmtime_wmemcheck::AccessError::{
@@ -141,6 +142,8 @@ pub mod raw {
 
         (@ty i32) => (u32);
         (@ty i64) => (u64);
+        (@ty f64) => (f64);
+        (@ty u8) => (u8);
         (@ty reference) => (u32);
         (@ty pointer) => (*mut u8);
         (@ty vmctx) => (*mut VMContext);
@@ -502,43 +505,6 @@ unsafe fn gc(instance: &mut Instance, gc_ref: u32) -> Result<u32> {
     }
 }
 
-/// Perform a Wasm `global.get` for GC reference globals.
-#[cfg(feature = "gc")]
-unsafe fn gc_ref_global_get(instance: &mut Instance, index: u32) -> Result<u32> {
-    use core::num::NonZeroUsize;
-
-    let index = wasmtime_environ::GlobalIndex::from_u32(index);
-    let global = instance.defined_or_imported_global_ptr(index);
-    let gc_store = (*instance.store()).gc_store();
-
-    if gc_store
-        .gc_heap
-        .need_gc_before_entering_wasm(NonZeroUsize::new(1).unwrap())
-    {
-        (*instance.store()).gc(None)?;
-    }
-
-    match (*global).as_gc_ref() {
-        None => Ok(0),
-        Some(gc_ref) => {
-            let gc_ref = gc_store.clone_gc_ref(gc_ref);
-            let ret = gc_ref.as_raw_u32();
-            gc_store.expose_gc_ref_to_wasm(gc_ref);
-            Ok(ret)
-        }
-    }
-}
-
-/// Perform a Wasm `global.set` for GC reference globals.
-#[cfg(feature = "gc")]
-unsafe fn gc_ref_global_set(instance: &mut Instance, index: u32, gc_ref: u32) {
-    let index = wasmtime_environ::GlobalIndex::from_u32(index);
-    let global = instance.defined_or_imported_global_ptr(index);
-    let gc_ref = VMGcRef::from_raw_u32(gc_ref);
-    let gc_store = (*instance.store()).gc_store();
-    (*global).write_gc_ref(gc_store, gc_ref.as_ref());
-}
-
 // Implementation of `memory.atomic.notify` for locally defined memories.
 #[cfg(feature = "threads")]
 fn memory_atomic_notify(
@@ -721,6 +687,60 @@ fn update_mem_size(instance: &mut Instance, num_pages: u32) {
         let num_bytes = num_pages as usize * 64 * KIB;
         wmemcheck_state.update_mem_size(num_bytes);
     }
+}
+
+fn trap(_instance: &mut Instance, code: u8) -> Result<(), TrapReason> {
+    Err(TrapReason::Wasm(
+        wasmtime_environ::Trap::from_u8(code).unwrap(),
+    ))
+}
+
+fn f64_to_i64(_instance: &mut Instance, val: f64) -> Result<u64, TrapReason> {
+    if val.is_nan() {
+        return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
+    }
+    let val = relocs::truncf64(val);
+    if val <= -9223372036854777856.0 || val >= 9223372036854775808.0 {
+        return Err(TrapReason::Wasm(Trap::IntegerOverflow));
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    return Ok((val as i64).unsigned());
+}
+
+fn f64_to_u64(_instance: &mut Instance, val: f64) -> Result<u64, TrapReason> {
+    if val.is_nan() {
+        return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
+    }
+    let val = relocs::truncf64(val);
+    if val <= -1.0 || val >= 18446744073709551616.0 {
+        return Err(TrapReason::Wasm(Trap::IntegerOverflow));
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    return Ok(val as u64);
+}
+
+fn f64_to_i32(_instance: &mut Instance, val: f64) -> Result<u32, TrapReason> {
+    if val.is_nan() {
+        return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
+    }
+    let val = relocs::truncf64(val);
+    if val <= -2147483649.0 || val >= 2147483648.0 {
+        return Err(TrapReason::Wasm(Trap::IntegerOverflow));
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    return Ok((val as i32).unsigned());
+}
+
+fn f64_to_u32(_instance: &mut Instance, val: f64) -> Result<u32, TrapReason> {
+    if val.is_nan() {
+        return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
+    }
+    let val = relocs::truncf64(val);
+    if val <= -1.0 || val >= 4294967296.0 {
+        return Err(TrapReason::Wasm(Trap::IntegerOverflow));
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    return Ok(val as u32);
 }
 
 /// This module contains functions which are used for resolving relocations at
