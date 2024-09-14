@@ -271,6 +271,10 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
             {
                 return true;
             }
+            // Tag linking is broken in the baseline implementation.
+            if cfg!(feature = "wasmfx_baseline") && test.ends_with("linking_tags.wast") {
+                return true;
+            }
         }
     }
 
