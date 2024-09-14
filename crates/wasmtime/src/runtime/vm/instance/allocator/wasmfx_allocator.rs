@@ -221,7 +221,8 @@ pub mod wasmfx_pooling {
                 &mut self.continuations[index] as *mut VMContRef
             );
 
-            self.index_allocator.free(SlotId(index as u32));
+            let index = u32::try_from(index).unwrap();
+            self.index_allocator.free(SlotId(index));
         }
     }
 

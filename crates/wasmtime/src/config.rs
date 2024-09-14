@@ -167,6 +167,7 @@ struct ConfigTunables {
     generate_address_map: Option<bool>,
     debug_adapter_modules: Option<bool>,
     relaxed_simd_deterministic: Option<bool>,
+    signals_based_traps: Option<bool>,
 }
 
 /// User-provided configuration for the compiler.
@@ -596,6 +597,24 @@ impl Config {
     /// An initial deadline must be set before executing code by calling
     /// [`Store::set_epoch_deadline`](crate::Store::set_epoch_deadline). If this
     /// deadline is not configured then wasm will immediately trap.
+    ///
+    /// ## Interaction with blocking host calls
+    ///
+    /// Epochs (and fuel) do not assist in handling WebAssembly code blocked in
+    /// a call to the host. For example if the WebAssembly function calls
+    /// `wasi:io/poll/poll` to sleep epochs will not assist in waking this up or
+    /// timing it out. Epochs intentionally only affect running WebAssembly code
+    /// itself and it's left to the embedder to determine how best to wake up
+    /// indefinitely blocking code in the host.
+    ///
+    /// The typical solution for this, however, is to use
+    /// [`Config::async_support(true)`](Config::async_support) and the `async`
+    /// variant of WASI host functions. This models computation as a Rust
+    /// `Future` which means that when blocking happens the future is only
+    /// suspended and control yields back to the main event loop. This gives the
+    /// embedder the opportunity to use `tokio::time::timeout` for example on a
+    /// wasm computation and have the desired effect of cancelling a blocking
+    /// operation when a timeout expires.
     ///
     /// ## When to use fuel vs. epochs
     ///
@@ -1839,7 +1858,7 @@ impl Config {
     fn features(&self) -> WasmFeatures {
         // Wasmtime by default supports all of the wasm 2.0 version of the
         // specification.
-        let mut features = WasmFeatures::wasm2();
+        let mut features = WasmFeatures::WASM2;
 
         // On-by-default features that wasmtime has. Note that these are all
         // subject to the criteria at
@@ -1979,6 +1998,7 @@ impl Config {
             generate_address_map
             debug_adapter_modules
             relaxed_simd_deterministic
+            signals_based_traps
         }
 
         // If we're going to compile with winch, we must use the winch calling convention.
@@ -1988,6 +2008,10 @@ impl Config {
 
             if tunables.winch_callable && !tunables.table_lazy_init {
                 bail!("Winch requires the table-lazy-init configuration option");
+            }
+
+            if tunables.winch_callable && !tunables.signals_based_traps {
+                bail!("Winch requires signals-based traps to be enabled");
             }
         }
 
@@ -2119,6 +2143,29 @@ impl Config {
         self.compiler_config
             .settings
             .insert("preserve_frame_pointers".into(), "true".into());
+
+        if !tunables.signals_based_traps {
+            let mut ok = self.compiler_config.ensure_setting_unset_or_given(
+                "enable_table_access_spectre_mitigation".into(),
+                "false".into(),
+            );
+            ok = ok
+                && self.compiler_config.ensure_setting_unset_or_given(
+                    "enable_heap_access_spectre_mitigation".into(),
+                    "false".into(),
+                );
+
+            // Right now spectre-mitigated bounds checks will load from zero so
+            // if host-based signal handlers are disabled then that's a mismatch
+            // and doesn't work right now. Fixing this will require more thought
+            // of how to implement the bounds check in spectre-only mode.
+            if !ok {
+                bail!(
+                    "when signals-based traps are disabled then spectre \
+                     mitigations must also be disabled"
+                );
+            }
+        }
 
         // check for incompatible compiler options and set required values
         if features.contains(WasmFeatures::REFERENCE_TYPES) {
@@ -2253,6 +2300,43 @@ impl Config {
     /// `detect` must be correct for memory safe execution at runtime.
     pub unsafe fn detect_host_feature(&mut self, detect: fn(&str) -> Option<bool>) -> &mut Self {
         self.detect_host_feature = Some(detect);
+        self
+    }
+
+    /// Configures Wasmtime to not use signals-based trap handlers, for example
+    /// disables `SIGILL` and `SIGSEGV` handler registration on Unix platforms.
+    ///
+    /// Wasmtime will by default leverage signals-based trap handlers (or the
+    /// platform equivalent, for example "vectored exception handlers" on
+    /// Windows) to make generated code more efficient. For example an
+    /// out-of-bounds load in WebAssembly will result in a `SIGSEGV` on Unix
+    /// that is caught by a signal handler in Wasmtime by default. Another
+    /// example is divide-by-zero is reported by hardware rather than
+    /// explicitly checked and Wasmtime turns that into a trap.
+    ///
+    /// Some environments however may not have easy access to signal handlers.
+    /// For example embedded scenarios may not support virtual memory. Other
+    /// environments where Wasmtime is embedded within the surrounding
+    /// environment may require that new signal handlers aren't registered due
+    /// to the global nature of signal handlers. This option exists to disable
+    /// the signal handler registration when required.
+    ///
+    /// When signals-based trap handlers are disabled then generated code will
+    /// never rely on segfaults or other signals. Generated code will be slower
+    /// because bounds checks must be explicit along with other operations like
+    /// integer division which must check for zero.
+    ///
+    /// When this option is disable it additionally requires that the
+    /// `enable_heap_access_spectre_mitigation` and
+    /// `enable_table_access_spectre_mitigation` Cranelift settings are
+    /// disabled. This means that generated code must have spectre mitigations
+    /// disabled. This is because spectre mitigations rely on faults from
+    /// loading from the null address to implement bounds checks.
+    ///
+    /// This option defaults to `true` meaning that signals-based trap handlers
+    /// are enabled by default.
+    pub fn signals_based_traps(&mut self, enable: bool) -> &mut Self {
+        self.tunables.signals_based_traps = Some(enable);
         self
     }
 }
@@ -2865,7 +2949,7 @@ impl PoolingAllocationConfig {
     /// table; table elements are pointer-sized in the Wasmtime runtime.
     /// Therefore, the space reserved for each instance is `tables *
     /// table_elements * sizeof::<*const ()>`.
-    pub fn table_elements(&mut self, elements: u32) -> &mut Self {
+    pub fn table_elements(&mut self, elements: usize) -> &mut Self {
         self.config.limits.table_elements = elements;
         self
     }

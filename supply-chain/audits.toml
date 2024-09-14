@@ -171,7 +171,7 @@ notes = "We (Bytecode Alliance) are the primary authors of regalloc2 and co-deve
 [[wildcard-audits.regalloc2]]
 who = "Trevor Elliott <telliott@fastly.com>"
 criteria = "safe-to-deploy"
-user-id = 187138
+user-id = 187138 # Trevor Elliott (elliottt)
 start = "2022-11-29"
 end = "2025-07-30"
 notes = """
@@ -2393,6 +2393,12 @@ notes = "I am the author of this crate."
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 delta = "0.1.21 -> 0.1.24"
+
+[[audits.rustc-hash]]
+who = "Trevor Elliott <telliott@fastly.com>"
+criteria = "safe-to-deploy"
+delta = "1.1.0 -> 2.0.0"
+notes = "Chris Fallin reviewed this update with me, and we didn't find anything surprising. We did verify that the new constants did originate in the paper referenced."
 
 [[audits.rustix]]
 who = "Dan Gohman <dev@sunfishcode.online>"

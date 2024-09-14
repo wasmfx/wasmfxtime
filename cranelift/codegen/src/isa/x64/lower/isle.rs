@@ -19,10 +19,10 @@ use crate::{
     },
     isa::x64::{
         abi::X64CallSite,
-        inst::{args::*, regs, CallInfo, ReturnCallInfo},
+        inst::{args::*, regs, ReturnCallInfo},
     },
     machinst::{
-        isle::*, ArgPair, InsnInput, InstOutput, IsTailCall, MachAtomicRmwOp, MachInst,
+        isle::*, ArgPair, CallInfo, InsnInput, InstOutput, IsTailCall, MachAtomicRmwOp, MachInst,
         VCodeConstant, VCodeConstantData,
     },
 };
@@ -34,8 +34,10 @@ use std::boxed::Box;
 /// call instruction is also used by Winch to emit calls, but the
 /// `Box<CallInfo>` field is not used, it's only used by Cranelift. By making it
 /// optional, we reduce the number of heap allocations in Winch.
-type BoxCallInfo = Option<Box<CallInfo>>;
-type BoxReturnCallInfo = Box<ReturnCallInfo>;
+type BoxCallInfo = Box<CallInfo<ExternalName>>;
+type BoxCallIndInfo = Box<CallInfo<RegMem>>;
+type BoxReturnCallInfo = Box<ReturnCallInfo<ExternalName>>;
+type BoxReturnCallIndInfo = Box<ReturnCallInfo<Reg>>;
 type VecArgPair = Vec<ArgPair>;
 
 pub struct SinkableLoad {
@@ -987,6 +989,11 @@ impl Context for IsleContext<'_, '_, MInst, X64Backend> {
     fn insert_i8x16_lane_hole(&mut self, hole_idx: u8) -> VCodeConstant {
         let mask = -1i128 as u128;
         self.emit_u128_le_const(mask ^ (0xff << (hole_idx * 8)))
+    }
+
+    fn writable_invalid_gpr(&mut self) -> WritableGpr {
+        let reg = Gpr::new(self.invalid_reg()).unwrap();
+        WritableGpr::from_reg(reg)
     }
 }
 

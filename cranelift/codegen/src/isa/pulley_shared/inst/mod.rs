@@ -10,7 +10,7 @@ use crate::isa::FunctionAlignment;
 use crate::{machinst::*, trace};
 use crate::{settings, CodegenError, CodegenResult};
 use alloc::string::{String, ToString};
-use regalloc2::{PRegSet, RegClass};
+use regalloc2::RegClass;
 use smallvec::SmallVec;
 
 pub mod regs;
@@ -26,17 +26,6 @@ pub use self::emit::*;
 pub use crate::isa::pulley_shared::lower::isle::generated_code::MInst as Inst;
 
 use super::PulleyTargetKind;
-
-/// Additional information for direct and indirect call instructions.
-///
-/// Left out of line to lower the size of the `Inst` enum.
-#[derive(Clone, Debug)]
-pub struct CallInfo {
-    pub uses: CallArgList,
-    pub defs: CallRetList,
-    pub clobbers: PRegSet,
-    pub callee_pop_size: u32,
-}
 
 impl Inst {
     /// Generic constructor for a load (zero-extending where appropriate).
@@ -79,6 +68,17 @@ fn pulley_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
 
         Inst::Unwind { .. } | Inst::Trap { .. } | Inst::Nop => {}
 
+        Inst::TrapIf {
+            cond: _,
+            size: _,
+            src1,
+            src2,
+            code: _,
+        } => {
+            collector.reg_use(src1);
+            collector.reg_use(src2);
+        }
+
         Inst::GetSp { dst } => {
             collector.reg_def(dst);
         }
@@ -91,7 +91,7 @@ fn pulley_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_def(dst);
         }
 
-        Inst::Call { callee: _, info } => {
+        Inst::Call { info } => {
             let CallInfo { uses, defs, .. } = &mut **info;
             for CallArgPair { vreg, preg } in uses {
                 collector.reg_fixed_use(vreg, *preg);
@@ -101,8 +101,8 @@ fn pulley_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             }
             collector.reg_clobbers(info.clobbers);
         }
-        Inst::IndirectCall { callee, info } => {
-            collector.reg_use(callee);
+        Inst::IndirectCall { info } => {
+            collector.reg_use(&mut info.dest);
             let CallInfo { uses, defs, .. } = &mut **info;
             for CallArgPair { vreg, preg } in uses {
                 collector.reg_fixed_use(vreg, *preg);
@@ -534,6 +534,18 @@ impl Inst {
 
             Inst::Trap { code } => format!("trap // code = {code:?}"),
 
+            Inst::TrapIf {
+                cond,
+                size,
+                src1,
+                src2,
+                code,
+            } => {
+                let src1 = format_reg(**src1);
+                let src2 = format_reg(**src2);
+                format!("trap_if {cond}, {size:?}, {src1}, {src2} // code = {code:?}")
+            }
+
             Inst::Nop => format!("nop"),
 
             Inst::Ret => format!("ret"),
@@ -548,12 +560,12 @@ impl Inst {
                 format!("{dst} = load_ext_name {name:?}, {offset}")
             }
 
-            Inst::Call { callee, info } => {
-                format!("call {callee:?}, {info:?}")
+            Inst::Call { info } => {
+                format!("call {info:?}")
             }
 
-            Inst::IndirectCall { callee, info } => {
-                let callee = format_reg(**callee);
+            Inst::IndirectCall { info } => {
+                let callee = format_reg(*info.dest);
                 format!("indirect_call {callee}, {info:?}")
             }
 
