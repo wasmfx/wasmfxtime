@@ -327,7 +327,7 @@ pub(crate) mod typed_continuation_helpers {
         /// This is NOT the "top of stack" address of the stack itself. In line
         /// with how the (runtime) `FiberStack` type works, this is a pointer to
         /// the TOS address.
-        pointer_to_tos: ir::Value,
+        tos_ptr: ir::Value,
     }
 
     impl VMContRef {
@@ -1167,8 +1167,8 @@ pub(crate) mod typed_continuation_helpers {
         /// The parameter is NOT the "top of stack" address of the stack itself. In line
         /// with how the (runtime) `FiberStack` type works, this is a pointer to
         /// the TOS address.
-        pub fn new(pointer_to_tos: ir::Value) -> Self {
-            Self { pointer_to_tos }
+        pub fn new(tos_ptr: ir::Value) -> Self {
+            Self { tos_ptr }
         }
 
         fn load_top_of_stack<'a>(
@@ -1177,7 +1177,7 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
         ) -> ir::Value {
             let mem_flags = ir::MemFlags::trusted();
-            builder.ins().load(I64, mem_flags, self.pointer_to_tos, 0)
+            builder.ins().load(I64, mem_flags, self.tos_ptr, 0)
         }
 
         /// Returns address of the control context stored in the stack memory,
