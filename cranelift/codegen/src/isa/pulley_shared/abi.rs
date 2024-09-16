@@ -204,15 +204,35 @@ where
 
     fn gen_add_imm(
         _call_conv: isa::CallConv,
-        _into_reg: Writable<Reg>,
-        _from_reg: Reg,
-        _imm: u32,
+        into_reg: Writable<Reg>,
+        from_reg: Reg,
+        imm: u32,
     ) -> SmallInstVec<Self::I> {
-        todo!()
+        let dst = into_reg.try_into().unwrap();
+        let imm = imm as i32;
+        smallvec![
+            Inst::Xconst32 { dst, imm }.into(),
+            Inst::Xadd32 {
+                dst,
+                src1: from_reg.try_into().unwrap(),
+                src2: dst.to_reg(),
+            }
+            .into()
+        ]
     }
 
-    fn gen_stack_lower_bound_trap(_limit_reg: Reg) -> SmallInstVec<Self::I> {
-        todo!()
+    fn gen_stack_lower_bound_trap(limit_reg: Reg) -> SmallInstVec<Self::I> {
+        smallvec![Inst::TrapIf {
+            cond: ir::condcodes::IntCC::UnsignedLessThan,
+            size: match P::pointer_width() {
+                super::PointerWidth::PointerWidth32 => OperandSize::Size32,
+                super::PointerWidth::PointerWidth64 => OperandSize::Size64,
+            },
+            src1: limit_reg.try_into().unwrap(),
+            src2: pulley_interpreter::regs::XReg::sp.into(),
+            code: ir::TrapCode::StackOverflow,
+        }
+        .into()]
     }
 
     fn gen_get_stack_addr(mem: StackAMode, dst: Writable<Reg>) -> Self::I {
@@ -522,26 +542,11 @@ where
         insts
     }
 
-    fn gen_call(
-        dest: &CallDest,
-        uses: CallArgList,
-        defs: CallRetList,
-        clobbers: PRegSet,
-        tmp: Writable<Reg>,
-        callee_conv: isa::CallConv,
-        caller_conv: isa::CallConv,
-        callee_pop_size: u32,
-    ) -> SmallVec<[Self::I; 2]> {
-        if callee_conv == isa::CallConv::Tail || callee_conv == isa::CallConv::Fast {
+    fn gen_call(dest: &CallDest, tmp: Writable<Reg>, info: CallInfo<()>) -> SmallVec<[Self::I; 2]> {
+        if info.callee_conv == isa::CallConv::Tail || info.callee_conv == isa::CallConv::Fast {
             match &dest {
                 &CallDest::ExtName(ref name, RelocDistance::Near) => smallvec![Inst::Call {
-                    callee: Box::new(name.clone()),
-                    info: Box::new(CallInfo {
-                        uses,
-                        defs,
-                        clobbers,
-                        callee_pop_size,
-                    }),
+                    info: Box::new(info.map(|()| name.clone()))
                 }
                 .into()],
                 &CallDest::ExtName(ref name, RelocDistance::Far) => smallvec![
@@ -552,29 +557,21 @@ where
                     }
                     .into(),
                     Inst::IndirectCall {
-                        callee: XReg::new(tmp.to_reg()).unwrap(),
-                        info: Box::new(CallInfo {
-                            uses,
-                            defs,
-                            clobbers,
-                            callee_pop_size,
-                        }),
+                        info: Box::new(info.map(|()| XReg::new(tmp.to_reg()).unwrap()))
                     }
                     .into(),
                 ],
                 &CallDest::Reg(reg) => smallvec![Inst::IndirectCall {
-                    callee: XReg::new(*reg).unwrap(),
-                    info: Box::new(CallInfo {
-                        uses,
-                        defs,
-                        clobbers,
-                        callee_pop_size,
-                    }),
+                    info: Box::new(info.map(|()| XReg::new(*reg).unwrap()))
                 }
                 .into()],
             }
         } else {
-            todo!("host calls? callee_conv = {callee_conv:?}; caller_conv = {caller_conv:?}")
+            todo!(
+                "host calls? callee_conv = {:?}; caller_conv = {:?}",
+                info.callee_conv,
+                info.caller_conv,
+            )
         }
     }
 

@@ -35,7 +35,7 @@ impl TablePool {
         // from its actual elements.
         let table_size = round_up_to_pow2(
             crate::runtime::vm::table::MAX_TABLE_ELEM_SIZE
-                .checked_mul(config.limits.table_elements as usize)
+                .checked_mul(config.limits.table_elements)
                 .ok_or_else(|| anyhow!("table size exceeds addressable memory"))?,
             page_size,
         );
@@ -83,11 +83,11 @@ impl TablePool {
         }
 
         for (i, plan) in module.table_plans.iter().skip(module.num_imported_tables) {
-            if plan.table.minimum > u32::try_from(self.table_elements).unwrap() {
+            if plan.table.limits.min > u64::try_from(self.table_elements)? {
                 bail!(
                     "table index {} has a minimum element size of {} which exceeds the limit of {}",
                     i.as_u32(),
-                    plan.table.minimum,
+                    plan.table.limits.min,
                     self.table_elements,
                 );
             }
@@ -131,7 +131,7 @@ impl TablePool {
             let base = self.get(allocation_index);
 
             let element_size =
-                crate::vm::table::wasm_to_table_type(table_plan.table.wasm_ty).element_size();
+                crate::vm::table::wasm_to_table_type(table_plan.table.ref_type).element_size();
 
             unsafe {
                 commit_pages(base as *mut u8, self.table_elements * element_size)?;
@@ -195,7 +195,7 @@ impl TablePool {
 
         let element_size = table.element_type().element_size();
 
-        let size = round_up_to_pow2(table.size() as usize * element_size, self.page_size);
+        let size = round_up_to_pow2(table.size() * element_size, self.page_size);
 
         // `memset` the first `keep_resident` bytes.
         let size_to_memset = size.min(self.keep_resident);

@@ -238,17 +238,6 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
 
         if part == "memory64" {
             if [
-                // Wasmtime doesn't implement the table64 extension yet.
-                "call_indirect.wast",
-                "table_copy.wast",
-                "table_get.wast",
-                "table_set.wast",
-                "table_fill.wast",
-                "table.wast",
-                "table_init.wast",
-                "table_copy_mixed.wast",
-                "table_grow.wast",
-                "table_size.wast",
                 // wasmtime doesn't implement exceptions yet
                 "imports.wast",
                 "ref_null.wast",
@@ -282,6 +271,10 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
             {
                 return true;
             }
+            // Tag linking is broken in the baseline implementation.
+            if cfg!(feature = "wasmfx_baseline") && test.ends_with("linking_tags.wast") {
+                return true;
+            }
         }
     }
 
@@ -298,12 +291,14 @@ fn run_wast(wast: &Path, strategy: Strategy, pooling: bool) -> anyhow::Result<()
 
     let wast = Path::new(wast);
 
+    let misc = feature_found(wast, "misc_testsuite");
     let memory64 = feature_found(wast, "memory64");
     let custom_page_sizes = feature_found(wast, "custom-page-sizes");
     let multi_memory = feature_found(wast, "multi-memory")
         || feature_found(wast, "component-model")
         || custom_page_sizes
-        || memory64;
+        || memory64
+        || misc;
     let threads = feature_found(wast, "threads");
     let typed_continuations = feature_found(wast, "typed-continuations");
     let exceptions = feature_found(wast, "exception-handling") || typed_continuations;
