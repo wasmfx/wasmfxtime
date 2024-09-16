@@ -8,7 +8,6 @@ cfg_if::cfg_if! {
 
         use std::io;
         use std::ops::Range;
-        use wasmtime_continuations::ControlEffect;
 
         use crate::runtime::vm::{VMContext, VMFuncRef, ValRaw};
 
@@ -81,15 +80,6 @@ cfg_if::cfg_if! {
             /// supports it.
             pub fn range(&self) -> Option<Range<usize>> {
                 self.0.range()
-            }
-
-            /// Resumes execution of this fiber.
-            pub fn resume(&self) -> ControlEffect {
-                self.0.resume()
-            }
-
-            pub fn suspend(&self, payload: ControlEffect) {
-                self.0.suspend(payload)
             }
 
             pub fn initialize(

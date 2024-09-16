@@ -79,7 +79,7 @@ pub mod optimized {
     };
     use core::cmp;
     use core::mem;
-    use wasmtime_continuations::{debug_println, ControlEffect, ENABLE_DEBUG_PRINTING};
+    use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
     pub use wasmtime_continuations::{Payloads, StackLimits, State};
 
     /// Fibers used for continuations
@@ -291,84 +291,6 @@ pub mod optimized {
         // continuation reference objects.
         debug_println!("Created contref @ {:p}", contref);
         Ok(contref)
-    }
-
-    /// TODO
-    #[inline(always)]
-    pub fn resume(
-        instance: &mut Instance,
-        contref: *mut VMContRef,
-    ) -> Result<ControlEffect, TrapReason> {
-        let cont = unsafe {
-            contref.as_ref().ok_or_else(|| {
-                TrapReason::user_without_backtrace(anyhow::anyhow!(
-                    "Attempt to dereference null VMContRef!"
-                ))
-            })?
-        };
-        assert!(cont.state == State::Allocated || cont.state == State::Invoked);
-
-        if ENABLE_DEBUG_PRINTING {
-            let chain = instance.typed_continuations_stack_chain();
-            // SAFETY: We maintain as an invariant that the stack chain field in the
-            // VMContext is non-null and contains a chain of zero or more
-            // StackChain::Continuation values followed by StackChain::Main.
-            match unsafe { (**chain).0.get_mut() } {
-                StackChain::Continuation(running_contref) => {
-                    debug_assert_eq!(contref, *running_contref);
-                    debug_println!(
-                        "Resuming contref @ {:p}, previously running contref is {:p}",
-                        contref,
-                        running_contref
-                    )
-                }
-                _ => {
-                    // Before calling this function as a libcall, we must have set
-                    // the parent of the to-be-resumed continuation to the
-                    // previously running one. Hence, we must see a
-                    // `StackChain::Continuation` variant.
-                    return Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
-                        "Invalid StackChain value in VMContext"
-                    )));
-                }
-            }
-        }
-
-        Ok(cont.stack.resume())
-    }
-
-    /// TODO
-    #[inline(always)]
-    pub fn suspend(instance: &mut Instance, tag_addr: *mut u8) -> Result<(), TrapReason> {
-        let chain_ptr = instance.typed_continuations_stack_chain();
-
-        // TODO(dhil): This should be handled in generated code.
-        // SAFETY: We maintain as an invariant that the stack chain field in the
-        // VMContext is non-null and contains a chain of zero or more
-        // StackChain::Continuation values followed by StackChain::Main.
-        let chain = unsafe { (**chain_ptr).0.get_mut() };
-        let running = match chain {
-            StackChain::Absent => Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
-                "Internal error: StackChain not initialised"
-            ))),
-            StackChain::MainStack { .. } => Err(TrapReason::user_without_backtrace(
-                anyhow::anyhow!("Calling suspend outside of a continuation"),
-            )),
-            StackChain::Continuation(running) => {
-                // SAFETY: See above.
-                Ok(unsafe { &**running })
-            }
-        }?;
-
-        let stack = &running.stack;
-        debug_println!(
-            "Suspending while running {:p}, parent is {:?}",
-            running,
-            running.parent_chain
-        );
-
-        let payload = ControlEffect::suspend(tag_addr as *const u8);
-        Ok(stack.suspend(payload))
     }
 
     // Tests
@@ -917,7 +839,6 @@ pub mod stack_chain {
 #[cfg(feature = "wasmfx_baseline")]
 pub mod optimized {
     use crate::runtime::vm::{Instance, TrapReason};
-    pub use wasmtime_continuations::ControlEffect;
 
     pub type VMContRef = super::baseline::VMContRef;
 
@@ -941,19 +862,6 @@ pub mod optimized {
         _result_count: u32,
     ) -> Result<*mut VMContRef, TrapReason> {
         panic!("attempt to execute continuation::optimized::cont_new with `typed_continuation_baseline_implementation` toggled!")
-    }
-
-    #[inline(always)]
-    pub fn resume(
-        _instance: &mut Instance,
-        _contref: *mut VMContRef,
-    ) -> Result<ControlEffect, TrapReason> {
-        panic!("attempt to execute continuation::optimized::resume with `typed_continuation_baseline_implementation` toggled!")
-    }
-
-    #[inline(always)]
-    pub fn suspend(_instance: &mut Instance, _tag_addr: *mut u8) -> Result<(), TrapReason> {
-        panic!("attempt to execute continuation::optimized::suspend with `typed_continuation_baseline_implementation` toggled!")
     }
 }
 
