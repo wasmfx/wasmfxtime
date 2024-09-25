@@ -5,7 +5,7 @@ use crate::runtime::vm::instance::{Instance, InstanceHandle};
 use crate::runtime::vm::memory::Memory;
 use crate::runtime::vm::mpk::ProtectionKey;
 use crate::runtime::vm::table::Table;
-use crate::runtime::vm::{CompiledModuleId, ModuleRuntimeInfo, Store, VMFuncRef, VMGcRef};
+use crate::runtime::vm::{CompiledModuleId, ModuleRuntimeInfo, VMFuncRef, VMGcRef, VMStore};
 use core::{any::Any, mem, ptr};
 use wasmtime_environ::{
     DefinedMemoryIndex, DefinedTableIndex, HostPtr, InitMemory, MemoryInitialization,
@@ -81,7 +81,7 @@ pub struct InstanceAllocationRequest<'a> {
 /// InstanceAllocationRequest, rather than on a &mut InstanceAllocationRequest
 /// itself, because several use-sites require a split mut borrow on the
 /// InstanceAllocationRequest.
-pub struct StorePtr(Option<*mut dyn Store>);
+pub struct StorePtr(Option<*mut dyn VMStore>);
 
 impl StorePtr {
     /// A pointer to no Store.
@@ -90,19 +90,19 @@ impl StorePtr {
     }
 
     /// A pointer to a Store.
-    pub fn new(ptr: *mut dyn Store) -> Self {
+    pub fn new(ptr: *mut dyn VMStore) -> Self {
         Self(Some(ptr))
     }
 
     /// The raw contents of this struct
-    pub fn as_raw(&self) -> Option<*mut dyn Store> {
+    pub fn as_raw(&self) -> Option<*mut dyn VMStore> {
         self.0
     }
 
     /// Use the StorePtr as a mut ref to the Store.
     ///
     /// Safety: must not be used outside the original lifetime of the borrow.
-    pub(crate) unsafe fn get(&mut self) -> Option<&mut dyn Store> {
+    pub(crate) unsafe fn get(&mut self) -> Option<&mut dyn VMStore> {
         match self.0 {
             Some(ptr) => Some(&mut *ptr),
             None => None,
@@ -374,7 +374,7 @@ pub trait InstanceAllocator: InstanceAllocatorImpl {
         &self,
         mut request: InstanceAllocationRequest,
     ) -> Result<InstanceHandle> {
-        let module = request.runtime_info.module();
+        let module = request.runtime_info.env_module();
 
         #[cfg(debug_assertions)]
         InstanceAllocatorImpl::validate_module_impl(self, module, request.runtime_info.offsets())
@@ -440,7 +440,7 @@ pub trait InstanceAllocator: InstanceAllocatorImpl {
         request: &mut InstanceAllocationRequest,
         memories: &mut PrimaryMap<DefinedMemoryIndex, (MemoryAllocationIndex, Memory)>,
     ) -> Result<()> {
-        let module = request.runtime_info.module();
+        let module = request.runtime_info.env_module();
 
         #[cfg(debug_assertions)]
         InstanceAllocatorImpl::validate_module_impl(self, module, request.runtime_info.offsets())
@@ -492,7 +492,7 @@ pub trait InstanceAllocator: InstanceAllocatorImpl {
         request: &mut InstanceAllocationRequest,
         tables: &mut PrimaryMap<DefinedTableIndex, (TableAllocationIndex, Table)>,
     ) -> Result<()> {
-        let module = request.runtime_info.module();
+        let module = request.runtime_info.env_module();
 
         #[cfg(debug_assertions)]
         InstanceAllocatorImpl::validate_module_impl(self, module, request.runtime_info.offsets())
@@ -577,7 +577,7 @@ fn initialize_tables(instance: &mut Instance, module: &Module) -> Result<()> {
                 match module.table_plans[idx].table.ref_type.heap_type.top() {
                     WasmHeapTopType::Extern => {
                         let gc_ref = VMGcRef::from_raw_u32(raw.get_externref());
-                        let gc_store = unsafe { (*instance.store()).gc_store() };
+                        let gc_store = unsafe { (*instance.store()).unwrap_gc_store_mut() };
                         let items = (0..table.size())
                             .map(|_| gc_ref.as_ref().map(|r| gc_store.clone_gc_ref(r)));
                         table.init_gc_refs(0, items).err2anyhow()?;
@@ -585,7 +585,7 @@ fn initialize_tables(instance: &mut Instance, module: &Module) -> Result<()> {
 
                     WasmHeapTopType::Any => {
                         let gc_ref = VMGcRef::from_raw_u32(raw.get_anyref());
-                        let gc_store = unsafe { (*instance.store()).gc_store() };
+                        let gc_store = unsafe { (*instance.store()).unwrap_gc_store_mut() };
                         let items = (0..table.size())
                             .map(|_| gc_ref.as_ref().map(|r| gc_store.clone_gc_ref(r)));
                         table.init_gc_refs(0, items).err2anyhow()?;
@@ -640,7 +640,7 @@ fn get_memory_init_start(
     let mut context = ConstEvalContext::new(instance, module);
     let mut const_evaluator = ConstExprEvaluator::default();
     unsafe { const_evaluator.eval(&mut context, &init.offset) }.map(|v| {
-        match instance.module().memory_plans[init.memory_index]
+        match instance.env_module().memory_plans[init.memory_index]
             .memory
             .idx_type
         {
@@ -710,7 +710,10 @@ fn initialize_memories(instance: &mut Instance, module: &Module) -> Result<()> {
             let val = unsafe { self.const_evaluator.eval(&mut context, expr) }
                 .expect("const expression should be valid");
             Some(
-                match self.instance.module().memory_plans[memory].memory.idx_type {
+                match self.instance.env_module().memory_plans[memory]
+                    .memory
+                    .idx_type
+                {
                     wasmtime_environ::IndexType::I32 => val.get_u32().into(),
                     wasmtime_environ::IndexType::I64 => val.get_u64(),
                 },

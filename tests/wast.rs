@@ -217,7 +217,6 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
         "ref_test.wast",
         "return_call_indirect.wast",
         "return_call.wast",
-        "struct.wast",
         "table_sub.wast",
         "type_canon.wast",
         "type_equivalence.wast",

@@ -4,12 +4,15 @@
 #![warn(clippy::cast_sign_loss)]
 
 use crate::prelude::*;
+use crate::store::StoreOpaque;
 use alloc::sync::Arc;
 use continuation::stack_chain::StackChainCell;
 use core::fmt;
 use core::mem;
+use core::ops::Deref;
+use core::ops::DerefMut;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use wasmtime_continuations::WasmFXConfig;
 use wasmtime_environ::{
     DefinedFuncIndex, DefinedMemoryIndex, HostPtr, ModuleInternedTypeIndex, VMOffsets,
@@ -97,13 +100,9 @@ pub use crate::runtime::vm::cow::{MemoryImage, MemoryImageSlot, ModuleMemoryImag
 /// lifetime of this store or the Send/Sync-ness of this store. All of that must
 /// be respected by embedders (e.g. the `wasmtime::Store` structure). The theory
 /// is that `wasmtime::Store` handles all this correctly.
-pub unsafe trait Store {
-    /// Returns the raw pointer in memory where this store's shared
-    /// `VMRuntimeLimits` structure is located.
-    ///
-    /// Used to configure `VMContext` initialization and store the right pointer
-    /// in the `VMContext`.
-    fn vmruntime_limits(&self) -> *mut VMRuntimeLimits;
+pub unsafe trait VMStore {
+    /// Get a shared borrow of this store's `StoreOpaque`.
+    fn store_opaque(&self) -> &StoreOpaque;
 
     /// Used to configure `VMContext` initialization and store the right pointer
     /// in the `VMContext`.
@@ -116,19 +115,8 @@ pub unsafe trait Store {
     /// depend on the entire `wasmtime` crate in the current crate.
     fn wasmfx_config(&self) -> *const WasmFXConfig;
 
-    /// Returns a pointer to the global epoch counter.
-    ///
-    /// Used to configure the `VMContext` on initialization.
-    fn epoch_ptr(&self) -> *const AtomicU64;
-
-    /// Get this store's GC heap.
-    fn gc_store(&mut self) -> &mut GcStore {
-        self.maybe_gc_store()
-            .expect("attempt to access the GC store before it has been allocated")
-    }
-
-    /// Get this store's GC heap, if it has been allocated.
-    fn maybe_gc_store(&mut self) -> Option<&mut GcStore>;
+    /// Get an exclusive borrow of this store's `StoreOpaque`.
+    fn store_opaque_mut(&mut self) -> &mut StoreOpaque;
 
     /// Callback invoked to allow the store's resource limiter to reject a
     /// memory grow operation.
@@ -186,6 +174,20 @@ pub unsafe trait Store {
     fn component_calls(&mut self) -> &mut component::CallContexts;
 }
 
+impl Deref for dyn VMStore {
+    type Target = StoreOpaque;
+
+    fn deref(&self) -> &Self::Target {
+        self.store_opaque()
+    }
+}
+
+impl DerefMut for dyn VMStore {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.store_opaque_mut()
+    }
+}
+
 /// Functionality required by this crate for a particular module. This
 /// is chiefly needed for lazy initialization of various bits of
 /// instance state.
@@ -233,7 +235,7 @@ impl ModuleRuntimeInfo {
     }
 
     /// The underlying Module.
-    pub(crate) fn module(&self) -> &Arc<wasmtime_environ::Module> {
+    pub(crate) fn env_module(&self) -> &Arc<wasmtime_environ::Module> {
         match self {
             ModuleRuntimeInfo::Module(m) => m.env_module(),
             ModuleRuntimeInfo::Bare(b) => &b.module,

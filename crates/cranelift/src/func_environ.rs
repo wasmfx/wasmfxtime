@@ -13,9 +13,9 @@ use cranelift_frontend::FunctionBuilder;
 use cranelift_frontend::Variable;
 use cranelift_wasm::{
     EngineOrModuleTypeIndex, FuncEnvironment as _, FuncIndex, FuncTranslationState, GlobalIndex,
-    GlobalVariable, Heap, HeapData, HeapStyle, IndexType, Memory, MemoryIndex, Table, TableData,
-    TableIndex, TableSize, TagIndex, TargetEnvironment, TypeIndex, WasmFuncType, WasmHeapTopType,
-    WasmHeapType, WasmResult, WasmValType,
+    GlobalVariable, Heap, HeapData, HeapStyle, IndexType, Memory, MemoryIndex, StructFieldsVec,
+    Table, TableData, TableIndex, TableSize, TagIndex, TargetEnvironment, TypeIndex,
+    WasmCompositeType, WasmFuncType, WasmHeapTopType, WasmHeapType, WasmResult, WasmValType,
 };
 use smallvec::SmallVec;
 use std::mem;
@@ -94,9 +94,15 @@ pub struct FuncEnvironment<'module_environment> {
     /// NOTE(frank-emrich) pub for use in crate::wasmfx::* modules
     pub(crate) isa: &'module_environment (dyn TargetIsa + 'module_environment),
     pub(crate) module: &'module_environment Module,
-    types: &'module_environment ModuleTypesBuilder,
+    pub(crate) types: &'module_environment ModuleTypesBuilder,
     wasm_func_ty: &'module_environment WasmFuncType,
     sig_ref_to_ty: SecondaryMap<ir::SigRef, Option<&'module_environment WasmFuncType>>,
+
+    #[cfg(feature = "gc")]
+    pub(crate) ty_to_struct_layout: std::collections::HashMap<
+        wasmtime_environ::ModuleInternedTypeIndex,
+        wasmtime_environ::GcStructLayout,
+    >,
 
     #[cfg(feature = "wmemcheck")]
     translation: &'module_environment ModuleTranslation<'module_environment>,
@@ -184,6 +190,9 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             types,
             wasm_func_ty,
             sig_ref_to_ty: SecondaryMap::default(),
+
+            #[cfg(feature = "gc")]
+            ty_to_struct_layout: std::collections::HashMap::new(),
 
             heaps: PrimaryMap::default(),
             tables: SecondaryMap::default(),
@@ -1748,17 +1757,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let table_data = self.tables[table_index].clone().unwrap();
         let heap_ty = table.ref_type.heap_type;
         match heap_ty.top() {
-            // `i31ref`s never need barriers, and therefore don't need to go
-            // through the GC compiler.
-            WasmHeapTopType::Any if heap_ty == WasmHeapType::I31 => {
-                let (src, flags) = table_data.prepare_table_addr(self, builder, index);
-                gc::unbarriered_load_gc_ref(self, builder, WasmHeapType::I31, src, flags)
-            }
-
             // GC-managed types.
             WasmHeapTopType::Any | WasmHeapTopType::Extern => {
                 let (src, flags) = table_data.prepare_table_addr(self, builder, index);
-                gc::gc_compiler(self).translate_read_gc_reference(
+                gc::gc_compiler(self)?.translate_read_gc_reference(
                     self,
                     builder,
                     table.ref_type,
@@ -1809,17 +1811,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let table_data = self.tables[table_index].clone().unwrap();
         let heap_ty = table.ref_type.heap_type;
         match heap_ty.top() {
-            // `i31ref`s never need GC barriers, and therefore don't need to go
-            // through the GC compiler.
-            WasmHeapTopType::Any if heap_ty == WasmHeapType::I31 => {
-                let (addr, flags) = table_data.prepare_table_addr(self, builder, index);
-                gc::unbarriered_store_gc_ref(self, builder, WasmHeapType::I31, addr, value, flags)
-            }
-
             // GC-managed types.
             WasmHeapTopType::Any | WasmHeapTopType::Extern => {
                 let (dst, flags) = table_data.prepare_table_addr(self, builder, index);
-                gc::gc_compiler(self).translate_write_gc_reference(
+                gc::gc_compiler(self)?.translate_write_gc_reference(
                     self,
                     builder,
                     table.ref_type,
@@ -1922,7 +1917,10 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         i31ref: ir::Value,
     ) -> WasmResult<ir::Value> {
-        self.trapz(builder, i31ref, ir::TrapCode::NullI31Ref);
+        // TODO: If we knew we have a `(ref i31)` here, instead of maybe a `(ref
+        // null i31)`, we could omit the `trapz`. But plumbing that type info
+        // from `wasmparser` and through to here is a bit funky.
+        self.trapz(builder, i31ref, ir::TrapCode::NullReference);
         Ok(builder.ins().sshr_imm(i31ref, 1))
     }
 
@@ -1931,8 +1929,84 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         builder: &mut FunctionBuilder,
         i31ref: ir::Value,
     ) -> WasmResult<ir::Value> {
-        self.trapz(builder, i31ref, ir::TrapCode::NullI31Ref);
+        // TODO: If we knew we have a `(ref i31)` here, instead of maybe a `(ref
+        // null i31)`, we could omit the `trapz`. But plumbing that type info
+        // from `wasmparser` and through to here is a bit funky.
+        self.trapz(builder, i31ref, ir::TrapCode::NullReference);
         Ok(builder.ins().ushr_imm(i31ref, 1))
+    }
+
+    fn struct_fields_len(&mut self, struct_type_index: TypeIndex) -> WasmResult<usize> {
+        let ty = self.module.types[struct_type_index];
+        match &self.types[ty].composite_type {
+            WasmCompositeType::Struct(s) => Ok(s.fields.len()),
+            _ => unreachable!(),
+        }
+    }
+
+    fn translate_struct_new(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        struct_type_index: TypeIndex,
+        fields: StructFieldsVec,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_struct_new(self, builder, struct_type_index, &fields)
+    }
+
+    fn translate_struct_new_default(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        struct_type_index: TypeIndex,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_struct_new_default(self, builder, struct_type_index)
+    }
+
+    fn translate_struct_get(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        struct_type_index: TypeIndex,
+        field_index: u32,
+        struct_ref: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_struct_get(self, builder, struct_type_index, field_index, struct_ref)
+    }
+
+    fn translate_struct_get_s(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        struct_type_index: TypeIndex,
+        field_index: u32,
+        struct_ref: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_struct_get_s(self, builder, struct_type_index, field_index, struct_ref)
+    }
+
+    fn translate_struct_get_u(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        struct_type_index: TypeIndex,
+        field_index: u32,
+        struct_ref: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_struct_get_u(self, builder, struct_type_index, field_index, struct_ref)
+    }
+
+    fn translate_struct_set(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        struct_type_index: TypeIndex,
+        field_index: u32,
+        struct_ref: ir::Value,
+        value: ir::Value,
+    ) -> WasmResult<()> {
+        gc::translate_struct_set(
+            self,
+            builder,
+            struct_type_index,
+            field_index,
+            struct_ref,
+            value,
+        )
     }
 
     fn translate_ref_null(
@@ -1996,7 +2070,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             ty.is_vmgcref_type(),
             "We only use GlobalVariable::Custom for VMGcRef types"
         );
-        let cranelift_wasm::WasmValType::Ref(ty) = ty else {
+        let WasmValType::Ref(ty) = ty else {
             unreachable!()
         };
 
@@ -2004,17 +2078,13 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let gv = builder.ins().global_value(self.pointer_type(), gv);
         let src = builder.ins().iadd_imm(gv, i64::from(offset));
 
-        if let WasmHeapType::I31 = ty.heap_type {
-            gc::unbarriered_load_gc_ref(self, builder, ty.heap_type, src, ir::MemFlags::trusted())
-        } else {
-            gc::gc_compiler(self).translate_read_gc_reference(
-                self,
-                builder,
-                ty,
-                src,
-                ir::MemFlags::trusted(),
-            )
-        }
+        gc::gc_compiler(self)?.translate_read_gc_reference(
+            self,
+            builder,
+            ty,
+            src,
+            ir::MemFlags::trusted(),
+        )
     }
 
     fn translate_custom_global_set(
@@ -2028,7 +2098,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             ty.is_vmgcref_type(),
             "We only use GlobalVariable::Custom for VMGcRef types"
         );
-        let cranelift_wasm::WasmValType::Ref(ty) = ty else {
+        let WasmValType::Ref(ty) = ty else {
             unreachable!()
         };
 
@@ -2036,25 +2106,14 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let gv = builder.ins().global_value(self.pointer_type(), gv);
         let src = builder.ins().iadd_imm(gv, i64::from(offset));
 
-        if let WasmHeapType::I31 = ty.heap_type {
-            gc::unbarriered_store_gc_ref(
-                self,
-                builder,
-                ty.heap_type,
-                src,
-                value,
-                ir::MemFlags::trusted(),
-            )
-        } else {
-            gc::gc_compiler(self).translate_write_gc_reference(
-                self,
-                builder,
-                ty,
-                src,
-                value,
-                ir::MemFlags::trusted(),
-            )
-        }
+        gc::gc_compiler(self)?.translate_write_gc_reference(
+            self,
+            builder,
+            ty,
+            src,
+            value,
+            ir::MemFlags::trusted(),
+        )
     }
 
     fn make_heap(&mut self, func: &mut ir::Function, index: MemoryIndex) -> WasmResult<Heap> {

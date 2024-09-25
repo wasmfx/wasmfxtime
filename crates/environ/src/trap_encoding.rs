@@ -74,8 +74,8 @@ pub enum Trap {
     /// Call to a null reference.
     NullReference,
 
-    /// Attempt to get the bits of a null `i31ref`.
-    NullI31Ref,
+    /// Attempt to access beyond the bounds of an array.
+    ArrayOutOfBounds,
 
     /// When the `component-model` feature is enabled this trap represents a
     /// scenario where one component tried to call another component but it
@@ -120,7 +120,7 @@ impl Trap {
             OutOfFuel
             AtomicWaitNonSharedMemory
             NullReference
-            NullI31Ref
+            ArrayOutOfBounds
             CannotEnterComponent
             UnhandledTag
             ContinuationAlreadyConsumed
@@ -150,7 +150,7 @@ impl fmt::Display for Trap {
             OutOfFuel => "all fuel consumed by WebAssembly",
             AtomicWaitNonSharedMemory => "atomic wait on non-shared memory",
             NullReference => "null reference",
-            NullI31Ref => "null i31 reference",
+            ArrayOutOfBounds => "out of bounds array access",
             CannotEnterComponent => "cannot enter component instance",
             UnhandledTag => "unhandled tag",
             ContinuationAlreadyConsumed => "continuation already consumed",

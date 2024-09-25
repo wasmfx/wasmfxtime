@@ -15,7 +15,7 @@ use crate::runtime::vm::vmcontext::{
 };
 use crate::runtime::vm::{
     ExportFunction, ExportGlobal, ExportMemory, ExportTable, ExportTag, GcStore, Imports,
-    ModuleRuntimeInfo, SendSyncPtr, Store, VMFunctionBody, VMGcRef, WasmFault,
+    ModuleRuntimeInfo, SendSyncPtr, VMFunctionBody, VMGcRef, VMStore, WasmFault,
 };
 use alloc::sync::Arc;
 use core::alloc::Layout;
@@ -178,7 +178,7 @@ impl Instance {
         }
         let ptr = ptr.cast::<Instance>();
 
-        let module = req.runtime_info.module();
+        let module = req.runtime_info.env_module();
         let dropped_elements = EntitySet::with_capacity(module.passive_elements.len());
         let dropped_data = EntitySet::with_capacity(module.passive_data_map.len());
 
@@ -266,8 +266,15 @@ impl Instance {
             .cast()
     }
 
-    pub(crate) fn module(&self) -> &Arc<Module> {
-        self.runtime_info.module()
+    pub(crate) fn env_module(&self) -> &Arc<wasmtime_environ::Module> {
+        self.runtime_info.env_module()
+    }
+
+    pub(crate) fn runtime_module(&self) -> Option<&crate::Module> {
+        match &self.runtime_info {
+            ModuleRuntimeInfo::Module(m) => Some(m),
+            ModuleRuntimeInfo::Bare(_) => None,
+        }
     }
 
     /// Translate a module-level interned type index into an engine-level
@@ -326,7 +333,7 @@ impl Instance {
 
     /// Get a locally defined or imported memory.
     pub(crate) fn get_memory(&self, index: MemoryIndex) -> VMMemoryDefinition {
-        if let Some(defined_index) = self.module().defined_memory_index(index) {
+        if let Some(defined_index) = self.env_module().defined_memory_index(index) {
             self.memory(defined_index)
         } else {
             let import = self.imported_memory(index);
@@ -337,7 +344,7 @@ impl Instance {
     /// Get a locally defined or imported memory.
     #[cfg(feature = "threads")]
     pub(crate) fn get_runtime_memory(&mut self, index: MemoryIndex) -> &mut Memory {
-        if let Some(defined_index) = self.module().defined_memory_index(index) {
+        if let Some(defined_index) = self.env_module().defined_memory_index(index) {
             unsafe { &mut *self.get_defined_memory(defined_index) }
         } else {
             let import = self.imported_memory(index);
@@ -379,7 +386,7 @@ impl Instance {
         &mut self,
         index: GlobalIndex,
     ) -> *mut VMGlobalDefinition {
-        if let Some(index) = self.module().defined_global_index(index) {
+        if let Some(index) = self.env_module().defined_global_index(index) {
             self.global_ptr(index)
         } else {
             self.imported_global(index).from
@@ -396,14 +403,14 @@ impl Instance {
     pub fn all_globals<'a>(
         &'a mut self,
     ) -> impl ExactSizeIterator<Item = (GlobalIndex, ExportGlobal)> + 'a {
-        let module = self.module().clone();
+        let module = self.env_module().clone();
         module.globals.keys().map(move |idx| {
             (
                 idx,
                 ExportGlobal {
                     definition: self.defined_or_imported_global_ptr(idx),
                     vmctx: self.vmctx(),
-                    global: self.module().globals[idx],
+                    global: self.env_module().globals[idx],
                 },
             )
         })
@@ -413,7 +420,7 @@ impl Instance {
     pub fn defined_globals<'a>(
         &'a mut self,
     ) -> impl ExactSizeIterator<Item = (DefinedGlobalIndex, ExportGlobal)> + 'a {
-        let module = self.module().clone();
+        let module = self.env_module().clone();
         module
             .globals
             .keys()
@@ -423,7 +430,7 @@ impl Instance {
                 let global = ExportGlobal {
                     definition: self.global_ptr(def_idx),
                     vmctx: self.vmctx(),
-                    global: self.module().globals[global_idx],
+                    global: self.env_module().globals[global_idx],
                 };
                 (def_idx, global)
             })
@@ -479,23 +486,24 @@ impl Instance {
     /// functions are shared amongst threads and don't all share the same
     /// store).
     #[inline]
-    pub fn store(&self) -> *mut dyn Store {
-        let ptr =
-            unsafe { *self.vmctx_plus_offset::<*mut dyn Store>(self.offsets().ptr.vmctx_store()) };
+    pub fn store(&self) -> *mut dyn VMStore {
+        let ptr = unsafe {
+            *self.vmctx_plus_offset::<*mut dyn VMStore>(self.offsets().ptr.vmctx_store())
+        };
         debug_assert!(!ptr.is_null());
         ptr
     }
 
-    pub(crate) unsafe fn set_store(&mut self, store: Option<*mut dyn Store>) {
+    pub(crate) unsafe fn set_store(&mut self, store: Option<*mut dyn VMStore>) {
         if let Some(store) = store {
             *self.vmctx_plus_offset_mut(self.offsets().ptr.vmctx_store()) = store;
             *self.runtime_limits() = (*store).vmruntime_limits();
             *self.stack_chain() = (*store).stack_chain();
-            *self.epoch_ptr() = (*store).epoch_ptr();
-            self.set_gc_heap((*store).maybe_gc_store());
+            *self.epoch_ptr() = (*store).engine().epoch_counter();
+            self.set_gc_heap((*store).gc_store_mut().ok());
         } else {
             assert_eq!(
-                mem::size_of::<*mut dyn Store>(),
+                mem::size_of::<*mut dyn VMStore>(),
                 mem::size_of::<[*mut (); 2]>()
             );
             *self.vmctx_plus_offset_mut::<[*mut (); 2]>(self.offsets().ptr.vmctx_store()) =
@@ -557,35 +565,35 @@ impl Instance {
     }
 
     fn get_exported_table(&mut self, index: TableIndex) -> ExportTable {
-        let (definition, vmctx) = if let Some(def_index) = self.module().defined_table_index(index)
-        {
-            (self.table_ptr(def_index), self.vmctx())
-        } else {
-            let import = self.imported_table(index);
-            (import.from, import.vmctx)
-        };
+        let (definition, vmctx) =
+            if let Some(def_index) = self.env_module().defined_table_index(index) {
+                (self.table_ptr(def_index), self.vmctx())
+            } else {
+                let import = self.imported_table(index);
+                (import.from, import.vmctx)
+            };
         ExportTable {
             definition,
             vmctx,
-            table: self.module().table_plans[index].clone(),
+            table: self.env_module().table_plans[index].clone(),
         }
     }
 
     fn get_exported_tag(&mut self, index: TagIndex) -> ExportTag {
         ExportTag {
-            definition: if let Some(def_index) = self.module().defined_tag_index(index) {
+            definition: if let Some(def_index) = self.env_module().defined_tag_index(index) {
                 self.tag_ptr(def_index)
             } else {
                 self.imported_tag(index).from
             },
             vmctx: self.vmctx(),
-            tag: self.module().tags[index],
+            tag: self.env_module().tags[index],
         }
     }
 
     fn get_exported_memory(&mut self, index: MemoryIndex) -> ExportMemory {
         let (definition, vmctx, def_index) =
-            if let Some(def_index) = self.module().defined_memory_index(index) {
+            if let Some(def_index) = self.env_module().defined_memory_index(index) {
                 (self.memory_ptr(def_index), self.vmctx(), def_index)
             } else {
                 let import = self.imported_memory(index);
@@ -594,20 +602,20 @@ impl Instance {
         ExportMemory {
             definition,
             vmctx,
-            memory: self.module().memory_plans[index].clone(),
+            memory: self.env_module().memory_plans[index].clone(),
             index: def_index,
         }
     }
 
     fn get_exported_global(&mut self, index: GlobalIndex) -> ExportGlobal {
         ExportGlobal {
-            definition: if let Some(def_index) = self.module().defined_global_index(index) {
+            definition: if let Some(def_index) = self.env_module().defined_global_index(index) {
                 self.global_ptr(def_index)
             } else {
                 self.imported_global(index).from
             },
             vmctx: self.vmctx(),
-            global: self.module().globals[index],
+            global: self.env_module().globals[index],
         }
     }
 
@@ -617,7 +625,7 @@ impl Instance {
     /// are export names, and the values are export declarations which can be
     /// resolved `lookup_by_declaration`.
     pub fn exports(&self) -> wasmparser::collections::index_map::Iter<String, EntityIndex> {
-        self.module().exports.iter()
+        self.env_module().exports.iter()
     }
 
     /// Return a reference to the custom state attached to this instance.
@@ -641,7 +649,7 @@ impl Instance {
 
     /// Get the given memory's page size, in bytes.
     pub(crate) fn memory_page_size(&self, index: MemoryIndex) -> usize {
-        usize::try_from(self.module().memory_plans[index].memory.page_size()).unwrap()
+        usize::try_from(self.env_module().memory_plans[index].memory.page_size()).unwrap()
     }
 
     /// Grow memory by the specified amount of pages.
@@ -654,7 +662,7 @@ impl Instance {
         index: MemoryIndex,
         delta: u64,
     ) -> Result<Option<usize>, Error> {
-        match self.module().defined_memory_index(index) {
+        match self.env_module().defined_memory_index(index) {
             Some(idx) => self.defined_memory_grow(idx, delta),
             None => {
                 let import = self.imported_memory(index);
@@ -759,7 +767,7 @@ impl Instance {
             *base.add(sig.index())
         };
 
-        let func_ref = if let Some(def_index) = self.module().defined_func_index(index) {
+        let func_ref = if let Some(def_index) = self.env_module().defined_func_index(index) {
             VMFuncRef {
                 array_call: self
                     .runtime_info
@@ -824,7 +832,7 @@ impl Instance {
             // expensive, so it's better for instantiation performance
             // if we don't have to track "is-initialized" state at
             // all!
-            let func = &self.module().functions[index];
+            let func = &self.env_module().functions[index];
             let sig = func.signature;
             let func_ref: *mut VMFuncRef = self
                 .vmctx_plus_offset_mut::<VMFuncRef>(self.offsets().vmctx_func_ref(func.func_ref));
@@ -852,7 +860,7 @@ impl Instance {
         // TODO: this `clone()` shouldn't be necessary but is used for now to
         // inform `rustc` that the lifetime of the elements here are
         // disconnected from the lifetime of `self`.
-        let module = self.module().clone();
+        let module = self.env_module().clone();
 
         // NB: fall back to an expressions-based list of elements which doesn't
         // have static type information (as opposed to `Functions`) since we
@@ -884,7 +892,7 @@ impl Instance {
         let table = unsafe { &mut *self.get_table(table_index) };
         let src = usize::try_from(src).map_err(|_| Trap::TableOutOfBounds)?;
         let len = usize::try_from(len).map_err(|_| Trap::TableOutOfBounds)?;
-        let module = self.module().clone();
+        let module = self.env_module().clone();
 
         match elements {
             TableSegmentElements::Functions(funcs) => {
@@ -1054,7 +1062,7 @@ impl Instance {
         src: u32,
         len: u32,
     ) -> Result<(), Trap> {
-        let range = match self.module().passive_data_map.get(&data_index).cloned() {
+        let range = match self.env_module().passive_data_map.get(&data_index).cloned() {
             Some(range) if !self.dropped_data.contains(data_index) => range,
             _ => 0..0,
         };
@@ -1134,7 +1142,7 @@ impl Instance {
 
         if elt_ty == TableElementType::Func {
             for i in range {
-                let gc_store = unsafe { (*self.store()).gc_store() };
+                let gc_store = unsafe { (*self.store()).unwrap_gc_store_mut() };
                 let value = match self.tables[idx].1.get(gc_store, i) {
                     Some(value) => value,
                     None => {
@@ -1156,7 +1164,7 @@ impl Instance {
                 // determine the function that is going to be initialized. Note
                 // that `i` may be outside the limits of the static
                 // initialization so it's a fallible `get` instead of an index.
-                let module = self.module();
+                let module = self.env_module();
                 let precomputed = match &module.table_initialization.initial_values[idx] {
                     TableInitialValue::Null { precomputed } => precomputed,
                     TableInitialValue::Expr(_) => unreachable!(),
@@ -1194,7 +1202,7 @@ impl Instance {
         index: TableIndex,
         f: impl FnOnce(DefinedTableIndex, &mut Instance) -> R,
     ) -> R {
-        if let Some(defined_table_index) = self.module().defined_table_index(index) {
+        if let Some(defined_table_index) = self.env_module().defined_table_index(index) {
             f(defined_table_index, self)
         } else {
             let import = self.imported_table(index);
@@ -1220,7 +1228,7 @@ impl Instance {
         store: StorePtr,
         imports: Imports,
     ) {
-        assert!(ptr::eq(module, self.module().as_ref()));
+        assert!(ptr::eq(module, self.env_module().as_ref()));
 
         *self.vmctx_plus_offset_mut(offsets.ptr.vmctx_magic()) = VMCONTEXT_MAGIC;
         self.set_callee(None);
@@ -1438,7 +1446,7 @@ impl InstanceHandle {
 
     /// Return a reference to a module.
     pub fn module(&self) -> &Arc<Module> {
-        self.instance().module()
+        self.instance().env_module()
     }
 
     /// Lookup a function by index.
@@ -1503,7 +1511,7 @@ impl InstanceHandle {
         index: DefinedTableIndex,
         range: impl Iterator<Item = u64>,
     ) -> *mut Table {
-        let index = self.instance().module().table_index(index);
+        let index = self.instance().env_module().table_index(index);
         self.instance_mut().get_table_with_lazy_init(index, range)
     }
 
@@ -1589,7 +1597,7 @@ impl InstanceHandle {
 
     /// Returns the `Store` pointer that was stored on creation
     #[inline]
-    pub fn store(&self) -> *mut dyn Store {
+    pub fn store(&self) -> *mut dyn VMStore {
         self.instance().store()
     }
 
@@ -1597,7 +1605,7 @@ impl InstanceHandle {
     ///
     /// This is provided for the original `Store` itself to configure the first
     /// self-pointer after the original `Box` has been initialized.
-    pub unsafe fn set_store(&mut self, store: *mut dyn Store) {
+    pub unsafe fn set_store(&mut self, store: *mut dyn VMStore) {
         self.instance_mut().set_store(Some(store));
     }
 
