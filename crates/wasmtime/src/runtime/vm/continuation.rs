@@ -79,6 +79,7 @@ pub mod optimized {
     };
     use core::cmp;
     use core::mem;
+    #[allow(unused)]
     use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
     pub use wasmtime_continuations::{Payloads, StackLimits, State};
 

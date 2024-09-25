@@ -27,6 +27,9 @@ pub enum TrapCode {
     /// A `table_addr` instruction detected an out-of-bounds error.
     TableOutOfBounds,
 
+    /// An array access attempted to index beyond its array's bounds.
+    ArrayOutOfBounds,
+
     /// Indirect call to a null table entry.
     IndirectCallToNull,
 
@@ -60,9 +63,6 @@ pub enum TrapCode {
     /// Attempt to resume a continuation object whose revision is out
     /// of sync with the underlying continuation reference.
     ContinuationAlreadyConsumed,
-
-    /// A null `i31ref` was encountered which was required to be non-null.
-    NullI31Ref,
 }
 
 impl TrapCode {
@@ -105,8 +105,8 @@ impl Display for TrapCode {
             User(x) => return write!(f, "user{x}"),
             NullReference => "null_reference",
             UnhandledTag => "unhandled_tag",
-            NullI31Ref => "null_i31ref",
             ContinuationAlreadyConsumed => "continuation_already_consumed",
+            ArrayOutOfBounds => "array_oob",
         };
         f.write_str(identifier)
     }
@@ -131,8 +131,8 @@ impl FromStr for TrapCode {
             "interrupt" => Ok(Interrupt),
             "null_reference" => Ok(NullReference),
             "unhandled_tag" => Ok(UnhandledTag),
-            "null_i31ref" => Ok(NullI31Ref),
             "continuation_already_consumed" => Ok(ContinuationAlreadyConsumed),
+            "array_oob" => Ok(ArrayOutOfBounds),
             _ if s.starts_with("user") => s[4..].parse().map(User).map_err(|_| ()),
             _ => Err(()),
         }

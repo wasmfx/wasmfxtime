@@ -6,12 +6,12 @@ use crate::ir::types::*;
 use crate::ir::MemFlags;
 use crate::ir::{dynamic_to_fixed, ExternalName, LibCall, Signature};
 use crate::isa;
-use crate::isa::aarch64::{inst::*, settings as aarch64_settings};
+use crate::isa::aarch64::{inst::*, settings as aarch64_settings, AArch64Backend};
 use crate::isa::unwind::UnwindInst;
 use crate::isa::winch;
 use crate::machinst::*;
 use crate::settings;
-use crate::{CodegenError, CodegenResult};
+use crate::CodegenResult;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use regalloc2::{MachineEnv, PReg, PRegSet};
@@ -26,11 +26,6 @@ pub(crate) type AArch64Callee = Callee<AArch64MachineDeps>;
 
 /// Support for the AArch64 ABI from the caller side (at a callsite).
 pub(crate) type AArch64CallSite = CallSite<AArch64MachineDeps>;
-
-/// This is the limit for the size of argument and return-value areas on the
-/// stack. We place a reasonable limit here to avoid integer overflow issues
-/// with 32-bit arithmetic: for now, 128 MB.
-static STACK_ARG_RET_SIZE_LIMIT: u32 = 128 * 1024 * 1024;
 
 impl Into<AMode> for StackAMode {
     fn into(self) -> AMode {
@@ -92,6 +87,11 @@ impl ABIMachineSpec for AArch64MachineDeps {
 
     type F = aarch64_settings::Flags;
 
+    /// This is the limit for the size of argument and return-value areas on the
+    /// stack. We place a reasonable limit here to avoid integer overflow issues
+    /// with 32-bit arithmetic: for now, 128 MB.
+    const STACK_ARG_RET_SIZE_LIMIT: u32 = 128 * 1024 * 1024;
+
     fn word_bits() -> u32 {
         64
     }
@@ -109,7 +109,7 @@ impl ABIMachineSpec for AArch64MachineDeps {
         add_ret_area_ptr: bool,
         mut args: ArgsAccumulator,
     ) -> CodegenResult<(u32, Option<usize>)> {
-        let is_apple_cc = call_conv.extends_apple_aarch64();
+        let is_apple_cc = call_conv == isa::CallConv::AppleAarch64;
         let is_winch_return = call_conv == isa::CallConv::Winch && args_or_rets == ArgsOrRets::Rets;
 
         // See AArch64 ABI (https://github.com/ARM-software/abi-aa/blob/2021Q1/aapcs64/aapcs64.rst#64parameter-passing), sections 6.4.
@@ -151,6 +151,33 @@ impl ABIMachineSpec for AArch64MachineDeps {
         let max_per_class_reg_vals = 8; // x0-x7 and v0-v7
         let mut remaining_reg_vals = 16;
 
+        let ret_area_ptr = if add_ret_area_ptr {
+            debug_assert_eq!(args_or_rets, ArgsOrRets::Args);
+            if call_conv != isa::CallConv::Winch {
+                // In the AAPCS64 calling convention the return area pointer is
+                // stored in x8.
+                Some(ABIArg::reg(
+                    xreg(8).to_real_reg().unwrap(),
+                    I64,
+                    ir::ArgumentExtension::None,
+                    ir::ArgumentPurpose::Normal,
+                ))
+            } else {
+                // Use x0 for the return area pointer in the Winch calling convention
+                // to simplify the ABI handling code in Winch by avoiding an AArch64
+                // special case to assign it to x8.
+                next_xreg += 1;
+                Some(ABIArg::reg(
+                    xreg(0).to_real_reg().unwrap(),
+                    I64,
+                    ir::ArgumentExtension::None,
+                    ir::ArgumentPurpose::Normal,
+                ))
+            }
+        } else {
+            None
+        };
+
         for (i, param) in params.into_iter().enumerate() {
             if is_apple_cc && param.value_type == types::F128 && !flags.enable_llvm_abi_extensions()
             {
@@ -161,31 +188,19 @@ impl ABIMachineSpec for AArch64MachineDeps {
 
             let (rcs, reg_types) = Inst::rc_for_type(param.value_type)?;
 
-            if matches!(
-                param.purpose,
-                ir::ArgumentPurpose::StructArgument(_) | ir::ArgumentPurpose::StructReturn
-            ) {
+            if let ir::ArgumentPurpose::StructReturn = param.purpose {
                 assert!(
                     call_conv != isa::CallConv::Tail,
-                    "support for {:?} parameters is not implemented for the `tail` calling \
-                    convention yet",
-                    param.purpose,
+                    "support for StructReturn parameters is not implemented for the `tail` \
+                    calling convention yet",
                 );
             }
 
-            if let ir::ArgumentPurpose::StructArgument(size) = param.purpose {
-                assert_eq!(args_or_rets, ArgsOrRets::Args);
-                let offset = next_stack as i64;
-                let size = size;
-                assert!(size % 8 == 0, "StructArgument size is not properly aligned");
-                next_stack += size;
-                args.push(ABIArg::StructArg {
-                    pointer: None,
-                    offset,
-                    size: size as u64,
-                    purpose: param.purpose,
-                });
-                continue;
+            if let ir::ArgumentPurpose::StructArgument(_) = param.purpose {
+                panic!(
+                    "StructArgument parameters are not supported on arm64. \
+                    Use regular pointer arguments instead."
+                );
             }
 
             if let ir::ArgumentPurpose::StructReturn = param.purpose {
@@ -361,33 +376,8 @@ impl ABIMachineSpec for AArch64MachineDeps {
             next_stack += size;
         }
 
-        let extra_arg = if add_ret_area_ptr {
-            debug_assert!(args_or_rets == ArgsOrRets::Args);
-            if call_conv == isa::CallConv::Tail {
-                args.push_non_formal(ABIArg::reg(
-                    xreg_preg(0).into(),
-                    I64,
-                    ir::ArgumentExtension::None,
-                    ir::ArgumentPurpose::Normal,
-                ));
-            } else {
-                if next_xreg < max_per_class_reg_vals && remaining_reg_vals > 0 {
-                    args.push_non_formal(ABIArg::reg(
-                        xreg(next_xreg).to_real_reg().unwrap(),
-                        I64,
-                        ir::ArgumentExtension::None,
-                        ir::ArgumentPurpose::Normal,
-                    ));
-                } else {
-                    args.push_non_formal(ABIArg::stack(
-                        next_stack as i64,
-                        I64,
-                        ir::ArgumentExtension::None,
-                        ir::ArgumentPurpose::Normal,
-                    ));
-                    next_stack += 8;
-                }
-            }
+        let extra_arg = if let Some(ret_area_ptr) = ret_area_ptr {
+            args.push_non_formal(ret_area_ptr);
             Some(args.args().len() - 1)
         } else {
             None
@@ -398,12 +388,6 @@ impl ABIMachineSpec for AArch64MachineDeps {
         }
 
         next_stack = align_to(next_stack, 16);
-
-        // To avoid overflow issues, limit the arg/return size to something
-        // reasonable -- here, 128 MB.
-        if next_stack > STACK_ARG_RET_SIZE_LIMIT {
-            return Err(CodegenError::ImplLimitExceeded);
-        }
 
         Ok((next_stack, extra_arg))
     }
@@ -594,7 +578,7 @@ impl ABIMachineSpec for AArch64MachineDeps {
                     });
                 }
 
-                if flags.unwind_info() && call_conv.extends_apple_aarch64() {
+                if flags.unwind_info() && call_conv == isa::CallConv::AppleAarch64 {
                     // The macOS unwinder seems to require this.
                     insts.push(Inst::Unwind {
                         inst: UnwindInst::Aarch64SetPointerAuth {
@@ -736,6 +720,13 @@ impl ABIMachineSpec for AArch64MachineDeps {
         if incoming_args_diff > 0 {
             // Decrement SP to account for the additional space required by a tail call.
             insts.extend(Self::gen_sp_reg_adjust(-(incoming_args_diff as i32)));
+            if flags.unwind_info() {
+                insts.push(Inst::Unwind {
+                    inst: UnwindInst::StackAlloc {
+                        size: incoming_args_diff,
+                    },
+                });
+            }
 
             // Move fp and lr down.
             if setup_frame {
@@ -932,6 +923,11 @@ impl ABIMachineSpec for AArch64MachineDeps {
         let stack_size = frame_layout.fixed_frame_storage_size + frame_layout.outgoing_args_size;
         if stack_size > 0 {
             insts.extend(Self::gen_sp_reg_adjust(-(stack_size as i32)));
+            if flags.unwind_info() {
+                insts.push(Inst::Unwind {
+                    inst: UnwindInst::StackAlloc { size: stack_size },
+                });
+            }
         }
 
         insts
@@ -1260,7 +1256,7 @@ impl AArch64CallSite {
         mut self,
         ctx: &mut Lower<Inst>,
         args: isle::ValueSlice,
-        isa_flags: &aarch64_settings::Flags,
+        backend: &AArch64Backend,
     ) {
         let new_stack_arg_size =
             u32::try_from(self.sig(ctx.sigs()).sized_stack_arg_space()).unwrap();
@@ -1274,7 +1270,7 @@ impl AArch64CallSite {
 
         let dest = self.dest().clone();
         let uses = self.take_uses();
-        let key = select_api_key(isa_flags, isa::CallConv::Tail, true);
+        let key = select_api_key(&backend.isa_flags, isa::CallConv::Tail, true);
 
         match dest {
             CallDest::ExtName(callee, RelocDistance::Near) => {

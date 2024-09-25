@@ -254,12 +254,12 @@ regalloc2 = "0.10.2"
 
 # cap-std family:
 target-lexicon = "0.12.16"
-cap-std = "3.0.0"
-cap-rand = { version = "3.0.0", features = ["small_rng"] }
-cap-fs-ext = "3.0.0"
-cap-net-ext = "3.0.0"
-cap-time-ext = "3.0.0"
-cap-tempfile = "3.0.0"
+cap-std = "3.3.0"
+cap-rand = { version = "3.3.0", features = ["small_rng"] }
+cap-fs-ext = "3.3.0"
+cap-net-ext = "3.3.0"
+cap-time-ext = "3.3.0"
+cap-tempfile = "3.3.0"
 fs-set-times = "0.20.1"
 system-interface = { version = "0.27.1", features = ["cap_std_impls"] }
 io-lifetimes = { version = "2.0.3", default-features = false }
@@ -284,13 +284,13 @@ wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.217.
 # --------------------------
 cc = "1.0"
 object = { version = "0.36", default-features = false, features = ['read_core', 'elf'] }
-gimli = { version = "0.29.0", default-features = false, features = ['read'] }
-addr2line = { version = "0.22.0", default-features = false }
+gimli = { version = "0.31.0", default-features = false, features = ['read'] }
+addr2line = { version = "0.24.1", default-features = false }
 anyhow = { version = "1.0.22", default-features = false }
-windows-sys = "0.52.0"
-env_logger = "0.10"
+windows-sys = "0.59.0"
+env_logger = "0.11.5"
 log = { version = "0.4.8", default-features = false }
-clap = { version = "4.3.12", default-features = false, features = ["std", "derive"] }
+clap = { version = "4.5.17", default-features = false, features = ["std", "derive"] }
 hashbrown = { version = "0.14", default-features = false }
 capstone = "0.12.0"
 once_cell = { version = "1.12.0", default-features = false }
@@ -299,7 +299,7 @@ tracing = "0.1.26"
 bitflags = "2.0"
 thiserror = "1.0.43"
 async-trait = "0.1.71"
-heck = "0.4"
+heck = "0.5"
 similar = "2.1.0"
 toml = "0.8.10"
 mach2 = "0.4.2"
@@ -471,12 +471,25 @@ gc = ["wasmtime-cli-flags/gc"]
 
 # CLI subcommands for the `wasmtime` executable. See `wasmtime $cmd --help`
 # for more information on each subcommand.
-serve = ["wasi-http", "component-model", "dep:http-body-util", "dep:http"]
+serve = [
+  "wasi-http",
+  "component-model",
+  "dep:http-body-util",
+  "dep:http",
+  "wasmtime-cli-flags/async",
+]
 explore = ["dep:wasmtime-explorer", "dep:tempfile"]
 wast = ["dep:wasmtime-wast"]
 config = ["cache"]
 compile = ["cranelift"]
-run = ["dep:wasmtime-wasi", "wasmtime/runtime", "dep:listenfd", "dep:wasi-common", "dep:tokio"]
+run = [
+  "dep:wasmtime-wasi",
+  "wasmtime/runtime",
+  "dep:listenfd",
+  "dep:wasi-common",
+  "dep:tokio",
+  "wasmtime-cli-flags/async",
+]
 
 [[test]]
 name = "host_segfault"

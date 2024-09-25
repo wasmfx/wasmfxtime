@@ -86,7 +86,6 @@ pub fn mach_trap_to_trap(trap: &MachTrap) -> Option<TrapInformation> {
             ir::TrapCode::User(ALWAYS_TRAP_CODE) => Trap::AlwaysTrapAdapter,
             ir::TrapCode::User(CANNOT_ENTER_CODE) => Trap::CannotEnterComponent,
             ir::TrapCode::NullReference => Trap::NullReference,
-            ir::TrapCode::NullI31Ref => Trap::NullI31Ref,
             ir::TrapCode::UnhandledTag => Trap::UnhandledTag,
             ir::TrapCode::ContinuationAlreadyConsumed => Trap::ContinuationAlreadyConsumed,
 

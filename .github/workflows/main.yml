@@ -319,15 +319,16 @@ jobs:
 
     # Assemble the documentation, and always upload it as an artifact for
     # inspection on PRs and such.
-    - run: |
-        mv docs/book gh-pages
-        mv crates/c-api/html gh-pages/c-api
-        mv target/doc gh-pages/api
-        tar czf gh-pages.tar.gz gh-pages
-    - uses: actions/upload-artifact@v4
-      with:
-        name: gh-pages
-        path: gh-pages.tar.gz
+    # NOTE(dhil): we don't publish the documentation.
+    # - run: |
+    #     mv docs/book gh-pages
+    #     mv crates/c-api/html gh-pages/c-api
+    #     mv target/doc gh-pages/api
+    #     tar czf gh-pages.tar.gz gh-pages
+    # - uses: actions/upload-artifact@v4
+    #   with:
+    #     name: gh-pages
+    #     path: gh-pages.tar.gz
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
