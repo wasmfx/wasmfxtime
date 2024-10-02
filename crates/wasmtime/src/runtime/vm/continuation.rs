@@ -80,7 +80,7 @@ pub mod optimized {
     use core::cmp;
     use core::mem;
     #[allow(unused)]
-    use wasmtime_continuations::{debug_println, ENABLE_DEBUG_PRINTING};
+    use wasmtime_continuations::{debug_println, CommonStackInformation, ENABLE_DEBUG_PRINTING};
     pub use wasmtime_continuations::{Payloads, StackLimits, State};
 
     /// Fibers used for continuations
@@ -89,8 +89,8 @@ pub mod optimized {
     /// TODO
     #[repr(C)]
     pub struct VMContRef {
-        /// The limits of this continuation's stack.
-        pub limits: StackLimits,
+        /// The `CommonStackInformation` of this continuation's stack.
+        pub common_stack_information: CommonStackInformation,
 
         /// The parent of this continuation, which may be another continuation, the
         /// main stack, or absent (in case of a suspended continuation).
@@ -110,9 +110,6 @@ pub mod optimized {
         /// In particular, this may only be Some when `state` is `Invoked`.
         pub tag_return_values: Payloads,
 
-        /// Indicates the state of this continuation.
-        pub state: State,
-
         /// Revision counter.
         pub revision: u64,
     }
@@ -130,20 +127,20 @@ pub mod optimized {
         /// so. Used to create `VMContRef`s when initializing pooling allocator.
         pub fn empty() -> Self {
             let limits = StackLimits::with_stack_limit(Default::default());
+            let state = State::Allocated;
+            let common_stack_information = CommonStackInformation { limits, state };
             let parent_chain = StackChain::Absent;
             let stack = FiberStack::unallocated();
             let args = Payloads::new(0);
             let tag_return_values = Payloads::new(0);
-            let state = State::Allocated;
             let revision = 0;
 
             Self {
-                limits,
+                common_stack_information,
                 parent_chain,
                 stack,
                 args,
                 tag_return_values,
-                state,
                 revision,
             }
         }
@@ -190,8 +187,8 @@ pub mod optimized {
                 ))
             })?
         };
-        assert!(parent.state == State::Invoked);
-        assert!(child.state == State::Invoked);
+        assert!(parent.common_stack_information.state == State::Running);
+        assert!(child.common_stack_information.state == State::Suspended);
         assert!(child.tag_return_values.length == 0);
 
         mem::swap(&mut child.tag_return_values, &mut parent.tag_return_values);
@@ -216,7 +213,7 @@ pub mod optimized {
         {
             let contref = unsafe { contref.as_mut().unwrap() };
             // A continuation must have run to completion before dropping it.
-            assert!(contref.state == State::Returned);
+            assert!(contref.common_stack_information.state == State::Returned);
 
             // Note that we *could* deallocate the `Payloads` (i.e., `args` and
             // `tag_return_values`) here, but choose not to:
@@ -265,9 +262,10 @@ pub mod optimized {
 
         {
             let contref = unsafe { contref.as_mut().unwrap() };
-            contref.limits = limits;
+            let csi = &mut contref.common_stack_information;
+            csi.limits = limits;
+            csi.state = State::Allocated;
             contref.parent_chain = StackChain::Absent;
-            contref.state = State::Allocated;
             contref.args.ensure_capacity(capacity);
 
             // In order to give the pool a uniform interface for the optimized
@@ -300,7 +298,10 @@ pub mod optimized {
         use core::mem::offset_of;
         use wasmtime_continuations::offsets::*;
 
-        assert_eq!(offset_of!(VMContRef, limits), vm_cont_ref::LIMITS);
+        assert_eq!(
+            offset_of!(VMContRef, common_stack_information),
+            vm_cont_ref::COMMON_STACK_INFORMATION
+        );
         assert_eq!(
             offset_of!(VMContRef, parent_chain),
             vm_cont_ref::PARENT_CHAIN
@@ -311,12 +312,14 @@ pub mod optimized {
             offset_of!(VMContRef, tag_return_values),
             vm_cont_ref::TAG_RETURN_VALUES
         );
-        assert_eq!(offset_of!(VMContRef, state), vm_cont_ref::STATE);
+
+        assert_eq!(offset_of!(VMContRef, revision), vm_cont_ref::REVISION);
 
         assert_eq!(core::mem::size_of::<FiberStack>(), FIBER_STACK_SIZE);
         assert_eq!(core::mem::size_of::<StackChain>(), STACK_CHAIN_SIZE);
 
-        assert_eq!(offset_of!(VMContRef, revision), vm_cont_ref::REVISION);
+        // `CommonStackInformation` and `StackLimits` offsets don't need tests because
+        // they are defined diretly with `offset_of!`
     }
 }
 
@@ -687,6 +690,7 @@ pub mod baseline {
 pub mod stack_chain {
     use super::imp::VMContRef;
     use core::cell::UnsafeCell;
+    use wasmtime_continuations::CommonStackInformation;
     pub use wasmtime_continuations::StackLimits;
 
     /// This type represents a linked lists of stacks, additionally associating a
@@ -758,7 +762,8 @@ pub mod stack_chain {
         /// field, means that there is currently no parent.
         Absent = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT,
         /// Represents the main stack.
-        MainStack(*mut StackLimits) = wasmtime_continuations::STACK_CHAIN_MAIN_STACK_DISCRIMINANT,
+        MainStack(*mut CommonStackInformation) =
+            wasmtime_continuations::STACK_CHAIN_MAIN_STACK_DISCRIMINANT,
         /// Represents a continuation's stack.
         Continuation(*mut VMContRef) =
             wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT,
@@ -793,21 +798,32 @@ pub mod stack_chain {
     impl Iterator for ContinuationChainIterator {
         type Item = (Option<*mut VMContRef>, *mut StackLimits);
 
+        #[cfg(not(feature = "wasmfx_baseline"))]
         fn next(&mut self) -> Option<Self::Item> {
             match self.0 {
                 StackChain::Absent => None,
-                StackChain::MainStack(ms) => {
-                    let next = (None, ms);
+                StackChain::MainStack(csi) => {
+                    let stack_limits = unsafe { &mut (*csi).limits } as *mut StackLimits;
+
+                    let next = (None, stack_limits);
                     self.0 = StackChain::Absent;
                     Some(next)
                 }
                 StackChain::Continuation(ptr) => {
                     let continuation = unsafe { ptr.as_mut().unwrap() };
-                    let next = (Some(ptr), (&mut continuation.limits) as *mut StackLimits);
+                    let next = (
+                        Some(ptr),
+                        (&mut continuation.common_stack_information.limits) as *mut StackLimits,
+                    );
                     self.0 = continuation.parent_chain.clone();
                     Some(next)
                 }
             }
+        }
+
+        #[cfg(feature = "wasmfx_baseline")]
+        fn next(&mut self) -> Option<Self::Item> {
+            None
         }
     }
 
