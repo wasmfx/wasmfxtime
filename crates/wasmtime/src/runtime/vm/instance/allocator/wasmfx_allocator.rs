@@ -170,7 +170,11 @@ pub mod wasmfx_pooling {
 
                 commit_pages(bottom_of_stack, size_without_guard)?;
 
-                let stack = super::FiberStack::from_raw_parts(bottom_of_stack, size_without_guard)?;
+                let stack = super::FiberStack::from_raw_parts(
+                    bottom_of_stack,
+                    self.page_size,
+                    size_without_guard,
+                )?;
                 let continuation = &mut self.continuations[index];
                 Ok((continuation as *mut VMContRef, stack))
             }

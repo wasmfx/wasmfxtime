@@ -136,7 +136,7 @@ impl FiberStack {
     }
 
     #[allow(clippy::missing_safety_doc)]
-    pub unsafe fn from_raw_parts(base: *mut u8, len: usize) -> io::Result<Self> {
+    pub unsafe fn from_raw_parts(base: *mut u8, _guard_size: usize, len: usize) -> io::Result<Self> {
         Ok(Self {
             top: base.add(len),
             len,
