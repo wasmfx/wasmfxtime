@@ -1,14 +1,16 @@
 use super::shared;
 
+use crate::translate::{FuncEnvironment, FuncTranslationState};
 use crate::wasmfx::shared::call_builtin;
 use cranelift_codegen::ir;
 use cranelift_codegen::ir::condcodes::*;
 use cranelift_codegen::ir::types::*;
 use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::FunctionBuilder;
-use cranelift_wasm::FuncEnvironment;
-use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
 use wasmtime_environ::PtrSize;
+use wasmtime_environ::{WasmResult, WasmValType};
+
+pub const DEBUG_ASSERT_TRAP_CODE: crate::TrapCode = crate::TRAP_DEBUG_ASSERTION;
 
 #[cfg_attr(feature = "wasmfx_baseline", allow(unused_imports))]
 pub(crate) use shared::{assemble_contobj, disassemble_contobj, vm_contobj_type, ControlEffect};
@@ -179,7 +181,7 @@ pub(crate) mod typed_continuation_helpers {
             } else {
                 builder
                     .ins()
-                    .trapz(condition, ir::TrapCode::User(crate::DEBUG_ASSERT_TRAP_CODE));
+                    .trapz(condition, super::DEBUG_ASSERT_TRAP_CODE);
             }
         }
     }
@@ -220,9 +222,7 @@ pub(crate) mod typed_continuation_helpers {
                 builder.switch_to_block(continue_block);
                 builder.seal_block(continue_block);
             } else {
-                builder
-                    .ins()
-                    .trapz(cmp_res, ir::TrapCode::User(crate::DEBUG_ASSERT_TRAP_CODE));
+                builder.ins().trapz(cmp_res, super::DEBUG_ASSERT_TRAP_CODE);
             }
         }
     }
@@ -995,7 +995,7 @@ pub(crate) mod typed_continuation_helpers {
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
-            trap_code: ir::TrapCode,
+            trap_code: crate::TrapCode,
         ) -> ir::Value {
             if cfg!(debug_assertions) {
                 let absent_discriminant = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT;
@@ -1393,7 +1393,7 @@ pub(crate) fn typed_continuations_load_continuation_reference<'a>(
     let vmctx = env.vmctx_val(&mut builder.cursor());
     let vmctx = tc::VMContext::new(vmctx, env.pointer_type());
     let active_stack_chain = vmctx.load_stack_chain(env, builder);
-    active_stack_chain.unwrap_continuation_or_trap(env, builder, ir::TrapCode::UnhandledTag)
+    active_stack_chain.unwrap_continuation_or_trap(env, builder, crate::TRAP_UNHANDLED_TAG)
 }
 
 pub(crate) fn translate_cont_bind<'a>(
@@ -1418,7 +1418,7 @@ pub(crate) fn translate_cont_bind<'a>(
     );
     builder
         .ins()
-        .trapz(evidence, ir::TrapCode::ContinuationAlreadyConsumed);
+        .trapz(evidence, crate::TRAP_CONTINUATION_ALREADY_CONSUMED);
 
     let remaining_arg_count = builder.ins().iconst(I32, remaining_arg_count as i64);
     typed_continuations_store_resume_args(env, builder, args, remaining_arg_count, contref);
@@ -1533,7 +1533,7 @@ pub(crate) fn translate_resume<'a>(
             );
             builder
                 .ins()
-                .trapz(evidence, ir::TrapCode::ContinuationAlreadyConsumed);
+                .trapz(evidence, crate::TRAP_CONTINUATION_ALREADY_CONSUMED);
         }
         let next_revision = vmcontref.incr_revision(env, builder, revision);
         emit_debug_println!(env, builder, "[resume] new revision = {}", next_revision);
@@ -1713,11 +1713,8 @@ pub(crate) fn translate_resume<'a>(
     {
         builder.switch_to_block(forward_block);
 
-        let parent_contref = parent_stack_chain.unwrap_continuation_or_trap(
-            env,
-            builder,
-            ir::TrapCode::UnhandledTag,
-        );
+        let parent_contref =
+            parent_stack_chain.unwrap_continuation_or_trap(env, builder, crate::TRAP_UNHANDLED_TAG);
 
         let cref = tc::VMContRef::new(parent_contref, env.pointer_type());
         let fiber_stack = cref.get_fiber_stack(env, builder);

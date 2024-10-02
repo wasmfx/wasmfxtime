@@ -187,7 +187,7 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
             "tail-call",
             "relaxed-simd",
             "threads",
-            "typed-continuations",
+            "stack-switching",
             // Winch technically supports memory64 but the upstream tests have
             // gc/function-references/exceptions/etc all merged in now so Winch
             // can no longer run those tests without panicking.
@@ -204,10 +204,7 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
     }
     let unsupported_gc_tests = [
         "array_copy.wast",
-        "array_fill.wast",
-        "array_init_data.wast",
         "array_init_elem.wast",
-        "array.wast",
         "binary_gc.wast",
         "br_on_cast_fail.wast",
         "br_on_cast.wast",
@@ -262,7 +259,7 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
             return unsupported_gc_tests.iter().any(|i| test.ends_with(i));
         }
 
-        if part == "typed-continuations" {
+        if part == "stack-switching" {
             // This test specifically checks that we catch a continuation being
             // resumed twice, which we cannot detect in this mode.
             if cfg!(feature = "unsafe_disable_continuation_linearity_check")
@@ -299,11 +296,11 @@ fn run_wast(wast: &Path, strategy: Strategy, pooling: bool) -> anyhow::Result<()
         || memory64
         || misc;
     let threads = feature_found(wast, "threads");
-    let typed_continuations = feature_found(wast, "typed-continuations");
-    let exceptions = feature_found(wast, "exception-handling") || typed_continuations;
+    let stack_switching = feature_found(wast, "stack-switching");
+    let exceptions = feature_found(wast, "exception-handling") || stack_switching;
     let gc = feature_found(wast, "gc") || memory64;
     let function_references =
-        gc || memory64 || typed_continuations || feature_found(wast, "function-references");
+        gc || memory64 || stack_switching || feature_found(wast, "function-references");
     let reference_types = !(threads && feature_found(wast, "proposals"));
     let relaxed_simd = feature_found(wast, "relaxed-simd");
     let tail_call = feature_found(wast, "tail-call") || feature_found(wast, "function-references");
@@ -331,7 +328,7 @@ fn run_wast(wast: &Path, strategy: Strategy, pooling: bool) -> anyhow::Result<()
         .wasm_relaxed_simd(relaxed_simd)
         .wasm_tail_call(tail_call)
         .wasm_exceptions(exceptions)
-        .wasm_typed_continuations(typed_continuations)
+        .wasm_stack_switching(stack_switching)
         .wasm_custom_page_sizes(custom_page_sizes)
         .wasm_extended_const(extended_const)
         .strategy(strategy);

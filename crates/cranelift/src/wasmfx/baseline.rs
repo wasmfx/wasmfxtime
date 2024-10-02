@@ -1,14 +1,14 @@
 use super::shared;
 
+use crate::translate::{FuncEnvironment, FuncTranslationState};
 use crate::wasmfx::shared::call_builtin;
 use cranelift_codegen::ir;
 use cranelift_codegen::ir::condcodes::*;
 use cranelift_codegen::ir::types::*;
 use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::{FunctionBuilder, Switch};
-use cranelift_wasm::FuncEnvironment;
-use cranelift_wasm::{FuncTranslationState, WasmResult, WasmValType};
 use wasmtime_environ::PtrSize;
+use wasmtime_environ::{WasmResult, WasmValType};
 
 #[cfg_attr(not(feature = "wasmfx_baseline"), allow(unused_imports))]
 pub(crate) use shared::{assemble_contobj, disassemble_contobj, vm_contobj_type};
@@ -41,7 +41,7 @@ fn compare_revision_and_increment<'a>(
         let evidence = builder.ins().icmp(IntCC::Equal, witness, revision);
         builder
             .ins()
-            .trapz(evidence, ir::TrapCode::ContinuationAlreadyConsumed);
+            .trapz(evidence, crate::TRAP_CONTINUATION_ALREADY_CONSUMED);
 
         let revision_plus1 = builder.ins().iadd_imm(revision, 1);
         builder.ins().store(mem_flags, revision_plus1, contref, 0);

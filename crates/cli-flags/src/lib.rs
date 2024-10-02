@@ -285,8 +285,8 @@ wasmtime_option_group! {
         pub function_references: Option<bool>,
         /// Configure support for the exceptions proposal.
         pub exceptions: Option<bool>,
-        /// Configure support for the typed continuations proposal.
-        pub typed_continuations: Option<bool>,
+        /// Configure support for the stack-switching proposal.
+        pub stack_switching: Option<bool>,
         /// Configure support for the GC proposal.
         pub gc: Option<bool>,
         /// Configure support for the custom-page-sizes proposal.
@@ -739,8 +739,8 @@ impl CommonOptions {
         if let Some(enable) = self.wasm.exceptions {
             config.wasm_exceptions(enable);
         }
-        if let Some(enable) = self.wasm.typed_continuations {
-            config.wasm_typed_continuations(enable);
+        if let Some(enable) = self.wasm.stack_switching {
+            config.wasm_stack_switching(enable);
         }
         if let Some(enable) = self.wasm.custom_page_sizes.or(all) {
             config.wasm_custom_page_sizes(enable);

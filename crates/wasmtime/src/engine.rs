@@ -339,7 +339,7 @@ impl Engine {
 
             // stack switch model must match the current OS
             "stack_switch_model" => {
-                if self.features().contains(WasmFeatures::TYPED_CONTINUATIONS) {
+                if self.features().contains(WasmFeatures::STACK_SWITCHING) {
                     let expected =
                     match target.operating_system  {
                         target_lexicon::OperatingSystem::Windows => "update_windows_tib",

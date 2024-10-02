@@ -1,4 +1,8 @@
-use crate::{gc, BuiltinFunctionSignatures};
+use crate::translate::{
+    FuncEnvironment as _, FuncTranslationState, GlobalVariable, Heap, HeapData, HeapStyle,
+    StructFieldsVec, TableData, TableSize, TargetEnvironment,
+};
+use crate::{gc, BuiltinFunctionSignatures, TRAP_INTERNAL_ASSERT};
 use cranelift_codegen::cursor::FuncCursor;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::immediates::{Imm64, Offset32};
@@ -11,18 +15,15 @@ use cranelift_entity::packed_option::ReservedValue;
 use cranelift_entity::{EntityRef, PrimaryMap, SecondaryMap};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_frontend::Variable;
-use cranelift_wasm::{
-    EngineOrModuleTypeIndex, FuncEnvironment as _, FuncIndex, FuncTranslationState, GlobalIndex,
-    GlobalVariable, Heap, HeapData, HeapStyle, IndexType, Memory, MemoryIndex, StructFieldsVec,
-    Table, TableData, TableIndex, TableSize, TagIndex, TargetEnvironment, TypeIndex,
-    WasmCompositeType, WasmFuncType, WasmHeapTopType, WasmHeapType, WasmResult, WasmValType,
-};
 use smallvec::SmallVec;
 use std::mem;
 use wasmparser::Operator;
 use wasmtime_environ::{
-    BuiltinFunctionIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation, ModuleTypesBuilder,
-    PtrSize, TableStyle, Tunables, TypeConvert, VMOffsets,
+    BuiltinFunctionIndex, DataIndex, ElemIndex, EngineOrModuleTypeIndex, FuncIndex, GlobalIndex,
+    IndexType, Memory, MemoryIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation,
+    ModuleTypesBuilder, PtrSize, Table, TableIndex, TableStyle, TagIndex, Tunables, TypeConvert,
+    TypeIndex, VMOffsets, WasmCompositeType, WasmFuncType, WasmHeapTopType, WasmHeapType,
+    WasmResult, WasmValType,
 };
 use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
@@ -99,9 +100,9 @@ pub struct FuncEnvironment<'module_environment> {
     sig_ref_to_ty: SecondaryMap<ir::SigRef, Option<&'module_environment WasmFuncType>>,
 
     #[cfg(feature = "gc")]
-    pub(crate) ty_to_struct_layout: std::collections::HashMap<
+    pub(crate) ty_to_gc_layout: std::collections::HashMap<
         wasmtime_environ::ModuleInternedTypeIndex,
-        wasmtime_environ::GcStructLayout,
+        wasmtime_environ::GcLayout,
     >,
 
     #[cfg(feature = "wmemcheck")]
@@ -192,7 +193,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             sig_ref_to_ty: SecondaryMap::default(),
 
             #[cfg(feature = "gc")]
-            ty_to_struct_layout: std::collections::HashMap::new(),
+            ty_to_gc_layout: std::collections::HashMap::new(),
 
             heaps: PrimaryMap::default(),
             tables: SecondaryMap::default(),
@@ -615,7 +616,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         let vmctx = self.vmctx(builder.func);
         let pointer_type = self.pointer_type();
         let base = builder.ins().global_value(pointer_type, vmctx);
-        let offset = i32::try_from(self.offsets.ptr.vmctx_epoch_ptr()).unwrap();
+        let offset = i32::from(self.offsets.ptr.vmctx_epoch_ptr());
         let epoch_ptr = builder
             .ins()
             .load(pointer_type, ir::MemFlags::trusted(), base, offset);
@@ -1080,7 +1081,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         if self.signals_based_traps() {
             return;
         }
-        self.trapz(builder, rhs, ir::TrapCode::IntegerDivisionByZero);
+        self.trapz(builder, rhs, ir::TrapCode::INTEGER_DIVISION_BY_ZERO);
     }
 
     /// Helper used when `!self.signals_based_traps()` is enabled to test
@@ -1094,7 +1095,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         if self.signals_based_traps() {
             return;
         }
-        self.trapz(builder, rhs, ir::TrapCode::IntegerDivisionByZero);
+        self.trapz(builder, rhs, ir::TrapCode::INTEGER_DIVISION_BY_ZERO);
 
         let ty = builder.func.dfg.value_type(rhs);
         let minus_one = builder.ins().iconst(ty, -1);
@@ -1109,7 +1110,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         );
         let lhs_is_int_min = builder.ins().icmp(IntCC::Equal, lhs, int_min);
         let is_integer_overflow = builder.ins().band(rhs_is_minus_one, lhs_is_int_min);
-        self.conditionally_trap(builder, is_integer_overflow, ir::TrapCode::IntegerOverflow);
+        self.conditionally_trap(builder, is_integer_overflow, ir::TrapCode::INTEGER_OVERFLOW);
     }
 
     /// Helper used when `!self.signals_based_traps()` is enabled to perform
@@ -1309,7 +1310,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             // functions, though, then there's no possibility of a trap.
             CheckIndirectCallTypeSignature::StaticMatch { may_be_null } => {
                 if may_be_null {
-                    Some(ir::TrapCode::IndirectCallToNull)
+                    Some(crate::TRAP_INDIRECT_CALL_TO_NULL)
                 } else {
                     None
                 }
@@ -1374,16 +1375,19 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
                         let mem_flags = ir::MemFlags::trusted().with_readonly();
                         self.builder.ins().load(
                             sig_id_type,
-                            mem_flags.with_trap_code(Some(ir::TrapCode::IndirectCallToNull)),
+                            mem_flags.with_trap_code(Some(crate::TRAP_INDIRECT_CALL_TO_NULL)),
                             funcref_ptr,
                             i32::from(self.env.offsets.ptr.vm_func_ref_type_index()),
                         );
                     } else {
-                        self.env
-                            .trapz(self.builder, funcref_ptr, ir::TrapCode::IndirectCallToNull);
+                        self.env.trapz(
+                            self.builder,
+                            funcref_ptr,
+                            crate::TRAP_INDIRECT_CALL_TO_NULL,
+                        );
                     }
                 }
-                self.env.trap(self.builder, ir::TrapCode::BadSignature);
+                self.env.trap(self.builder, crate::TRAP_BAD_SIGNATURE);
                 return CheckIndirectCallTypeSignature::StaticTrap;
             }
 
@@ -1392,7 +1396,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             WasmHeapType::NoFunc => {
                 assert!(table.table.ref_type.nullable);
                 self.env
-                    .trap(self.builder, ir::TrapCode::IndirectCallToNull);
+                    .trap(self.builder, crate::TRAP_INDIRECT_CALL_TO_NULL);
                 return CheckIndirectCallTypeSignature::StaticTrap;
             }
 
@@ -1443,13 +1447,13 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         // Load the callee ID.
         //
         // Note that the callee may be null in which case this load may
-        // trap. If so use the `IndirectCallToNull` trap code.
+        // trap. If so use the `TRAP_INDIRECT_CALL_TO_NULL` trap code.
         let mut mem_flags = ir::MemFlags::trusted().with_readonly();
         if self.env.signals_based_traps() {
-            mem_flags = mem_flags.with_trap_code(Some(ir::TrapCode::IndirectCallToNull));
+            mem_flags = mem_flags.with_trap_code(Some(crate::TRAP_INDIRECT_CALL_TO_NULL));
         } else {
             self.env
-                .trapz(self.builder, funcref_ptr, ir::TrapCode::IndirectCallToNull);
+                .trapz(self.builder, funcref_ptr, crate::TRAP_INDIRECT_CALL_TO_NULL);
         }
         let callee_sig_id = self.builder.ins().load(
             sig_id_type,
@@ -1463,8 +1467,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             .builder
             .ins()
             .icmp(IntCC::Equal, callee_sig_id, caller_sig_id);
-        self.env
-            .trapz(self.builder, cmp, ir::TrapCode::BadSignature);
+        self.env.trapz(self.builder, cmp, crate::TRAP_BAD_SIGNATURE);
         CheckIndirectCallTypeSignature::Runtime
     }
 
@@ -1481,7 +1484,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         // can be `None` instead. This requires feeding type information from
         // wasmparser's validator into this function, however, which is not
         // easily done at this time.
-        let callee_load_trap_code = Some(ir::TrapCode::NullReference);
+        let callee_load_trap_code = Some(crate::TRAP_NULL_REFERENCE);
 
         self.unchecked_call(sig_ref, callee, callee_load_trap_code, args)
     }
@@ -1658,7 +1661,9 @@ impl<'module_environment> TargetEnvironment for FuncEnvironment<'module_environm
     }
 }
 
-impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'module_environment> {
+impl<'module_environment> crate::translate::FuncEnvironment
+    for FuncEnvironment<'module_environment>
+{
     fn heaps(&self) -> &PrimaryMap<Heap, HeapData> {
         &self.heaps
     }
@@ -1716,7 +1721,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let mut args = vec![vmctx, table_index_arg, delta];
         let grow = if ty.is_vmgcref_type() {
             args.push(init_value);
-            gc::gc_ref_table_grow_builtin(ty, self, &mut builder.func)?
+            gc::builtins::table_grow_gc_ref(self, &mut builder.cursor().func)?
         } else {
             debug_assert!(matches!(
                 ty.top(),
@@ -1877,7 +1882,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         let mut args = vec![vmctx, table_index_arg, dst];
         let libcall = if ty.is_vmgcref_type() {
             args.push(val);
-            gc::gc_ref_table_fill_builtin(ty, self, &mut builder.func)?
+            gc::builtins::table_fill_gc_ref(self, &mut builder.cursor().func)?
         } else {
             match ty.top() {
                 WasmHeapTopType::Func => {
@@ -1920,7 +1925,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         // TODO: If we knew we have a `(ref i31)` here, instead of maybe a `(ref
         // null i31)`, we could omit the `trapz`. But plumbing that type info
         // from `wasmparser` and through to here is a bit funky.
-        self.trapz(builder, i31ref, ir::TrapCode::NullReference);
+        self.trapz(builder, i31ref, crate::TRAP_NULL_REFERENCE);
         Ok(builder.ins().sshr_imm(i31ref, 1))
     }
 
@@ -1932,7 +1937,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         // TODO: If we knew we have a `(ref i31)` here, instead of maybe a `(ref
         // null i31)`, we could omit the `trapz`. But plumbing that type info
         // from `wasmparser` and through to here is a bit funky.
-        self.trapz(builder, i31ref, ir::TrapCode::NullReference);
+        self.trapz(builder, i31ref, crate::TRAP_NULL_REFERENCE);
         Ok(builder.ins().ushr_imm(i31ref, 1))
     }
 
@@ -2009,6 +2014,240 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
         )
     }
 
+    fn translate_array_new(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        elem: ir::Value,
+        len: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_array_new(self, builder, array_type_index, elem, len)
+    }
+
+    fn translate_array_new_default(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        len: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_array_new_default(self, builder, array_type_index, len)
+    }
+
+    fn translate_array_new_fixed(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        elems: &[ir::Value],
+    ) -> WasmResult<ir::Value> {
+        gc::translate_array_new_fixed(self, builder, array_type_index, elems)
+    }
+
+    fn translate_array_new_data(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        data_index: DataIndex,
+        data_offset: ir::Value,
+        len: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        let libcall = gc::builtins::array_new_data(self, builder.func)?;
+        let vmctx = self.vmctx_val(&mut builder.cursor());
+        let interned_type_index = self.module.types[array_type_index];
+        let interned_type_index = builder
+            .ins()
+            .iconst(I32, i64::from(interned_type_index.as_u32()));
+        let data_index = builder.ins().iconst(I32, i64::from(data_index.as_u32()));
+        let call_inst = builder.ins().call(
+            libcall,
+            &[vmctx, interned_type_index, data_index, data_offset, len],
+        );
+        Ok(builder.func.dfg.first_result(call_inst))
+    }
+
+    fn translate_array_new_elem(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        elem_index: ElemIndex,
+        elem_offset: ir::Value,
+        len: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        let libcall = gc::builtins::array_new_elem(self, builder.func)?;
+        let vmctx = self.vmctx_val(&mut builder.cursor());
+        let interned_type_index = self.module.types[array_type_index];
+        let interned_type_index = builder
+            .ins()
+            .iconst(I32, i64::from(interned_type_index.as_u32()));
+        let elem_index = builder.ins().iconst(I32, i64::from(elem_index.as_u32()));
+        let call_inst = builder.ins().call(
+            libcall,
+            &[vmctx, interned_type_index, elem_index, elem_offset, len],
+        );
+        Ok(builder.func.dfg.first_result(call_inst))
+    }
+
+    fn translate_array_copy(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        dst_array_type_index: TypeIndex,
+        dst_array: ir::Value,
+        dst_index: ir::Value,
+        src_array_type_index: TypeIndex,
+        src_array: ir::Value,
+        src_index: ir::Value,
+        len: ir::Value,
+    ) -> WasmResult<()> {
+        let libcall = gc::builtins::array_copy(self, builder.func)?;
+        let vmctx = self.vmctx_val(&mut builder.cursor());
+        let dst_array_type_index = self.module.types[dst_array_type_index];
+        let dst_array_type_index = builder
+            .ins()
+            .iconst(I32, i64::from(dst_array_type_index.as_u32()));
+        let src_array_type_index = self.module.types[src_array_type_index];
+        let src_array_type_index = builder
+            .ins()
+            .iconst(I32, i64::from(src_array_type_index.as_u32()));
+        builder.ins().call(
+            libcall,
+            &[
+                vmctx,
+                dst_array_type_index,
+                dst_array,
+                dst_index,
+                src_array_type_index,
+                src_array,
+                src_index,
+                len,
+            ],
+        );
+        Ok(())
+    }
+
+    fn translate_array_fill(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        array: ir::Value,
+        index: ir::Value,
+        value: ir::Value,
+        len: ir::Value,
+    ) -> WasmResult<()> {
+        gc::translate_array_fill(self, builder, array_type_index, array, index, value, len)
+    }
+
+    fn translate_array_init_data(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        array: ir::Value,
+        dst_index: ir::Value,
+        data_index: DataIndex,
+        data_offset: ir::Value,
+        len: ir::Value,
+    ) -> WasmResult<()> {
+        let libcall = gc::builtins::array_init_data(self, builder.func)?;
+        let vmctx = self.vmctx_val(&mut builder.cursor());
+        let interned_type_index = self.module.types[array_type_index];
+        let interned_type_index = builder
+            .ins()
+            .iconst(I32, i64::from(interned_type_index.as_u32()));
+        let data_index = builder.ins().iconst(I32, i64::from(data_index.as_u32()));
+        builder.ins().call(
+            libcall,
+            &[
+                vmctx,
+                interned_type_index,
+                array,
+                dst_index,
+                data_index,
+                data_offset,
+                len,
+            ],
+        );
+        Ok(())
+    }
+
+    fn translate_array_init_elem(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        array: ir::Value,
+        dst_index: ir::Value,
+        elem_index: ElemIndex,
+        elem_offset: ir::Value,
+        len: ir::Value,
+    ) -> WasmResult<()> {
+        let libcall = gc::builtins::array_init_elem(self, builder.func)?;
+        let vmctx = self.vmctx_val(&mut builder.cursor());
+        let interned_type_index = self.module.types[array_type_index];
+        let interned_type_index = builder
+            .ins()
+            .iconst(I32, i64::from(interned_type_index.as_u32()));
+        let elem_index = builder.ins().iconst(I32, i64::from(elem_index.as_u32()));
+        builder.ins().call(
+            libcall,
+            &[
+                vmctx,
+                interned_type_index,
+                array,
+                dst_index,
+                elem_index,
+                elem_offset,
+                len,
+            ],
+        );
+        Ok(())
+    }
+
+    fn translate_array_len(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_array_len(self, builder, array)
+    }
+
+    fn translate_array_get(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        array: ir::Value,
+        index: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_array_get(self, builder, array_type_index, array, index)
+    }
+
+    fn translate_array_get_s(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        array: ir::Value,
+        index: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_array_get_s(self, builder, array_type_index, array, index)
+    }
+
+    fn translate_array_get_u(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        array: ir::Value,
+        index: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_array_get_u(self, builder, array_type_index, array, index)
+    }
+
+    fn translate_array_set(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_type_index: TypeIndex,
+        array: ir::Value,
+        index: ir::Value,
+        value: ir::Value,
+    ) -> WasmResult<()> {
+        gc::translate_array_set(self, builder, array_type_index, array, index, value)
+    }
+
     fn translate_ref_null(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -2063,7 +2302,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn translate_custom_global_get(
         &mut self,
         builder: &mut FunctionBuilder,
-        index: cranelift_wasm::GlobalIndex,
+        index: GlobalIndex,
     ) -> WasmResult<ir::Value> {
         let ty = self.module.globals[index].wasm_ty;
         debug_assert!(
@@ -2090,7 +2329,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
     fn translate_custom_global_set(
         &mut self,
         builder: &mut FunctionBuilder,
-        index: cranelift_wasm::GlobalIndex,
+        index: GlobalIndex,
         value: ir::Value,
     ) -> WasmResult<()> {
         let ty = self.module.globals[index].wasm_ty;
@@ -2372,7 +2611,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             // any other type of global at the same index would, getting or
             // setting them requires ref counting barriers. Therefore, we need
             // to use `GlobalVariable::Custom`, as that is the only kind of
-            // `GlobalVariable` for which `cranelift-wasm` supports custom
+            // `GlobalVariable` for which translation supports custom
             // access translation.
             return Ok(GlobalVariable::Custom);
         }
@@ -2923,7 +3162,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             let limit = builder.ins().global_value(self.pointer_type(), gv);
             let sp = builder.ins().get_stack_pointer(self.pointer_type());
             let overflow = builder.ins().icmp(IntCC::UnsignedLessThan, sp, limit);
-            self.conditionally_trap(builder, overflow, ir::TrapCode::StackOverflow);
+            self.conditionally_trap(builder, overflow, ir::TrapCode::STACK_OVERFLOW);
         }
 
         // If the `vmruntime_limits_ptr` variable will get used then we initialize
@@ -3189,9 +3428,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
                 let vmctx = self.vmctx_val(&mut builder.cursor());
                 let trap_code = builder.ins().iconst(I8, i64::from(trap as u8));
                 builder.ins().call(libcall, &[vmctx, trap_code]);
-                builder
-                    .ins()
-                    .trap(ir::TrapCode::User(crate::DEBUG_ASSERT_TRAP_CODE));
+                builder.ins().trap(TRAP_INTERNAL_ASSERT);
             }
         }
     }

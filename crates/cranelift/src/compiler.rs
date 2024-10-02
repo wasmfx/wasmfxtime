@@ -1,6 +1,7 @@
 use crate::debug::DwarfSectionRelocTarget;
 use crate::func_environ::FuncEnvironment;
-use crate::DEBUG_ASSERT_TRAP_CODE;
+use crate::translate::{FuncEnvironment as _, FuncTranslator};
+use crate::TRAP_INTERNAL_ASSERT;
 use crate::{array_call_signature, CompiledFunction, ModuleTextBuilder};
 use crate::{builder::LinkOptions, wasm_call_signature, BuiltinFunctionSignatures};
 use anyhow::{Context as _, Result};
@@ -15,9 +16,6 @@ use cranelift_codegen::print_errors::pretty_error;
 use cranelift_codegen::{CompiledCode, Context};
 use cranelift_entity::PrimaryMap;
 use cranelift_frontend::FunctionBuilder;
-use cranelift_wasm::{
-    DefinedFuncIndex, FuncEnvironment as _, FuncTranslator, WasmFuncType, WasmValType,
-};
 use object::write::{Object, StandardSegment, SymbolId};
 use object::{RelocationEncoding, RelocationFlags, RelocationKind, SectionKind};
 use std::any::Any;
@@ -28,10 +26,10 @@ use std::path;
 use std::sync::{Arc, Mutex};
 use wasmparser::{FuncValidatorAllocations, FunctionBody};
 use wasmtime_environ::{
-    AddressMapSection, BuiltinFunctionIndex, CacheStore, CompileError, FlagValue, FunctionBodyData,
-    FunctionLoc, ModuleTranslation, ModuleTypesBuilder, PtrSize, RelocationTarget,
-    StackMapInformation, StaticModuleIndex, TrapEncodingBuilder, Tunables, VMOffsets,
-    WasmFunctionInfo,
+    AddressMapSection, BuiltinFunctionIndex, CacheStore, CompileError, DefinedFuncIndex, FlagValue,
+    FunctionBodyData, FunctionLoc, ModuleTranslation, ModuleTypesBuilder, PtrSize,
+    RelocationTarget, StackMapInformation, StaticModuleIndex, TrapEncodingBuilder, Tunables,
+    VMOffsets, WasmFuncType, WasmFunctionInfo, WasmValType,
 };
 
 #[cfg(feature = "component-model")]
@@ -202,9 +200,7 @@ impl wasmtime_environ::Compiler for Compiler {
         });
         let stack_limit = context.func.create_global_value(ir::GlobalValueData::Load {
             base: interrupts_ptr,
-            offset: i32::try_from(func_env.offsets.ptr.vmruntime_limits_stack_limit())
-                .unwrap()
-                .into(),
+            offset: i32::from(func_env.offsets.ptr.vmruntime_limits_stack_limit()).into(),
             global_type: isa.pointer_type(),
             flags: MemFlags::trusted(),
         });
@@ -343,7 +339,7 @@ impl wasmtime_environ::Compiler for Compiler {
             pointer_type,
             MemFlags::trusted(),
             caller_vmctx,
-            i32::try_from(ptr.vmcontext_runtime_limits()).unwrap(),
+            i32::from(ptr.vmcontext_runtime_limits()),
         );
         save_last_wasm_exit_fp_and_pc(&mut builder, pointer_type, &ptr, limits);
 
@@ -548,7 +544,7 @@ impl wasmtime_environ::Compiler for Compiler {
             pointer_type,
             mem_flags,
             vmctx,
-            i32::try_from(ptr_size.vmcontext_builtin_functions()).unwrap(),
+            i32::from(ptr_size.vmcontext_builtin_functions()),
         );
         let body_offset = i32::try_from(index.index() * pointer_type.bytes()).unwrap();
         let func_addr = builder
@@ -673,7 +669,7 @@ impl Compiler {
         {
             let values_vec_len = builder
                 .ins()
-                .iconst(ir::types::I32, i64::try_from(values_vec_len).unwrap());
+                .iconst(ir::types::I32, i64::from(values_vec_len));
             self.store_values_to_array(builder, ty.params(), args, values_vec_ptr, values_vec_len);
         }
 
@@ -947,9 +943,7 @@ fn debug_assert_enough_capacity_for_length(
             capacity,
             ir::immediates::Imm64::new(length.try_into().unwrap()),
         );
-        builder
-            .ins()
-            .trapz(enough_capacity, ir::TrapCode::User(DEBUG_ASSERT_TRAP_CODE));
+        builder.ins().trapz(enough_capacity, TRAP_INTERNAL_ASSERT);
     }
 }
 
@@ -971,10 +965,7 @@ fn debug_assert_vmctx_kind(
             magic,
             i64::from(expected_vmctx_magic),
         );
-        builder.ins().trapz(
-            is_expected_vmctx,
-            ir::TrapCode::User(DEBUG_ASSERT_TRAP_CODE),
-        );
+        builder.ins().trapz(is_expected_vmctx, TRAP_INTERNAL_ASSERT);
     }
 }
 

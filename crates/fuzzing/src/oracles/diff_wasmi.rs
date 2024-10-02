@@ -19,6 +19,7 @@ impl WasmiEngine {
         config.memory64_enabled = false;
         config.threads_enabled = false;
         config.exceptions_enabled = false;
+        config.gc_enabled = false;
         config.max_memories = config.max_memories.min(1);
         config.min_memories = config.min_memories.min(1);
 
@@ -217,7 +218,12 @@ impl From<wasmi::Value> for DiffValue {
     }
 }
 
-#[test]
-fn smoke() {
-    crate::oracles::engine::smoke_test_engine(|_, config| Ok(WasmiEngine::new(config)))
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smoke() {
+        crate::oracles::engine::smoke_test_engine(|_, config| Ok(WasmiEngine::new(config)))
+    }
 }

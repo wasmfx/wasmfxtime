@@ -77,6 +77,9 @@ pub enum Trap {
     /// Attempt to access beyond the bounds of an array.
     ArrayOutOfBounds,
 
+    /// Attempted an allocation that was too large to succeed.
+    AllocationTooLarge,
+
     /// When the `component-model` feature is enabled this trap represents a
     /// scenario where one component tried to call another component but it
     /// would have violated the reentrance rules of the component model,
@@ -88,7 +91,9 @@ pub enum Trap {
 
     /// Attempt to resume a continuation twice.
     ContinuationAlreadyConsumed,
-    // if adding a variant here be sure to update the `check!` macro below
+
+    /// For debug assertions in generated code.
+    DebugAssertion, // if adding a variant here be sure to update the `check!` macro below
 }
 
 impl Trap {
@@ -121,9 +126,11 @@ impl Trap {
             AtomicWaitNonSharedMemory
             NullReference
             ArrayOutOfBounds
+            AllocationTooLarge
             CannotEnterComponent
             UnhandledTag
             ContinuationAlreadyConsumed
+            DebugAssertion
         }
 
         None
@@ -151,9 +158,11 @@ impl fmt::Display for Trap {
             AtomicWaitNonSharedMemory => "atomic wait on non-shared memory",
             NullReference => "null reference",
             ArrayOutOfBounds => "out of bounds array access",
+            AllocationTooLarge => "allocation size too large",
             CannotEnterComponent => "cannot enter component instance",
             UnhandledTag => "unhandled tag",
             ContinuationAlreadyConsumed => "continuation already consumed",
+            DebugAssertion => "triggered debug assertion",
         };
         write!(f, "wasm trap: {desc}")
     }

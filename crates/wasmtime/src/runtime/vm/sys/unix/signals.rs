@@ -4,8 +4,8 @@ use crate::runtime::vm::traphandlers::{tls, TrapRegisters, TrapTest};
 use crate::runtime::vm::VMContext;
 use std::cell::RefCell;
 use std::io;
-use std::mem::{self, MaybeUninit};
-use std::ptr::{self, null_mut};
+use std::mem;
+use std::ptr::{self, addr_of, addr_of_mut, null_mut};
 
 #[link(name = "wasmtime-helpers")]
 extern "C" {
@@ -26,10 +26,11 @@ extern "C" {
 pub type SignalHandler<'a> =
     dyn Fn(libc::c_int, *const libc::siginfo_t, *const libc::c_void) -> bool + Send + Sync + 'a;
 
-static mut PREV_SIGSEGV: MaybeUninit<libc::sigaction> = MaybeUninit::uninit();
-static mut PREV_SIGBUS: MaybeUninit<libc::sigaction> = MaybeUninit::uninit();
-static mut PREV_SIGILL: MaybeUninit<libc::sigaction> = MaybeUninit::uninit();
-static mut PREV_SIGFPE: MaybeUninit<libc::sigaction> = MaybeUninit::uninit();
+const UNINIT_SIGACTION: libc::sigaction = unsafe { mem::zeroed() };
+static mut PREV_SIGSEGV: libc::sigaction = UNINIT_SIGACTION;
+static mut PREV_SIGBUS: libc::sigaction = UNINIT_SIGACTION;
+static mut PREV_SIGILL: libc::sigaction = UNINIT_SIGACTION;
+static mut PREV_SIGFPE: libc::sigaction = UNINIT_SIGACTION;
 
 pub struct TrapHandler;
 
@@ -82,20 +83,20 @@ impl TrapHandler {
 
 unsafe fn foreach_handler(mut f: impl FnMut(*mut libc::sigaction, i32)) {
     // Allow handling OOB with signals on all architectures
-    f(PREV_SIGSEGV.as_mut_ptr(), libc::SIGSEGV);
+    f(addr_of_mut!(PREV_SIGSEGV), libc::SIGSEGV);
 
     // Handle `unreachable` instructions which execute `ud2` right now
-    f(PREV_SIGILL.as_mut_ptr(), libc::SIGILL);
+    f(addr_of_mut!(PREV_SIGILL), libc::SIGILL);
 
     // x86 and s390x use SIGFPE to report division by zero
     if cfg!(target_arch = "x86_64") || cfg!(target_arch = "s390x") {
-        f(PREV_SIGFPE.as_mut_ptr(), libc::SIGFPE);
+        f(addr_of_mut!(PREV_SIGFPE), libc::SIGFPE);
     }
 
     // Sometimes we need to handle SIGBUS too:
     // - On Darwin, guard page accesses are raised as SIGBUS.
     if cfg!(target_os = "macos") || cfg!(target_os = "freebsd") {
-        f(PREV_SIGBUS.as_mut_ptr(), libc::SIGBUS);
+        f(addr_of_mut!(PREV_SIGBUS), libc::SIGBUS);
     }
 
     // TODO(#1980): x86-32, if we support it, will also need a SIGFPE handler.
@@ -145,10 +146,10 @@ unsafe extern "C" fn trap_handler(
     context: *mut libc::c_void,
 ) {
     let previous = match signum {
-        libc::SIGSEGV => PREV_SIGSEGV.as_ptr(),
-        libc::SIGBUS => PREV_SIGBUS.as_ptr(),
-        libc::SIGFPE => PREV_SIGFPE.as_ptr(),
-        libc::SIGILL => PREV_SIGILL.as_ptr(),
+        libc::SIGSEGV => addr_of!(PREV_SIGSEGV),
+        libc::SIGBUS => addr_of!(PREV_SIGBUS),
+        libc::SIGFPE => addr_of!(PREV_SIGFPE),
+        libc::SIGILL => addr_of!(PREV_SIGILL),
         _ => panic!("unknown signal: {signum}"),
     };
     let handled = tls::with(|info| {
@@ -180,7 +181,16 @@ unsafe extern "C" fn trap_handler(
         // exception was handled by a custom exception handler, so we
         // keep executing.
         let jmp_buf = match test {
-            TrapTest::NotWasm => return false,
+            TrapTest::NotWasm => {
+                if let Some(faulting_addr) = faulting_addr {
+                    let start = info.async_guard_range.start;
+                    let end = info.async_guard_range.end;
+                    if start as usize <= faulting_addr && faulting_addr < end as usize {
+                        abort_stack_overflow();
+                    }
+                }
+                return false;
+            }
             TrapTest::HandledByEmbedder => return true,
             TrapTest::Trap { jmp_buf } => jmp_buf,
         };
@@ -227,6 +237,15 @@ unsafe extern "C" fn trap_handler(
         return;
     }
 
+    delegate_signal_to_previous_handler(previous, signum, siginfo, context)
+}
+
+pub unsafe fn delegate_signal_to_previous_handler(
+    previous: *const libc::sigaction,
+    signum: libc::c_int,
+    siginfo: *mut libc::siginfo_t,
+    context: *mut libc::c_void,
+) {
     // This signal is not for any compiled wasm code we expect, so we
     // need to forward the signal to the next handler. If there is no
     // next handler (SIG_IGN or SIG_DFL), then it's time to crash. To do
@@ -245,6 +264,14 @@ unsafe extern "C" fn trap_handler(
         libc::sigaction(signum, &previous as *const _, ptr::null_mut());
     } else {
         mem::transmute::<usize, extern "C" fn(libc::c_int)>(previous.sa_sigaction)(signum)
+    }
+}
+
+pub fn abort_stack_overflow() -> ! {
+    unsafe {
+        let msg = "execution on async fiber has overflowed its stack";
+        libc::write(libc::STDERR_FILENO, msg.as_ptr().cast(), msg.len());
+        libc::abort();
     }
 }
 
