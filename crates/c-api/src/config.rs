@@ -143,11 +143,8 @@ pub extern "C" fn wasmtime_config_wasm_exceptions_set(c: &mut wasm_config_t, ena
 }
 
 #[no_mangle]
-pub extern "C" fn wasmtime_config_wasm_typed_continuations_set(
-    c: &mut wasm_config_t,
-    enable: bool,
-) {
-    c.config.wasm_typed_continuations(enable);
+pub extern "C" fn wasmtime_config_wasm_stack_switching_set(c: &mut wasm_config_t, enable: bool) {
+    c.config.wasm_stack_switching(enable);
 }
 
 #[no_mangle]

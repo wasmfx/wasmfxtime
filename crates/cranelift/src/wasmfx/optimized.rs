@@ -875,7 +875,7 @@ pub(crate) mod typed_continuation_helpers {
             let pointer_type = env.pointer_type();
             let vmctx = env.vmctx(builder.func);
             let base = builder.ins().global_value(pointer_type, vmctx);
-            let offset = i32::try_from(env.offsets.ptr.vmctx_runtime_limits()).unwrap();
+            let offset = i32::from(env.offsets.ptr.vmctx_runtime_limits());
 
             // The *pointer* to the VMRuntimeLimits does not change within the
             // same function, allowing us to set the `read_only` flag.

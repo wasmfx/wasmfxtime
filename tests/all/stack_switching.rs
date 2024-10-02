@@ -73,7 +73,7 @@ mod test_utils {
             let entry = instance.get_func(&mut self.store, "entry").unwrap();
 
             std::panic::catch_unwind(AssertUnwindSafe(|| {
-                drop(entry.call(&mut self.store, &mut [], &mut []))
+                drop(entry.call(&mut self.store, &[], &mut []))
             }))
             .unwrap_err()
         }
