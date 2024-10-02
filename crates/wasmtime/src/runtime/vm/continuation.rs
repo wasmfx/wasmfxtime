@@ -793,6 +793,7 @@ pub mod stack_chain {
     /// Each stack is represented by a tuple `(co_opt, sl)`, where sl is a pointer
     /// to the stack's `StackLimits` object and `co_opt` is a pointer to the
     /// corresponding `VMContRef`, or None for the main stack.
+    #[cfg_attr(feature = "wasmfx_baseline", allow(dead_code))]
     pub struct ContinuationChainIterator(StackChain);
 
     impl Iterator for ContinuationChainIterator {
@@ -823,7 +824,7 @@ pub mod stack_chain {
 
         #[cfg(feature = "wasmfx_baseline")]
         fn next(&mut self) -> Option<Self::Item> {
-            None
+            unimplemented!()
         }
     }
 
