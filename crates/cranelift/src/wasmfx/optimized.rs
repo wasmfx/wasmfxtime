@@ -1100,7 +1100,7 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
         ) -> ir::Value {
             let actual_state = self.load_state(env, builder);
-            let allocated: i32 = i32::from(wasmtime_continuations::State::Allocated);
+            let allocated: i32 = i32::from(wasmtime_continuations::State::Fresh);
             builder
                 .ins()
                 .icmp_imm(IntCC::NotEqual, actual_state, allocated as i64)

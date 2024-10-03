@@ -192,7 +192,7 @@ pub const STACK_CHAIN_CONTINUATION_DISCRIMINANT: usize = 2;
 pub enum State {
     /// The `VMContRef` has been created, but `resume` has never been
     /// called on it. During this stage, we may add arguments using `cont.bind`.
-    Allocated,
+    Fresh,
     /// The continuation is running, meaning that it is the one currently
     /// executing code.
     Running,

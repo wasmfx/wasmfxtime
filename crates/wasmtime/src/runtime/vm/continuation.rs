@@ -127,7 +127,7 @@ pub mod optimized {
         /// so. Used to create `VMContRef`s when initializing pooling allocator.
         pub fn empty() -> Self {
             let limits = StackLimits::with_stack_limit(Default::default());
-            let state = State::Allocated;
+            let state = State::Fresh;
             let common_stack_information = CommonStackInformation { limits, state };
             let parent_chain = StackChain::Absent;
             let stack = FiberStack::unallocated();
@@ -264,7 +264,7 @@ pub mod optimized {
             let contref = unsafe { contref.as_mut().unwrap() };
             let csi = &mut contref.common_stack_information;
             csi.limits = limits;
-            csi.state = State::Allocated;
+            csi.state = State::Fresh;
             contref.parent_chain = StackChain::Absent;
             contref.args.ensure_capacity(capacity);
 
