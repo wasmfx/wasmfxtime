@@ -755,7 +755,7 @@ jobs:
         # Let's keep the build step separate from the run step below, because the former should not fail:
         cargo build --features=unsafe_disable_continuation_linearity_check,wasmfx_pooling_allocator
         # We want this to fail and are happy with any non-zero exit code:
-        cargo run --features=unsafe_disable_continuation_linearity_check,wasmfx_pooling_allocator -- wast -W=exceptions,function-references,stack-switching tests/misc_testsuite/stack-switching/cont_twice.wast ; test $? -eq 132
+        cargo run --features=unsafe_disable_continuation_linearity_check,wasmfx_pooling_allocator -- wast -W=exceptions,function-references,stack-switching tests/misc_testsuite/stack-switching/cont_twice.wast ; test $? -eq 1
 
     # NB: the test job here is explicitly lacking in cancellation of this run if
     # something goes wrong. These take the longest anyway and otherwise if
