@@ -187,9 +187,9 @@ pub mod optimized {
                 ))
             })?
         };
-        assert!(parent.common_stack_information.state == State::Running);
-        assert!(child.common_stack_information.state == State::Suspended);
-        assert!(child.tag_return_values.length == 0);
+        debug_assert!(parent.common_stack_information.state == State::Running);
+        debug_assert!(child.common_stack_information.state == State::Suspended);
+        debug_assert!(child.tag_return_values.length == 0);
 
         mem::swap(&mut child.tag_return_values, &mut parent.tag_return_values);
         Ok(())
@@ -213,7 +213,7 @@ pub mod optimized {
         {
             let contref = unsafe { contref.as_mut().unwrap() };
             // A continuation must have run to completion before dropping it.
-            assert!(contref.common_stack_information.state == State::Returned);
+            debug_assert!(contref.common_stack_information.state == State::Returned);
 
             // Note that we *could* deallocate the `Payloads` (i.e., `args` and
             // `tag_return_values`) here, but choose not to:
