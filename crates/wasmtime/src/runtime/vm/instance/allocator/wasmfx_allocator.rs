@@ -165,7 +165,7 @@ pub mod wasmfx_pooling {
                 let bottom_of_stack = self
                     .stack_mapping
                     .as_ptr()
-                    .add((index * self.stack_size) + self.page_size)
+                    .add(index * self.stack_size)
                     .cast_mut();
 
                 commit_pages(bottom_of_stack, size_without_guard)?;
