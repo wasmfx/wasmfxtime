@@ -2,10 +2,12 @@
 
 use crate::runtime::vm::{Instance, VMGcRef, ValRaw, I31};
 use crate::store::AutoAssertNoGc;
-use crate::{prelude::*, StructRef, StructRefPre, StructType, Val};
+use crate::{
+    prelude::*, ArrayRef, ArrayRefPre, ArrayType, StructRef, StructRefPre, StructType, Val,
+};
 use smallvec::SmallVec;
 use wasmtime_environ::{
-    ConstExpr, ConstOp, FuncIndex, GlobalIndex, Module, ModuleInternedTypeIndex, WasmCompositeType,
+    ConstExpr, ConstOp, FuncIndex, GlobalIndex, ModuleInternedTypeIndex, WasmCompositeType,
     WasmSubType,
 };
 
@@ -19,15 +21,14 @@ pub struct ConstExprEvaluator {
 }
 
 /// The context within which a particular const expression is evaluated.
-pub struct ConstEvalContext<'a, 'b> {
-    instance: &'a mut Instance,
-    module: &'b Module,
+pub struct ConstEvalContext<'a> {
+    pub(crate) instance: &'a mut Instance,
 }
 
-impl<'a, 'b> ConstEvalContext<'a, 'b> {
+impl<'a> ConstEvalContext<'a> {
     /// Create a new context.
-    pub fn new(instance: &'a mut Instance, module: &'b Module) -> Self {
-        Self { instance, module }
+    pub fn new(instance: &'a mut Instance) -> Self {
+        Self { instance }
     }
 
     fn global_get(&mut self, store: &mut AutoAssertNoGc<'_>, index: GlobalIndex) -> Result<ValRaw> {
@@ -38,7 +39,10 @@ impl<'a, 'b> ConstEvalContext<'a, 'b> {
                 .as_ref()
                 .unwrap();
             let mut gc_store = store.unwrap_gc_store_mut();
-            Ok(global.to_val_raw(&mut gc_store, self.module.globals[index].wasm_ty))
+            Ok(global.to_val_raw(
+                &mut gc_store,
+                self.instance.env_module().globals[index].wasm_ty,
+            ))
         }
     }
 
@@ -86,8 +90,7 @@ impl<'a, 'b> ConstEvalContext<'a, 'b> {
             .zip(struct_ty.fields())
             .map(|(raw, ty)| {
                 let ty = ty.element_type().unpack();
-                let mut store = AutoAssertNoGc::new(store);
-                Val::_from_raw(&mut store, *raw, ty)
+                Val::_from_raw(store, *raw, ty)
             })
             .collect::<Vec<_>>();
 
@@ -163,7 +166,7 @@ impl ConstExprEvaluator {
     /// the correct type.
     pub unsafe fn eval(
         &mut self,
-        context: &mut ConstEvalContext<'_, '_>,
+        context: &mut ConstEvalContext<'_>,
         expr: &ConstExpr,
     ) -> Result<ValRaw> {
         self.stack.clear();
@@ -231,7 +234,11 @@ impl ConstExprEvaluator {
                 }
 
                 #[cfg(not(feature = "gc"))]
-                ConstOp::StructNew { .. } | ConstOp::StructNewDefault { .. } => {
+                ConstOp::StructNew { .. }
+                | ConstOp::StructNewDefault { .. }
+                | ConstOp::ArrayNew { .. }
+                | ConstOp::ArrayNewDefault { .. }
+                | ConstOp::ArrayNewFixed { .. } => {
                     bail!(
                         "const expr evaluation error: struct operations are not \
                          supported without the `gc` feature"
@@ -240,7 +247,8 @@ impl ConstExprEvaluator {
 
                 #[cfg(feature = "gc")]
                 ConstOp::StructNew { struct_type_index } => {
-                    let interned_type_index = context.module.types[*struct_type_index];
+                    let interned_type_index =
+                        context.instance.env_module().types[*struct_type_index];
                     let len = context.struct_fields_len(interned_type_index);
 
                     if self.stack.len() < len {
@@ -262,9 +270,103 @@ impl ConstExprEvaluator {
 
                 #[cfg(feature = "gc")]
                 ConstOp::StructNewDefault { struct_type_index } => {
-                    let interned_type_index = context.module.types[*struct_type_index];
+                    let interned_type_index =
+                        context.instance.env_module().types[*struct_type_index];
                     self.stack
                         .push(context.struct_new_default(&mut store, interned_type_index)?);
+                }
+
+                #[cfg(feature = "gc")]
+                ConstOp::ArrayNew { array_type_index } => {
+                    let interned_type_index =
+                        context.instance.env_module().types[*array_type_index];
+                    let module = context.instance.runtime_module().expect(
+                        "should never be allocating a struct type defined in a dummy module",
+                    );
+                    let shared_ty = module
+                        .signatures()
+                        .shared_type(interned_type_index)
+                        .expect("should have an engine type for module type");
+                    let ty = ArrayType::from_shared_type_index(store.engine(), shared_ty);
+
+                    #[allow(clippy::cast_sign_loss)]
+                    let len = self.pop()?.get_i32() as u32;
+
+                    let elem = Val::_from_raw(&mut store, self.pop()?, ty.element_type().unpack());
+
+                    let pre = ArrayRefPre::_new(&mut store, ty);
+                    let array = ArrayRef::_new(&mut store, &pre, &elem, len)?;
+
+                    self.stack
+                        .push(ValRaw::anyref(array.to_anyref()._to_raw(&mut store)?));
+                }
+
+                #[cfg(feature = "gc")]
+                ConstOp::ArrayNewDefault { array_type_index } => {
+                    let interned_type_index =
+                        context.instance.env_module().types[*array_type_index];
+                    let module = context.instance.runtime_module().expect(
+                        "should never be allocating a struct type defined in a dummy module",
+                    );
+                    let shared_ty = module
+                        .signatures()
+                        .shared_type(interned_type_index)
+                        .expect("should have an engine type for module type");
+                    let ty = ArrayType::from_shared_type_index(store.engine(), shared_ty);
+
+                    #[allow(clippy::cast_sign_loss)]
+                    let len = self.pop()?.get_i32() as u32;
+
+                    let elem = Val::default_for_ty(ty.element_type().unpack())
+                        .expect("type should have a default value");
+
+                    let pre = ArrayRefPre::_new(&mut store, ty);
+                    let array = ArrayRef::_new(&mut store, &pre, &elem, len)?;
+
+                    self.stack
+                        .push(ValRaw::anyref(array.to_anyref()._to_raw(&mut store)?));
+                }
+
+                #[cfg(feature = "gc")]
+                ConstOp::ArrayNewFixed {
+                    array_type_index,
+                    array_size,
+                } => {
+                    let interned_type_index =
+                        context.instance.env_module().types[*array_type_index];
+                    let module = context.instance.runtime_module().expect(
+                        "should never be allocating a struct type defined in a dummy module",
+                    );
+                    let shared_ty = module
+                        .signatures()
+                        .shared_type(interned_type_index)
+                        .expect("should have an engine type for module type");
+                    let ty = ArrayType::from_shared_type_index(store.engine(), shared_ty);
+
+                    let array_size = usize::try_from(*array_size).unwrap();
+                    if self.stack.len() < array_size {
+                        bail!(
+                            "const expr evaluation error: expected at least {array_size} values on the stack, found {}",
+                            self.stack.len()
+                        )
+                    }
+
+                    let start = self.stack.len() - array_size;
+
+                    let elem_ty = ty.element_type();
+                    let elem_ty = elem_ty.unpack();
+
+                    let elems = self
+                        .stack
+                        .drain(start..)
+                        .map(|raw| Val::_from_raw(&mut store, raw, elem_ty))
+                        .collect::<SmallVec<[_; 8]>>();
+
+                    let pre = ArrayRefPre::_new(&mut store, ty);
+                    let array = ArrayRef::_new_fixed(&mut store, &pre, &elems)?;
+
+                    self.stack
+                        .push(ValRaw::anyref(array.to_anyref()._to_raw(&mut store)?));
                 }
             }
         }

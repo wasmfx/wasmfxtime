@@ -165,12 +165,16 @@ pub mod wasmfx_pooling {
                 let bottom_of_stack = self
                     .stack_mapping
                     .as_ptr()
-                    .add((index * self.stack_size) + self.page_size)
+                    .add(index * self.stack_size)
                     .cast_mut();
 
                 commit_pages(bottom_of_stack, size_without_guard)?;
 
-                let stack = super::FiberStack::from_raw_parts(bottom_of_stack, size_without_guard)?;
+                let stack = super::FiberStack::from_raw_parts(
+                    bottom_of_stack,
+                    self.page_size,
+                    size_without_guard,
+                )?;
                 let continuation = &mut self.continuations[index];
                 Ok((continuation as *mut VMContRef, stack))
             }
@@ -206,7 +210,17 @@ pub mod wasmfx_pooling {
             // Remove the guard page from the size
             let stack_size = self.stack_size - self.page_size;
             let bottom_of_stack = top - stack_size;
-            let start_of_stack = bottom_of_stack - self.page_size;
+            let start_of_stack =
+                // TODO(dhil): The fiber and fibre
+                // interfaces/implementations are slightly out of
+                // sync; in one of them the page_size is part of the
+                // stack size, in the other it isn't. We should bring
+                // them into sync.
+                if cfg!(feature = "wasmfx_baseline") {
+                    bottom_of_stack - self.page_size
+                } else {
+                    bottom_of_stack
+                };
             assert!(start_of_stack >= base && start_of_stack < (base + len));
             assert!((start_of_stack - base) % self.stack_size == 0);
 

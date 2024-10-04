@@ -200,7 +200,7 @@ struct WasmFeatures {
     relaxed_simd: bool,
     extended_const: bool,
     function_references: bool,
-    typed_continuations: bool,
+    stack_switching: bool,
     gc: bool,
     custom_page_sizes: bool,
     component_model_more_flags: bool,
@@ -226,7 +226,6 @@ impl Metadata<'_> {
             extended_const,
             memory_control,
             function_references,
-            typed_continuations,
             gc,
             custom_page_sizes,
             shared_everything_threads,
@@ -236,6 +235,7 @@ impl Metadata<'_> {
             component_model_multiple_returns,
             legacy_exceptions,
             gc_types,
+            stack_switching,
 
             // Always on; we don't currently have knobs for these.
             mutable_global: _,
@@ -252,6 +252,7 @@ impl Metadata<'_> {
         assert!(!component_model_nested_names);
         assert!(!shared_everything_threads);
         assert!(!legacy_exceptions);
+        //assert!(!stack_switching); // NOTE(dhil): we are working on implementing it!
 
         Metadata {
             target: engine.compiler().triple().to_string(),
@@ -272,7 +273,7 @@ impl Metadata<'_> {
                 relaxed_simd,
                 extended_const,
                 function_references,
-                typed_continuations,
+                stack_switching,
                 gc,
                 custom_page_sizes,
                 component_model_more_flags,
@@ -484,12 +485,12 @@ impl Metadata<'_> {
             relaxed_simd,
             extended_const,
             function_references,
-            typed_continuations,
             gc,
             custom_page_sizes,
             component_model_more_flags,
             component_model_multiple_returns,
             gc_types,
+            stack_switching,
         } = self.features;
 
         use wasmparser::WasmFeatures as F;
@@ -560,9 +561,9 @@ impl Metadata<'_> {
             "WebAssembly relaxed-simd support",
         )?;
         Self::check_bool(
-            typed_continuations,
-            other.contains(F::TYPED_CONTINUATIONS),
-            "WebAssembly typed-continuations support",
+            stack_switching,
+            other.contains(F::STACK_SWITCHING),
+            "WebAssembly stack-switching support",
         )?;
         Self::check_bool(
             custom_page_sizes,

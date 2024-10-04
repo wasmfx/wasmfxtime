@@ -76,6 +76,7 @@
 //! contents of `StoreOpaque`. This is an invariant that we, as the authors of
 //! `wasmtime`, must uphold for the public interface to be safe.
 
+use crate::hash_set::HashSet;
 use crate::instance::InstanceData;
 use crate::linker::Definition;
 use crate::module::RegisteredModuleId;
@@ -100,7 +101,7 @@ use core::future::Future;
 use core::marker;
 use core::mem::{self, ManuallyDrop};
 use core::num::NonZeroU64;
-use core::ops::{Deref, DerefMut};
+use core::ops::{Deref, DerefMut, Range};
 use core::pin::Pin;
 use core::ptr;
 use core::task::{Context, Poll};
@@ -341,7 +342,7 @@ pub struct StoreOpaque {
     gc_roots: RootSet,
     gc_roots_list: GcRootsList,
     // Types for which the embedder has created an allocator for.
-    gc_host_alloc_types: hashbrown::HashSet<RegisteredType>,
+    gc_host_alloc_types: HashSet<RegisteredType>,
 
     // Numbers of resources instantiated in this store, and their limits
     instance_count: usize,
@@ -408,7 +409,26 @@ pub struct StoreOpaque {
 #[cfg(feature = "async")]
 struct AsyncState {
     current_suspend: UnsafeCell<*mut wasmtime_fiber::Suspend<Result<()>, (), Result<()>>>,
-    current_poll_cx: UnsafeCell<*mut Context<'static>>,
+    current_poll_cx: UnsafeCell<PollContext>,
+}
+
+#[cfg(feature = "async")]
+#[derive(Clone, Copy)]
+struct PollContext {
+    future_context: *mut Context<'static>,
+    guard_range_start: *mut u8,
+    guard_range_end: *mut u8,
+}
+
+#[cfg(feature = "async")]
+impl Default for PollContext {
+    fn default() -> PollContext {
+        PollContext {
+            future_context: core::ptr::null_mut(),
+            guard_range_start: core::ptr::null_mut(),
+            guard_range_end: core::ptr::null_mut(),
+        }
+    }
 }
 
 // Lots of pesky unsafe cells and pointers in this structure. This means we need
@@ -542,7 +562,7 @@ impl<T> Store<T> {
                 gc_store: None,
                 gc_roots: RootSet::default(),
                 gc_roots_list: GcRootsList::default(),
-                gc_host_alloc_types: hashbrown::HashSet::default(),
+                gc_host_alloc_types: HashSet::default(),
                 modules: ModuleRegistry::default(),
                 func_refs: FuncRefs::default(),
                 host_globals: Vec::new(),
@@ -555,7 +575,7 @@ impl<T> Store<T> {
                 #[cfg(feature = "async")]
                 async_state: AsyncState {
                     current_suspend: UnsafeCell::new(ptr::null_mut()),
-                    current_poll_cx: UnsafeCell::new(ptr::null_mut()),
+                    current_poll_cx: UnsafeCell::new(PollContext::default()),
                 },
                 fuel_reserve: 0,
                 fuel_yield_interval: None,
@@ -1350,7 +1370,7 @@ impl StoreOpaque {
     }
 
     pub(crate) fn fill_func_refs(&mut self) {
-        self.func_refs.fill(&mut self.modules);
+        self.func_refs.fill(&self.modules);
     }
 
     pub(crate) fn push_instance_pre_func_refs(&mut self, func_refs: Arc<[VMFuncRef]>) {
@@ -1807,13 +1827,13 @@ impl StoreOpaque {
         }
 
         let poll_cx_inner_ptr = unsafe { *poll_cx_box_ptr };
-        if poll_cx_inner_ptr.is_null() {
+        if poll_cx_inner_ptr.future_context.is_null() {
             return None;
         }
 
         Some(AsyncCx {
             current_suspend: self.async_state.current_suspend.get(),
-            current_poll_cx: poll_cx_box_ptr,
+            current_poll_cx: unsafe { core::ptr::addr_of_mut!((*poll_cx_box_ptr).future_context) },
             track_pkey_context_switch: self.pkey.is_some(),
         })
     }
@@ -2095,6 +2115,18 @@ at https://bytecodealliance.org/security.
 
         self.num_component_instances += 1;
     }
+
+    pub(crate) fn async_guard_range(&self) -> Range<*mut u8> {
+        #[cfg(feature = "async")]
+        unsafe {
+            let ptr = self.async_state.current_poll_cx.get();
+            (*ptr).guard_range_start..(*ptr).guard_range_end
+        }
+        #[cfg(not(feature = "async"))]
+        {
+            core::ptr::null_mut()..core::ptr::null_mut()
+        }
+    }
 }
 
 impl<T> StoreContextMut<'_, T> {
@@ -2165,7 +2197,7 @@ impl<T> StoreContextMut<'_, T> {
 
         struct FiberFuture<'a> {
             fiber: Option<wasmtime_fiber::Fiber<'a, Result<()>, (), Result<()>>>,
-            current_poll_cx: *mut *mut Context<'static>,
+            current_poll_cx: *mut PollContext,
             engine: Engine,
             // See comments in `FiberFuture::resume` for this
             state: Option<crate::runtime::vm::AsyncWasmCallState>,
@@ -2301,10 +2333,21 @@ impl<T> StoreContextMut<'_, T> {
                 // On exit from this function, though, we reset the polling
                 // context back to what it was to signify that `Store` no longer
                 // has access to this pointer.
+                let guard = self
+                    .fiber()
+                    .stack()
+                    .guard_range()
+                    .unwrap_or(core::ptr::null_mut()..core::ptr::null_mut());
                 unsafe {
                     let _reset = Reset(self.current_poll_cx, *self.current_poll_cx);
-                    *self.current_poll_cx =
-                        core::mem::transmute::<&mut Context<'_>, *mut Context<'static>>(cx);
+                    *self.current_poll_cx = PollContext {
+                        future_context: core::mem::transmute::<
+                            &mut Context<'_>,
+                            *mut Context<'static>,
+                        >(cx),
+                        guard_range_start: guard.start,
+                        guard_range_end: guard.end,
+                    };
 
                     // After that's set up we resume execution of the fiber, which
                     // may also start the fiber for the first time. This either

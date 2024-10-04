@@ -30,10 +30,9 @@
 
 use crate::{
     DefinedGlobalIndex, DefinedMemoryIndex, DefinedTableIndex, DefinedTagIndex, FuncIndex,
-    FuncRefIndex, GlobalIndex, MemoryIndex, Module, TableIndex, TagIndex,
+    FuncRefIndex, GlobalIndex, MemoryIndex, Module, OwnedMemoryIndex, TableIndex, TagIndex,
 };
 use cranelift_entity::packed_option::ReservedValue;
-use wasmtime_types::OwnedMemoryIndex;
 
 #[cfg(target_pointer_width = "32")]
 fn cast_to_u32(sz: usize) -> u32 {

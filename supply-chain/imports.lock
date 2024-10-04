@@ -815,6 +815,13 @@ user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
+[[publisher.clap_complete]]
+version = "4.5.28"
+when = "2024-09-17"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
 [[publisher.clap_derive]]
 version = "4.3.12"
 when = "2023-07-14"
@@ -1049,18 +1056,6 @@ user-id = 73222
 user-login = "wasmtime-publish"
 
 [[publisher.cranelift-serde]]
-version = "0.111.0"
-when = "2024-08-20"
-user-id = 73222
-user-login = "wasmtime-publish"
-
-[[publisher.cranelift-wasm]]
-version = "0.110.1"
-when = "2024-07-22"
-user-id = 73222
-user-login = "wasmtime-publish"
-
-[[publisher.cranelift-wasm]]
 version = "0.111.0"
 when = "2024-08-20"
 user-id = 73222
@@ -1387,13 +1382,6 @@ user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
-[[publisher.scopeguard]]
-version = "1.1.0"
-when = "2020-02-16"
-user-id = 2915
-user-login = "Amanieu"
-user-name = "Amanieu d'Antras"
-
 [[publisher.serde]]
 version = "1.0.188"
 when = "2023-08-26"
@@ -1604,6 +1592,12 @@ when = "2024-09-10"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wasm-encoder]]
+version = "0.218.0"
+when = "2024-09-30"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wasm-metadata]]
 version = "0.214.0"
 when = "2024-07-16"
@@ -1628,6 +1622,12 @@ when = "2024-09-10"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wasm-metadata]]
+version = "0.218.0"
+when = "2024-09-30"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wasmparser]]
 version = "0.214.0"
 when = "2024-07-16"
@@ -1652,6 +1652,12 @@ when = "2024-09-10"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wasmparser]]
+version = "0.218.0"
+when = "2024-09-30"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wasmprinter]]
 version = "0.214.0"
 when = "2024-07-16"
@@ -1673,6 +1679,12 @@ user-login = "wasmtime-publish"
 [[publisher.wasmprinter]]
 version = "0.217.0"
 when = "2024-09-10"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wasmprinter]]
+version = "0.218.0"
+when = "2024-09-30"
 user-id = 73222
 user-login = "wasmtime-publish"
 
@@ -1839,18 +1851,6 @@ user-id = 73222
 user-login = "wasmtime-publish"
 
 [[publisher.wasmtime-slab]]
-version = "24.0.0"
-when = "2024-08-20"
-user-id = 73222
-user-login = "wasmtime-publish"
-
-[[publisher.wasmtime-types]]
-version = "23.0.1"
-when = "2024-07-22"
-user-id = 73222
-user-login = "wasmtime-publish"
-
-[[publisher.wasmtime-types]]
 version = "24.0.0"
 when = "2024-08-20"
 user-id = 73222
@@ -1988,6 +1988,12 @@ when = "2024-09-10"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wast]]
+version = "218.0.0"
+when = "2024-09-30"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wat]]
 version = "1.214.0"
 when = "2024-07-16"
@@ -2009,6 +2015,12 @@ user-login = "wasmtime-publish"
 [[publisher.wat]]
 version = "1.217.0"
 when = "2024-09-10"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wat]]
+version = "1.218.0"
+when = "2024-09-30"
 user-id = 73222
 user-login = "wasmtime-publish"
 
@@ -2335,6 +2347,12 @@ when = "2024-09-10"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wit-bindgen]]
+version = "0.33.0"
+when = "2024-09-30"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wit-bindgen-core]]
 version = "0.28.0"
 when = "2024-07-16"
@@ -2365,6 +2383,12 @@ when = "2024-09-10"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wit-bindgen-core]]
+version = "0.33.0"
+when = "2024-09-30"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wit-bindgen-rt]]
 version = "0.28.0"
 when = "2024-07-16"
@@ -2395,6 +2419,12 @@ when = "2024-09-10"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wit-bindgen-rt]]
+version = "0.33.0"
+when = "2024-09-30"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wit-bindgen-rust]]
 version = "0.28.0"
 when = "2024-07-16"
@@ -2425,6 +2455,12 @@ when = "2024-09-10"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wit-bindgen-rust]]
+version = "0.33.0"
+when = "2024-09-30"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wit-bindgen-rust-macro]]
 version = "0.28.0"
 when = "2024-07-16"
@@ -2452,6 +2488,12 @@ user-login = "wasmtime-publish"
 [[publisher.wit-bindgen-rust-macro]]
 version = "0.32.0"
 when = "2024-09-10"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wit-bindgen-rust-macro]]
+version = "0.33.0"
+when = "2024-09-30"
 user-id = 73222
 user-login = "wasmtime-publish"
 
@@ -2479,6 +2521,12 @@ when = "2024-09-10"
 user-id = 73222
 user-login = "wasmtime-publish"
 
+[[publisher.wit-component]]
+version = "0.218.0"
+when = "2024-09-30"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[publisher.wit-parser]]
 version = "0.214.0"
 when = "2024-07-16"
@@ -2500,6 +2548,12 @@ user-login = "wasmtime-publish"
 [[publisher.wit-parser]]
 version = "0.217.0"
 when = "2024-09-10"
+user-id = 73222
+user-login = "wasmtime-publish"
+
+[[publisher.wit-parser]]
+version = "0.218.0"
+when = "2024-09-30"
 user-id = 73222
 user-login = "wasmtime-publish"
 
@@ -2658,6 +2712,11 @@ who = "Brandon Pitman <bran@bran.land>"
 criteria = "safe-to-run"
 delta = "0.4.0 -> 0.5.1"
 
+[[audits.isrg.audits.either]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+version = "1.6.1"
+
 [[audits.isrg.audits.once_cell]]
 who = "Brandon Pitman <bran@bran.land>"
 criteria = "safe-to-deploy"
@@ -2810,6 +2869,25 @@ criteria = "safe-to-deploy"
 delta = "1.0.78 -> 1.0.83"
 aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.crossbeam-utils]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "0.8.11 -> 0.8.14"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.crossbeam-utils]]
+who = "Jan-Erik Rediger <jrediger@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.14 -> 0.8.19"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.crossbeam-utils]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.19 -> 0.8.20"
+notes = "Minor changes."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
 [[audits.mozilla.audits.crypto-common]]
 who = "Mike Hommey <mh+mozilla@glandium.org>"
 criteria = "safe-to-deploy"
@@ -2832,6 +2910,24 @@ Straightforward crate providing the Either enum and trait implementations with
 no unsafe code.
 """
 aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.either]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "1.6.1 -> 1.7.0"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.either]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "1.7.0 -> 1.8.0"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.either]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "1.8.0 -> 1.8.1"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.encoding_rs]]
 who = "Henri Sivonen <hsivonen@hsivonen.fi>"

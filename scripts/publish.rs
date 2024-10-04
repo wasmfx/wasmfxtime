@@ -23,7 +23,6 @@ const CRATES_TO_PUBLISH: &[&str] = &[
     // cranelift
     "cranelift-isle",
     "cranelift-entity",
-    "wasmtime-types",
     "cranelift-bforest",
     "cranelift-codegen-shared",
     "cranelift-codegen-meta",
@@ -34,7 +33,6 @@ const CRATES_TO_PUBLISH: &[&str] = &[
     "cranelift-serde",
     "cranelift-module",
     "cranelift-frontend",
-    "cranelift-wasm",
     "cranelift-native",
     "cranelift-object",
     "cranelift-interpreter",
@@ -109,7 +107,6 @@ const PUBLIC_CRATES: &[&str] = &[
     "cranelift-serde",
     "cranelift-module",
     "cranelift-frontend",
-    "cranelift-wasm",
     "cranelift-native",
     "cranelift-object",
     "cranelift-interpreter",

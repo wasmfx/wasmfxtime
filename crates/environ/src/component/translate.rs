@@ -3,8 +3,9 @@ use crate::prelude::*;
 use crate::Module;
 use crate::ScopeVec;
 use crate::{
-    EntityIndex, ModuleEnvironment, ModuleTranslation, ModuleTypesBuilder, PrimaryMap, Tunables,
-    TypeConvert, WasmHeapType, WasmValType,
+    EngineOrModuleTypeIndex, EntityIndex, ModuleEnvironment, ModuleInternedTypeIndex,
+    ModuleTranslation, ModuleTypesBuilder, PrimaryMap, Tunables, TypeConvert, WasmHeapType,
+    WasmResult, WasmValType,
 };
 use anyhow::anyhow;
 use anyhow::{bail, Result};
@@ -16,8 +17,6 @@ use wasmparser::types::{
     ComponentInstanceTypeId, Types,
 };
 use wasmparser::{Chunk, ComponentImportName, Encoding, Parser, Payload, Validator};
-use wasmtime_types::ModuleInternedTypeIndex;
-use wasmtime_types::WasmResult;
 
 mod adapt;
 pub use self::adapt::*;
@@ -523,6 +522,11 @@ impl<'a, 'data> Translator<'a, 'data> {
                             core_func_index += 1;
                             LocalInitializer::ResourceRep(resource, ty)
                         }
+
+                        wasmparser::CanonicalFunction::ThreadSpawn { .. }
+                        | wasmparser::CanonicalFunction::ThreadHwConcurrency => {
+                            bail!("unsupported intrinsic")
+                        }
                     };
                     self.result.initializers.push(init);
                 }
@@ -982,10 +986,7 @@ mod pre_inlining {
             self.types.lookup_heap_type(index)
         }
 
-        fn lookup_type_index(
-            &self,
-            index: wasmparser::UnpackedIndex,
-        ) -> wasmtime_types::EngineOrModuleTypeIndex {
+        fn lookup_type_index(&self, index: wasmparser::UnpackedIndex) -> EngineOrModuleTypeIndex {
             self.types.lookup_type_index(index)
         }
     }

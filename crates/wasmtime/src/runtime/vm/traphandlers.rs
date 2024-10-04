@@ -18,6 +18,7 @@ use crate::runtime::vm::{Instance, VMContext, VMOpaqueContext, VMRuntimeLimits};
 use crate::sync::RwLock;
 use core::cell::{Cell, UnsafeCell};
 use core::mem::MaybeUninit;
+use core::ops::Range;
 use core::ptr;
 
 pub use self::backtrace::Backtrace;
@@ -247,6 +248,7 @@ pub unsafe fn catch_traps<F>(
     signal_handler: Option<*const SignalHandler<'static>>,
     capture_backtrace: bool,
     capture_coredump: bool,
+    async_guard_range: Range<*mut u8>,
     caller: *mut VMContext,
     callee: *mut VMOpaqueContext,
     mut closure: F,
@@ -264,6 +266,7 @@ where
         capture_coredump,
         *limits,
         callee_stack_chain,
+        async_guard_range,
     )
     .with(|cx| {
         traphandlers::wasmtime_setjmp(
@@ -341,6 +344,8 @@ mod call_thread_state {
         pub(crate) callee_stack_chain: Option<*const StackChainCell>,
 
         pub(super) prev: Cell<tls::Ptr>,
+        #[cfg_attr(any(windows, miri), allow(dead_code))]
+        pub(crate) async_guard_range: Range<*mut u8>,
 
         // The values of `VMRuntimeLimits::last_wasm_{exit_{pc,fp},entry_sp}`
         // for the *previous* `CallThreadState` for this same store/limits. Our
@@ -381,6 +386,7 @@ mod call_thread_state {
             capture_coredump: bool,
             limits: *const VMRuntimeLimits,
             callee_stack_chain: Option<*const StackChainCell>,
+            async_guard_range: Range<*mut u8>,
         ) -> CallThreadState {
             let _ = capture_coredump;
 
@@ -393,6 +399,7 @@ mod call_thread_state {
                 capture_coredump,
                 limits,
                 callee_stack_chain,
+                async_guard_range,
                 prev: Cell::new(ptr::null()),
                 old_last_wasm_exit_fp: Cell::new(unsafe { *(*limits).last_wasm_exit_fp.get() }),
                 old_last_wasm_exit_pc: Cell::new(unsafe { *(*limits).last_wasm_exit_pc.get() }),

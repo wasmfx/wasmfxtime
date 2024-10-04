@@ -134,7 +134,7 @@ impl TablePool {
                 crate::vm::table::wasm_to_table_type(table_plan.table.ref_type).element_size();
 
             unsafe {
-                commit_pages(base as *mut u8, self.table_elements * element_size)?;
+                commit_pages(base, self.table_elements * element_size)?;
             }
 
             let ptr = NonNull::new(std::ptr::slice_from_raw_parts_mut(

@@ -1055,6 +1055,15 @@ Nothing outside the realm of what one would expect from a bitflags generator,
 all as expected.
 """
 
+[[audits.bitflags]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "2.4.1 -> 2.6.0"
+notes = """
+Changes in how macros are invoked and various bits and pieces of macro-fu.
+Otherwise no major changes and nothing dealing with `unsafe`.
+"""
+
 [[audits.block-buffer]]
 who = "Benjamin Bouvier <public@benj.me>"
 criteria = "safe-to-deploy"
@@ -1329,6 +1338,12 @@ criteria = "safe-to-deploy"
 version = "0.7.1"
 notes = "This library has many uses of unsafe, but contains extensive fuzzing and miri testing."
 
+[[audits.console]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.15.0 -> 0.15.8"
+notes = "Lots of internal refactorings for new features and such, nothing major out of place."
+
 [[audits.constant_time_eq]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"
@@ -1415,6 +1430,18 @@ other words everything is as one would expect from a minor update for this
 crate.
 """
 
+[[audits.crossbeam-epoch]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.9.15 -> 0.9.18"
+notes = "Nontrivial update but mostly around dependencies and how `unsafe` code is managed. Everything looks the same shape as before."
+
+[[audits.crossbeam-utils]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.10 -> 0.8.11"
+notes = "No changes of substance, only minor updates around how `unsafe` code is managed but it's all trivially the same as before"
+
 [[audits.crypto-common]]
 who = "Benjamin Bouvier <public@benj.me>"
 criteria = "safe-to-deploy"
@@ -1451,6 +1478,12 @@ notes = """
 This diff brings in a number of minor updates of which none are related to
 `unsafe` code or anything system-related like filesystems.
 """
+
+[[audits.either]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "1.8.1 -> 1.13.0"
+notes = "More utilities and such for the `Either` type, no `unsafe` code."
 
 [[audits.embedded-io]]
 who = "Alex Crichton <alex@alexcrichton.com>"
@@ -2125,6 +2158,12 @@ criteria = "safe-to-deploy"
 delta = "0.7.1 -> 0.8.0"
 notes = "Minor updates, using new Rust features like `const`, no major changes."
 
+[[audits.miniz_oxide]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.0 -> 0.7.4"
+notes = "Very few changes here, only minor updates here and there."
+
 [[audits.mio]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
@@ -2457,6 +2496,18 @@ criteria = "safe-to-deploy"
 delta = "0.6.1 -> 0.7.0"
 notes = "The Bytecode Alliance is the author of this crate."
 
+[[audits.region]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "2.2.0 -> 3.0.2"
+notes = """
+This release brings a number of refactorings and new platforms to be supported
+in the crate. Lots of `unsafe` code because that's what the crate is
+fundamentally doing, managing virtual memory. That being said it's all largely
+the same as before where it's all as expected and the `unsafe` has to do with
+managing OS APIs.
+"""
+
 [[audits.rustc-demangle]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
@@ -2694,6 +2745,18 @@ notes = "Minor updates here, nothing major."
 who = "Pat Hickey <phickey@fastly.com>"
 criteria = "safe-to-deploy"
 version = "0.2.11"
+
+[[audits.test-log]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-run"
+delta = "0.2.11 -> 0.2.16"
+notes = "Crate implementation was moved to a `*-macros` crate, crate is very small as a result."
+
+[[audits.test-log-macros]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-run"
+version = "0.2.16"
+notes = "Simple procedural macro copied from its previous source."
 
 [[audits.thread_local]]
 who = "Pat Hickey <phickey@fastly.com>"
@@ -3783,6 +3846,12 @@ criteria = "safe-to-deploy"
 user-id = 6743 # Ed Page (epage)
 start = "2023-03-28"
 end = "2025-09-20"
+
+[[trusted.clap_complete]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2021-12-31"
+end = "2025-09-25"
 
 [[trusted.clap_derive]]
 criteria = "safe-to-deploy"

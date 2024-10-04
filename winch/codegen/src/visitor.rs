@@ -10,12 +10,12 @@ use crate::masm::{
     DivKind, ExtendKind, FloatCmpKind, IntCmpKind, MacroAssembler, MemMoveDirection, OperandSize,
     RegImm, RemKind, RoundingMode, SPOffset, ShiftKind, TruncKind,
 };
-use crate::reg::Reg;
+use crate::reg::{writable, Reg};
 use crate::stack::{TypedReg, Val};
-use cranelift_codegen::ir::TrapCode;
 use regalloc2::RegClass;
 use smallvec::SmallVec;
 use wasmparser::{BlockType, BrTable, Ieee32, Ieee64, MemArg, VisitOperator, V128};
+use wasmtime_cranelift::TRAP_INDIRECT_CALL_TO_NULL;
 use wasmtime_environ::{
     FuncIndex, GlobalIndex, MemoryIndex, TableIndex, TableStyle, TypeIndex, WasmHeapType,
     WasmValType, FUNCREF_INIT_BIT,
@@ -28,7 +28,7 @@ use wasmtime_environ::{
 /// 2. Defines the visitor function and panics when
 ///    matching an unsupported operator.
 macro_rules! def_unsupported {
-    ($( @$proposal:ident $op:ident $({ $($arg:ident: $argty:ty),* })? => $visit:ident)*) => {
+    ($( @$proposal:ident $op:ident $({ $($arg:ident: $argty:ty),* })? => $visit:ident $ann:tt)*) => {
         $(
             def_unsupported!(
                 emit
@@ -223,7 +223,6 @@ macro_rules! def_unsupported {
     (emit I64Load32U $($rest:tt)*) => {};
     (emit I64Load $($rest:tt)*) => {};
     (emit I32Store $($rest:tt)*) => {};
-    (emit I32Store $($rest:tt)*) => {};
     (emit I32Store8 $($rest:tt)*) => {};
     (emit I32Store16 $($rest:tt)*) => {};
     (emit I64Store $($rest:tt)*) => {};
@@ -279,7 +278,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_add(dst, dst, src, size);
+                masm.float_add(writable!(dst), dst, src, size);
                 TypedReg::f32(dst)
             },
         );
@@ -290,7 +289,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_add(dst, dst, src, size);
+                masm.float_add(writable!(dst), dst, src, size);
                 TypedReg::f64(dst)
             },
         );
@@ -301,7 +300,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_sub(dst, dst, src, size);
+                masm.float_sub(writable!(dst), dst, src, size);
                 TypedReg::f32(dst)
             },
         );
@@ -312,7 +311,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_sub(dst, dst, src, size);
+                masm.float_sub(writable!(dst), dst, src, size);
                 TypedReg::f64(dst)
             },
         );
@@ -323,7 +322,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_mul(dst, dst, src, size);
+                masm.float_mul(writable!(dst), dst, src, size);
                 TypedReg::f32(dst)
             },
         );
@@ -334,7 +333,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_mul(dst, dst, src, size);
+                masm.float_mul(writable!(dst), dst, src, size);
                 TypedReg::f64(dst)
             },
         );
@@ -345,7 +344,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_div(dst, dst, src, size);
+                masm.float_div(writable!(dst), dst, src, size);
                 TypedReg::f32(dst)
             },
         );
@@ -356,7 +355,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_div(dst, dst, src, size);
+                masm.float_div(writable!(dst), dst, src, size);
                 TypedReg::f64(dst)
             },
         );
@@ -367,7 +366,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_min(dst, dst, src, size);
+                masm.float_min(writable!(dst), dst, src, size);
                 TypedReg::f32(dst)
             },
         );
@@ -378,7 +377,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_min(dst, dst, src, size);
+                masm.float_min(writable!(dst), dst, src, size);
                 TypedReg::f64(dst)
             },
         );
@@ -389,7 +388,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_max(dst, dst, src, size);
+                masm.float_max(writable!(dst), dst, src, size);
                 TypedReg::f32(dst)
             },
         );
@@ -400,7 +399,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_max(dst, dst, src, size);
+                masm.float_max(writable!(dst), dst, src, size);
                 TypedReg::f64(dst)
             },
         );
@@ -411,7 +410,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_copysign(dst, dst, src, size);
+                masm.float_copysign(writable!(dst), dst, src, size);
                 TypedReg::f32(dst)
             },
         );
@@ -422,7 +421,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src, size| {
-                masm.float_copysign(dst, dst, src, size);
+                masm.float_copysign(writable!(dst), dst, src, size);
                 TypedReg::f64(dst)
             },
         );
@@ -431,7 +430,7 @@ where
     fn visit_f32_abs(&mut self) {
         self.context
             .unop(self.masm, OperandSize::S32, &mut |masm, reg, size| {
-                masm.float_abs(reg, size);
+                masm.float_abs(writable!(reg), size);
                 TypedReg::f32(reg)
             });
     }
@@ -439,7 +438,7 @@ where
     fn visit_f64_abs(&mut self) {
         self.context
             .unop(self.masm, OperandSize::S64, &mut |masm, reg, size| {
-                masm.float_abs(reg, size);
+                masm.float_abs(writable!(reg), size);
                 TypedReg::f64(reg)
             });
     }
@@ -447,7 +446,7 @@ where
     fn visit_f32_neg(&mut self) {
         self.context
             .unop(self.masm, OperandSize::S32, &mut |masm, reg, size| {
-                masm.float_neg(reg, size);
+                masm.float_neg(writable!(reg), size);
                 TypedReg::f32(reg)
             });
     }
@@ -455,7 +454,7 @@ where
     fn visit_f64_neg(&mut self) {
         self.context
             .unop(self.masm, OperandSize::S64, &mut |masm, reg, size| {
-                masm.float_neg(reg, size);
+                masm.float_neg(writable!(reg), size);
                 TypedReg::f64(reg)
             });
     }
@@ -567,7 +566,7 @@ where
     fn visit_f32_sqrt(&mut self) {
         self.context
             .unop(self.masm, OperandSize::S32, &mut |masm, reg, size| {
-                masm.float_sqrt(reg, reg, size);
+                masm.float_sqrt(writable!(reg), reg, size);
                 TypedReg::f32(reg)
             });
     }
@@ -575,7 +574,7 @@ where
     fn visit_f64_sqrt(&mut self) {
         self.context
             .unop(self.masm, OperandSize::S64, &mut |masm, reg, size| {
-                masm.float_sqrt(reg, reg, size);
+                masm.float_sqrt(writable!(reg), reg, size);
                 TypedReg::f64(reg)
             });
     }
@@ -585,7 +584,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Eq, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Eq, size);
             },
         );
     }
@@ -595,7 +594,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Eq, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Eq, size);
             },
         );
     }
@@ -605,7 +604,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Ne, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Ne, size);
             },
         );
     }
@@ -615,7 +614,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Ne, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Ne, size);
             },
         );
     }
@@ -625,7 +624,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Lt, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Lt, size);
             },
         );
     }
@@ -635,7 +634,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Lt, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Lt, size);
             },
         );
     }
@@ -645,7 +644,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Gt, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Gt, size);
             },
         );
     }
@@ -655,7 +654,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Gt, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Gt, size);
             },
         );
     }
@@ -665,7 +664,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Le, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Le, size);
             },
         );
     }
@@ -675,7 +674,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Le, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Le, size);
             },
         );
     }
@@ -685,7 +684,7 @@ where
             self.masm,
             OperandSize::S32,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Ge, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Ge, size);
             },
         );
     }
@@ -695,7 +694,7 @@ where
             self.masm,
             OperandSize::S64,
             &mut |masm: &mut M, dst, src1, src2, size| {
-                masm.float_cmp_with_set(src1, src2, dst, FloatCmpKind::Ge, size);
+                masm.float_cmp_with_set(writable!(dst), src1, src2, FloatCmpKind::Ge, size);
             },
         );
     }
@@ -703,7 +702,7 @@ where
     fn visit_f32_convert_i32_s(&mut self) {
         self.context
             .convert_op(self.masm, WasmValType::F32, |masm, dst, src, dst_size| {
-                masm.signed_convert(src, dst, OperandSize::S32, dst_size);
+                masm.signed_convert(writable!(dst), src, OperandSize::S32, dst_size);
             });
     }
 
@@ -713,7 +712,7 @@ where
             WasmValType::F32,
             RegClass::Int,
             |masm, dst, src, tmp_gpr, dst_size| {
-                masm.unsigned_convert(src, dst, tmp_gpr, OperandSize::S32, dst_size);
+                masm.unsigned_convert(writable!(dst), src, tmp_gpr, OperandSize::S32, dst_size);
             },
         );
     }
@@ -721,7 +720,7 @@ where
     fn visit_f32_convert_i64_s(&mut self) {
         self.context
             .convert_op(self.masm, WasmValType::F32, |masm, dst, src, dst_size| {
-                masm.signed_convert(src, dst, OperandSize::S64, dst_size);
+                masm.signed_convert(writable!(dst), src, OperandSize::S64, dst_size);
             });
     }
 
@@ -731,7 +730,7 @@ where
             WasmValType::F32,
             RegClass::Int,
             |masm, dst, src, tmp_gpr, dst_size| {
-                masm.unsigned_convert(src, dst, tmp_gpr, OperandSize::S64, dst_size);
+                masm.unsigned_convert(writable!(dst), src, tmp_gpr, OperandSize::S64, dst_size);
             },
         );
     }
@@ -739,7 +738,7 @@ where
     fn visit_f64_convert_i32_s(&mut self) {
         self.context
             .convert_op(self.masm, WasmValType::F64, |masm, dst, src, dst_size| {
-                masm.signed_convert(src, dst, OperandSize::S32, dst_size);
+                masm.signed_convert(writable!(dst), src, OperandSize::S32, dst_size);
             });
     }
 
@@ -749,7 +748,7 @@ where
             WasmValType::F64,
             RegClass::Int,
             |masm, dst, src, tmp_gpr, dst_size| {
-                masm.unsigned_convert(src, dst, tmp_gpr, OperandSize::S32, dst_size);
+                masm.unsigned_convert(writable!(dst), src, tmp_gpr, OperandSize::S32, dst_size);
             },
         );
     }
@@ -757,7 +756,7 @@ where
     fn visit_f64_convert_i64_s(&mut self) {
         self.context
             .convert_op(self.masm, WasmValType::F64, |masm, dst, src, dst_size| {
-                masm.signed_convert(src, dst, OperandSize::S64, dst_size);
+                masm.signed_convert(writable!(dst), src, OperandSize::S64, dst_size);
             });
     }
 
@@ -767,7 +766,7 @@ where
             WasmValType::F64,
             RegClass::Int,
             |masm, dst, src, tmp_gpr, dst_size| {
-                masm.unsigned_convert(src, dst, tmp_gpr, OperandSize::S64, dst_size);
+                masm.unsigned_convert(writable!(dst), src, tmp_gpr, OperandSize::S64, dst_size);
             },
         );
     }
@@ -775,21 +774,21 @@ where
     fn visit_f32_reinterpret_i32(&mut self) {
         self.context
             .convert_op(self.masm, WasmValType::F32, |masm, dst, src, size| {
-                masm.reinterpret_int_as_float(src.into(), dst, size);
+                masm.reinterpret_int_as_float(writable!(dst), src.into(), size);
             });
     }
 
     fn visit_f64_reinterpret_i64(&mut self) {
         self.context
             .convert_op(self.masm, WasmValType::F64, |masm, dst, src, size| {
-                masm.reinterpret_int_as_float(src.into(), dst, size);
+                masm.reinterpret_int_as_float(writable!(dst), src.into(), size);
             });
     }
 
     fn visit_f32_demote_f64(&mut self) {
         self.context
             .unop(self.masm, OperandSize::S64, &mut |masm, reg, _size| {
-                masm.demote(reg, reg);
+                masm.demote(writable!(reg), reg);
                 TypedReg::f32(reg)
             });
     }
@@ -797,49 +796,49 @@ where
     fn visit_f64_promote_f32(&mut self) {
         self.context
             .unop(self.masm, OperandSize::S32, &mut |masm, reg, _size| {
-                masm.promote(reg, reg);
+                masm.promote(writable!(reg), reg);
                 TypedReg::f64(reg)
             });
     }
 
     fn visit_i32_add(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
-            masm.add(dst, dst, src, size);
+            masm.add(writable!(dst), dst, src, size);
             TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_add(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
-            masm.add(dst, dst, src, size);
+            masm.add(writable!(dst), dst, src, size);
             TypedReg::i64(dst)
         });
     }
 
     fn visit_i32_sub(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
-            masm.sub(dst, dst, src, size);
+            masm.sub(writable!(dst), dst, src, size);
             TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_sub(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
-            masm.sub(dst, dst, src, size);
+            masm.sub(writable!(dst), dst, src, size);
             TypedReg::i64(dst)
         });
     }
 
     fn visit_i32_mul(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
-            masm.mul(dst, dst, src, size);
+            masm.mul(writable!(dst), dst, src, size);
             TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_mul(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
-            masm.mul(dst, dst, src, size);
+            masm.mul(writable!(dst), dst, src, size);
             TypedReg::i64(dst)
         });
     }
@@ -984,7 +983,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S32, &mut |masm, reg, size| {
-            masm.cmp_with_set(RegImm::i32(0), reg.into(), IntCmpKind::Eq, size);
+            masm.cmp_with_set(writable!(reg.into()), RegImm::i32(0), IntCmpKind::Eq, size);
             TypedReg::i32(reg)
         });
     }
@@ -993,7 +992,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S64, &mut |masm, reg, size| {
-            masm.cmp_with_set(RegImm::i64(0), reg.into(), IntCmpKind::Eq, size);
+            masm.cmp_with_set(writable!(reg.into()), RegImm::i64(0), IntCmpKind::Eq, size);
             TypedReg::i32(reg) // Return value for `i64.eqz` is an `i32`.
         });
     }
@@ -1002,7 +1001,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S32, &mut |masm, reg, size| {
-            masm.clz(reg, reg, size);
+            masm.clz(writable!(reg), reg, size);
             TypedReg::i32(reg)
         });
     }
@@ -1011,7 +1010,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S64, &mut |masm, reg, size| {
-            masm.clz(reg, reg, size);
+            masm.clz(writable!(reg), reg, size);
             TypedReg::i64(reg)
         });
     }
@@ -1020,7 +1019,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S32, &mut |masm, reg, size| {
-            masm.ctz(reg, reg, size);
+            masm.ctz(writable!(reg), reg, size);
             TypedReg::i32(reg)
         });
     }
@@ -1029,49 +1028,49 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S64, &mut |masm, reg, size| {
-            masm.ctz(reg, reg, size);
+            masm.ctz(writable!(reg), reg, size);
             TypedReg::i64(reg)
         });
     }
 
     fn visit_i32_and(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
-            masm.and(dst, dst, src, size);
+            masm.and(writable!(dst), dst, src, size);
             TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_and(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
-            masm.and(dst, dst, src, size);
+            masm.and(writable!(dst), dst, src, size);
             TypedReg::i64(dst)
         });
     }
 
     fn visit_i32_or(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
-            masm.or(dst, dst, src, size);
+            masm.or(writable!(dst), dst, src, size);
             TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_or(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
-            masm.or(dst, dst, src, size);
+            masm.or(writable!(dst), dst, src, size);
             TypedReg::i64(dst)
         });
     }
 
     fn visit_i32_xor(&mut self) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
-            masm.xor(dst, dst, src, size);
+            masm.xor(writable!(dst), dst, src, size);
             TypedReg::i32(dst)
         });
     }
 
     fn visit_i64_xor(&mut self) {
         self.context.i64_binop(self.masm, |masm, dst, src, size| {
-            masm.xor(dst, dst, src, size);
+            masm.xor(writable!(dst), dst, src, size);
             TypedReg::i64(dst)
         });
     }
@@ -1160,7 +1159,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S64, &mut |masm, reg, _size| {
-            masm.wrap(reg, reg);
+            masm.wrap(writable!(reg), reg);
             TypedReg::i32(reg)
         });
     }
@@ -1169,7 +1168,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S32, &mut |masm, reg, _size| {
-            masm.extend(reg, reg, ExtendKind::I64ExtendI32S);
+            masm.extend(writable!(reg), reg, ExtendKind::I64ExtendI32S);
             TypedReg::i64(reg)
         });
     }
@@ -1178,7 +1177,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S32, &mut |masm, reg, _size| {
-            masm.extend(reg, reg, ExtendKind::I64ExtendI32U);
+            masm.extend(writable!(reg), reg, ExtendKind::I64ExtendI32U);
             TypedReg::i64(reg)
         });
     }
@@ -1187,7 +1186,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S32, &mut |masm, reg, _size| {
-            masm.extend(reg, reg, ExtendKind::I32Extend8S);
+            masm.extend(writable!(reg), reg, ExtendKind::I32Extend8S);
             TypedReg::i32(reg)
         });
     }
@@ -1196,7 +1195,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S32, &mut |masm, reg, _size| {
-            masm.extend(reg, reg, ExtendKind::I32Extend16S);
+            masm.extend(writable!(reg), reg, ExtendKind::I32Extend16S);
             TypedReg::i32(reg)
         });
     }
@@ -1205,7 +1204,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S64, &mut |masm, reg, _size| {
-            masm.extend(reg, reg, ExtendKind::I64Extend8S);
+            masm.extend(writable!(reg), reg, ExtendKind::I64Extend8S);
             TypedReg::i64(reg)
         });
     }
@@ -1214,7 +1213,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S64, &mut |masm, reg, _size| {
-            masm.extend(reg, reg, ExtendKind::I64Extend16S);
+            masm.extend(writable!(reg), reg, ExtendKind::I64Extend16S);
             TypedReg::i64(reg)
         });
     }
@@ -1223,7 +1222,7 @@ where
         use OperandSize::*;
 
         self.context.unop(self.masm, S64, &mut |masm, reg, _size| {
-            masm.extend(reg, reg, ExtendKind::I64Extend32S);
+            masm.extend(writable!(reg), reg, ExtendKind::I64Extend32S);
             TypedReg::i64(reg)
         });
     }
@@ -1233,7 +1232,7 @@ where
 
         self.context
             .convert_op(self.masm, WasmValType::I32, |masm, dst, src, dst_size| {
-                masm.signed_truncate(src, dst, S32, dst_size, TruncKind::Unchecked);
+                masm.signed_truncate(writable!(dst), src, S32, dst_size, TruncKind::Unchecked);
             });
     }
 
@@ -1245,7 +1244,14 @@ where
             WasmValType::I32,
             RegClass::Float,
             |masm, dst, src, tmp_fpr, dst_size| {
-                masm.unsigned_truncate(src, dst, tmp_fpr, S32, dst_size, TruncKind::Unchecked);
+                masm.unsigned_truncate(
+                    writable!(dst),
+                    src,
+                    tmp_fpr,
+                    S32,
+                    dst_size,
+                    TruncKind::Unchecked,
+                );
             },
         );
     }
@@ -1255,7 +1261,7 @@ where
 
         self.context
             .convert_op(self.masm, WasmValType::I32, |masm, dst, src, dst_size| {
-                masm.signed_truncate(src, dst, S64, dst_size, TruncKind::Unchecked);
+                masm.signed_truncate(writable!(dst), src, S64, dst_size, TruncKind::Unchecked);
             });
     }
 
@@ -1267,7 +1273,14 @@ where
             WasmValType::I32,
             RegClass::Float,
             |masm, dst, src, tmp_fpr, dst_size| {
-                masm.unsigned_truncate(src, dst, tmp_fpr, S64, dst_size, TruncKind::Unchecked);
+                masm.unsigned_truncate(
+                    writable!(dst),
+                    src,
+                    tmp_fpr,
+                    S64,
+                    dst_size,
+                    TruncKind::Unchecked,
+                );
             },
         );
     }
@@ -1277,7 +1290,7 @@ where
 
         self.context
             .convert_op(self.masm, WasmValType::I64, |masm, dst, src, dst_size| {
-                masm.signed_truncate(src, dst, S32, dst_size, TruncKind::Unchecked);
+                masm.signed_truncate(writable!(dst), src, S32, dst_size, TruncKind::Unchecked);
             });
     }
 
@@ -1289,7 +1302,14 @@ where
             WasmValType::I64,
             RegClass::Float,
             |masm, dst, src, tmp_fpr, dst_size| {
-                masm.unsigned_truncate(src, dst, tmp_fpr, S32, dst_size, TruncKind::Unchecked);
+                masm.unsigned_truncate(
+                    writable!(dst),
+                    src,
+                    tmp_fpr,
+                    S32,
+                    dst_size,
+                    TruncKind::Unchecked,
+                );
             },
         );
     }
@@ -1299,7 +1319,7 @@ where
 
         self.context
             .convert_op(self.masm, WasmValType::I64, |masm, dst, src, dst_size| {
-                masm.signed_truncate(src, dst, S64, dst_size, TruncKind::Unchecked);
+                masm.signed_truncate(writable!(dst), src, S64, dst_size, TruncKind::Unchecked);
             });
     }
 
@@ -1311,7 +1331,14 @@ where
             WasmValType::I64,
             RegClass::Float,
             |masm, dst, src, tmp_fpr, dst_size| {
-                masm.unsigned_truncate(src, dst, tmp_fpr, S64, dst_size, TruncKind::Unchecked);
+                masm.unsigned_truncate(
+                    writable!(dst),
+                    src,
+                    tmp_fpr,
+                    S64,
+                    dst_size,
+                    TruncKind::Unchecked,
+                );
             },
         );
     }
@@ -1319,14 +1346,14 @@ where
     fn visit_i32_reinterpret_f32(&mut self) {
         self.context
             .convert_op(self.masm, WasmValType::I32, |masm, dst, src, size| {
-                masm.reinterpret_float_as_int(src.into(), dst, size);
+                masm.reinterpret_float_as_int(writable!(dst), src.into(), size);
             });
     }
 
     fn visit_i64_reinterpret_f64(&mut self) {
         self.context
             .convert_op(self.masm, WasmValType::I64, |masm, dst, src, size| {
-                masm.reinterpret_float_as_int(src.into(), dst, size);
+                masm.reinterpret_float_as_int(writable!(dst), src.into(), size);
             });
     }
 
@@ -1378,7 +1405,7 @@ where
             TableStyle::CallerChecksSignature { lazy_init: true } => {
                 let funcref_ptr = self.context.stack.peek().map(|v| v.unwrap_reg()).unwrap();
                 self.masm
-                    .trapz(funcref_ptr.into(), TrapCode::IndirectCallToNull);
+                    .trapz(funcref_ptr.into(), TRAP_INDIRECT_CALL_TO_NULL);
                 self.emit_typecheck_funcref(funcref_ptr.into(), type_index);
             }
             _ => unimplemented!("Support for eager table init"),
@@ -1519,7 +1546,7 @@ where
                         self.emit_compute_table_elem_addr(index.into(), base, &table_data);
                     // Set the initialized bit.
                     self.masm.or(
-                        value.into(),
+                        writable!(value.into()),
                         value.into(),
                         RegImm::i64(FUNCREF_INIT_BIT as i64),
                         ptr_type.into(),
@@ -1639,7 +1666,7 @@ where
             // the result of the memory32_grow builtin.
             (WasmValType::I64, WasmValType::I32) => {
                 let top: Reg = self.context.pop_to_reg(self.masm, None).into();
-                self.masm.wrap(top.into(), top.into());
+                self.masm.wrap(writable!(top.into()), top.into());
                 self.context.stack.push(TypedReg::i32(top).into());
             }
             _ => unimplemented!("Support for 32-bit platforms"),
@@ -1875,7 +1902,7 @@ where
         let index = GlobalIndex::from_u32(global_index);
         let (ty, addr) = self.emit_get_global_addr(index);
         let dst = self.context.reg_for_type(ty, self.masm);
-        self.masm.load(addr, dst, ty.into());
+        self.masm.load(addr, writable!(dst), ty.into());
         self.context.stack.push(Val::reg(dst, ty));
     }
 
@@ -1904,8 +1931,12 @@ where
             .cmp(cond.reg.into(), RegImm::i32(0), OperandSize::S32);
         // Conditionally move val1 to val2 if the comparison is
         // not zero.
-        self.masm
-            .cmov(val1.into(), val2.into(), IntCmpKind::Ne, val1.ty.into());
+        self.masm.cmov(
+            writable!(val2.into()),
+            val1.into(),
+            IntCmpKind::Ne,
+            val1.ty.into(),
+        );
         self.context.stack.push(val2.into());
         self.context.free_reg(val1.reg);
         self.context.free_reg(cond);
@@ -2041,7 +2072,7 @@ where
 
         self.context
             .convert_op(self.masm, WasmValType::I32, |masm, dst, src, dst_size| {
-                masm.signed_truncate(src, dst, S32, dst_size, TruncKind::Checked);
+                masm.signed_truncate(writable!(dst), src, S32, dst_size, TruncKind::Checked);
             });
     }
 
@@ -2053,7 +2084,14 @@ where
             WasmValType::I32,
             RegClass::Float,
             |masm, dst, src, tmp_fpr, dst_size| {
-                masm.unsigned_truncate(src, dst, tmp_fpr, S32, dst_size, TruncKind::Checked);
+                masm.unsigned_truncate(
+                    writable!(dst),
+                    src,
+                    tmp_fpr,
+                    S32,
+                    dst_size,
+                    TruncKind::Checked,
+                );
             },
         );
     }
@@ -2063,7 +2101,7 @@ where
 
         self.context
             .convert_op(self.masm, WasmValType::I32, |masm, dst, src, dst_size| {
-                masm.signed_truncate(src, dst, S64, dst_size, TruncKind::Checked);
+                masm.signed_truncate(writable!(dst), src, S64, dst_size, TruncKind::Checked);
             });
     }
 
@@ -2075,7 +2113,14 @@ where
             WasmValType::I32,
             RegClass::Float,
             |masm, dst, src, tmp_fpr, dst_size| {
-                masm.unsigned_truncate(src, dst, tmp_fpr, S64, dst_size, TruncKind::Checked);
+                masm.unsigned_truncate(
+                    writable!(dst),
+                    src,
+                    tmp_fpr,
+                    S64,
+                    dst_size,
+                    TruncKind::Checked,
+                );
             },
         );
     }
@@ -2085,7 +2130,7 @@ where
 
         self.context
             .convert_op(self.masm, WasmValType::I64, |masm, dst, src, dst_size| {
-                masm.signed_truncate(src, dst, S32, dst_size, TruncKind::Checked);
+                masm.signed_truncate(writable!(dst), src, S32, dst_size, TruncKind::Checked);
             });
     }
 
@@ -2097,7 +2142,14 @@ where
             WasmValType::I64,
             RegClass::Float,
             |masm, dst, src, tmp_fpr, dst_size| {
-                masm.unsigned_truncate(src, dst, tmp_fpr, S32, dst_size, TruncKind::Checked);
+                masm.unsigned_truncate(
+                    writable!(dst),
+                    src,
+                    tmp_fpr,
+                    S32,
+                    dst_size,
+                    TruncKind::Checked,
+                );
             },
         );
     }
@@ -2107,7 +2159,7 @@ where
 
         self.context
             .convert_op(self.masm, WasmValType::I64, |masm, dst, src, dst_size| {
-                masm.signed_truncate(src, dst, S64, dst_size, TruncKind::Checked);
+                masm.signed_truncate(writable!(dst), src, S64, dst_size, TruncKind::Checked);
             });
     }
 
@@ -2119,7 +2171,14 @@ where
             WasmValType::I64,
             RegClass::Float,
             |masm, dst, src, tmp_fpr, dst_size| {
-                masm.unsigned_truncate(src, dst, tmp_fpr, S64, dst_size, TruncKind::Checked);
+                masm.unsigned_truncate(
+                    writable!(dst),
+                    src,
+                    tmp_fpr,
+                    S64,
+                    dst_size,
+                    TruncKind::Checked,
+                );
             },
         );
     }
@@ -2133,7 +2192,7 @@ where
 {
     fn cmp_i32s(&mut self, kind: IntCmpKind) {
         self.context.i32_binop(self.masm, |masm, dst, src, size| {
-            masm.cmp_with_set(src, dst, kind, size);
+            masm.cmp_with_set(writable!(dst), src, kind, size);
             TypedReg::i32(dst)
         });
     }
@@ -2141,7 +2200,7 @@ where
     fn cmp_i64s(&mut self, kind: IntCmpKind) {
         self.context
             .i64_binop(self.masm, move |masm, dst, src, size| {
-                masm.cmp_with_set(src, dst, kind, size);
+                masm.cmp_with_set(writable!(dst), src, kind, size);
                 TypedReg::i32(dst) // Return value for comparisons is an `i32`.
             });
     }

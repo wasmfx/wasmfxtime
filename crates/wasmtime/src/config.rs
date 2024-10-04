@@ -1,9 +1,10 @@
+use crate::hash_map::HashMap;
+use crate::hash_set::HashSet;
 use crate::prelude::*;
 use alloc::sync::Arc;
 use bitflags::Flags;
 use core::fmt;
 use core::str::FromStr;
-use hashbrown::{HashMap, HashSet};
 use serde_derive::{Deserialize, Serialize};
 #[cfg(any(feature = "cache", feature = "cranelift", feature = "winch"))]
 use std::path::Path;
@@ -1035,16 +1036,16 @@ impl Config {
         self
     }
 
-    /// Configures whether the WebAssembly typed-continuations
+    /// Configures whether the WebAssembly stack-switching
     /// [proposal] will be enabled for compilation.
     ///
     /// Note that this feature is a work-in-progress and is incomplete.
     ///
     /// This is `false` by default.
     ///
-    /// [proposal]: https://github.com/effect-handlers/wasm-spec
-    pub fn wasm_typed_continuations(&mut self, enable: bool) -> &mut Self {
-        self.wasm_feature(WasmFeatures::TYPED_CONTINUATIONS, enable);
+    /// [proposal]: https://github.com/WebAssembly/stack-switching
+    pub fn wasm_stack_switching(&mut self, enable: bool) -> &mut Self {
+        self.wasm_feature(WasmFeatures::STACK_SWITCHING, enable);
         self
     }
 
@@ -1821,7 +1822,7 @@ impl Config {
                     | WasmFeatures::THREADS
                     | WasmFeatures::RELAXED_SIMD
                     | WasmFeatures::TAIL_CALL
-                    | WasmFeatures::TYPED_CONTINUATIONS
+                    | WasmFeatures::STACK_SWITCHING
                     | WasmFeatures::GC_TYPES;
                 match self.compiler_target().architecture {
                     target_lexicon::Architecture::Aarch64(_) => {
@@ -2181,7 +2182,7 @@ impl Config {
             bail!("cannot disable the simd proposal but enable the relaxed simd proposal");
         }
 
-        if features.contains(WasmFeatures::TYPED_CONTINUATIONS) {
+        if features.contains(WasmFeatures::STACK_SWITCHING) {
             let model = match target.operating_system {
                 target_lexicon::OperatingSystem::Windows => "update_windows_tib",
                 target_lexicon::OperatingSystem::Linux => "basic",
