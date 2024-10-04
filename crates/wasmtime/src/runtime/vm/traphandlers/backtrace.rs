@@ -186,11 +186,18 @@ impl Backtrace {
         });
 
         for (chain, pc, fp, sp) in activations {
-            if let ControlFlow::Break(()) =
-                Self::trace_through_continuations(chain, pc, fp, sp, &mut f)
-            {
-                log::trace!("====== Done Capturing Backtrace (closure break) ======");
-                return;
+            if cfg!(feature = "wasmfx_baseline") {
+                if let ControlFlow::Break(()) = Self::trace_through_wasm(pc, fp, sp, &mut f) {
+                    log::trace!("====== Done Capturing Backtrace (closure break) ======");
+                    return;
+                }
+            } else {
+                if let ControlFlow::Break(()) =
+                    Self::trace_through_continuations(chain, pc, fp, sp, &mut f)
+                {
+                    log::trace!("====== Done Capturing Backtrace (closure break) ======");
+                    return;
+                }
             }
         }
 
