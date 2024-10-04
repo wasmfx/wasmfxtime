@@ -13,10 +13,6 @@ cfg_if::cfg_if! {
 /// once. The linearity is checked dynamically in the generated code
 /// by comparing the revision witness embedded in the pointer to the
 /// actual revision counter on the continuation reference.
-#[cfg_attr(
-    feature = "unsafe_disable_continuation_linearity_check",
-    allow(dead_code)
-)]
 pub mod safe_vm_contobj {
     use super::imp::VMContRef;
     use core::ptr::NonNull;
@@ -37,35 +33,7 @@ pub mod safe_vm_contobj {
     }
 }
 
-/// This version of `VMContObj` does not actually store a revision counter. It is
-/// used when we opt out of the linearity check using the
-/// `unsafe_disable_continuation_linearity_check` feature
-#[cfg_attr(
-    not(feature = "unsafe_disable_continuation_linearity_check"),
-    allow(dead_code)
-)]
-pub mod unsafe_vm_contobj {
-    use super::imp::VMContRef;
-    use core::ptr::NonNull;
-
-    #[repr(transparent)]
-    #[derive(Debug, Clone, Copy)]
-    pub struct VMContObj(NonNull<VMContRef>);
-
-    impl VMContObj {
-        pub fn new(contref: NonNull<VMContRef>, _revision: u64) -> Self {
-            Self(contref)
-        }
-    }
-}
-
-cfg_if::cfg_if! {
-    if #[cfg(feature = "unsafe_disable_continuation_linearity_check")] {
-        pub use unsafe_vm_contobj::*;
-    } else {
-        pub use safe_vm_contobj::*;
-    }
-}
+pub use safe_vm_contobj::*;
 
 unsafe impl Send for VMContObj {}
 unsafe impl Sync for VMContObj {}

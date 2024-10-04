@@ -162,22 +162,25 @@ macro_rules! foreach_builtin_function {
 
             // General-purpose printing functions.
             //
-            // Prints a string. Note that we transfer the string not as C strings, but as 'static str,
-            // represented as a pointer and a length.
+            // Prints a string. Note that we transfer the string not
+            // as C strings, but as 'static str, represented as a
+            // pointer and a length.
             tc_print_str(vmctx: vmctx, s: pointer, len : i64);
             // TODO
             tc_print_int(vmctx: vmctx, arg : i64);
             // TODO
             tc_print_pointer(vmctx: vmctx, arg : pointer);
 
-            // Returns an index for Wasm's `table.grow` instruction for `contobj`s.
-            // Note that the initial Option<VMContObj> (i.e., the value to fill
-            // the new slots with) is split into two arguments: The underlying
-            // continuation reference and the revision count.
-            // If `unsafe_disable_continuation_linearity_check` is enabled, the revision value is arbitrary.
-            // To denote the continuation being `None`, `init_contref` may be 0.
+            // Returns an index for Wasm's `table.grow` instruction
+            // for `contobj`s.  Note that the initial
+            // Option<VMContObj> (i.e., the value to fill the new
+            // slots with) is split into two arguments: The underlying
+            // continuation reference and the revision count.  To
+            // denote the continuation being `None`, `init_contref`
+            // may be 0.
             table_grow_cont_obj(vmctx: vmctx, table: i32, delta: i64, init_contref: pointer, init_revision : i64) -> pointer;
-            // `value_contref` and `value_revision` together encode the Option<VMContObj>, as in previous libcall.
+            // `value_contref` and `value_revision` together encode
+            // the Option<VMContObj>, as in previous libcall.
             table_fill_cont_obj(vmctx: vmctx, table: i32, dst: i64, value_contref: pointer, value_revision : i64, len: i64);
         }
     };

@@ -1173,17 +1173,14 @@ mod misc {
 "#;
 
         let runner = Runner::new();
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "unsafe_disable_continuation_linearity_check")] {
-                let result = runner.run_test::<()>(wat, &[])?;
-                assert_eq!(result, ())
-            } else {
-                let error = runner.run_test::<()>(wat, &[])
-                    .expect_err("expected an overflow");
-                assert!(error.root_cause().is::<Trap>());
-                assert_eq!(*error.downcast_ref::<Trap>().unwrap(), Trap::IntegerOverflow);
-            }
-        }
+        let error = runner
+            .run_test::<()>(wat, &[])
+            .expect_err("expected an overflow");
+        assert!(error.root_cause().is::<Trap>());
+        assert_eq!(
+            *error.downcast_ref::<Trap>().unwrap(),
+            Trap::IntegerOverflow
+        );
         Ok(())
     }
 }

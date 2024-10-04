@@ -43,6 +43,5 @@ incremental-cache = ["cranelift-codegen/incremental-cache"]
 wmemcheck = ["wasmtime-environ/wmemcheck"]
 gc = ["wasmtime-environ/gc"]
 threads = ["wasmtime-environ/threads"]
-unsafe_disable_continuation_linearity_check = []
 wasmfx_baseline = []
 
