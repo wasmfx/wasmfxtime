@@ -22,6 +22,9 @@ env:
 
 jobs:
   bench:
+    # TODO(dhil): Disable this workflow until we have brought our
+    # toolchains up-to-date with the new binary format.
+    if: false
     name: Setup and run benchmarks
     runs-on: ubuntu-latest
     steps:
