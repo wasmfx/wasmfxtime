@@ -214,10 +214,10 @@ macro_rules! foreach_builtin_function {
             // TODO
             tc_drop_cont_ref(vmctx: vmctx, contref: pointer);
 
-            // General-purpose allocation. Only used by typed-continuations
+            // General-purpose allocation. Only used by stack-switching
             // code at the moment.
             tc_allocate(vmctx: vmctx, size: i64, align: i64) -> pointer;
-            // General-purpose deallocation. Only used by typed-continuations
+            // General-purpose deallocation. Only used by stack-switching
             // code at the moment.
             tc_deallocate(vmctx: vmctx, ptr: pointer, size: i64, align: i64);
             // General-purpose reallocation without preserving existing data. Concretely, behaves like

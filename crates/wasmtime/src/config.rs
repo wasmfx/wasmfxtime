@@ -2186,7 +2186,7 @@ impl Config {
             let model = match target.operating_system {
                 target_lexicon::OperatingSystem::Windows => "update_windows_tib",
                 target_lexicon::OperatingSystem::Linux => "basic",
-                _ => bail!("typed-continuations feature not supported on this platform "),
+                _ => bail!("stack-switching feature not supported on this platform "),
             };
 
             if !self
