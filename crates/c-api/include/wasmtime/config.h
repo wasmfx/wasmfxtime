@@ -259,12 +259,12 @@ WASMTIME_CONFIG_PROP(void, wasm_exceptions, bool)
 WASMTIME_CONFIG_PROP(void, wasm_function_references, bool)
 
 /**
- * \brief Configures whether the WebAssembly typed continuations
+ * \brief Configures whether the WebAssembly stack switching
  * proposal is enabled.
  *
  * This setting is `false` by default.
  */
-WASMTIME_CONFIG_PROP(void, wasm_typed_continuations, bool)
+WASMTIME_CONFIG_PROP(void, wasm_stack_switching, bool)
 
 /**
  * \brief Configures how JIT code will be compiled.
