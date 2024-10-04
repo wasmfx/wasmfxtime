@@ -260,13 +260,6 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
         }
 
         if part == "stack-switching" {
-            // This test specifically checks that we catch a continuation being
-            // resumed twice, which we cannot detect in this mode.
-            if cfg!(feature = "unsafe_disable_continuation_linearity_check")
-                && test.ends_with("cont_twice.wast")
-            {
-                return true;
-            }
             // Tag linking is broken in the baseline implementation.
             if cfg!(feature = "wasmfx_baseline") && test.ends_with("linking_tags.wast") {
                 return true;

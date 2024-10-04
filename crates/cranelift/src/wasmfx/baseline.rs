@@ -18,12 +18,8 @@ fn get_revision<'a>(
     builder: &mut FunctionBuilder,
     contref: ir::Value,
 ) -> ir::Value {
-    if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
-        builder.ins().iconst(I64, 0)
-    } else {
-        let mem_flags = ir::MemFlags::trusted();
-        builder.ins().load(I64, mem_flags, contref, 0)
-    }
+    let mem_flags = ir::MemFlags::trusted();
+    builder.ins().load(I64, mem_flags, contref, 0)
 }
 
 fn compare_revision_and_increment<'a>(
@@ -32,21 +28,17 @@ fn compare_revision_and_increment<'a>(
     contref: ir::Value,
     witness: ir::Value,
 ) -> ir::Value {
-    if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
-        builder.ins().iconst(I64, 0)
-    } else {
-        let mem_flags = ir::MemFlags::trusted();
-        let revision = get_revision(env, builder, contref);
+    let mem_flags = ir::MemFlags::trusted();
+    let revision = get_revision(env, builder, contref);
 
-        let evidence = builder.ins().icmp(IntCC::Equal, witness, revision);
-        builder
-            .ins()
-            .trapz(evidence, crate::TRAP_CONTINUATION_ALREADY_CONSUMED);
+    let evidence = builder.ins().icmp(IntCC::Equal, witness, revision);
+    builder
+        .ins()
+        .trapz(evidence, crate::TRAP_CONTINUATION_ALREADY_CONSUMED);
 
-        let revision_plus1 = builder.ins().iadd_imm(revision, 1);
-        builder.ins().store(mem_flags, revision_plus1, contref, 0);
-        revision_plus1
-    }
+    let revision_plus1 = builder.ins().iadd_imm(revision, 1);
+    builder.ins().store(mem_flags, revision_plus1, contref, 0);
+    revision_plus1
 }
 
 fn typed_continuations_load_payloads<'a>(

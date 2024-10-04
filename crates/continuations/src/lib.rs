@@ -71,6 +71,27 @@ pub struct StackLimits {
     pub last_wasm_entry_sp: usize,
 }
 
+/// This type represents "common" information that we need to save both for the
+/// main stack and each continuation.
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct CommonStackInformation {
+    pub limits: StackLimits,
+    /// For the main stack, this field must only have one of the following values:
+    /// - Running
+    /// - Parent
+    pub state: State,
+}
+
+impl CommonStackInformation {
+    pub fn running_default() -> Self {
+        Self {
+            limits: StackLimits::default(),
+            state: State::Running,
+        }
+    }
+}
+
 impl StackLimits {
     pub fn with_stack_limit(stack_limit: usize) -> Self {
         Self {
@@ -171,12 +192,17 @@ pub const STACK_CHAIN_CONTINUATION_DISCRIMINANT: usize = 2;
 pub enum State {
     /// The `VMContRef` has been created, but `resume` has never been
     /// called on it. During this stage, we may add arguments using `cont.bind`.
-    Allocated,
-    /// `resume` has been invoked at least once on the `VMContRef`,
-    /// meaning that the function passed to `cont.new` has started executing.
-    /// Note that this state does not indicate whether the execution of this
-    /// function is currently suspended or not.
-    Invoked,
+    Fresh,
+    /// The continuation is running, meaning that it is the one currently
+    /// executing code.
+    Running,
+    /// The continuation is suspended because it executed a resume instruction
+    /// that has not finished yet. In other words, it became the parent of
+    /// another continuation (which may itself be `Running`, a `Parent`, or
+    /// `Suspended`).
+    Parent,
+    /// The continuation was suspended by a `suspend` instruction.
+    Suspended,
     /// The function originally passed to `cont.new` has returned normally.
     /// Note that there is no guarantee that a VMContRef will ever
     /// reach this status, as it may stay suspended until being dropped.
@@ -214,22 +240,21 @@ pub mod offsets {
     /// Offsets of fields in `wasmtime_runtime::continuation::VMContRef`.
     /// We uses tests there to ensure these values are correct.
     pub mod vm_cont_ref {
-        use crate::Payloads;
+        use crate::{CommonStackInformation, Payloads};
 
-        /// Offset of `limits` field
-        pub const LIMITS: usize = 0;
+        /// Offset of `common_stack_information` field
+        pub const COMMON_STACK_INFORMATION: usize = 0;
         /// Offset of `parent_chain` field
-        pub const PARENT_CHAIN: usize = LIMITS + 4 * core::mem::size_of::<usize>();
+        pub const PARENT_CHAIN: usize =
+            COMMON_STACK_INFORMATION + core::mem::size_of::<CommonStackInformation>();
         /// Offset of `stack` field
         pub const STACK: usize = PARENT_CHAIN + 2 * core::mem::size_of::<usize>();
         /// Offset of `args` field
         pub const ARGS: usize = STACK + super::FIBER_STACK_SIZE;
         /// Offset of `tag_return_values` field
         pub const TAG_RETURN_VALUES: usize = ARGS + core::mem::size_of::<Payloads>();
-        /// Offset of `state` field
-        pub const STATE: usize = TAG_RETURN_VALUES + core::mem::size_of::<Payloads>();
         /// Offset of `revision` field
-        pub const REVISION: usize = STATE + core::mem::size_of::<usize>();
+        pub const REVISION: usize = TAG_RETURN_VALUES + core::mem::size_of::<Payloads>();
     }
 
     pub mod stack_limits {
@@ -240,6 +265,14 @@ pub mod offsets {
         pub const LAST_WASM_EXIT_FP: usize = offset_of!(StackLimits, last_wasm_exit_fp);
         pub const LAST_WASM_EXIT_PC: usize = offset_of!(StackLimits, last_wasm_exit_pc);
         pub const LAST_WASM_ENTRY_SP: usize = offset_of!(StackLimits, last_wasm_entry_sp);
+    }
+
+    pub mod common_stack_information {
+        use crate::CommonStackInformation;
+        use memoffset::offset_of;
+
+        pub const LIMITS: usize = offset_of!(CommonStackInformation, limits);
+        pub const STATE: usize = offset_of!(CommonStackInformation, state);
     }
 
     /// Size of wasmtime_runtime::continuation::FiberStack.

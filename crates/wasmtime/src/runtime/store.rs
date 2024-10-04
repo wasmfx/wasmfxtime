@@ -81,7 +81,7 @@ use crate::instance::InstanceData;
 use crate::linker::Definition;
 use crate::module::RegisteredModuleId;
 use crate::prelude::*;
-use crate::runtime::vm::continuation::stack_chain::{StackChain, StackChainCell, StackLimits};
+use crate::runtime::vm::continuation::stack_chain::{StackChain, StackChainCell};
 use crate::runtime::vm::mpk::{self, ProtectionKey, ProtectionMask};
 use crate::runtime::vm::{
     Backtrace, ExportGlobal, GcHeapAllocationIndex, GcRootsList, GcStore,
@@ -105,7 +105,7 @@ use core::ops::{Deref, DerefMut, Range};
 use core::pin::Pin;
 use core::ptr;
 use core::task::{Context, Poll};
-use wasmtime_continuations::WasmFXConfig;
+use wasmtime_continuations::{CommonStackInformation, WasmFXConfig};
 
 mod context;
 pub use self::context::*;
@@ -326,7 +326,7 @@ pub struct StoreOpaque {
     // Finally, observe that the stack chain adds more internal self references:
     // The stack chain always contains a `MainStack` element at the ends which
     // has a pointer to the `main_stack_limits` field of the same `StoreOpaque`.
-    main_stack_limits: StackLimits,
+    main_stack_information: CommonStackInformation,
     stack_chain: StackChainCell,
 
     instances: Vec<StoreInstance>,
@@ -553,7 +553,7 @@ impl<T> Store<T> {
                 _marker: marker::PhantomPinned,
                 engine: engine.clone(),
                 runtime_limits: Default::default(),
-                main_stack_limits: Default::default(),
+                main_stack_information: CommonStackInformation::running_default(),
                 stack_chain: StackChainCell::absent(),
                 instances: Vec::new(),
                 #[cfg(feature = "component-model")]
@@ -645,7 +645,7 @@ impl<T> Store<T> {
             // `Store` indicates that `inner` is supposed to be at a stable
             // location at this point, without explicitly being `Pin`-ed.
             let stack_chain = inner.stack_chain.0.get();
-            *stack_chain = StackChain::MainStack(inner.main_stack_limits());
+            *stack_chain = StackChain::MainStack(inner.main_stack_information());
         }
 
         Self {
@@ -1925,10 +1925,10 @@ impl StoreOpaque {
     }
 
     #[inline]
-    pub fn main_stack_limits(&self) -> *mut StackLimits {
+    pub fn main_stack_information(&self) -> *mut CommonStackInformation {
         // NOTE(frank-emrich) This looks dogdy, but follows the same pattern as
         // `vmruntime_limits()` above.
-        &self.main_stack_limits as *const StackLimits as *mut StackLimits
+        &self.main_stack_information as *const CommonStackInformation as *mut CommonStackInformation
     }
 
     #[inline]

@@ -414,18 +414,6 @@ memory-protection-keys = ["wasmtime-cli-flags/memory-protection-keys"]
 # throughout Wasmtime and its dependencies.
 disable-logging = ["log/max_level_off", "tracing/max_level_off"]
 
-# Until we implement proper reference counting for `VMContObj` objects,
-# we may use this flag to bypass the creation of VMContObj objects,
-# directly using the corresponding VMContRef instead.
-# This is to allow running benchmarks that may create a lot of such objects and
-# may otherwise run out of memory.
-# Note that enabling this is highly unsafe, as it makes it impossible to detect
-# at runtime when an already taken continuation is used again.
-unsafe_disable_continuation_linearity_check = [
-  "wasmtime-cranelift/unsafe_disable_continuation_linearity_check",
-  "wasmtime/unsafe_disable_continuation_linearity_check"
-]
-
 # The following toggles the baseline implementation of typed continuations.
 wasmfx_baseline = [
   "wasmtime-cranelift/wasmfx_baseline",

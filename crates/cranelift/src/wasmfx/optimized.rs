@@ -322,6 +322,10 @@ pub(crate) mod typed_continuation_helpers {
         pointer_type: ir::Type,
     }
 
+    pub struct CommonStackInformation {
+        pub address: ir::Value,
+    }
+
     /// Compile-time representation of `crate::runtime::vm::fibre::FiberStack`.
     pub struct FiberStack {
         /// This is NOT the "top of stack" address of the stack itself. In line
@@ -348,58 +352,14 @@ pub(crate) mod typed_continuation_helpers {
             Payloads::new(self.address, offset as i32, self.pointer_type)
         }
 
-        /// Loads the value of the `state` field of the VMContRef,
-        /// which is represented using the `State` enum.
-        fn load_state(&self, builder: &mut FunctionBuilder) -> ir::Value {
-            let mem_flags = ir::MemFlags::trusted();
-            let offset = wasmtime_continuations::offsets::vm_cont_ref::STATE as i32;
-
-            // Let's make sure that we still represent the State enum as i32.
-            debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
-
-            builder.ins().load(I32, mem_flags, self.address, offset)
-        }
-
-        /// Sets the value of the `state` field of the `VMContRef`,
-        pub fn set_state(
+        pub fn common_stack_information<'a>(
             &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
-            state: wasmtime_continuations::State,
-        ) {
-            let mem_flags = ir::MemFlags::trusted();
-            let offset = wasmtime_continuations::offsets::vm_cont_ref::STATE as i32;
-
-            // Let's make sure that we still represent the State enum as i32.
-            debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
-
-            let v = builder.ins().iconst(I32, state.discriminant() as i64);
-            builder.ins().store(mem_flags, v, self.address, offset);
-        }
-
-        /// Checks whether the `VMContRef` is invoked (i.e., `resume`
-        /// was called at least once on the continuation).
-        pub fn is_invoked(&self, builder: &mut FunctionBuilder) -> ir::Value {
-            // TODO(frank-emrich) In the future, we may get rid of the State field
-            // in `VMContRef` and try to infer the state by other means.
-            // For example, we may alllocate the `ContinuationFiber` lazily, doing
-            // so only at the point when a continuation is actualy invoked, meaning
-            // that we can use the null-ness of the `fiber` field as an indicator
-            // for invokedness.
-            let actual_state = self.load_state(builder);
-            let invoked: i32 = i32::from(wasmtime_continuations::State::Invoked);
-            builder
-                .ins()
-                .icmp_imm(IntCC::Equal, actual_state, invoked as i64)
-        }
-
-        /// Checks whether the `VMContRef` has returned (i.e., the
-        /// function used as continuation has returned normally).
-        pub fn has_returned(&self, builder: &mut FunctionBuilder) -> ir::Value {
-            let actual_state = self.load_state(builder);
-            let returned: i32 = i32::from(wasmtime_continuations::State::Returned);
-            builder
-                .ins()
-                .icmp_imm(IntCC::Equal, actual_state, returned as i64)
+        ) -> CommonStackInformation {
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::COMMON_STACK_INFORMATION;
+            let address = builder.ins().iadd_imm(self.address, offset as i64);
+            CommonStackInformation { address }
         }
 
         /// Returns pointer to buffer where results are stored after a
@@ -410,7 +370,11 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
         ) -> ir::Value {
             if cfg!(debug_assertions) {
-                let has_returned = self.has_returned(builder);
+                let has_returned = self.common_stack_information(env, builder).has_state(
+                    env,
+                    builder,
+                    wasmtime_continuations::State::Returned,
+                );
                 emit_debug_assert!(env, builder, has_returned);
             }
             return self.args().get_data(builder);
@@ -436,14 +400,10 @@ pub(crate) mod typed_continuation_helpers {
             _env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
         ) -> ir::Value {
-            if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
-                builder.ins().iconst(I64, 0)
-            } else {
-                let mem_flags = ir::MemFlags::trusted();
-                let offset = wasmtime_continuations::offsets::vm_cont_ref::REVISION as i32;
-                let revision = builder.ins().load(I64, mem_flags, self.address, offset);
-                revision
-            }
+            let mem_flags = ir::MemFlags::trusted();
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::REVISION as i32;
+            let revision = builder.ins().load(I64, mem_flags, self.address, offset);
+            revision
         }
 
         /// Sets the revision counter on the given continuation
@@ -454,27 +414,23 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
             revision: ir::Value,
         ) -> ir::Value {
-            if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
-                builder.ins().iconst(I64, 0)
-            } else {
-                if cfg!(debug_assertions) {
-                    let actual_revision = self.get_revision(env, builder);
-                    emit_debug_assert_eq!(env, builder, revision, actual_revision);
-                }
-                let mem_flags = ir::MemFlags::trusted();
-                let offset = wasmtime_continuations::offsets::vm_cont_ref::REVISION as i32;
-                let revision_plus1 = builder.ins().iadd_imm(revision, 1);
-                builder
-                    .ins()
-                    .store(mem_flags, revision_plus1, self.address, offset);
-                if cfg!(debug_assertions) {
-                    let new_revision = self.get_revision(env, builder);
-                    emit_debug_assert_eq!(env, builder, revision_plus1, new_revision);
-                    // Check for overflow:
-                    emit_debug_assert_ule!(env, builder, revision, revision_plus1);
-                }
-                revision_plus1
+            if cfg!(debug_assertions) {
+                let actual_revision = self.get_revision(env, builder);
+                emit_debug_assert_eq!(env, builder, revision, actual_revision);
             }
+            let mem_flags = ir::MemFlags::trusted();
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::REVISION as i32;
+            let revision_plus1 = builder.ins().iadd_imm(revision, 1);
+            builder
+                .ins()
+                .store(mem_flags, revision_plus1, self.address, offset);
+            if cfg!(debug_assertions) {
+                let new_revision = self.get_revision(env, builder);
+                emit_debug_assert_eq!(env, builder, revision_plus1, new_revision);
+                // Check for overflow:
+                emit_debug_assert_ule!(env, builder, revision, revision_plus1);
+            }
+            revision_plus1
         }
 
         pub fn get_fiber_stack<'a>(
@@ -1022,15 +978,13 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         /// Must only be called if `self` represents a `MainStack` or `Continuation` variant.
-        /// Returns a pointer to the associated `StackLimits` object (i.e., in
-        /// the former case, the pointer directly stored in the variant, or in
-        /// the latter case a pointer to the `StackLimits` data within the
-        /// `VMContRef`.
-        pub fn get_stack_limits_ptr<'a>(
+        /// Returns a pointer to the associated `CommonStackInformation` object either stored in
+        /// the `MainStackInfo` object (if `MainStack`) or the `VMContRef` (if `Continuation`)
+        pub fn get_common_stack_information<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
-        ) -> ir::Value {
+        ) -> CommonStackInformation {
             use wasmtime_continuations::offsets as o;
 
             self.assert_not_absent(env, builder);
@@ -1038,24 +992,115 @@ pub(crate) mod typed_continuation_helpers {
             // `self` corresponds to a StackChain::MainStack or
             // StackChain::Continuation.
             // In both cases, the payload is a pointer.
-            let ptr = self.payload;
+            let address = self.payload;
 
             // `obj` is now a pointer to the beginning of either
             // 1. A `VMContRef` struct (in the case of a
             // StackChain::Continuation)
-            // 2. A StackLimits struct (in the case of
+            // 2. A CommonStackInformation struct (in the case of
             // StackChain::MainStack)
             //
-            // Since a `VMContRef` starts with an (inlined) StackLimits
+            // Since a `VMContRef` starts with an (inlined) CommonStackInformation
             // object at offset 0, we actually have in both cases that `ptr` is
             // now the address of the beginning of a StackLimits object.
-            debug_assert_eq!(o::vm_cont_ref::LIMITS, 0);
-            ptr
+            debug_assert_eq!(o::vm_cont_ref::COMMON_STACK_INFORMATION, 0);
+            CommonStackInformation { address }
+        }
+    }
+
+    impl CommonStackInformation {
+        fn get_state_ptr<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            use wasmtime_continuations::offsets as o;
+
+            builder
+                .ins()
+                .iadd_imm(self.address, o::common_stack_information::STATE as i64)
+        }
+
+        fn get_stack_limits_ptr<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            use wasmtime_continuations::offsets as o;
+
+            builder
+                .ins()
+                .iadd_imm(self.address, o::common_stack_information::LIMITS as i64)
+        }
+
+        fn load_state<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            // Let's make sure that we still represent the State enum as i32.
+            debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
+
+            let mem_flags = ir::MemFlags::trusted();
+            let state_ptr = self.get_state_ptr(env, builder);
+
+            builder.ins().load(I32, mem_flags, state_ptr, 0)
+        }
+
+        pub fn set_state<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            state: wasmtime_continuations::State,
+        ) {
+            // Let's make sure that we still represent the State enum as i32.
+            debug_assert!(mem::size_of::<wasmtime_continuations::State>() == mem::size_of::<i32>());
+
+            let discriminant = builder.ins().iconst(I32, state.discriminant() as i64);
+            emit_debug_println!(
+                env,
+                builder,
+                "setting state of CommonStackInformation {:p} to {}",
+                self.address,
+                discriminant
+            );
+
+            let mem_flags = ir::MemFlags::trusted();
+            let state_ptr = self.get_state_ptr(env, builder);
+
+            builder.ins().store(mem_flags, discriminant, state_ptr, 0);
+        }
+
+        pub fn has_state<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            state: wasmtime_continuations::State,
+        ) -> ir::Value {
+            let actual_state = self.load_state(env, builder);
+
+            builder
+                .ins()
+                .icmp_imm(IntCC::Equal, actual_state, state.discriminant() as i64)
+        }
+
+        /// Checks whether the `State` reflects that the stack has ever been
+        /// active (instead of just having been allocated, but never resumed).
+        pub fn was_invoked<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            let actual_state = self.load_state(env, builder);
+            let allocated: i32 = i32::from(wasmtime_continuations::State::Fresh);
+            builder
+                .ins()
+                .icmp_imm(IntCC::NotEqual, actual_state, allocated as i64)
         }
 
         /// Sets `last_wasm_entry_sp` and `stack_limit` fields in
-        /// `VMRuntimelimits` using the values from the `StackLimits` object
-        /// associated with this stack chain.
+        /// `VMRuntimelimits` using the values from the `StackLimits` of this
+        /// object.
         pub fn write_limits_to_vmcontext<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -1070,7 +1115,7 @@ pub(crate) mod typed_continuation_helpers {
 
             let mut copy_to_vm_runtime_limits = |our_offset, their_offset| {
                 let our_value = builder.ins().load(
-                    self.pointer_type,
+                    env.pointer_type(),
                     memflags,
                     stack_limits_ptr,
                     our_offset as i32,
@@ -1083,7 +1128,7 @@ pub(crate) mod typed_continuation_helpers {
                 );
             };
 
-            let pointer_size = self.pointer_type.bytes() as u8;
+            let pointer_size = env.pointer_type().bytes() as u8;
             copy_to_vm_runtime_limits(
                 o::stack_limits::STACK_LIMIT,
                 pointer_size.vmruntime_limits_stack_limit(),
@@ -1095,7 +1140,7 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         /// Overwrites the `last_wasm_entry_sp` field of the `StackLimits`
-        /// object associated with this stack chain by loading the corresponding
+        /// object in the `StackLimits` of this object by loading the corresponding
         /// field from the `VMRuntimeLimits`.
         /// If `load_stack_limit` is true, we do the same for the `stack_limit`
         /// field.
@@ -1115,11 +1160,11 @@ pub(crate) mod typed_continuation_helpers {
             let stack_limits_ptr = self.get_stack_limits_ptr(env, builder);
 
             let memflags = ir::MemFlags::trusted();
-            let pointer_size = self.pointer_type.bytes() as u8;
+            let pointer_size = env.pointer_type().bytes() as u8;
 
             let mut copy = |runtime_limits_offset, stack_limits_offset| {
                 let from_vm_runtime_limits = builder.ins().load(
-                    self.pointer_type,
+                    env.pointer_type(),
                     memflags,
                     vmruntime_limits_ptr,
                     runtime_limits_offset,
@@ -1314,10 +1359,11 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
         builder.append_block_param(store_data_block, env.pointer_type());
 
         let co = tc::VMContRef::new(contref, env.pointer_type());
-        let is_invoked = co.is_invoked(builder);
+        let csi = co.common_stack_information(env, builder);
+        let was_invoked = csi.was_invoked(env, builder);
         builder
             .ins()
-            .brif(is_invoked, use_payloads_block, &[], use_args_block, &[]);
+            .brif(was_invoked, use_payloads_block, &[], use_args_block, &[]);
 
         {
             builder.switch_to_block(use_args_block);
@@ -1520,30 +1566,27 @@ pub(crate) fn translate_resume<'a>(
         let mut vmcontref = tc::VMContRef::new(resume_contref, env.pointer_type());
 
         let revision = vmcontref.get_revision(env, builder);
-        if cfg!(not(feature = "unsafe_disable_continuation_linearity_check")) {
-            let evidence = builder.ins().icmp(IntCC::Equal, revision, witness);
-            emit_debug_println!(
-                env,
-                builder,
-                "[resume] resume_contref = {:p} witness = {}, revision = {}, evidence = {}",
-                resume_contref,
-                witness,
-                revision,
-                evidence
-            );
-            builder
-                .ins()
-                .trapz(evidence, crate::TRAP_CONTINUATION_ALREADY_CONSUMED);
-        }
+        let evidence = builder.ins().icmp(IntCC::Equal, revision, witness);
+        emit_debug_println!(
+            env,
+            builder,
+            "[resume] resume_contref = {:p} witness = {}, revision = {}, evidence = {}",
+            resume_contref,
+            witness,
+            revision,
+            evidence
+        );
+        builder
+            .ins()
+            .trapz(evidence, crate::TRAP_CONTINUATION_ALREADY_CONSUMED);
         let next_revision = vmcontref.incr_revision(env, builder, revision);
         emit_debug_println!(env, builder, "[resume] new revision = {}", next_revision);
 
         if cfg!(debug_assertions) {
             // This should be impossible due to the linearity check.
-            // We keep this check mostly for the test that runs a continuation
-            // twice with `unsafe_disable_continuation_linearity_check` enabled.
             let zero = builder.ins().iconst(I8, 0);
-            let has_returned = vmcontref.has_returned(builder);
+            let csi = vmcontref.common_stack_information(env, builder);
+            let has_returned = csi.has_state(env, builder, wasmtime_continuations::State::Returned);
             emit_debug_assert_eq!(env, builder, has_returned, zero);
         }
 
@@ -1589,9 +1632,12 @@ pub(crate) fn translate_resume<'a>(
         // description of the invariants that we maintain for the various stack
         // limits.
 
-        // We mark `resume_contref` to be invoked
+        // `resume_contref` is now active, and its parent is suspended.
         let co = tc::VMContRef::new(resume_contref, env.pointer_type());
-        co.set_state(builder, wasmtime_continuations::State::Invoked);
+        let resume_csi = co.common_stack_information(env, builder);
+        let parent_csi = parent_stack_chain.get_common_stack_information(env, builder);
+        resume_csi.set_state(env, builder, wasmtime_continuations::State::Running);
+        parent_csi.set_state(env, builder, wasmtime_continuations::State::Parent);
 
         // We update the `StackLimits` of the parent of the continuation to be resumed
         // as well as the `VMRuntimeLimits`.
@@ -1612,7 +1658,7 @@ pub(crate) fn translate_resume<'a>(
         let vm_runtime_limits_ptr = vmctx.load_vm_runtime_limits_ptr(env, builder);
         let last_wasm_exit_fp = builder.ins().get_frame_pointer(env.pointer_type());
         let last_wasm_exit_pc = builder.ins().get_instruction_pointer(env.pointer_type());
-        parent_stack_chain.load_limits_from_vmcontext(
+        parent_csi.load_limits_from_vmcontext(
             env,
             builder,
             vm_runtime_limits_ptr,
@@ -1620,9 +1666,7 @@ pub(crate) fn translate_resume<'a>(
             Some(last_wasm_exit_fp),
             Some(last_wasm_exit_pc),
         );
-        let resume_stackchain =
-            tc::StackChain::from_continuation(builder, resume_contref, env.pointer_type());
-        resume_stackchain.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
+        resume_csi.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
         let fiber_stack = co.get_fiber_stack(env, builder);
         let control_context_ptr = fiber_stack.load_control_context(env, builder);
@@ -1651,6 +1695,8 @@ pub(crate) fn translate_resume<'a>(
 
         // Now the parent contref (or main stack) is active again
         vmctx.store_stack_chain(env, builder, &parent_stack_chain);
+        parent_csi.set_state(env, builder, wasmtime_continuations::State::Running);
+        resume_csi.set_state(env, builder, wasmtime_continuations::State::Suspended);
 
         // Extract the result and signal bit.
         let result = ControlEffect::new(result);
@@ -1683,7 +1729,9 @@ pub(crate) fn translate_resume<'a>(
         // We store parts of the VMRuntimeLimits into the continuation that just suspended.
         let suspended_chain =
             tc::StackChain::from_continuation(builder, resume_contref, env.pointer_type());
-        suspended_chain.load_limits_from_vmcontext(
+        let suspended_csi = suspended_chain.get_common_stack_information(env, builder);
+        let parent_csi = parent_stack_chain.get_common_stack_information(env, builder);
+        suspended_csi.load_limits_from_vmcontext(
             env,
             builder,
             vm_runtime_limits_ptr,
@@ -1694,7 +1742,7 @@ pub(crate) fn translate_resume<'a>(
 
         // Afterwards (!), restore parts of the VMRuntimeLimits from the
         // parent of the suspended continuation (which is now active).
-        parent_stack_chain.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
+        parent_csi.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
         // Extract the tag
         let tag = ControlEffect::value(resume_result, env, builder);
@@ -1827,10 +1875,12 @@ pub(crate) fn translate_resume<'a>(
 
         // Restore parts of the VMRuntimeLimits from the parent of the
         // returned continuation (which is now active).
-        parent_stack_chain.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
+        let parent_csi = parent_stack_chain.get_common_stack_information(env, builder);
+        parent_csi.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
         let co = tc::VMContRef::new(resume_contref, env.pointer_type());
-        co.set_state(builder, wasmtime_continuations::State::Returned);
+        let resume_csi = co.common_stack_information(env, builder);
+        resume_csi.set_state(env, builder, wasmtime_continuations::State::Returned);
 
         // Load and push the results.
         let returns = env.continuation_returns(type_index).to_vec();
@@ -1868,6 +1918,15 @@ pub(crate) fn translate_suspend<'a>(
     let control_context_ptr = fiber_stack.load_control_context(env, builder);
 
     let suspend_payload = ControlEffect::make_suspend(env, builder, tag_addr).0 .0;
+
+    if cfg!(debug_assertions) {
+        let is_running = cref.common_stack_information(env, builder).has_state(
+            env,
+            builder,
+            wasmtime_continuations::State::Running,
+        );
+        emit_debug_assert!(env, builder, is_running);
+    }
 
     builder
         .ins()
