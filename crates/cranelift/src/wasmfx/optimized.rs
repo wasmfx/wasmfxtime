@@ -400,14 +400,10 @@ pub(crate) mod typed_continuation_helpers {
             _env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
         ) -> ir::Value {
-            if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
-                builder.ins().iconst(I64, 0)
-            } else {
-                let mem_flags = ir::MemFlags::trusted();
-                let offset = wasmtime_continuations::offsets::vm_cont_ref::REVISION as i32;
-                let revision = builder.ins().load(I64, mem_flags, self.address, offset);
-                revision
-            }
+            let mem_flags = ir::MemFlags::trusted();
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::REVISION as i32;
+            let revision = builder.ins().load(I64, mem_flags, self.address, offset);
+            revision
         }
 
         /// Sets the revision counter on the given continuation
@@ -418,27 +414,23 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
             revision: ir::Value,
         ) -> ir::Value {
-            if cfg!(feature = "unsafe_disable_continuation_linearity_check") {
-                builder.ins().iconst(I64, 0)
-            } else {
-                if cfg!(debug_assertions) {
-                    let actual_revision = self.get_revision(env, builder);
-                    emit_debug_assert_eq!(env, builder, revision, actual_revision);
-                }
-                let mem_flags = ir::MemFlags::trusted();
-                let offset = wasmtime_continuations::offsets::vm_cont_ref::REVISION as i32;
-                let revision_plus1 = builder.ins().iadd_imm(revision, 1);
-                builder
-                    .ins()
-                    .store(mem_flags, revision_plus1, self.address, offset);
-                if cfg!(debug_assertions) {
-                    let new_revision = self.get_revision(env, builder);
-                    emit_debug_assert_eq!(env, builder, revision_plus1, new_revision);
-                    // Check for overflow:
-                    emit_debug_assert_ule!(env, builder, revision, revision_plus1);
-                }
-                revision_plus1
+            if cfg!(debug_assertions) {
+                let actual_revision = self.get_revision(env, builder);
+                emit_debug_assert_eq!(env, builder, revision, actual_revision);
             }
+            let mem_flags = ir::MemFlags::trusted();
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::REVISION as i32;
+            let revision_plus1 = builder.ins().iadd_imm(revision, 1);
+            builder
+                .ins()
+                .store(mem_flags, revision_plus1, self.address, offset);
+            if cfg!(debug_assertions) {
+                let new_revision = self.get_revision(env, builder);
+                emit_debug_assert_eq!(env, builder, revision_plus1, new_revision);
+                // Check for overflow:
+                emit_debug_assert_ule!(env, builder, revision, revision_plus1);
+            }
+            revision_plus1
         }
 
         pub fn get_fiber_stack<'a>(
@@ -1574,28 +1566,24 @@ pub(crate) fn translate_resume<'a>(
         let mut vmcontref = tc::VMContRef::new(resume_contref, env.pointer_type());
 
         let revision = vmcontref.get_revision(env, builder);
-        if cfg!(not(feature = "unsafe_disable_continuation_linearity_check")) {
-            let evidence = builder.ins().icmp(IntCC::Equal, revision, witness);
-            emit_debug_println!(
-                env,
-                builder,
-                "[resume] resume_contref = {:p} witness = {}, revision = {}, evidence = {}",
-                resume_contref,
-                witness,
-                revision,
-                evidence
-            );
-            builder
-                .ins()
-                .trapz(evidence, ir::TrapCode::ContinuationAlreadyConsumed);
-        }
+        let evidence = builder.ins().icmp(IntCC::Equal, revision, witness);
+        emit_debug_println!(
+            env,
+            builder,
+            "[resume] resume_contref = {:p} witness = {}, revision = {}, evidence = {}",
+            resume_contref,
+            witness,
+            revision,
+            evidence
+        );
+        builder
+            .ins()
+            .trapz(evidence, ir::TrapCode::ContinuationAlreadyConsumed);
         let next_revision = vmcontref.incr_revision(env, builder, revision);
         emit_debug_println!(env, builder, "[resume] new revision = {}", next_revision);
 
         if cfg!(debug_assertions) {
             // This should be impossible due to the linearity check.
-            // We keep this check mostly for the test that runs a continuation
-            // twice with `unsafe_disable_continuation_linearity_check` enabled.
             let zero = builder.ins().iconst(I8, 0);
             let csi = vmcontref.common_stack_information(env, builder);
             let has_returned = csi.has_state(env, builder, wasmtime_continuations::State::Returned);
