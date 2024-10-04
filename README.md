@@ -3,14 +3,14 @@ with support for the [WasmFX](https://wasmfx.dev/) instruction set. WasmFX adds
 stack switching capabilities to core Wasm, thereby enabling interleaving of
 computation. The design of the instruction set extension is based on [effect
 handlers](https://effect-handlers.org), which provide a structured facility for
-handling non-local control flow. 
+handling non-local control flow.
 
 Additional key resources are
-* An [explainer document](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Explainer.md) with an informal introduction to the instruction set extension along with [example programs](https://github.com/WebAssembly/stack-switching/tree/main/proposals/continuations/examples).
+* An [explainer document](https://github.com/WebAssembly/stack-switching/blob/main/proposals/stack-switching/Explainer.md) with an informal introduction to the instruction set extension along with [example programs](https://github.com/WebAssembly/stack-switching/tree/main/proposals/continuations/examples).
 * A [formal description](https://github.com/WebAssembly/stack-switching/blob/main/proposals/continuations/Overview.md) of the extension.
 * A collection of [benchmark programs](https://github.com/wasmfx/benchfx) and a prototype library for [asynchronous I/O programming](https://github.com/wasmfx/waeio) leveraging the instruction extension.
 
-## Building 
+## Building
 
 The build steps are equivalent to the [standard steps for building Wasmtime from
 source](https://docs.wasmtime.dev/contributing-building.html), but using this
@@ -43,15 +43,15 @@ Analogously, to build in release mode run `cargo build --release`, which places 
 The `wasmtime` executable can compile and run WebAssembly modules [in the usual way](https://docs.wasmtime.dev/cli.html). However, if a module contains WasmFX instructions, then it is necessary to enable additional features, e.g.
 
 ```sh
-wasmtime -W=exceptions,function-references,typed-continuations my_module.wat
+wasmtime -W=exceptions,function-references,stack-switching my_module.wat
 ```
 
-The first two features are prerequisite features, i.e. the `exceptions` feature is required to support WebAssembly tags and the `function-references` feature is required to support typed references. The `typed-continuations` feature enables support for the WasmFX instruction set.
+The first two features are prerequisite features, i.e. the `exceptions` feature is required to support WebAssembly tags and the `function-references` feature is required to support typed references. The `stack-switching` feature enables support for the stack switching (viz. WasmFX) instruction set.
 
-To run an arbitrary function exported as `foo` by the module type 
+To run an arbitrary function exported as `foo` by the module type
 
 ```sh
-wasmtime -W=exceptions,function-references,typed-continuations --invoke=foo my_module.wat
+wasmtime -W=exceptions,function-references,stack-switching --invoke=foo my_module.wat
 ```
 
 ## Example program
@@ -118,9 +118,9 @@ See
 [examples/generator.wat](https://github.com/wasmfx/wasmfxtime/blob/main/examples/generator.wat)
 for the full version of the file, including the definition of `$println_u32`.
 
-Running the full version with 
+Running the full version with
 ```
-wasmtime -W=exceptions,function-references,typed-continuations generator.wat
+wasmtime -W=exceptions,function-references,stack-switching generator.wat
 ```
 then prints the numbers 100 down to 1 in the terminal.
 
@@ -128,7 +128,7 @@ then prints the numbers 100 down to 1 in the terminal.
 ## Current limitations
 
 The implementation of the WasmFX proposal is currently limited in a few ways:
-- The only supported platform is x64 Linux. 
+- The only supported platform is x64 Linux.
 - Only a single module can be executed. In particular, providing additional
   modules using the `--preload` option of `wasmtime` can lead to unexpected
   behavior.
