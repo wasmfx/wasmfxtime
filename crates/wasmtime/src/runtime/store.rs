@@ -1642,6 +1642,8 @@ impl StoreOpaque {
             return;
         }
 
+        log::trace!("============ Begin GC ===========");
+
         // Take the GC roots out of `self` so we can borrow it mutably but still
         // call mutable methods on `self`.
         let mut roots = core::mem::take(&mut self.gc_roots_list);
@@ -1652,6 +1654,8 @@ impl StoreOpaque {
         // Restore the GC roots for the next GC.
         roots.clear();
         self.gc_roots_list = roots;
+
+        log::trace!("============ End GC ===========");
     }
 
     #[inline]
@@ -1690,6 +1694,8 @@ impl StoreOpaque {
             return;
         }
 
+        log::trace!("============ Begin Async GC ===========");
+
         // Take the GC roots out of `self` so we can borrow it mutably but still
         // call mutable methods on `self`.
         let mut roots = std::mem::take(&mut self.gc_roots_list);
@@ -1702,6 +1708,8 @@ impl StoreOpaque {
         // Restore the GC roots for the next GC.
         roots.clear();
         self.gc_roots_list = roots;
+
+        log::trace!("============ End Async GC ===========");
     }
 
     #[inline]

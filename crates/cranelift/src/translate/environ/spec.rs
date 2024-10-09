@@ -18,7 +18,7 @@ use smallvec::SmallVec;
 use wasmparser::Operator;
 use wasmtime_environ::{
     DataIndex, ElemIndex, FuncIndex, GlobalIndex, MemoryIndex, TableIndex, TypeConvert, TypeIndex,
-    WasmHeapType, WasmResult, WasmValType,
+    WasmHeapType, WasmRefType, WasmResult, WasmValType,
 };
 
 /// The value of a WebAssembly global variable.
@@ -707,6 +707,14 @@ pub trait FuncEnvironment: TargetEnvironment {
         index: ir::Value,
         value: ir::Value,
     ) -> WasmResult<()>;
+
+    /// Translate a `ref.test` instruction.
+    fn translate_ref_test(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        ref_ty: WasmRefType,
+        gc_ref: ir::Value,
+    ) -> WasmResult<ir::Value>;
 
     /// Emit code at the beginning of every wasm loop.
     ///

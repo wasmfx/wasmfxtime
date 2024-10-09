@@ -291,6 +291,8 @@ wasmtime_option_group! {
         pub gc: Option<bool>,
         /// Configure support for the custom-page-sizes proposal.
         pub custom_page_sizes: Option<bool>,
+        /// Configure support for the wide-arithmetic proposal.
+        pub wide_arithmetic: Option<bool>,
     }
 
     enum Wasm {
@@ -303,6 +305,8 @@ wasmtime_option_group! {
     pub struct WasiOptions {
         /// Enable support for WASI CLI APIs, including filesystems, sockets, clocks, and random.
         pub cli: Option<bool>,
+        /// Enable WASI APIs marked as: @unstable(feature = cli-exit-with-code)
+        pub cli_exit_with_code: Option<bool>,
         /// Deprecated alias for `cli`
         pub common: Option<bool>,
         /// Enable support for WASI neural network API (experimental)
@@ -744,6 +748,9 @@ impl CommonOptions {
         }
         if let Some(enable) = self.wasm.custom_page_sizes.or(all) {
             config.wasm_custom_page_sizes(enable);
+        }
+        if let Some(enable) = self.wasm.wide_arithmetic.or(all) {
+            config.wasm_wide_arithmetic(enable);
         }
 
         macro_rules! handle_conditionally_compiled {

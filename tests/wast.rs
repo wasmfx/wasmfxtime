@@ -174,6 +174,8 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
             "spec_testsuite/simd_store32_lane.wast",
             "spec_testsuite/simd_store64_lane.wast",
             "spec_testsuite/simd_store8_lane.wast",
+            // wide arithmetic
+            "misc_testsuite/wide-arithmetic.wast",
         ];
 
         if unsupported.iter().any(|part| test.ends_with(part)) {
@@ -203,16 +205,12 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
         }
     }
     let unsupported_gc_tests = [
-        "array_copy.wast",
         "binary_gc.wast",
         "br_on_cast_fail.wast",
         "br_on_cast.wast",
         "extern.wast",
         "ref_cast.wast",
-        "ref_eq.wast",
         "ref_test.wast",
-        "return_call_indirect.wast",
-        "return_call.wast",
         "table_sub.wast",
         "type_canon.wast",
         "type_equivalence.wast",
@@ -295,10 +293,11 @@ fn run_wast(wast: &Path, strategy: Strategy, pooling: bool) -> anyhow::Result<()
         gc || memory64 || stack_switching || feature_found(wast, "function-references");
     let reference_types = !(threads && feature_found(wast, "proposals"));
     let relaxed_simd = feature_found(wast, "relaxed-simd");
-    let tail_call = feature_found(wast, "tail-call") || feature_found(wast, "function-references");
+    let tail_call = function_references || feature_found(wast, "tail-call");
     let use_shared_memory = feature_found_src(&wast_bytes, "shared_memory")
         || feature_found_src(&wast_bytes, "shared)");
     let extended_const = feature_found(wast, "extended-const") || memory64;
+    let wide_arithmetic = feature_found(wast, "wide-arithmetic");
 
     if pooling && use_shared_memory {
         log::warn!("skipping pooling test with shared memory");
@@ -323,6 +322,7 @@ fn run_wast(wast: &Path, strategy: Strategy, pooling: bool) -> anyhow::Result<()
         .wasm_stack_switching(stack_switching)
         .wasm_custom_page_sizes(custom_page_sizes)
         .wasm_extended_const(extended_const)
+        .wasm_wide_arithmetic(wide_arithmetic)
         .strategy(strategy);
 
     if is_cranelift {

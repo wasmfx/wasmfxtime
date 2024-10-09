@@ -94,7 +94,7 @@ use std::vec::Vec;
 use wasmparser::{FuncValidator, MemArg, Operator, WasmModuleResources};
 use wasmtime_environ::{
     wasm_unsupported, DataIndex, ElemIndex, FuncIndex, GlobalIndex, MemoryIndex, TableIndex,
-    TypeIndex, WasmResult,
+    TypeIndex, WasmRefType, WasmResult,
 };
 
 /// Given a `Reachability<T>`, unwrap the inner `T` or, when unreachable, set
@@ -2718,17 +2718,46 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let (array, index, elem) = state.pop3();
             environ.translate_array_set(builder, array_type_index, array, index, elem)?;
         }
+        Operator::RefEq => {
+            let (r1, r2) = state.pop2();
+            let eq = builder.ins().icmp(ir::condcodes::IntCC::Equal, r1, r2);
+            let eq = builder.ins().uextend(ir::types::I32, eq);
+            state.push1(eq);
+        }
+        Operator::RefTestNonNull { hty } => {
+            let r = state.pop1();
+            let heap_type = environ.convert_heap_type(*hty);
+            let result = environ.translate_ref_test(
+                builder,
+                WasmRefType {
+                    heap_type,
+                    nullable: false,
+                },
+                r,
+            )?;
+            state.push1(result);
+        }
+        Operator::RefTestNullable { hty } => {
+            let r = state.pop1();
+            let heap_type = environ.convert_heap_type(*hty);
+            let result = environ.translate_ref_test(
+                builder,
+                WasmRefType {
+                    heap_type,
+                    nullable: true,
+                },
+                r,
+            )?;
+            state.push1(result);
+        }
 
-        Operator::RefEq
-        | Operator::RefTestNonNull { .. }
-        | Operator::RefTestNullable { .. }
-        | Operator::RefCastNonNull { .. }
+        Operator::RefCastNonNull { .. }
         | Operator::RefCastNullable { .. }
         | Operator::BrOnCast { .. }
         | Operator::BrOnCastFail { .. }
         | Operator::AnyConvertExtern
         | Operator::ExternConvertAny => {
-            return Err(wasm_unsupported!("GC operators are not yet implemented"));
+            return Err(wasm_unsupported!("GC operator not yet implemented: {op:?}"));
         }
 
         Operator::ContNew { cont_type_index } => {
@@ -2850,6 +2879,39 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             return Err(wasm_unsupported!(
                 "shared-everything-threads operators are not yet implemented"
             ));
+        }
+
+        Operator::I64MulWideS => {
+            let (arg1, arg2) = state.pop2();
+            let arg1 = builder.ins().sextend(I128, arg1);
+            let arg2 = builder.ins().sextend(I128, arg2);
+            let result = builder.ins().imul(arg1, arg2);
+            let (lo, hi) = builder.ins().isplit(result);
+            state.push2(lo, hi);
+        }
+        Operator::I64MulWideU => {
+            let (arg1, arg2) = state.pop2();
+            let arg1 = builder.ins().uextend(I128, arg1);
+            let arg2 = builder.ins().uextend(I128, arg2);
+            let result = builder.ins().imul(arg1, arg2);
+            let (lo, hi) = builder.ins().isplit(result);
+            state.push2(lo, hi);
+        }
+        Operator::I64Add128 => {
+            let (arg1, arg2, arg3, arg4) = state.pop4();
+            let arg1 = builder.ins().iconcat(arg1, arg2);
+            let arg2 = builder.ins().iconcat(arg3, arg4);
+            let result = builder.ins().iadd(arg1, arg2);
+            let (res1, res2) = builder.ins().isplit(result);
+            state.push2(res1, res2);
+        }
+        Operator::I64Sub128 => {
+            let (arg1, arg2, arg3, arg4) = state.pop4();
+            let arg1 = builder.ins().iconcat(arg1, arg2);
+            let arg2 = builder.ins().iconcat(arg3, arg4);
+            let result = builder.ins().isub(arg1, arg2);
+            let (res1, res2) = builder.ins().isplit(result);
+            state.push2(res1, res2);
         }
     };
     Ok(())

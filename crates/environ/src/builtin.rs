@@ -148,10 +148,8 @@ macro_rules! foreach_builtin_function {
             #[cfg(feature = "gc")]
             array_copy(
                 vmctx: vmctx,
-                dst_array_interned_type_index: i32,
                 dst_array: reference,
                 dst_index: i32,
-                src_array_interned_type_index: i32,
                 src_array: reference,
                 src_index: i32,
                 len: i32
@@ -180,6 +178,15 @@ macro_rules! foreach_builtin_function {
                 src: i32,
                 len: i32
             );
+
+            // Returns whether `actual_engine_type` is a subtype of
+            // `expected_engine_type`.
+            #[cfg(feature = "gc")]
+            is_subtype(
+                vmctx: vmctx,
+                actual_engine_type: i32,
+                expected_engine_type: i32
+            ) -> i32;
 
             // Returns an index for Wasm's `table.grow` instruction for GC references.
             #[cfg(feature = "gc")]
