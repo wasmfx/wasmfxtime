@@ -20,10 +20,10 @@ use std::mem;
 use wasmparser::Operator;
 use wasmtime_environ::{
     BuiltinFunctionIndex, DataIndex, ElemIndex, EngineOrModuleTypeIndex, FuncIndex, GlobalIndex,
-    IndexType, Memory, MemoryIndex, MemoryPlan, MemoryStyle, Module, ModuleTranslation,
-    ModuleTypesBuilder, PtrSize, Table, TableIndex, TableStyle, TagIndex, Tunables, TypeConvert,
-    TypeIndex, VMOffsets, WasmCompositeType, WasmFuncType, WasmHeapTopType, WasmHeapType,
-    WasmResult, WasmValType,
+    IndexType, Memory, MemoryIndex, MemoryPlan, MemoryStyle, Module, ModuleInternedTypeIndex,
+    ModuleTranslation, ModuleTypesBuilder, PtrSize, Table, TableIndex, TableStyle, TagIndex,
+    Tunables, TypeConvert, TypeIndex, VMOffsets, WasmCompositeType, WasmFuncType, WasmHeapTopType,
+    WasmHeapType, WasmRefType, WasmResult, WasmValType,
 };
 use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
@@ -1139,6 +1139,57 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         let call = builder.ins().call(libcall, &[vmctx, val]);
         *builder.func.dfg.inst_results(call).first().unwrap()
     }
+
+    fn vmshared_type_index_ty(&self) -> Type {
+        Type::int_with_byte_size(self.offsets.size_of_vmshared_type_index().into()).unwrap()
+    }
+
+    /// Given a `ModuleInternedTypeIndex`, emit code to get the corresponding
+    /// `VMSharedTypeIndex` at runtime.
+    pub(crate) fn module_interned_to_shared_ty(
+        &mut self,
+        pos: &mut FuncCursor,
+        interned_ty: ModuleInternedTypeIndex,
+    ) -> ir::Value {
+        let vmctx = self.vmctx_val(pos);
+        let pointer_type = self.pointer_type();
+        let mem_flags = ir::MemFlags::trusted().with_readonly();
+
+        // Load the base pointer of the array of `VMSharedTypeIndex`es.
+        let shared_indices = pos.ins().load(
+            pointer_type,
+            mem_flags,
+            vmctx,
+            i32::from(self.offsets.ptr.vmctx_type_ids_array()),
+        );
+
+        // Calculate the offset in that array for this type's entry.
+        let ty = self.vmshared_type_index_ty();
+        let offset = i32::try_from(interned_ty.as_u32().checked_mul(ty.bytes()).unwrap()).unwrap();
+
+        // Load the`VMSharedTypeIndex` that this `ModuleInternedTypeIndex` is
+        // associated with at runtime from the array.
+        pos.ins().load(ty, mem_flags, shared_indices, offset)
+    }
+
+    /// Load the associated `VMSharedTypeIndex` from inside a `*const VMFuncRef`.
+    ///
+    /// Does not check for null; just assumes that the `funcref` is a valid
+    /// pointer.
+    pub(crate) fn load_funcref_type_index(
+        &mut self,
+        pos: &mut FuncCursor,
+        mem_flags: ir::MemFlags,
+        funcref: ir::Value,
+    ) -> ir::Value {
+        let ty = self.vmshared_type_index_ty();
+        pos.ins().load(
+            ty,
+            mem_flags,
+            funcref,
+            i32::from(self.offsets.ptr.vm_func_ref_type_index()),
+        )
+    }
 }
 
 struct Call<'a, 'func, 'module_env> {
@@ -1330,7 +1381,6 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         ty_index: TypeIndex,
         funcref_ptr: ir::Value,
     ) -> CheckIndirectCallTypeSignature {
-        let pointer_type = self.env.pointer_type();
         let table = &self.env.module.table_plans[table_index];
         let sig_id_size = self.env.offsets.size_of_vmshared_type_index();
         let sig_id_type = Type::int(u16::from(sig_id_size) * 8).unwrap();
@@ -1423,28 +1473,13 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             }
         }
 
-        let vmctx = self.env.vmctx(self.builder.func);
-        let base = self.builder.ins().global_value(pointer_type, vmctx);
-
-        // Load the caller ID. This requires loading the `*mut VMFuncRef` base
-        // pointer from `VMContext` and then loading, based on `SignatureIndex`,
-        // the corresponding entry.
-        let mem_flags = ir::MemFlags::trusted().with_readonly();
-        let signatures = self.builder.ins().load(
-            pointer_type,
-            mem_flags,
-            base,
-            i32::from(self.env.offsets.ptr.vmctx_type_ids_array()),
-        );
-        let sig_index = self.env.module.types[ty_index];
-        let offset =
-            i32::try_from(sig_index.as_u32().checked_mul(sig_id_type.bytes()).unwrap()).unwrap();
+        // Load the caller's `VMSharedTypeIndex.
+        let interned_ty = self.env.module.types[ty_index];
         let caller_sig_id = self
-            .builder
-            .ins()
-            .load(sig_id_type, mem_flags, signatures, offset);
+            .env
+            .module_interned_to_shared_ty(&mut self.builder.cursor(), interned_ty);
 
-        // Load the callee ID.
+        // Load the callee's `VMSharedTypeIndex`.
         //
         // Note that the callee may be null in which case this load may
         // trap. If so use the `TRAP_INDIRECT_CALL_TO_NULL` trap code.
@@ -1455,12 +1490,9 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             self.env
                 .trapz(self.builder, funcref_ptr, crate::TRAP_INDIRECT_CALL_TO_NULL);
         }
-        let callee_sig_id = self.builder.ins().load(
-            sig_id_type,
-            mem_flags,
-            funcref_ptr,
-            i32::from(self.env.offsets.ptr.vm_func_ref_type_index()),
-        );
+        let callee_sig_id =
+            self.env
+                .load_funcref_type_index(&mut self.builder.cursor(), mem_flags, funcref_ptr);
 
         // Check that they match.
         let cmp = self
@@ -2089,36 +2121,19 @@ impl<'module_environment> crate::translate::FuncEnvironment
     fn translate_array_copy(
         &mut self,
         builder: &mut FunctionBuilder,
-        dst_array_type_index: TypeIndex,
+        _dst_array_type_index: TypeIndex,
         dst_array: ir::Value,
         dst_index: ir::Value,
-        src_array_type_index: TypeIndex,
+        _src_array_type_index: TypeIndex,
         src_array: ir::Value,
         src_index: ir::Value,
         len: ir::Value,
     ) -> WasmResult<()> {
         let libcall = gc::builtins::array_copy(self, builder.func)?;
         let vmctx = self.vmctx_val(&mut builder.cursor());
-        let dst_array_type_index = self.module.types[dst_array_type_index];
-        let dst_array_type_index = builder
-            .ins()
-            .iconst(I32, i64::from(dst_array_type_index.as_u32()));
-        let src_array_type_index = self.module.types[src_array_type_index];
-        let src_array_type_index = builder
-            .ins()
-            .iconst(I32, i64::from(src_array_type_index.as_u32()));
         builder.ins().call(
             libcall,
-            &[
-                vmctx,
-                dst_array_type_index,
-                dst_array,
-                dst_index,
-                src_array_type_index,
-                src_array,
-                src_index,
-                len,
-            ],
+            &[vmctx, dst_array, dst_index, src_array, src_index, len],
         );
         Ok(())
     }
@@ -2246,6 +2261,15 @@ impl<'module_environment> crate::translate::FuncEnvironment
         value: ir::Value,
     ) -> WasmResult<()> {
         gc::translate_array_set(self, builder, array_type_index, array, index, value)
+    }
+
+    fn translate_ref_test(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        ref_ty: WasmRefType,
+        gc_ref: ir::Value,
+    ) -> WasmResult<ir::Value> {
+        gc::translate_ref_test(self, builder, ref_ty, gc_ref)
     }
 
     fn translate_ref_null(

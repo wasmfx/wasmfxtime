@@ -6,6 +6,7 @@ use crate::{
     masm::OperandSize,
     reg::{writable, Reg, WritableReg},
 };
+use cranelift_codegen::ir::TrapCode;
 use cranelift_codegen::isa::aarch64::inst::{
     BitOp, BranchTarget, Cond, CondBrKind, FPULeftShiftImm, FPUOp1, FPUOp2,
     FPUOpRI::{self, UShr32, UShr64},
@@ -314,9 +315,9 @@ impl Assembler {
         });
     }
 
-    pub fn mov_from_vec(&mut self, rn: Reg, rd: Reg, idx: u8, size: OperandSize) {
+    pub fn mov_from_vec(&mut self, rn: Reg, rd: WritableReg, idx: u8, size: OperandSize) {
         self.emit(Inst::MovFromVec {
-            rd: Writable::from_reg(rd.into()),
+            rd: rd.map(Into::into),
             rn: rn.into(),
             idx,
             size: size.into(),
@@ -341,10 +342,10 @@ impl Assembler {
     }
 
     /// Add across Vector.
-    pub fn addv(&mut self, rn: Reg, rd: Reg, size: VectorSize) {
+    pub fn addv(&mut self, rn: Reg, rd: WritableReg, size: VectorSize) {
         self.emit(Inst::VecLanes {
             op: VecLanesOp::Addv,
-            rd: Writable::from_reg(rd.into()),
+            rd: rd.map(Into::into),
             rn: rn.into(),
             size,
         });
@@ -539,7 +540,7 @@ impl Assembler {
     }
 
     /// Float round (ceil, trunc, floor) with two registers.
-    pub fn fround_rr(&mut self, rn: Reg, rd: Reg, mode: RoundingMode, size: OperandSize) {
+    pub fn fround_rr(&mut self, rn: Reg, rd: WritableReg, mode: RoundingMode, size: OperandSize) {
         let fpu_mode = match (mode, size) {
             (RoundingMode::Nearest, OperandSize::S32) => FpuRoundMode::Nearest32,
             (RoundingMode::Up, OperandSize::S32) => FpuRoundMode::Plus32,
@@ -674,12 +675,23 @@ impl Assembler {
         });
     }
 
+    // If the condition is true, Conditional Select writes rm to rd. If the condition is false,
+    // it writes rn to rd
+    pub fn csel(&mut self, rm: Reg, rn: Reg, rd: WritableReg, cond: Cond) {
+        self.emit(Inst::CSel {
+            rd: rd.map(Into::into),
+            rm: rm.into(),
+            rn: rn.into(),
+            cond,
+        });
+    }
+
     // Population Count per byte.
-    pub fn cnt(&mut self, rd: Reg) {
+    pub fn cnt(&mut self, rd: WritableReg) {
         self.emit(Inst::VecMisc {
             op: VecMisc2::Cnt,
-            rd: Writable::from_reg(rd.into()),
-            rn: rd.into(),
+            rd: rd.map(Into::into),
+            rn: rd.to_reg().into(),
             size: VectorSize::Size8x8,
         });
     }
@@ -697,6 +709,19 @@ impl Assembler {
     /// Bitwise AND (shifted register), setting flags.
     pub fn ands_rr(&mut self, rn: Reg, rm: Reg, size: OperandSize) {
         self.emit_alu_rrr(ALUOp::AndS, rm, rn, writable!(regs::zero()), size);
+    }
+
+    /// Permanently Undefined.
+    pub fn udf(&mut self, code: TrapCode) {
+        self.emit(Inst::Udf { trap_code: code });
+    }
+
+    /// Conditional trap.
+    pub fn trapif(&mut self, cc: Cond, code: TrapCode) {
+        self.emit(Inst::TrapIf {
+            kind: CondBrKind::Cond(cc),
+            trap_code: code,
+        });
     }
 
     // Helpers for ALU operations.
@@ -828,10 +853,10 @@ impl Assembler {
         });
     }
 
-    fn emit_fpu_round(&mut self, op: FpuRoundMode, rn: Reg, rd: Reg) {
+    fn emit_fpu_round(&mut self, op: FpuRoundMode, rn: Reg, rd: WritableReg) {
         self.emit(Inst::FpuRound {
             op: op,
-            rd: Writable::from_reg(rd.into()),
+            rd: rd.map(Into::into),
             rn: rn.into(),
         });
     }
