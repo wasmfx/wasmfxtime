@@ -68,7 +68,7 @@ pub struct StackLimits {
     pub stack_limit: usize,
     pub last_wasm_exit_fp: usize,
     pub last_wasm_exit_pc: usize,
-    pub last_wasm_entry_sp: usize,
+    pub last_wasm_entry_fp: usize,
 }
 
 /// This type represents "common" information that we need to save both for the
@@ -264,7 +264,7 @@ pub mod offsets {
         pub const STACK_LIMIT: usize = offset_of!(StackLimits, stack_limit);
         pub const LAST_WASM_EXIT_FP: usize = offset_of!(StackLimits, last_wasm_exit_fp);
         pub const LAST_WASM_EXIT_PC: usize = offset_of!(StackLimits, last_wasm_exit_pc);
-        pub const LAST_WASM_ENTRY_SP: usize = offset_of!(StackLimits, last_wasm_entry_sp);
+        pub const LAST_WASM_ENTRY_FP: usize = offset_of!(StackLimits, last_wasm_entry_fp);
     }
 
     pub mod common_stack_information {

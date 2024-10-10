@@ -1134,8 +1134,8 @@ pub(crate) mod typed_continuation_helpers {
                 pointer_size.vmruntime_limits_stack_limit(),
             );
             copy_to_vm_runtime_limits(
-                o::stack_limits::LAST_WASM_ENTRY_SP,
-                pointer_size.vmruntime_limits_last_wasm_entry_sp(),
+                o::stack_limits::LAST_WASM_ENTRY_FP,
+                pointer_size.vmruntime_limits_last_wasm_entry_fp(),
             );
         }
 
@@ -1177,8 +1177,8 @@ pub(crate) mod typed_continuation_helpers {
                 );
             };
             copy(
-                pointer_size.vmruntime_limits_last_wasm_entry_sp(),
-                o::stack_limits::LAST_WASM_ENTRY_SP,
+                pointer_size.vmruntime_limits_last_wasm_entry_fp(),
+                o::stack_limits::LAST_WASM_ENTRY_FP,
             );
 
             if load_stack_limit {

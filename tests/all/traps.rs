@@ -5,6 +5,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use wasmtime::*;
+use wasmtime_test_macros::wasmtime_test;
 
 #[test]
 fn test_trap_return() -> Result<()> {
@@ -1676,6 +1677,182 @@ fn async_stack_size_ignored_if_disabled() -> Result<()> {
     config.async_support(false);
     config.max_wasm_stack(8 << 20);
     Engine::new(&config)?;
+
+    Ok(())
+}
+
+#[wasmtime_test(wasm_features(tail_call))]
+fn tail_call_to_imported_function(config: &mut Config) -> Result<()> {
+    let engine = Engine::new(config)?;
+
+    let module = Module::new(
+        &engine,
+        r#"
+            (module
+              (import "" "" (func (result i32)))
+
+              (func (export "run") (result i32)
+                return_call 0
+              )
+            )
+        "#,
+    )?;
+
+    let mut store = Store::new(&engine, ());
+    let host_func = Func::wrap(&mut store, || -> Result<i32> { bail!("whoopsie") });
+    let instance = Instance::new(&mut store, &module, &[host_func.into()])?;
+
+    let run = instance.get_typed_func::<(), i32>(&mut store, "run")?;
+    let err = run.call(&mut store, ()).unwrap_err();
+    assert!(err.to_string().contains("whoopsie"));
+
+    Ok(())
+}
+
+#[wasmtime_test(wasm_features(tail_call))]
+fn tail_call_to_imported_function_in_start_function(config: &mut Config) -> Result<()> {
+    let engine = Engine::new(config)?;
+
+    let module = Module::new(
+        &engine,
+        r#"
+            (module
+              (import "" "" (func))
+
+              (func $f
+                return_call 0
+              )
+
+              (start $f)
+            )
+        "#,
+    )?;
+
+    let mut store = Store::new(&engine, ());
+    let host_func = Func::wrap(&mut store, || -> Result<()> { bail!("whoopsie") });
+    let err = Instance::new(&mut store, &module, &[host_func.into()]).unwrap_err();
+    assert!(err.to_string().contains("whoopsie"));
+
+    Ok(())
+}
+
+#[wasmtime_test(wasm_features(tail_call, function_references))]
+fn return_call_ref_to_imported_function(config: &mut Config) -> Result<()> {
+    let engine = Engine::new(config)?;
+
+    let module = Module::new(
+        &engine,
+        r#"
+            (module
+              (type (func (result i32)))
+              (func (export "run") (param (ref 0)) (result i32)
+                (return_call_ref 0 (local.get 0))
+              )
+            )
+        "#,
+    )?;
+
+    let mut store = Store::new(&engine, ());
+    let host_func = Func::wrap(&mut store, || -> Result<i32> { bail!("whoopsie") });
+    let instance = Instance::new(&mut store, &module, &[])?;
+
+    let run = instance.get_typed_func::<Func, i32>(&mut store, "run")?;
+    let err = run.call(&mut store, host_func).unwrap_err();
+    assert!(err.to_string().contains("whoopsie"));
+
+    Ok(())
+}
+
+#[wasmtime_test(wasm_features(tail_call, function_references))]
+fn return_call_indirect_to_imported_function(config: &mut Config) -> Result<()> {
+    let engine = Engine::new(config)?;
+
+    let module = Module::new(
+        &engine,
+        r#"
+            (module
+              (import "" "" (func (result i32)))
+              (table 1 funcref (ref.func 0))
+              (func (export "run") (result i32)
+                (return_call_indirect (result i32) (i32.const 0))
+              )
+            )
+        "#,
+    )?;
+
+    let mut store = Store::new(&engine, ());
+    let host_func = Func::wrap(&mut store, || -> Result<i32> { bail!("whoopsie") });
+    let instance = Instance::new(&mut store, &module, &[host_func.into()])?;
+
+    let run = instance.get_typed_func::<(), i32>(&mut store, "run")?;
+    let err = run.call(&mut store, ()).unwrap_err();
+    assert!(err.to_string().contains("whoopsie"));
+
+    Ok(())
+}
+
+#[test]
+fn return_call_to_aborting_wasm_function_with_stack_adjustments() -> Result<()> {
+    let engine = Engine::default();
+    let module = Module::new(
+        &engine,
+        r#"
+(module
+  (func (export "entry")
+        (param i64 i64 i64 i64 i64 i64)
+        (result i64 i64 i64 i64 i64 i64 i64 i64 i64 i64)
+    return_call $abort
+  )
+  (func $abort (result i64 i64 i64 i64 i64 i64 i64 i64 i64 i64)
+    unreachable
+  )
+)
+        "#,
+    )?;
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[])?;
+    let func = instance.get_func(&mut store, "entry").unwrap();
+    let args = vec![Val::I64(0); 6];
+    let mut results = vec![Val::I64(0); 10];
+
+    let err = func.call(&mut store, &args, &mut results).unwrap_err();
+
+    let trap: &Trap = err.downcast_ref().unwrap();
+    assert_eq!(*trap, Trap::UnreachableCodeReached);
+
+    let trace: &WasmBacktrace = err.downcast_ref().unwrap();
+    assert_eq!(trace.frames().len(), 1);
+    assert_eq!(trace.frames()[0].func_name(), Some("abort"));
+
+    let module2 = Module::new(
+        &engine,
+        r#"
+(module
+  (func (export "entry")
+        (param i64 i64 i64 i64 i64 i64)
+        (result i64 i64 i64 i64 i64 i64 i64 i64 i64 i64)
+    return_call $foo
+  )
+  (func $foo (result i64 i64 i64 i64 i64 i64 i64 i64 i64 i64)
+    call $abort
+    unreachable
+  )
+  (func $abort unreachable)
+)
+        "#,
+    )?;
+    let instance = Instance::new(&mut store, &module2, &[])?;
+    let func = instance.get_func(&mut store, "entry").unwrap();
+
+    let err = func.call(&mut store, &args, &mut results).unwrap_err();
+
+    let trap: &Trap = err.downcast_ref().unwrap();
+    assert_eq!(*trap, Trap::UnreachableCodeReached);
+
+    let trace: &WasmBacktrace = err.downcast_ref().unwrap();
+    assert_eq!(trace.frames().len(), 2);
+    assert_eq!(trace.frames()[0].func_name(), Some("abort"));
+    assert_eq!(trace.frames()[1].func_name(), Some("foo"));
 
     Ok(())
 }
