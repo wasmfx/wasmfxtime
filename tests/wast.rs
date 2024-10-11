@@ -204,21 +204,6 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
             }
         }
     }
-    let unsupported_gc_tests = [
-        "binary_gc.wast",
-        "br_on_cast_fail.wast",
-        "br_on_cast.wast",
-        "extern.wast",
-        "ref_cast.wast",
-        "ref_test.wast",
-        "table_sub.wast",
-        "type_canon.wast",
-        "type_equivalence.wast",
-        "type-rec.wast",
-        "type-subtyping.wast",
-        "unreached_valid.wast",
-        "i31.wast",
-    ];
 
     for part in test.iter() {
         // Not implemented in Wasmtime yet
@@ -245,15 +230,6 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
             {
                 return true;
             }
-            if unsupported_gc_tests.iter().any(|i| test.ends_with(i)) {
-                return true;
-            }
-        }
-
-        // Implementation of the GC proposal is a work-in-progress, this is
-        // a list of all currently known-to-fail tests.
-        if part == "gc" {
-            return unsupported_gc_tests.iter().any(|i| test.ends_with(i));
         }
 
         if part == "stack-switching" {

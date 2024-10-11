@@ -1423,6 +1423,13 @@ impl From<ValType> for StorageType {
     }
 }
 
+impl From<RefType> for StorageType {
+    #[inline]
+    fn from(r: RefType) -> Self {
+        StorageType::ValType(r.into())
+    }
+}
+
 impl StorageType {
     /// Is this an `i8`?
     #[inline]

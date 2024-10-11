@@ -2906,7 +2906,7 @@ dependencies = [
  "cargo_metadata",
  "heck 0.5.0",
  "wasmtime",
- "wit-component 0.219.0",
+ "wit-component 0.219.1",
 ]
 
 [[package]]
@@ -3267,7 +3267,7 @@ name = "verify-component-adapter"
 version = "27.0.0"
 dependencies = [
  "anyhow",
- "wasmparser 0.219.0",
+ "wasmparser 0.219.1",
  "wat",
 ]
 
@@ -3360,7 +3360,7 @@ dependencies = [
  "byte-array-literals",
  "object",
  "wasi",
- "wasm-encoder 0.219.0",
+ "wasm-encoder 0.219.1",
  "wit-bindgen-rust-macro",
 ]
 
@@ -3420,15 +3420,6 @@ checksum = "ca6ad05a4870b2bf5fe995117d3728437bd27d7cd5f06f13c17443ef369775a1"
 
 [[package]]
 name = "wasm-encoder"
-version = "0.218.0"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.218.0#b330644a808dd8557c67cfc09abc6c8a114e2ea0"
-dependencies = [
- "leb128",
- "wasmparser 0.218.0",
-]
-
-[[package]]
-name = "wasm-encoder"
 version = "0.219.0"
 source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.0#0261534e96012f4e82c0d9f83b65be8d91d4fbac"
 dependencies = [
@@ -3437,18 +3428,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasm-metadata"
-version = "0.218.0"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.218.0#b330644a808dd8557c67cfc09abc6c8a114e2ea0"
+name = "wasm-encoder"
+version = "0.219.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.1#91be0bbc8c5df685a74d87295e9cfff0be9c07c7"
 dependencies = [
- "anyhow",
- "indexmap 2.2.6",
- "serde",
- "serde_derive",
- "serde_json",
- "spdx",
- "wasm-encoder 0.218.0",
- "wasmparser 0.218.0",
+ "leb128",
+ "wasmparser 0.219.1",
 ]
 
 [[package]]
@@ -3467,29 +3452,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-metadata"
+version = "0.219.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.1#91be0bbc8c5df685a74d87295e9cfff0be9c07c7"
+dependencies = [
+ "anyhow",
+ "indexmap 2.2.6",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "spdx",
+ "wasm-encoder 0.219.1",
+ "wasmparser 0.219.1",
+]
+
+[[package]]
 name = "wasm-mutate"
-version = "0.219.0"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.0#0261534e96012f4e82c0d9f83b65be8d91d4fbac"
+version = "0.219.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.1#91be0bbc8c5df685a74d87295e9cfff0be9c07c7"
 dependencies = [
  "egg",
  "log",
  "rand",
  "thiserror",
- "wasm-encoder 0.219.0",
- "wasmparser 0.219.0",
+ "wasm-encoder 0.219.1",
+ "wasmparser 0.219.1",
 ]
 
 [[package]]
 name = "wasm-smith"
-version = "0.219.0"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.0#0261534e96012f4e82c0d9f83b65be8d91d4fbac"
+version = "0.219.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.1#91be0bbc8c5df685a74d87295e9cfff0be9c07c7"
 dependencies = [
  "anyhow",
  "arbitrary",
  "flagset",
  "indexmap 2.2.6",
  "leb128",
- "wasm-encoder 0.219.0",
+ "wasm-encoder 0.219.1",
 ]
 
 [[package]]
@@ -3534,8 +3534,8 @@ dependencies = [
 
 [[package]]
 name = "wasmparser"
-version = "0.218.0"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.218.0#b330644a808dd8557c67cfc09abc6c8a114e2ea0"
+version = "0.219.0"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.0#0261534e96012f4e82c0d9f83b65be8d91d4fbac"
 dependencies = [
  "ahash",
  "bitflags 2.6.0",
@@ -3546,8 +3546,8 @@ dependencies = [
 
 [[package]]
 name = "wasmparser"
-version = "0.219.0"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.0#0261534e96012f4e82c0d9f83b65be8d91d4fbac"
+version = "0.219.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.1#91be0bbc8c5df685a74d87295e9cfff0be9c07c7"
 dependencies = [
  "ahash",
  "bitflags 2.6.0",
@@ -3568,12 +3568,12 @@ dependencies = [
 
 [[package]]
 name = "wasmprinter"
-version = "0.219.0"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.0#0261534e96012f4e82c0d9f83b65be8d91d4fbac"
+version = "0.219.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.1#91be0bbc8c5df685a74d87295e9cfff0be9c07c7"
 dependencies = [
  "anyhow",
  "termcolor",
- "wasmparser 0.219.0",
+ "wasmparser 0.219.1",
 ]
 
 [[package]]
@@ -3618,8 +3618,8 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "wasi-common",
- "wasm-encoder 0.219.0",
- "wasmparser 0.219.0",
+ "wasm-encoder 0.219.1",
+ "wasmparser 0.219.1",
  "wasmtime-asm-macros",
  "wasmtime-cache",
  "wasmtime-component-macro",
@@ -3764,7 +3764,7 @@ dependencies = [
  "tracing",
  "walkdir",
  "wasi-common",
- "wasmparser 0.219.0",
+ "wasmparser 0.219.1",
  "wasmtime",
  "wasmtime-cache",
  "wasmtime-cli-flags",
@@ -3781,10 +3781,10 @@ dependencies = [
  "wasmtime-wasi-nn",
  "wasmtime-wasi-threads",
  "wasmtime-wast",
- "wast 219.0.0",
+ "wast 219.0.1",
  "wat",
  "windows-sys 0.59.0",
- "wit-component 0.219.0",
+ "wit-component 0.219.1",
 ]
 
 [[package]]
@@ -3817,7 +3817,7 @@ dependencies = [
  "wasmtime",
  "wasmtime-component-util",
  "wasmtime-wit-bindgen",
- "wit-parser 0.219.0",
+ "wit-parser 0.219.1",
 ]
 
 [[package]]
@@ -3849,7 +3849,7 @@ dependencies = [
  "smallvec",
  "target-lexicon",
  "thiserror",
- "wasmparser 0.219.0",
+ "wasmparser 0.219.1",
  "wasmtime-continuations",
  "wasmtime-environ",
  "wasmtime-versioned-export-macros",
@@ -3876,8 +3876,8 @@ dependencies = [
  "serde_derive",
  "smallvec",
  "target-lexicon",
- "wasm-encoder 0.219.0",
- "wasmparser 0.219.0",
+ "wasm-encoder 0.219.1",
+ "wasmparser 0.219.1",
  "wasmprinter",
  "wasmtime-component-util",
  "wasmtime-continuations",
@@ -3892,7 +3892,7 @@ dependencies = [
  "component-fuzz-util",
  "env_logger 0.11.5",
  "libfuzzer-sys",
- "wasmparser 0.219.0",
+ "wasmparser 0.219.1",
  "wasmprinter",
  "wasmtime-environ",
  "wat",
@@ -3952,7 +3952,7 @@ dependencies = [
  "rand",
  "smallvec",
  "target-lexicon",
- "wasmparser 0.219.0",
+ "wasmparser 0.219.1",
  "wasmtime",
  "wasmtime-fuzzing",
 ]
@@ -3973,12 +3973,12 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "v8",
- "wasm-encoder 0.219.0",
+ "wasm-encoder 0.219.1",
  "wasm-mutate",
  "wasm-smith",
  "wasm-spec-interpreter",
  "wasmi",
- "wasmparser 0.219.0",
+ "wasmparser 0.219.1",
  "wasmprinter",
  "wasmtime",
  "wasmtime-wast",
@@ -4148,7 +4148,7 @@ dependencies = [
  "anyhow",
  "log",
  "wasmtime",
- "wast 219.0.0",
+ "wast 219.0.1",
 ]
 
 [[package]]
@@ -4160,7 +4160,7 @@ dependencies = [
  "gimli",
  "object",
  "target-lexicon",
- "wasmparser 0.219.0",
+ "wasmparser 0.219.1",
  "wasmtime-cranelift",
  "wasmtime-environ",
  "winch-codegen",
@@ -4173,7 +4173,7 @@ dependencies = [
  "anyhow",
  "heck 0.5.0",
  "indexmap 2.2.6",
- "wit-parser 0.219.0",
+ "wit-parser 0.219.1",
 ]
 
 [[package]]
@@ -4191,22 +4191,22 @@ dependencies = [
 
 [[package]]
 name = "wast"
-version = "219.0.0"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.0#0261534e96012f4e82c0d9f83b65be8d91d4fbac"
+version = "219.0.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.1#91be0bbc8c5df685a74d87295e9cfff0be9c07c7"
 dependencies = [
  "bumpalo",
  "leb128",
  "memchr",
  "unicode-width",
- "wasm-encoder 0.219.0",
+ "wasm-encoder 0.219.1",
 ]
 
 [[package]]
 name = "wat"
-version = "1.219.0"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.0#0261534e96012f4e82c0d9f83b65be8d91d4fbac"
+version = "1.219.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.1#91be0bbc8c5df685a74d87295e9cfff0be9c07c7"
 dependencies = [
- "wast 219.0.0",
+ "wast 219.0.1",
 ]
 
 [[package]]
@@ -4347,7 +4347,7 @@ dependencies = [
  "regalloc2",
  "smallvec",
  "target-lexicon",
- "wasmparser 0.219.0",
+ "wasmparser 0.219.1",
  "wasmtime-cranelift",
  "wasmtime-environ",
 ]
@@ -4570,8 +4570,8 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.33.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.33.0#08fb6541e847b36c7d914d37d4caaa4c3a33b6eb"
+version = "0.34.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.34.0#6d38d1ae2466c9ca2fb574cbf2563d2fa896d636"
 dependencies = [
  "wit-bindgen-rt",
  "wit-bindgen-rust-macro",
@@ -4579,41 +4579,41 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen-core"
-version = "0.33.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.33.0#08fb6541e847b36c7d914d37d4caaa4c3a33b6eb"
+version = "0.34.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.34.0#6d38d1ae2466c9ca2fb574cbf2563d2fa896d636"
 dependencies = [
  "anyhow",
  "heck 0.5.0",
- "wit-parser 0.218.0",
+ "wit-parser 0.219.0",
 ]
 
 [[package]]
 name = "wit-bindgen-rt"
-version = "0.33.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.33.0#08fb6541e847b36c7d914d37d4caaa4c3a33b6eb"
+version = "0.34.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.34.0#6d38d1ae2466c9ca2fb574cbf2563d2fa896d636"
 dependencies = [
  "bitflags 2.6.0",
 ]
 
 [[package]]
 name = "wit-bindgen-rust"
-version = "0.33.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.33.0#08fb6541e847b36c7d914d37d4caaa4c3a33b6eb"
+version = "0.34.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.34.0#6d38d1ae2466c9ca2fb574cbf2563d2fa896d636"
 dependencies = [
  "anyhow",
  "heck 0.5.0",
  "indexmap 2.2.6",
  "prettyplease",
  "syn 2.0.60",
- "wasm-metadata 0.218.0",
+ "wasm-metadata 0.219.0",
  "wit-bindgen-core",
- "wit-component 0.218.0",
+ "wit-component 0.219.0",
 ]
 
 [[package]]
 name = "wit-bindgen-rust-macro"
-version = "0.33.0"
-source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.33.0#08fb6541e847b36c7d914d37d4caaa4c3a33b6eb"
+version = "0.34.0"
+source = "git+https://github.com/wasmfx/wit-bindgenfx?tag=v0.34.0#6d38d1ae2466c9ca2fb574cbf2563d2fa896d636"
 dependencies = [
  "anyhow",
  "prettyplease",
@@ -4622,24 +4622,6 @@ dependencies = [
  "syn 2.0.60",
  "wit-bindgen-core",
  "wit-bindgen-rust",
-]
-
-[[package]]
-name = "wit-component"
-version = "0.218.0"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.218.0#b330644a808dd8557c67cfc09abc6c8a114e2ea0"
-dependencies = [
- "anyhow",
- "bitflags 2.6.0",
- "indexmap 2.2.6",
- "log",
- "serde",
- "serde_derive",
- "serde_json",
- "wasm-encoder 0.218.0",
- "wasm-metadata 0.218.0",
- "wasmparser 0.218.0",
- "wit-parser 0.218.0",
 ]
 
 [[package]]
@@ -4661,20 +4643,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "wit-parser"
-version = "0.218.0"
-source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.218.0#b330644a808dd8557c67cfc09abc6c8a114e2ea0"
+name = "wit-component"
+version = "0.219.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.1#91be0bbc8c5df685a74d87295e9cfff0be9c07c7"
 dependencies = [
  "anyhow",
- "id-arena",
+ "bitflags 2.6.0",
  "indexmap 2.2.6",
  "log",
- "semver",
  "serde",
  "serde_derive",
  "serde_json",
- "unicode-xid",
- "wasmparser 0.218.0",
+ "wasm-encoder 0.219.1",
+ "wasm-metadata 0.219.1",
+ "wasmparser 0.219.1",
+ "wit-parser 0.219.1",
 ]
 
 [[package]]
@@ -4692,6 +4675,23 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser 0.219.0",
+]
+
+[[package]]
+name = "wit-parser"
+version = "0.219.1"
+source = "git+https://github.com/wasmfx/wasmfx-tools?tag=v1.219.1#91be0bbc8c5df685a74d87295e9cfff0be9c07c7"
+dependencies = [
+ "anyhow",
+ "id-arena",
+ "indexmap 2.2.6",
+ "log",
+ "semver",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "unicode-xid",
+ "wasmparser 0.219.1",
 ]
 
 [[package]]
