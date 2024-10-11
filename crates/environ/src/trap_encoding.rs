@@ -80,6 +80,9 @@ pub enum Trap {
     /// Attempted an allocation that was too large to succeed.
     AllocationTooLarge,
 
+    /// Attempted to cast a reference to a type that it is not an instance of.
+    CastFailure,
+
     /// When the `component-model` feature is enabled this trap represents a
     /// scenario where one component tried to call another component but it
     /// would have violated the reentrance rules of the component model,
@@ -127,6 +130,7 @@ impl Trap {
             NullReference
             ArrayOutOfBounds
             AllocationTooLarge
+            CastFailure
             CannotEnterComponent
             UnhandledTag
             ContinuationAlreadyConsumed
@@ -159,6 +163,7 @@ impl fmt::Display for Trap {
             NullReference => "null reference",
             ArrayOutOfBounds => "out of bounds array access",
             AllocationTooLarge => "allocation size too large",
+            CastFailure => "cast failure",
             CannotEnterComponent => "cannot enter component instance",
             UnhandledTag => "unhandled tag",
             ContinuationAlreadyConsumed => "continuation already consumed",

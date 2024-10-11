@@ -593,7 +593,7 @@ unsafe fn intern_func_ref_for_gc_heap(instance: &mut Instance, func_ref: *mut u8
     let func_ref = func_ref.cast::<VMFuncRef>();
     let func_ref = NonNull::new(func_ref).map(SendSyncPtr::new);
 
-    let func_ref_id = store.unwrap_gc_store_mut().func_ref_table.intern(func_ref);
+    let func_ref_id = store.gc_store_mut()?.func_ref_table.intern(func_ref);
     Ok(func_ref_id.into_raw())
 }
 
@@ -1085,11 +1085,14 @@ unsafe fn is_subtype(
     let actual = VMSharedTypeIndex::from_u32(actual_engine_type);
     let expected = VMSharedTypeIndex::from_u32(expected_engine_type);
 
-    (*instance.store())
+    let is_subtype: bool = (*instance.store())
         .engine()
         .signatures()
         .is_subtype(actual, expected)
-        .into()
+        .into();
+
+    log::trace!("is_subtype(actual={actual:?}, expected={expected:?}) -> {is_subtype}",);
+    is_subtype
 }
 
 // Implementation of `memory.atomic.notify` for locally defined memories.
