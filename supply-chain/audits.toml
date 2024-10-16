@@ -2274,6 +2274,12 @@ who = "Andrew Brown <andrew.brown@intel.com>"
 criteria = "safe-to-deploy"
 delta = "0.6.0 -> 0.7.2"
 
+[[audits.openvino]]
+who = "Andrew Brown <andrew.brown@intel.com>"
+criteria = "safe-to-deploy"
+delta = "0.7.2 -> 0.8.0"
+notes = "No new unsafe functionality, just brings in openvino-sys changes and other minor improvements."
+
 [[audits.openvino-finder]]
 who = "Matthew Tamayo-Rios <matthew@geekbeast.com>"
 criteria = "safe-to-deploy"
@@ -2297,6 +2303,12 @@ who = "Andrew Brown <andrew.brown@intel.com>"
 criteria = "safe-to-deploy"
 delta = "0.6.0 -> 0.7.2"
 
+[[audits.openvino-finder]]
+who = "Andrew Brown <andrew.brown@intel.com>"
+criteria = "safe-to-deploy"
+delta = "0.7.2 -> 0.8.0"
+notes = "No logic changes in version bump."
+
 [[audits.openvino-sys]]
 who = "Matthew Tamayo-Rios <matthew@geekbeast.com>"
 criteria = "safe-to-deploy"
@@ -2319,6 +2331,12 @@ delta = "0.5.0 -> 0.6.0"
 who = "Andrew Brown <andrew.brown@intel.com>"
 criteria = "safe-to-deploy"
 delta = "0.6.0 -> 0.7.2"
+
+[[audits.openvino-sys]]
+who = "Andrew Brown <andrew.brown@intel.com>"
+criteria = "safe-to-deploy"
+delta = "0.7.2 -> 0.8.0"
+notes = "This diff simply re-generates slightly newer C headers with a slightly newer version of bindgen."
 
 [[audits.ort]]
 who = "Andrew Brown <andrew.brown@intel.com>"
@@ -2649,6 +2667,12 @@ and in particular the new `NonNull::new_unchecked`s look ok.
 Most of the rest of the changes are adding some new unstable features which
 aren't enabled by default.
 """
+
+[[audits.smallvec]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "1.11.0 -> 1.13.2"
+notes = "Mostly minor updates, the one semi-substantial update looks good."
 
 [[audits.socket2]]
 who = "Alex Crichton <alex@alexcrichton.com>"
