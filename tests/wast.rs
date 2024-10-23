@@ -1,9 +1,8 @@
 use anyhow::{bail, Context};
 use bstr::ByteSlice;
 use libtest_mimic::{Arguments, FormatSetting, Trial};
-use once_cell::sync::Lazy;
 use std::path::Path;
-use std::sync::{Condvar, Mutex};
+use std::sync::{Condvar, LazyLock, Mutex};
 use wasmtime::{
     Config, Engine, InstanceAllocationStrategy, MpkEnabled, PoolingAllocationConfig, Store,
     Strategy,
@@ -174,8 +173,6 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
             "spec_testsuite/simd_store32_lane.wast",
             "spec_testsuite/simd_store64_lane.wast",
             "spec_testsuite/simd_store8_lane.wast",
-            // wide arithmetic
-            "misc_testsuite/wide-arithmetic.wast",
         ];
 
         if unsupported.iter().any(|part| test.ends_with(part)) {
@@ -471,7 +468,7 @@ fn feature_found_src(bytes: &[u8], name: &str) -> bool {
 fn lock_pooling() -> impl Drop {
     const MAX_CONCURRENT_POOLING: u32 = 4;
 
-    static ACTIVE: Lazy<MyState> = Lazy::new(MyState::default);
+    static ACTIVE: LazyLock<MyState> = LazyLock::new(MyState::default);
 
     #[derive(Default)]
     struct MyState {
