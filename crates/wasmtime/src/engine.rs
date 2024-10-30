@@ -345,7 +345,7 @@ impl Engine {
                     match target.operating_system  {
                         target_lexicon::OperatingSystem::Windows => "update_windows_tib",
                         target_lexicon::OperatingSystem::Linux => "basic",
-                        _ => {return Err(String::from("typed-continuations feature not supported on this platform"));}
+                        _ => {return Err(String::from("stack-switching feature not supported on this platform"));}
                     };
                     *value == FlagValue::Enum(expected)
                 } else {
