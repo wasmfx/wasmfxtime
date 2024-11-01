@@ -365,6 +365,7 @@ impl Metadata<'_> {
 
     fn check_tunables(&mut self, other: &Tunables) -> Result<()> {
         let Tunables {
+            collector,
             static_memory_reservation,
             static_memory_offset_guard_size,
             dynamic_memory_offset_guard_size,
@@ -391,6 +392,7 @@ impl Metadata<'_> {
             debug_adapter_modules: _,
         } = self.tunables;
 
+        Self::check_collector(collector, other.collector)?;
         Self::check_int(
             static_memory_reservation,
             other.static_memory_reservation,
@@ -598,6 +600,30 @@ impl Metadata<'_> {
         )?;
 
         Ok(())
+    }
+
+    fn check_collector(
+        module: Option<wasmtime_environ::Collector>,
+        host: Option<wasmtime_environ::Collector>,
+    ) -> Result<()> {
+        match (module, host) {
+            (None, None) => Ok(()),
+            (Some(module), Some(host)) if module == host => Ok(()),
+
+            (None, Some(_)) => {
+                bail!("module was compiled without GC but GC is enabled in the host")
+            }
+            (Some(_), None) => {
+                bail!("module was compiled with GC however GC is disabled in the host")
+            }
+
+            (Some(module), Some(host)) => {
+                bail!(
+                    "module was compiled for the {module} collector but \
+                     the host is configured to use the {host} collector",
+                )
+            }
+        }
     }
 }
 

@@ -369,10 +369,10 @@ impl<P: PtrSize> VMOffsets<P> {
     /// Return a new `VMOffsets` instance, for a given pointer size.
     pub fn new(ptr: P, module: &Module) -> Self {
         let num_owned_memories = module
-            .memory_plans
+            .memories
             .iter()
             .skip(module.num_imported_memories)
-            .filter(|p| !p.1.memory.shared)
+            .filter(|p| !p.1.shared)
             .count()
             .try_into()
             .unwrap();
@@ -383,10 +383,8 @@ impl<P: PtrSize> VMOffsets<P> {
             num_imported_memories: cast_to_u32(module.num_imported_memories),
             num_imported_tags: cast_to_u32(module.num_imported_tags),
             num_imported_globals: cast_to_u32(module.num_imported_globals),
-            num_defined_tables: cast_to_u32(module.table_plans.len() - module.num_imported_tables),
-            num_defined_memories: cast_to_u32(
-                module.memory_plans.len() - module.num_imported_memories,
-            ),
+            num_defined_tables: cast_to_u32(module.num_defined_tables()),
+            num_defined_memories: cast_to_u32(module.num_defined_memories()),
             num_owned_memories,
             num_defined_globals: cast_to_u32(module.globals.len() - module.num_imported_globals),
             num_defined_tags: cast_to_u32(module.tags.len() - module.num_imported_tags),

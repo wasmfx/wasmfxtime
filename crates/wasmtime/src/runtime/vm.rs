@@ -32,6 +32,7 @@ mod memory;
 mod mmap;
 mod mmap_vec;
 mod send_sync_ptr;
+mod send_sync_unsafe_cell;
 mod store_box;
 mod sys;
 mod table;
@@ -81,6 +82,7 @@ pub use crate::runtime::vm::vmcontext::{
 };
 
 pub use send_sync_ptr::SendSyncPtr;
+pub use send_sync_unsafe_cell::SendSyncUnsafeCell;
 
 mod module_id;
 pub use module_id::CompiledModuleId;
