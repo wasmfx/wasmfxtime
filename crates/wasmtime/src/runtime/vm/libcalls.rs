@@ -299,18 +299,21 @@ unsafe fn table_fill_func_ref(
     dst: u64,
     val: *mut u8,
     len: u64,
-) -> Result<(), Trap> {
+) -> Result<()> {
     let table_index = TableIndex::from_u32(table_index);
     let table = &mut *instance.get_table(table_index);
     match table.element_type() {
         TableElementType::Func => {
             let val = val.cast::<VMFuncRef>();
-            table.fill(
-                (*instance.store()).unwrap_gc_store_mut(),
-                dst,
-                val.into(),
-                len,
-            )
+            table
+                .fill(
+                    (*instance.store()).optional_gc_store_mut()?,
+                    dst,
+                    val.into(),
+                    len,
+                )
+                .err2anyhow()?;
+            Ok(())
         }
         TableElementType::GcRef => unreachable!(),
         TableElementType::Cont => unreachable!(),
@@ -324,16 +327,19 @@ unsafe fn table_fill_gc_ref(
     dst: u64,
     val: u32,
     len: u64,
-) -> Result<(), Trap> {
+) -> Result<()> {
     let table_index = TableIndex::from_u32(table_index);
     let table = &mut *instance.get_table(table_index);
     match table.element_type() {
         TableElementType::Func => unreachable!(),
         TableElementType::GcRef => {
-            let gc_store = (*instance.store()).unwrap_gc_store_mut();
+            let gc_store = (*instance.store()).gc_store_mut()?;
             let gc_ref = VMGcRef::from_raw_u32(val);
             let gc_ref = gc_ref.map(|r| gc_store.clone_gc_ref(&r));
-            table.fill(gc_store, dst, gc_ref.into(), len)
+            table
+                .fill(Some(gc_store), dst, gc_ref.into(), len)
+                .err2anyhow()?;
+            Ok(())
         }
 
         TableElementType::Cont => unreachable!(),
@@ -363,7 +369,7 @@ unsafe fn table_fill_cont_obj(
             };
 
             table.fill(
-                (*instance.store()).unwrap_gc_store_mut(),
+                Some((*instance.store()).unwrap_gc_store_mut()),
                 dst,
                 contobj.into(),
                 len,
@@ -381,15 +387,16 @@ unsafe fn table_copy(
     dst: u64,
     src: u64,
     len: u64,
-) -> Result<(), Trap> {
+) -> Result<()> {
     let dst_table_index = TableIndex::from_u32(dst_table_index);
     let src_table_index = TableIndex::from_u32(src_table_index);
     let dst_table = instance.get_table(dst_table_index);
     // Lazy-initialize the whole range in the source table first.
     let src_range = src..(src.checked_add(len).unwrap_or(u64::MAX));
     let src_table = instance.get_table_with_lazy_init(src_table_index, src_range);
-    let gc_store = (*instance.store()).unwrap_gc_store_mut();
-    Table::copy(gc_store, dst_table, src_table, dst, src, len)
+    let gc_store = (*instance.store()).optional_gc_store_mut()?;
+    Table::copy(gc_store, dst_table, src_table, dst, src, len).err2anyhow()?;
+    Ok(())
 }
 
 // Implementation of `table.init`.
@@ -475,16 +482,15 @@ unsafe fn table_get_lazy_init_func_ref(
 ) -> *mut u8 {
     let table_index = TableIndex::from_u32(table_index);
     let table = instance.get_table_with_lazy_init(table_index, core::iter::once(index));
-    let gc_store = (*instance.store()).unwrap_gc_store_mut();
     let elem = (*table)
-        .get(gc_store, index)
+        .get(None, index)
         .expect("table access already bounds-checked");
 
     elem.into_func_ref_asserting_initialized().cast()
 }
 
 /// Drop a GC reference.
-#[cfg(feature = "gc")]
+#[cfg(feature = "gc-drc")]
 unsafe fn drop_gc_ref(instance: &mut Instance, gc_ref: u32) {
     log::trace!("libcalls::drop_gc_ref({gc_ref:#x})");
     let gc_ref = VMGcRef::from_raw_u32(gc_ref).expect("non-null VMGcRef");
@@ -495,7 +501,7 @@ unsafe fn drop_gc_ref(instance: &mut Instance, gc_ref: u32) {
 
 /// Do a GC, keeping `gc_ref` rooted and returning the updated `gc_ref`
 /// reference.
-#[cfg(feature = "gc")]
+#[cfg(feature = "gc-drc")]
 unsafe fn gc(instance: &mut Instance, gc_ref: u32) -> Result<u32> {
     let gc_ref = VMGcRef::from_raw_u32(gc_ref);
     let gc_ref = gc_ref.map(|r| (*instance.store()).unwrap_gc_store_mut().clone_gc_ref(&r));
@@ -528,7 +534,7 @@ unsafe fn gc(instance: &mut Instance, gc_ref: u32) -> Result<u32> {
 /// Allocate a raw, unininitialized GC object for Wasm code.
 ///
 /// The Wasm code is responsible for initializing the object.
-#[cfg(feature = "gc")]
+#[cfg(feature = "gc-drc")]
 unsafe fn gc_alloc_raw(
     instance: &mut Instance,
     kind: u32,

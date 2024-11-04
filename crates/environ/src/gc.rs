@@ -9,11 +9,17 @@
 //! on our various `gc` cargo features is the actual garbage collection
 //! functions and their associated impact on binary size anyways.
 
-#[cfg(feature = "gc")]
+#[cfg(feature = "gc-drc")]
 pub mod drc;
 
+#[cfg(feature = "gc-null")]
+pub mod null;
+
 use crate::prelude::*;
-use crate::{WasmArrayType, WasmCompositeType, WasmStorageType, WasmStructType, WasmValType};
+use crate::{
+    WasmArrayType, WasmCompositeInnerType, WasmCompositeType, WasmStorageType, WasmStructType,
+    WasmValType,
+};
 use core::alloc::Layout;
 
 /// Discriminant to check whether GC reference is an `i31ref` or not.
@@ -49,6 +55,98 @@ pub fn byte_size_of_wasm_ty_in_gc_heap(ty: &WasmStorageType) -> u32 {
     }
 }
 
+/// Align `offset` up to `bytes`, updating `max_align` if `align` is the
+/// new maximum alignment, and returning the aligned offset.
+#[cfg(any(feature = "gc-drc", feature = "gc-null"))]
+fn align_up(offset: &mut u32, max_align: &mut u32, align: u32) -> u32 {
+    debug_assert!(max_align.is_power_of_two());
+    debug_assert!(align.is_power_of_two());
+    *offset = offset.checked_add(align - 1).unwrap() & !(align - 1);
+    *max_align = core::cmp::max(*max_align, align);
+    *offset
+}
+
+/// Define a new field of size and alignment `bytes`, updating the object's
+/// total `size` and `align` as necessary. The offset of the new field is
+/// returned.
+#[cfg(any(feature = "gc-drc", feature = "gc-null"))]
+fn field(size: &mut u32, align: &mut u32, bytes: u32) -> u32 {
+    let offset = align_up(size, align, bytes);
+    *size += bytes;
+    offset
+}
+
+/// Common code to define a GC array's layout, given the size and alignment of
+/// the collector's GC header and its expected offset of the array length field.
+#[cfg(any(feature = "gc-drc", feature = "gc-null"))]
+fn common_array_layout(
+    ty: &WasmArrayType,
+    header_size: u32,
+    header_align: u32,
+    expected_array_length_offset: u32,
+) -> GcArrayLayout {
+    assert!(header_size >= crate::VM_GC_HEADER_SIZE);
+    assert!(header_align >= crate::VM_GC_HEADER_ALIGN);
+
+    let mut size = header_size;
+    let mut align = header_align;
+
+    let length_field_offset = field(&mut size, &mut align, 4);
+    assert_eq!(length_field_offset, expected_array_length_offset);
+
+    let elem_size = byte_size_of_wasm_ty_in_gc_heap(&ty.0.element_type);
+    let elems_offset = align_up(&mut size, &mut align, elem_size);
+    assert_eq!(elems_offset, size);
+
+    GcArrayLayout {
+        base_size: size,
+        align,
+        elem_size,
+    }
+}
+
+/// Common code to define a GC struct's layout, given the size and alignment of
+/// the collector's GC header and its expected offset of the array length field.
+#[cfg(any(feature = "gc-drc", feature = "gc-null"))]
+fn common_struct_layout(
+    ty: &WasmStructType,
+    header_size: u32,
+    header_align: u32,
+) -> GcStructLayout {
+    assert!(header_size >= crate::VM_GC_HEADER_SIZE);
+    assert!(header_align >= crate::VM_GC_HEADER_ALIGN);
+
+    // Process each field, aligning it to its natural alignment.
+    //
+    // We don't try and do any fancy field reordering to minimize padding
+    // (yet?) because (a) the toolchain probably already did that and (b)
+    // we're just doing the simple thing first. We can come back and improve
+    // things here if we find that (a) isn't actually holding true in
+    // practice.
+    let mut size = header_size;
+    let mut align = header_align;
+
+    let fields = ty
+        .fields
+        .iter()
+        .map(|f| {
+            let field_size = byte_size_of_wasm_ty_in_gc_heap(&f.element_type);
+            field(&mut size, &mut align, field_size)
+        })
+        .collect();
+
+    // Ensure that the final size is a multiple of the alignment, for
+    // simplicity.
+    let align_size_to = align;
+    align_up(&mut size, &mut align, align_size_to);
+
+    GcStructLayout {
+        size,
+        align,
+        fields,
+    }
+}
+
 /// A trait for getting the layout of a Wasm GC struct or array inside a
 /// particular collector.
 pub trait GcTypeLayouts {
@@ -63,11 +161,12 @@ pub trait GcTypeLayouts {
     /// Returns `None` if the type is a function type, as functions are not
     /// managed by the GC.
     fn gc_layout(&self, ty: &WasmCompositeType) -> Option<GcLayout> {
-        match ty {
-            WasmCompositeType::Array(ty) => Some(self.array_layout(ty).into()),
-            WasmCompositeType::Struct(ty) => Some(self.struct_layout(ty).into()),
-            WasmCompositeType::Func(_) => None,
-            WasmCompositeType::Cont(_) => None,
+        assert!(!ty.shared);
+        match &ty.inner {
+            WasmCompositeInnerType::Array(ty) => Some(self.array_layout(ty).into()),
+            WasmCompositeInnerType::Struct(ty) => Some(self.struct_layout(ty).into()),
+            WasmCompositeInnerType::Func(_) => None,
+            WasmCompositeInnerType::Cont(_) => None,
         }
     }
 

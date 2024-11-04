@@ -347,7 +347,10 @@ fn inter_instance_suspend() -> Result<()> {
     let entry_func = main_instance.get_func(&mut store, "entry").unwrap();
 
     let result = entry_func.call(&mut store, &[], &mut []);
-    if cfg!(feature = "wasmfx_baseline") {
+    if cfg!(all(
+        feature = "wasmfx_baseline",
+        not(feature = "wasmfx_no_baseline")
+    )) {
         assert!(result.is_ok()); // NOTE(dhil): Tag linking is broken on the baseline implementation.
     } else {
         assert!(result.is_err());

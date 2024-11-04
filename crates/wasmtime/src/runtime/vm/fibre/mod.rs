@@ -4,7 +4,7 @@
 #![allow(missing_docs)]
 
 cfg_if::cfg_if! {
-    if #[cfg(not(feature = "wasmfx_baseline"))] {
+    if #[cfg(any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline"))] {
 
         use std::io;
         use std::ops::Range;

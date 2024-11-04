@@ -12,7 +12,7 @@ use wasmparser::WasmFeatures;
 #[cfg(feature = "cache")]
 use wasmtime_cache::CacheConfig;
 use wasmtime_continuations::WasmFXConfig;
-use wasmtime_environ::Tunables;
+use wasmtime_environ::{ConfigTunables, Tunables};
 
 #[cfg(feature = "runtime")]
 use crate::memory::MemoryCreator;
@@ -107,6 +107,8 @@ impl core::hash::Hash for ModuleVersionStrategy {
 pub struct Config {
     #[cfg(any(feature = "cranelift", feature = "winch"))]
     compiler_config: CompilerConfig,
+    #[cfg(feature = "gc")]
+    collector: Collector,
     profiling_strategy: ProfilingStrategy,
     tunables: ConfigTunables,
 
@@ -149,25 +151,6 @@ pub struct Config {
     pub(crate) coredump_on_trap: bool,
     pub(crate) macos_use_mach_ports: bool,
     pub(crate) detect_host_feature: Option<fn(&str) -> Option<bool>>,
-}
-
-#[derive(Default, Clone)]
-struct ConfigTunables {
-    static_memory_reservation: Option<u64>,
-    static_memory_offset_guard_size: Option<u64>,
-    dynamic_memory_offset_guard_size: Option<u64>,
-    dynamic_memory_growth_reserve: Option<u64>,
-    generate_native_debuginfo: Option<bool>,
-    parse_wasm_debuginfo: Option<bool>,
-    consume_fuel: Option<bool>,
-    epoch_interruption: Option<bool>,
-    static_memory_bound_is_maximum: Option<bool>,
-    guard_before_linear_memory: Option<bool>,
-    table_lazy_init: Option<bool>,
-    generate_address_map: Option<bool>,
-    debug_adapter_modules: Option<bool>,
-    relaxed_simd_deterministic: Option<bool>,
-    signals_based_traps: Option<bool>,
 }
 
 /// User-provided configuration for the compiler.
@@ -238,6 +221,8 @@ impl Config {
                 stack_size: wasmtime_continuations::DEFAULT_FIBER_SIZE,
                 red_zone_size: wasmtime_continuations::DEFAULT_RED_ZONE_SIZE,
             },
+            #[cfg(feature = "gc")]
+            collector: Collector::default(),
             #[cfg(feature = "cache")]
             cache_config: CacheConfig::new_cache_disabled(),
             profiling_strategy: ProfilingStrategy::None,
@@ -1098,6 +1083,19 @@ impl Config {
         self
     }
 
+    /// Configures which garbage collector will be used for Wasm modules.
+    ///
+    /// This method can be used to configure which garbage collector
+    /// implementation is used for Wasm modules. For more documentation, consult
+    /// the [`Collector`] enumeration and its documentation.
+    ///
+    /// The default value for this is `Collector::Auto`.
+    #[cfg(feature = "gc")]
+    pub fn collector(&mut self, collector: Collector) -> &mut Self {
+        self.collector = collector;
+        self
+    }
+
     /// Creates a default profiler based on the profiling strategy chosen.
     ///
     /// Profiler creation calls the type's default initializer where the purpose is
@@ -1339,7 +1337,7 @@ impl Config {
     /// When using the pooling instance allocation strategy, all linear memories
     /// will be created as "static" and the
     /// [`Config::static_memory_maximum_size`] and
-    /// [`Config::static_memory_guard_size`] options will be used to configure
+    /// [`Config::memory_guard_size`] options will be used to configure
     /// the virtual memory allocations of linear memories.
     pub fn allocation_strategy(&mut self, strategy: InstanceAllocationStrategy) -> &mut Self {
         self.allocation_strategy = strategy;
@@ -1460,7 +1458,7 @@ impl Config {
     }
 
     /// Configures the size, in bytes, of the guard region used at the end of a
-    /// static memory's address space reservation.
+    /// linear memory's address space reservation.
     ///
     /// > Note: this value has important performance ramifications, be sure to
     /// > understand what this value does before tweaking it and benchmarking.
@@ -1471,16 +1469,12 @@ impl Config {
     /// Accelerating these memory accesses is the motivation for a guard after a
     /// memory allocation.
     ///
-    /// Memories (both static and dynamic) can be configured with a guard at the
-    /// end of them which consists of unmapped virtual memory. This unmapped
-    /// memory will trigger a memory access violation (e.g. segfault) if
-    /// accessed. This allows JIT code to elide bounds checks if it can prove
-    /// that an access, if out of bounds, would hit the guard region. This means
-    /// that having such a guard of unmapped memory can remove the need for
-    /// bounds checks in JIT code.
-    ///
-    /// For the difference between static and dynamic memories, see the
-    /// [`Config::static_memory_maximum_size`].
+    /// Memories can be configured with a guard at the end of them which
+    /// consists of unmapped virtual memory. This unmapped memory will trigger
+    /// a memory access violation (e.g. segfault) if accessed. This allows JIT
+    /// code to elide bounds checks if it can prove that an access, if out of
+    /// bounds, would hit the guard region. This means that having such a guard
+    /// of unmapped memory can remove the need for bounds checks in JIT code.
     ///
     /// ## How big should the guard be?
     ///
@@ -1504,45 +1498,8 @@ impl Config {
     /// allows eliminating almost all bounds checks on loads/stores with an
     /// immediate offset of less than 2GB. On 32-bit platforms this defaults to
     /// 64KB.
-    ///
-    /// ## Errors
-    ///
-    /// The `Engine::new` method will return an error if this option is smaller
-    /// than the value configured for [`Config::dynamic_memory_guard_size`].
-    pub fn static_memory_guard_size(&mut self, guard_size: u64) -> &mut Self {
-        self.tunables.static_memory_offset_guard_size = Some(guard_size);
-        self
-    }
-
-    /// Configures the size, in bytes, of the guard region used at the end of a
-    /// dynamic memory's address space reservation.
-    ///
-    /// For the difference between static and dynamic memories, see the
-    /// [`Config::static_memory_maximum_size`]
-    ///
-    /// For more information about what a guard is, see the documentation on
-    /// [`Config::static_memory_guard_size`].
-    ///
-    /// Note that the size of the guard region for dynamic memories is not super
-    /// critical for performance. Making it reasonably-sized can improve
-    /// generated code slightly, but for maximum performance you'll want to lean
-    /// towards static memories rather than dynamic anyway.
-    ///
-    /// Also note that the dynamic memory guard size must be smaller than the
-    /// static memory guard size, so if a large dynamic memory guard is
-    /// specified then the static memory guard size will also be automatically
-    /// increased.
-    ///
-    /// ## Default
-    ///
-    /// This value defaults to 64KB.
-    ///
-    /// ## Errors
-    ///
-    /// The `Engine::new` method will return an error if this option is larger
-    /// than the value configured for [`Config::static_memory_guard_size`].
-    pub fn dynamic_memory_guard_size(&mut self, guard_size: u64) -> &mut Self {
-        self.tunables.dynamic_memory_offset_guard_size = Some(guard_size);
+    pub fn memory_guard_size(&mut self, guard_size: u64) -> &mut Self {
+        self.tunables.memory_guard_size = Some(guard_size);
         self
     }
 
@@ -1993,37 +1950,7 @@ impl Config {
             None => Tunables::default_host(),
         };
 
-        macro_rules! set_fields {
-            ($($field:ident)*) => (
-                let ConfigTunables {
-                    $($field,)*
-                } = &self.tunables;
-
-                $(
-                    if let Some(e) = $field {
-                        tunables.$field = *e;
-                    }
-                )*
-            )
-        }
-
-        set_fields! {
-            static_memory_reservation
-            static_memory_offset_guard_size
-            dynamic_memory_offset_guard_size
-            dynamic_memory_growth_reserve
-            generate_native_debuginfo
-            parse_wasm_debuginfo
-            consume_fuel
-            epoch_interruption
-            static_memory_bound_is_maximum
-            guard_before_linear_memory
-            table_lazy_init
-            generate_address_map
-            debug_adapter_modules
-            relaxed_simd_deterministic
-            signals_based_traps
-        }
+        self.tunables.configure(&mut tunables);
 
         // If we're going to compile with winch, we must use the winch calling convention.
         #[cfg(any(feature = "cranelift", feature = "winch"))]
@@ -2031,9 +1958,21 @@ impl Config {
             tunables.winch_callable = self.compiler_config.strategy == Some(Strategy::Winch);
         }
 
-        if tunables.static_memory_offset_guard_size < tunables.dynamic_memory_offset_guard_size {
-            bail!("static memory guard size cannot be smaller than dynamic memory guard size");
-        }
+        tunables.collector = if features.gc_types() {
+            #[cfg(feature = "gc")]
+            {
+                use wasmtime_environ::Collector as EnvCollector;
+                Some(match self.collector.try_not_auto()? {
+                    Collector::DeferredReferenceCounting => EnvCollector::DeferredReferenceCounting,
+                    Collector::Null => EnvCollector::Null,
+                    Collector::Auto => unreachable!(),
+                })
+            }
+            #[cfg(not(feature = "gc"))]
+            bail!("cannot use GC types: the `gc` feature was disabled at compile time")
+        } else {
+            None
+        };
 
         Ok((tunables, features))
     }
@@ -2076,8 +2015,38 @@ impl Config {
     }
 
     #[cfg(feature = "runtime")]
-    pub(crate) fn build_gc_runtime(&self) -> Result<Arc<dyn GcRuntime>> {
-        Ok(Arc::new(crate::runtime::vm::default_gc_runtime()) as Arc<dyn GcRuntime>)
+    pub(crate) fn build_gc_runtime(&self) -> Result<Option<Arc<dyn GcRuntime>>> {
+        if !self.features().gc_types() {
+            return Ok(None);
+        }
+
+        #[cfg(not(feature = "gc"))]
+        bail!("cannot create a GC runtime: the `gc` feature was disabled at compile time");
+
+        #[cfg(feature = "gc")]
+        #[cfg_attr(
+            not(any(feature = "gc-null", feature = "gc-drc")),
+            allow(unused_variables, unreachable_code)
+        )]
+        {
+            Ok(Some(match self.collector.try_not_auto()? {
+                #[cfg(feature = "gc-drc")]
+                Collector::DeferredReferenceCounting => {
+                    Arc::new(crate::runtime::vm::DrcCollector::default()) as Arc<dyn GcRuntime>
+                }
+                #[cfg(not(feature = "gc-drc"))]
+                Collector::DeferredReferenceCounting => unreachable!(),
+
+                #[cfg(feature = "gc-null")]
+                Collector::Null => {
+                    Arc::new(crate::runtime::vm::NullCollector::default()) as Arc<dyn GcRuntime>
+                }
+                #[cfg(not(feature = "gc-null"))]
+                Collector::Null => unreachable!(),
+
+                Collector::Auto => unreachable!(),
+            }))
+        }
     }
 
     #[cfg(feature = "runtime")]
@@ -2372,7 +2341,6 @@ impl Default for Config {
 impl fmt::Debug for Config {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut f = f.debug_struct("Config");
-        f.field("debug_info", &self.tunables.generate_native_debuginfo);
 
         // Not every flag in WasmFeatures can be enabled as part of creating
         // a Config. This impl gives a complete picture of all WasmFeatures
@@ -2393,21 +2361,7 @@ impl fmt::Debug for Config {
             f.field("compiler_config", &self.compiler_config);
         }
 
-        if let Some(enable) = self.tunables.parse_wasm_debuginfo {
-            f.field("parse_wasm_debuginfo", &enable);
-        }
-        if let Some(size) = self.tunables.static_memory_reservation {
-            f.field("static_memory_maximum_reservation", &size);
-        }
-        if let Some(size) = self.tunables.static_memory_offset_guard_size {
-            f.field("static_memory_guard_size", &size);
-        }
-        if let Some(size) = self.tunables.dynamic_memory_offset_guard_size {
-            f.field("dynamic_memory_guard_size", &size);
-        }
-        if let Some(enable) = self.tunables.guard_before_linear_memory {
-            f.field("guard_before_linear_memory", &enable);
-        }
+        self.tunables.format(&mut f);
         f.finish()
     }
 }
@@ -2451,6 +2405,135 @@ impl Strategy {
                 }
             }
             other => Some(*other),
+        }
+    }
+}
+
+/// Possible garbage collector implementations for Wasm.
+///
+/// This is used as an argument to the [`Config::collector`] method.
+///
+/// The properties of Wasmtime's available collectors are summarized in the
+/// following table:
+///
+/// | Collector                   | Collects Garbage[^1] | Latency[^2] | Throughput[^3] | Allocation Speed[^4] | Heap Utilization[^5] |
+/// |-----------------------------|----------------------|-------------|----------------|----------------------|----------------------|
+/// | `DeferredReferenceCounting` | Yes, but not cycles  | 🙂         | 🙁             | 😐                   | 😐                  |
+/// | `Null`                      | No                   | 🙂         | 🙂             | 🙂                   | 🙂                  |
+///
+/// [^1]: Whether or not the collector is capable of collecting garbage and cyclic garbage.
+///
+/// [^2]: How long the Wasm program is paused during garbage
+///       collections. Shorter is better. In general, better latency implies
+///       worse throughput and vice versa.
+///
+/// [^3]: How fast the Wasm program runs when using this collector. Roughly
+///       equivalent to the number of Wasm instructions executed per
+///       second. Faster is better. In general, better throughput implies worse
+///       latency and vice versa.
+///
+/// [^4]: How fast can individual objects be allocated?
+///
+/// [^5]: How many objects can the collector fit into N bytes of memory? That
+///       is, how much space for bookkeeping and metadata does this collector
+///       require? Less space taken up by metadata means more space for
+///       additional objects. Reference counts are larger than mark bits and
+///       free lists are larger than bump pointers, for example.
+#[non_exhaustive]
+#[derive(PartialEq, Eq, Clone, Debug, Copy)]
+pub enum Collector {
+    /// An indicator that the garbage collector should be automatically
+    /// selected.
+    ///
+    /// This is generally what you want for most projects and indicates that the
+    /// `wasmtime` crate itself should make the decision about what the best
+    /// collector for a wasm module is.
+    ///
+    /// Currently this always defaults to the deferred reference-counting
+    /// collector, but the default value may change over time.
+    Auto,
+
+    /// The deferred reference-counting collector.
+    ///
+    /// A reference-counting collector, generally trading improved latency for
+    /// worsened throughput. However, to avoid the largest overheads of
+    /// reference counting, it avoids manipulating reference counts for Wasm
+    /// objects on the stack. Instead, it will hold a reference count for an
+    /// over-approximation of all objects that are currently on the stack, trace
+    /// the stack during collection to find the precise set of on-stack roots,
+    /// and decrement the reference count of any object that was in the
+    /// over-approximation but not the precise set. This improves throughtput,
+    /// compared to "pure" reference counting, by performing many fewer
+    /// refcount-increment and -decrement operations. The cost is the increased
+    /// latency associated with tracing the stack.
+    ///
+    /// This collector cannot currently collect cycles; they will leak until the
+    /// GC heap's store is dropped.
+    DeferredReferenceCounting,
+
+    /// The null collector.
+    ///
+    /// This collector does not actually collect any garbage. It simply
+    /// allocates objects until it runs out of memory, at which point further
+    /// objects allocation attempts will trap.
+    ///
+    /// This collector is useful for incredibly short-running Wasm instances
+    /// where additionally you would rather halt an over-allocating Wasm program
+    /// than spend time collecting its garbage to allow it to keep running. It
+    /// is also useful for measuring the overheads associated with other
+    /// collectors, as this collector imposes as close to zero throughput and
+    /// latency overhead as possible.
+    Null,
+}
+
+impl Default for Collector {
+    fn default() -> Collector {
+        Collector::Auto
+    }
+}
+
+impl Collector {
+    fn not_auto(&self) -> Option<Collector> {
+        match self {
+            Collector::Auto => {
+                if cfg!(feature = "gc-drc") {
+                    Some(Collector::DeferredReferenceCounting)
+                } else if cfg!(feature = "gc-null") {
+                    Some(Collector::Null)
+                } else {
+                    None
+                }
+            }
+            other => Some(*other),
+        }
+    }
+
+    fn try_not_auto(&self) -> Result<Self> {
+        match self.not_auto() {
+            #[cfg(feature = "gc-drc")]
+            Some(c @ Collector::DeferredReferenceCounting) => Ok(c),
+            #[cfg(not(feature = "gc-drc"))]
+            Some(Collector::DeferredReferenceCounting) => bail!(
+                "cannot create an engine using the deferred reference-counting \
+                 collector because the `gc-drc` feature was not enabled at \
+                 compile time",
+            ),
+
+            #[cfg(feature = "gc-null")]
+            Some(c @ Collector::Null) => Ok(c),
+            #[cfg(not(feature = "gc-null"))]
+            Some(Collector::Null) => bail!(
+                "cannot create an engine using the null collector because \
+                 the `gc-null` feature was not enabled at compile time",
+            ),
+
+            Some(Collector::Auto) => unreachable!(),
+
+            None => bail!(
+                "cannot create an engine with GC support when none of the \
+                 collectors are available; enable one of the following \
+                 features: `gc-drc`, `gc-null`",
+            ),
         }
     }
 }

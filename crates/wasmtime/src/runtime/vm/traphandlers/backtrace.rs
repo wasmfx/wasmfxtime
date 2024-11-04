@@ -104,7 +104,7 @@ impl Backtrace {
         trap_pc_and_fp: Option<(usize, usize)>,
         mut f: impl FnMut(Frame) -> ControlFlow<()>,
     ) {
-        if cfg!(feature = "wasmfx_baseline") {
+        if cfg!(feature = "wasmfx_baseline") && cfg!(not(feature = "wasmfx_no_baseline")) {
             if crate::runtime::vm::continuation::baseline::has_ever_run_continuation() {
                 log::info!("Backtrace generation not supported in baseline implementation once a continuation has been invoked");
                 return;
@@ -185,15 +185,15 @@ impl Backtrace {
             pc != 0
         });
 
-        for (chain, pc, fp, sp) in activations {
-            if cfg!(feature = "wasmfx_baseline") {
+        for (_chain, pc, fp, sp) in activations {
+            if cfg!(feature = "wasmfx_baseline") && cfg!(not(feature = "wasmfx_no_baseline")) {
                 if let ControlFlow::Break(()) = Self::trace_through_wasm(pc, fp, sp, &mut f) {
                     log::trace!("====== Done Capturing Backtrace (closure break) ======");
                     return;
                 }
             } else {
                 if let ControlFlow::Break(()) =
-                    Self::trace_through_continuations(chain, pc, fp, sp, &mut f)
+                    Self::trace_through_continuations(_chain, pc, fp, sp, &mut f)
                 {
                     log::trace!("====== Done Capturing Backtrace (closure break) ======");
                     return;

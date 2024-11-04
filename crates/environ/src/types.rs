@@ -953,29 +953,52 @@ impl TypeTrace for WasmStructType {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[allow(missing_docs)]
+pub struct WasmCompositeType {
+    /// The type defined inside the composite type.
+    pub inner: WasmCompositeInnerType,
+    /// Is the composite type shared? This is part of the
+    /// shared-everything-threads proposal.
+    pub shared: bool,
+}
+
+impl fmt::Display for WasmCompositeType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.shared {
+            write!(f, "(shared ")?;
+        }
+        fmt::Display::fmt(&self.inner, f)?;
+        if self.shared {
+            write!(f, ")")?;
+        }
+        Ok(())
+    }
+}
+
 /// A function, array, or struct type.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[allow(missing_docs)]
-pub enum WasmCompositeType {
+pub enum WasmCompositeInnerType {
     Array(WasmArrayType),
     Func(WasmFuncType),
     Cont(WasmContType),
     Struct(WasmStructType),
 }
 
-impl fmt::Display for WasmCompositeType {
+impl fmt::Display for WasmCompositeInnerType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WasmCompositeType::Array(ty) => fmt::Display::fmt(ty, f),
-            WasmCompositeType::Func(ty) => fmt::Display::fmt(ty, f),
-            WasmCompositeType::Struct(ty) => fmt::Display::fmt(ty, f),
-            WasmCompositeType::Cont(ty) => fmt::Display::fmt(ty, f),
+            Self::Array(ty) => fmt::Display::fmt(ty, f),
+            Self::Func(ty) => fmt::Display::fmt(ty, f),
+            Self::Struct(ty) => fmt::Display::fmt(ty, f),
+            Self::Cont(ty) => fmt::Display::fmt(ty, f),
         }
     }
 }
 
 #[allow(missing_docs)]
-impl WasmCompositeType {
+impl WasmCompositeInnerType {
     #[inline]
     pub fn is_array(&self) -> bool {
         matches!(self, Self::Array(_))
@@ -984,7 +1007,7 @@ impl WasmCompositeType {
     #[inline]
     pub fn as_array(&self) -> Option<&WasmArrayType> {
         match self {
-            WasmCompositeType::Array(f) => Some(f),
+            Self::Array(f) => Some(f),
             _ => None,
         }
     }
@@ -1002,7 +1025,7 @@ impl WasmCompositeType {
     #[inline]
     pub fn as_func(&self) -> Option<&WasmFuncType> {
         match self {
-            WasmCompositeType::Func(f) => Some(f),
+            Self::Func(f) => Some(f),
             _ => None,
         }
     }
@@ -1020,7 +1043,7 @@ impl WasmCompositeType {
     #[inline]
     pub fn as_struct(&self) -> Option<&WasmStructType> {
         match self {
-            WasmCompositeType::Struct(f) => Some(f),
+            Self::Struct(f) => Some(f),
             _ => None,
         }
     }
@@ -1038,7 +1061,7 @@ impl WasmCompositeType {
     #[inline]
     pub fn as_cont(&self) -> Option<&WasmContType> {
         match self {
-            WasmCompositeType::Cont(f) => Some(f),
+            Self::Cont(f) => Some(f),
             _ => None,
         }
     }
@@ -1054,11 +1077,11 @@ impl TypeTrace for WasmCompositeType {
     where
         F: FnMut(EngineOrModuleTypeIndex) -> Result<(), E>,
     {
-        match self {
-            WasmCompositeType::Array(a) => a.trace(func),
-            WasmCompositeType::Func(f) => f.trace(func),
-            WasmCompositeType::Cont(c) => c.trace(func),
-            WasmCompositeType::Struct(a) => a.trace(func),
+        match &self.inner {
+            WasmCompositeInnerType::Array(a) => a.trace(func),
+            WasmCompositeInnerType::Func(f) => f.trace(func),
+            WasmCompositeInnerType::Struct(a) => a.trace(func),
+            WasmCompositeInnerType::Cont(c) => c.trace(func),
         }
     }
 
@@ -1066,11 +1089,11 @@ impl TypeTrace for WasmCompositeType {
     where
         F: FnMut(&mut EngineOrModuleTypeIndex) -> Result<(), E>,
     {
-        match self {
-            WasmCompositeType::Array(a) => a.trace_mut(func),
-            WasmCompositeType::Func(f) => f.trace_mut(func),
-            WasmCompositeType::Cont(c) => c.trace_mut(func),
-            WasmCompositeType::Struct(a) => a.trace_mut(func),
+        match &mut self.inner {
+            WasmCompositeInnerType::Array(a) => a.trace_mut(func),
+            WasmCompositeInnerType::Func(f) => f.trace_mut(func),
+            WasmCompositeInnerType::Struct(a) => a.trace_mut(func),
+            WasmCompositeInnerType::Cont(c) => c.trace_mut(func),
         }
     }
 }
@@ -1106,65 +1129,83 @@ impl fmt::Display for WasmSubType {
     }
 }
 
+/// Implicitly define all of these helper functions to handle only unshared
+/// types; essentially, these act like `is_unshared_*` functions until shared
+/// support is implemented.
 #[allow(missing_docs)]
 impl WasmSubType {
     #[inline]
     pub fn is_func(&self) -> bool {
-        self.composite_type.is_func()
+        self.composite_type.inner.is_func() && !self.composite_type.shared
     }
 
     #[inline]
     pub fn as_func(&self) -> Option<&WasmFuncType> {
-        self.composite_type.as_func()
+        if self.composite_type.shared {
+            None
+        } else {
+            self.composite_type.inner.as_func()
+        }
     }
 
     #[inline]
     pub fn unwrap_func(&self) -> &WasmFuncType {
-        self.composite_type.unwrap_func()
+        assert!(!self.composite_type.shared);
+        self.composite_type.inner.unwrap_func()
     }
 
     #[inline]
     pub fn is_array(&self) -> bool {
-        self.composite_type.is_array()
+        self.composite_type.inner.is_array() && !self.composite_type.shared
     }
 
     #[inline]
     pub fn as_array(&self) -> Option<&WasmArrayType> {
-        self.composite_type.as_array()
+        if self.composite_type.shared {
+            None
+        } else {
+            self.composite_type.inner.as_array()
+        }
     }
 
     #[inline]
     pub fn unwrap_array(&self) -> &WasmArrayType {
-        self.composite_type.unwrap_array()
+        assert!(!self.composite_type.shared);
+        self.composite_type.inner.unwrap_array()
     }
 
     pub fn is_cont(&self) -> bool {
-        self.composite_type.is_cont()
+        self.composite_type.inner.is_cont()
     }
 
     #[inline]
     pub fn as_cont(&self) -> Option<&WasmContType> {
-        self.composite_type.as_cont()
+        self.composite_type.inner.as_cont()
     }
 
     #[inline]
     pub fn unwrap_cont(&self) -> &WasmContType {
-        self.composite_type.unwrap_cont()
+        self.composite_type.inner.unwrap_cont()
     }
 
     #[inline]
     pub fn is_struct(&self) -> bool {
-        self.composite_type.is_struct()
+        self.composite_type.inner.is_struct() && !self.composite_type.shared
     }
 
     #[inline]
     pub fn as_struct(&self) -> Option<&WasmStructType> {
-        self.composite_type.as_struct()
+        if self.composite_type.shared {
+            None
+        } else {
+            self.composite_type.inner.as_struct()
+        }
     }
 
     #[inline]
     pub fn unwrap_struct(&self) -> &WasmStructType {
-        self.composite_type.unwrap_struct()
+        assert!(!self.composite_type.shared);
+        self.composite_type.inner.unwrap_struct()
     }
 }
 
@@ -1999,20 +2040,23 @@ pub trait TypeConvert {
     }
 
     fn convert_composite_type(&self, ty: &wasmparser::CompositeType) -> WasmCompositeType {
-        assert!(!ty.shared);
-        match &ty.inner {
+        let inner = match &ty.inner {
             wasmparser::CompositeInnerType::Func(f) => {
-                WasmCompositeType::Func(self.convert_func_type(f))
+                WasmCompositeInnerType::Func(self.convert_func_type(f))
             }
             wasmparser::CompositeInnerType::Array(a) => {
-                WasmCompositeType::Array(self.convert_array_type(a))
+                WasmCompositeInnerType::Array(self.convert_array_type(a))
             }
             wasmparser::CompositeInnerType::Struct(s) => {
-                WasmCompositeType::Struct(self.convert_struct_type(s))
+                WasmCompositeInnerType::Struct(self.convert_struct_type(s))
             }
             wasmparser::CompositeInnerType::Cont(c) => {
-                WasmCompositeType::Cont(self.convert_cont_type(c))
+                WasmCompositeInnerType::Cont(self.convert_cont_type(c))
             }
+        };
+        WasmCompositeType {
+            inner,
+            shared: ty.shared,
         }
     }
 

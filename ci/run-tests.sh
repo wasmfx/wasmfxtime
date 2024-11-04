@@ -17,23 +17,10 @@
 
 cargo test \
       --workspace \
-      --features=default \
+      --all-features \
       --exclude test-programs \
       --exclude wasmtime-wasi-nn \
       --exclude wasmtime-fuzzing \
       --exclude wasm-spec-interpreter \
-      --exclude wasmtime-winch \
       --exclude veri_engine \
       $@
-
-# NOTE(dhil): Several WasmFX features are conflicting, so we do not
-# want to run with `--all-features`.
-# cargo test \
-#       --workspace \
-#       --all-features \
-#       --exclude test-programs \
-#       --exclude wasmtime-wasi-nn \
-#       --exclude wasmtime-fuzzing \
-#       --exclude wasm-spec-interpreter \
-#       --exclude veri_engine \
-#       $@
