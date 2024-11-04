@@ -342,11 +342,13 @@ pub(crate) mod typed_continuation_helpers {
             }
         }
 
+        #[allow(clippy::cast_possible_truncation)]
         pub fn args(&self) -> Payloads {
             let offset = wasmtime_continuations::offsets::vm_cont_ref::ARGS;
             Payloads::new(self.address, offset as i32, self.pointer_type)
         }
 
+        #[allow(clippy::cast_possible_truncation)]
         pub fn tag_return_values(&self) -> Payloads {
             let offset = wasmtime_continuations::offsets::vm_cont_ref::TAG_RETURN_VALUES;
             Payloads::new(self.address, offset as i32, self.pointer_type)
@@ -383,6 +385,7 @@ pub(crate) mod typed_continuation_helpers {
         /// Stores the parent of this continuation, which may either be another
         /// continuation or the main stack. It is therefore represented as a
         /// `StackChain` element.
+        #[allow(clippy::cast_possible_truncation)]
         pub fn set_parent_stack_chain<'a>(
             &mut self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -395,6 +398,7 @@ pub(crate) mod typed_continuation_helpers {
 
         /// Gets the revision counter the a given continuation
         /// reference.
+        #[allow(clippy::cast_possible_truncation)]
         pub fn get_revision<'a>(
             &mut self,
             _env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -408,6 +412,7 @@ pub(crate) mod typed_continuation_helpers {
 
         /// Sets the revision counter on the given continuation
         /// reference to `revision + 1`.
+        #[allow(clippy::cast_possible_truncation)]
         pub fn incr_revision<'a>(
             &mut self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -433,6 +438,7 @@ pub(crate) mod typed_continuation_helpers {
             revision_plus1
         }
 
+        #[allow(clippy::cast_possible_truncation)]
         pub fn get_fiber_stack<'a>(
             &self,
             _env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -461,6 +467,7 @@ pub(crate) mod typed_continuation_helpers {
                 .load(ty, mem_flags, self.base, self.offset + offset)
         }
 
+        #[allow(clippy::cast_possible_truncation)]
         fn set<T>(&self, builder: &mut FunctionBuilder, offset: i32, value: ir::Value) {
             debug_assert_eq!(
                 builder.func.dfg.value_type(value),
@@ -472,6 +479,7 @@ pub(crate) mod typed_continuation_helpers {
                 .store(mem_flags, value, self.base, self.offset + offset);
         }
 
+        #[allow(clippy::cast_possible_truncation)]
         pub fn get_data(&self, builder: &mut FunctionBuilder) -> ir::Value {
             self.get(
                 builder,
@@ -480,6 +488,7 @@ pub(crate) mod typed_continuation_helpers {
             )
         }
 
+        #[allow(clippy::cast_possible_truncation)]
         fn get_capacity(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let ty = Type::int_with_byte_size(std::mem::size_of::<
                 wasmtime_continuations::types::payloads::Capacity,
@@ -492,6 +501,7 @@ pub(crate) mod typed_continuation_helpers {
             )
         }
 
+        #[allow(clippy::cast_possible_truncation)]
         fn get_length(&self, builder: &mut FunctionBuilder) -> ir::Value {
             let ty = Type::int_with_byte_size(std::mem::size_of::<
                 wasmtime_continuations::types::payloads::Length,
@@ -504,6 +514,7 @@ pub(crate) mod typed_continuation_helpers {
             )
         }
 
+        #[allow(clippy::cast_possible_truncation)]
         fn set_length(&self, builder: &mut FunctionBuilder, length: ir::Value) {
             self.set::<wasmtime_continuations::types::payloads::Length>(
                 builder,
@@ -512,6 +523,7 @@ pub(crate) mod typed_continuation_helpers {
             );
         }
 
+        #[allow(clippy::cast_possible_truncation)]
         fn set_capacity(&self, builder: &mut FunctionBuilder, capacity: ir::Value) {
             self.set::<wasmtime_continuations::types::payloads::Capacity>(
                 builder,
@@ -520,6 +532,7 @@ pub(crate) mod typed_continuation_helpers {
             );
         }
 
+        #[allow(clippy::cast_possible_truncation)]
         fn set_data(&self, builder: &mut FunctionBuilder, data: ir::Value) {
             self.set::<*mut u8>(
                 builder,
@@ -669,6 +682,7 @@ pub(crate) mod typed_continuation_helpers {
         /// Loads n entries from this Payloads object, where n is the length of
         /// `load_types`, which also gives the types of the values to load.
         /// Loading starts at index 0 of the Payloads object.
+        #[allow(clippy::cast_possible_truncation)]
         pub fn load_data_entries<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -702,6 +716,7 @@ pub(crate) mod typed_continuation_helpers {
         /// index 0. This expects the Payloads object to be empty (i.e., current
         /// length is 0), and to be of sufficient capacity to store |`values`|
         /// entries.
+        #[allow(clippy::cast_possible_truncation)]
         pub fn store_data_entries<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -901,6 +916,7 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         /// Load a `StackChain` object from the given address.
+        #[allow(clippy::cast_possible_truncation)]
         pub fn load<'a>(
             _env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
@@ -920,6 +936,7 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         /// Store this `StackChain` object at the given address.
+        #[allow(clippy::cast_possible_truncation)]
         pub fn store<'a>(
             &self,
             _env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -1101,6 +1118,7 @@ pub(crate) mod typed_continuation_helpers {
         /// Sets `last_wasm_entry_sp` and `stack_limit` fields in
         /// `VMRuntimelimits` using the values from the `StackLimits` of this
         /// object.
+        #[allow(clippy::cast_possible_truncation)]
         pub fn write_limits_to_vmcontext<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -1146,6 +1164,7 @@ pub(crate) mod typed_continuation_helpers {
         /// field.
         /// If `wasm_exit_fp`/`wasm_exit_pc` values are provided, we use them to
         /// overwrite the respective fields in the `StackLimits`.
+        #[allow(clippy::cast_possible_truncation)]
         pub fn load_limits_from_vmcontext<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -1241,6 +1260,7 @@ pub(crate) mod typed_continuation_helpers {
 
 use typed_continuation_helpers as tc;
 
+#[allow(clippy::cast_possible_truncation)]
 fn typed_continuations_load_return_values<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
@@ -1282,6 +1302,7 @@ fn typed_continuations_forward_tag_return_values<'a>(
     );
 }
 
+#[allow(clippy::cast_possible_truncation)]
 fn typed_continuations_load_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
@@ -1308,6 +1329,7 @@ fn typed_continuations_load_payloads<'a>(
     values
 }
 
+#[allow(clippy::cast_possible_truncation)]
 pub(crate) fn typed_continuations_load_tag_return_values<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
@@ -1345,6 +1367,7 @@ pub(crate) fn typed_continuations_load_tag_return_values<'a>(
 }
 
 /// TODO
+#[allow(clippy::cast_possible_truncation)]
 pub(crate) fn typed_continuations_store_resume_args<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
@@ -1409,6 +1432,7 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
 }
 
 //TODO(frank-emrich) Consider removing `valtypes` argument, as values are inherently typed
+#[allow(clippy::cast_possible_truncation)]
 pub(crate) fn typed_continuations_store_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
