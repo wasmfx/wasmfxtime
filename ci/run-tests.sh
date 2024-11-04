@@ -17,7 +17,7 @@
 
 cargo test \
       --workspace \
-      --features=default \
+      --features=default,gc-null,gc-drc \
       --exclude test-programs \
       --exclude wasmtime-wasi-nn \
       --exclude wasmtime-fuzzing \
