@@ -2,8 +2,9 @@ use crate::prelude::*;
 use core::fmt::{self, Display, Write};
 use wasmtime_environ::{
     EngineOrModuleTypeIndex, EntityType, Global, IndexType, Limits, Memory, ModuleTypes, Table,
-    TypeTrace, VMSharedTypeIndex, WasmArrayType, WasmCompositeType, WasmFieldType, WasmFuncType,
-    WasmHeapType, WasmRefType, WasmStorageType, WasmStructType, WasmSubType, WasmValType,
+    TypeTrace, VMSharedTypeIndex, WasmArrayType, WasmCompositeInnerType, WasmCompositeType,
+    WasmFieldType, WasmFuncType, WasmHeapType, WasmRefType, WasmStorageType, WasmStructType,
+    WasmSubType, WasmValType,
 };
 
 use crate::{type_registry::RegisteredType, Engine};
@@ -1765,6 +1766,7 @@ impl StructType {
         Self::from_wasm_struct_type(
             engine,
             finality.is_final(),
+            false,
             supertype.map(|ty| ty.type_index().into()),
             WasmStructType { fields },
         )
@@ -1881,6 +1883,7 @@ impl StructType {
     pub(crate) fn from_wasm_struct_type(
         engine: &Engine,
         is_final: bool,
+        is_shared: bool,
         supertype: Option<EngineOrModuleTypeIndex>,
         ty: WasmStructType,
     ) -> Result<StructType> {
@@ -1898,7 +1901,10 @@ impl StructType {
             WasmSubType {
                 is_final,
                 supertype,
-                composite_type: WasmCompositeType::Struct(ty),
+                composite_type: WasmCompositeType {
+                    shared: is_shared,
+                    inner: WasmCompositeInnerType::Struct(ty),
+                },
             },
         );
         Ok(Self {
@@ -2142,7 +2148,10 @@ impl ArrayType {
             WasmSubType {
                 is_final,
                 supertype,
-                composite_type: WasmCompositeType::Array(ty),
+                composite_type: WasmCompositeType {
+                    shared: false,
+                    inner: WasmCompositeInnerType::Array(ty),
+                },
             },
         );
         Self {
@@ -2498,7 +2507,10 @@ impl FuncType {
             WasmSubType {
                 is_final,
                 supertype,
-                composite_type: WasmCompositeType::Func(ty),
+                composite_type: WasmCompositeType {
+                    shared: false,
+                    inner: WasmCompositeInnerType::Func(ty),
+                },
             },
         );
         Self {
@@ -2743,7 +2755,7 @@ impl TableType {
 /// # fn foo() -> wasmtime::Result<()> {
 /// use wasmtime::MemoryTypeBuilder;
 ///
-/// let memory_type = MemoryTypeBuilder::default()
+/// let memory_type = MemoryTypeBuilder::new()
 ///     // Set the minimum size, in pages.
 ///     .min(4096)
 ///     // Set the maximum size, in pages.
@@ -2773,6 +2785,21 @@ impl Default for MemoryTypeBuilder {
 }
 
 impl MemoryTypeBuilder {
+    /// Create a new builder for a [`MemoryType`] with the default settings.
+    ///
+    /// By default memory types have the following properties:
+    ///
+    /// * The minimum memory size is 0 pages.
+    /// * The maximum memory size is unspecified.
+    /// * Memories use 32-bit indexes.
+    /// * The page size is 64KiB.
+    ///
+    /// Each option can be configued through the methods on the returned
+    /// builder.
+    pub fn new() -> MemoryTypeBuilder {
+        MemoryTypeBuilder::default()
+    }
+
     fn validate(&self) -> Result<()> {
         if self
             .ty
@@ -2980,6 +3007,14 @@ impl MemoryType {
             .max(Some(maximum.into()))
             .build()
             .unwrap()
+    }
+
+    /// Creates a new [`MemoryTypeBuilder`] to configure all the various knobs
+    /// of the final memory type being created.
+    ///
+    /// This is a convenience function for [`MemoryTypeBuilder::new`].
+    pub fn builder() -> MemoryTypeBuilder {
+        MemoryTypeBuilder::new()
     }
 
     /// Returns whether this is a 64-bit memory or not.

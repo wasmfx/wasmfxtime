@@ -367,8 +367,7 @@ impl Metadata<'_> {
         let Tunables {
             collector,
             static_memory_reservation,
-            static_memory_offset_guard_size,
-            dynamic_memory_offset_guard_size,
+            memory_guard_size,
             generate_native_debuginfo,
             parse_wasm_debuginfo,
             consume_fuel,
@@ -399,14 +398,9 @@ impl Metadata<'_> {
             "static memory reservation",
         )?;
         Self::check_int(
-            static_memory_offset_guard_size,
-            other.static_memory_offset_guard_size,
-            "static memory guard size",
-        )?;
-        Self::check_int(
-            dynamic_memory_offset_guard_size,
-            other.dynamic_memory_offset_guard_size,
-            "dynamic memory guard size",
+            memory_guard_size,
+            other.memory_guard_size,
+            "memory guard size",
         )?;
         Self::check_bool(
             generate_native_debuginfo,
@@ -730,11 +724,11 @@ Caused by:
         let engine = Engine::default();
         let mut metadata = Metadata::new(&engine);
 
-        metadata.tunables.static_memory_offset_guard_size = 0;
+        metadata.tunables.memory_guard_size = 0;
 
         match metadata.check_compatible(&engine) {
             Ok(_) => unreachable!(),
-            Err(e) => assert_eq!(e.to_string(), "Module was compiled with a static memory guard size of '0' but '2147483648' is expected for the host"),
+            Err(e) => assert_eq!(e.to_string(), "Module was compiled with a memory guard size of '0' but '2147483648' is expected for the host"),
         }
 
         Ok(())
