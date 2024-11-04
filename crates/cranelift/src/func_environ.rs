@@ -28,7 +28,7 @@ use wasmtime_environ::{
 use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "wasmfx_baseline")] {
+    if #[cfg(all(feature = "wasmfx_baseline", not(feature = "wasmfx_no_baseline")))] {
         pub (crate) use crate::wasmfx::baseline as wasmfx_impl;
     } else {
         pub(crate) use crate::wasmfx::optimized as wasmfx_impl;

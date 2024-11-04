@@ -263,7 +263,10 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
 
         if part == "stack-switching" {
             // Tag linking is broken in the baseline implementation.
-            if cfg!(feature = "wasmfx_baseline") && test.ends_with("linking_tags.wast") {
+            if cfg!(feature = "wasmfx_baseline")
+                && cfg!(not(feature = "wasmfx_no_baseline"))
+                && test.ends_with("linking_tags.wast")
+            {
                 return true;
             }
         }

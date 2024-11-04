@@ -30,7 +30,7 @@ pub mod wasmfx_on_demand {
         pub fn allocate(&mut self) -> Result<(*mut VMContRef, FiberStack)> {
             let stack = {
                 cfg_if::cfg_if! {
-                    if #[cfg(all(feature = "unsafe_wasmfx_stacks", not(feature = "wasmfx_baseline")))] {
+                    if #[cfg(all(feature = "unsafe_wasmfx_stacks", any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline")))] {
                         super::FiberStack::malloc(self.stack_size)
                     } else {
                         super::FiberStack::new(self.stack_size)
@@ -216,7 +216,7 @@ pub mod wasmfx_pooling {
                 // sync; in one of them the page_size is part of the
                 // stack size, in the other it isn't. We should bring
                 // them into sync.
-                if cfg!(feature = "wasmfx_baseline") {
+                if cfg!(feature = "wasmfx_baseline") && cfg!(not(feature = "wasmfx_no_baseline")) {
                     bottom_of_stack - self.page_size
                 } else {
                     bottom_of_stack
@@ -243,7 +243,7 @@ pub mod wasmfx_pooling {
     impl Drop for InnerAllocator {
         fn drop(&mut self) {
             cfg_if::cfg_if! {
-                if #[cfg(all(feature = "wasmfx_baseline"))] {
+                if #[cfg(all(feature = "wasmfx_baseline", not(feature = "wasmfx_no_baseline")))] {
                     // This is a workaround for the following quirk:
                     //
                     // We are about to drop all the `VMContRef`s in the

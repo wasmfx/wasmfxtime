@@ -1,7 +1,7 @@
 //! Continuations TODO
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "wasmfx_baseline")] {
+    if #[cfg(all(feature = "wasmfx_baseline", not(feature = "wasmfx_no_baseline")))] {
         pub use baseline as imp;
     } else {
         pub use optimized as imp;
@@ -38,7 +38,7 @@ pub use safe_vm_contobj::*;
 unsafe impl Send for VMContObj {}
 unsafe impl Sync for VMContObj {}
 
-#[cfg(not(feature = "wasmfx_baseline"))]
+#[cfg(any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline"))]
 pub mod optimized {
     use super::stack_chain::StackChain;
     use crate::runtime::vm::{
@@ -291,7 +291,7 @@ pub mod optimized {
     }
 }
 
-#[cfg(feature = "wasmfx_baseline")]
+#[cfg(all(feature = "wasmfx_baseline", not(feature = "wasmfx_no_baseline")))]
 pub mod baseline {
     use super::stack_chain::{StackChain, StackLimits};
     use crate::runtime::vm::{Instance, TrapReason, VMFuncRef, VMOpaqueContext, ValRaw};
@@ -767,7 +767,7 @@ pub mod stack_chain {
     impl Iterator for ContinuationChainIterator {
         type Item = (Option<*mut VMContRef>, *mut StackLimits);
 
-        #[cfg(not(feature = "wasmfx_baseline"))]
+        #[cfg(any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline"))]
         fn next(&mut self) -> Option<Self::Item> {
             match self.0 {
                 StackChain::Absent => None,
@@ -790,7 +790,7 @@ pub mod stack_chain {
             }
         }
 
-        #[cfg(feature = "wasmfx_baseline")]
+        #[cfg(all(feature = "wasmfx_baseline", not(feature = "wasmfx_no_baseline")))]
         fn next(&mut self) -> Option<Self::Item> {
             unimplemented!()
         }
@@ -822,7 +822,7 @@ pub mod stack_chain {
 //
 
 #[allow(missing_docs)]
-#[cfg(feature = "wasmfx_baseline")]
+#[cfg(all(feature = "wasmfx_baseline", not(feature = "wasmfx_no_baseline")))]
 pub mod optimized {
     use crate::runtime::vm::{Instance, TrapReason};
 
@@ -852,7 +852,7 @@ pub mod optimized {
 }
 
 #[allow(missing_docs)]
-#[cfg(not(feature = "wasmfx_baseline"))]
+#[cfg(any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline"))]
 pub mod baseline {
     use crate::runtime::vm::{Instance, TrapReason};
 

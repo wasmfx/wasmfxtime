@@ -304,6 +304,10 @@ wasmfx_baseline = [
   "wasmtime-cranelift?/wasmfx_baseline"
 ]
 
+wasmfx_no_baseline = [
+  "wasmtime-cranelift?/wasmfx_no_baseline"
+]
+
 # Toggle the WasmFX stack pooling allocator
 wasmfx_pooling_allocator = [
   "pooling-allocator",
