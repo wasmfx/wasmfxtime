@@ -1048,17 +1048,17 @@ mod tests {
     #[test]
     fn respect_tunables() {
         let mut cfg = Config::new();
-        cfg.static_memory_maximum_size(0).memory_guard_size(0);
+        cfg.memory_reservation(0).memory_guard_size(0);
         let mut store = Store::new(&Engine::new(&cfg).unwrap(), ());
         let ty = MemoryType::new(1, None);
         let mem = Memory::new(&mut store, ty).unwrap();
         let store = store.as_context();
-        let (style, offset_guard_size) = wasmtime_environ::MemoryStyle::for_memory(
+        let style = wasmtime_environ::MemoryStyle::for_memory(
             store[mem.0].memory,
             store.engine().tunables(),
         );
 
-        assert_eq!(offset_guard_size, 0);
+        assert_eq!(store.engine().tunables().memory_guard_size, 0);
         match style {
             wasmtime_environ::MemoryStyle::Dynamic { .. } => {}
             other => panic!("unexpected style {other:?}"),
