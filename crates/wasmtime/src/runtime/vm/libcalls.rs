@@ -59,7 +59,7 @@ use super::continuation::VMContObj;
 use crate::prelude::*;
 use crate::runtime::vm::table::{Table, TableElementType};
 use crate::runtime::vm::vmcontext::VMFuncRef;
-use crate::runtime::vm::{Instance, TrapReason, VMGcRef};
+use crate::runtime::vm::{Instance, TrapReason, VMGcRef, VMStore};
 #[cfg(feature = "threads")]
 use core::time::Duration;
 use wasmtime_environ::Unsigned;
@@ -88,7 +88,7 @@ pub mod raw {
     // between doc comments and `cfg`s.
     #![allow(unused_doc_comments, unused_attributes)]
 
-    use crate::runtime::vm::{Instance, TrapReason, VMContext};
+    use crate::runtime::vm::{InstanceAndStore, TrapReason, VMContext};
 
     macro_rules! libcall {
         (
@@ -112,9 +112,10 @@ pub mod raw {
                     $(#[cfg($attr)])?
                     {
                         let ret = crate::runtime::vm::traphandlers::catch_unwind_and_longjmp(|| {
-                            Instance::from_vmctx(vmctx, |instance| {
+                            InstanceAndStore::from_vmctx(vmctx, |pair| {
                                 {
-                                    super::$name(instance, $($pname),*)
+                                    let (instance, store) = pair.unpack_mut();
+                                    super::$name(store, instance, $($pname),*)
                                 }
                             })
                         });
@@ -194,26 +195,27 @@ pub mod raw {
 }
 
 fn memory32_grow(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     delta: u64,
     memory_index: u32,
 ) -> Result<*mut u8, TrapReason> {
     let memory_index = MemoryIndex::from_u32(memory_index);
-    let result =
-        match instance
-            .memory_grow(memory_index, delta)
-            .map_err(|error| TrapReason::User {
-                error,
-                needs_backtrace: true,
-            })? {
-            Some(size_in_bytes) => size_in_bytes / instance.memory_page_size(memory_index),
-            None => usize::max_value(),
-        };
+    let result = match instance
+        .memory_grow(store, memory_index, delta)
+        .map_err(|error| TrapReason::User {
+            error,
+            needs_backtrace: true,
+        })? {
+        Some(size_in_bytes) => size_in_bytes / instance.memory_page_size(memory_index),
+        None => usize::max_value(),
+    };
     Ok(result as *mut _)
 }
 
 /// Implementation of `table.grow` for `funcref` tables.
 unsafe fn table_grow_func_ref(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     table_index: u32,
     delta: u64,
@@ -227,7 +229,7 @@ unsafe fn table_grow_func_ref(
         TableElementType::Cont => unreachable!(),
     };
 
-    let result = match instance.table_grow(table_index, delta, element)? {
+    let result = match instance.table_grow(store, table_index, delta, element)? {
         Some(r) => r,
         None => usize::MAX,
     };
@@ -237,6 +239,7 @@ unsafe fn table_grow_func_ref(
 /// Implementation of `table.grow` for GC-reference tables.
 #[cfg(feature = "gc")]
 unsafe fn table_grow_gc_ref(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     table_index: u32,
     delta: u64,
@@ -247,12 +250,17 @@ unsafe fn table_grow_gc_ref(
     let element = match instance.table_element_type(table_index) {
         TableElementType::Func => unreachable!(),
         TableElementType::GcRef => VMGcRef::from_raw_u32(init_value)
-            .map(|r| (*instance.store()).unwrap_gc_store_mut().clone_gc_ref(&r))
+            .map(|r| {
+                store
+                    .store_opaque_mut()
+                    .unwrap_gc_store_mut()
+                    .clone_gc_ref(&r)
+            })
             .into(),
         TableElementType::Cont => unreachable!(),
     };
 
-    let result = match instance.table_grow(table_index, delta, element)? {
+    let result = match instance.table_grow(store, table_index, delta, element)? {
         Some(r) => r,
         None => usize::MAX,
     };
@@ -260,6 +268,7 @@ unsafe fn table_grow_gc_ref(
 }
 
 unsafe fn table_grow_cont_obj(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     table_index: u32,
     delta: u64,
@@ -285,7 +294,7 @@ unsafe fn table_grow_cont_obj(
         _ => panic!("Wrong table growing function"),
     };
 
-    let result = match instance.table_grow(table_index, delta, element)? {
+    let result = match instance.table_grow(store, table_index, delta, element)? {
         Some(r) => r,
         None => usize::MAX,
     };
@@ -294,6 +303,7 @@ unsafe fn table_grow_cont_obj(
 
 /// Implementation of `table.fill` for `funcref`s.
 unsafe fn table_fill_func_ref(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     table_index: u32,
     dst: u64,
@@ -306,12 +316,7 @@ unsafe fn table_fill_func_ref(
         TableElementType::Func => {
             let val = val.cast::<VMFuncRef>();
             table
-                .fill(
-                    (*instance.store()).optional_gc_store_mut()?,
-                    dst,
-                    val.into(),
-                    len,
-                )
+                .fill(store.optional_gc_store_mut()?, dst, val.into(), len)
                 .err2anyhow()?;
             Ok(())
         }
@@ -322,6 +327,7 @@ unsafe fn table_fill_func_ref(
 
 #[cfg(feature = "gc")]
 unsafe fn table_fill_gc_ref(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     table_index: u32,
     dst: u64,
@@ -333,7 +339,7 @@ unsafe fn table_fill_gc_ref(
     match table.element_type() {
         TableElementType::Func => unreachable!(),
         TableElementType::GcRef => {
-            let gc_store = (*instance.store()).gc_store_mut()?;
+            let gc_store = store.store_opaque_mut().unwrap_gc_store_mut();
             let gc_ref = VMGcRef::from_raw_u32(val);
             let gc_ref = gc_ref.map(|r| gc_store.clone_gc_ref(&r));
             table
@@ -347,13 +353,14 @@ unsafe fn table_fill_gc_ref(
 }
 
 unsafe fn table_fill_cont_obj(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     table_index: u32,
     dst: u64,
     value_contref: *mut u8,
     value_revision: u64,
     len: u64,
-) -> Result<(), Trap> {
+) -> Result<()> {
     use core::ptr::NonNull;
     let table_index = TableIndex::from_u32(table_index);
     let table = &mut *instance.get_table(table_index);
@@ -368,12 +375,10 @@ unsafe fn table_fill_cont_obj(
                 Some(contobj)
             };
 
-            table.fill(
-                Some((*instance.store()).unwrap_gc_store_mut()),
-                dst,
-                contobj.into(),
-                len,
-            )
+            table
+                .fill(store.optional_gc_store_mut()?, dst, contobj.into(), len)
+                .err2anyhow()?;
+            Ok(())
         }
         _ => panic!("Wrong table filling function"),
     }
@@ -381,6 +386,7 @@ unsafe fn table_fill_cont_obj(
 
 // Implementation of `table.copy`.
 unsafe fn table_copy(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     dst_table_index: u32,
     src_table_index: u32,
@@ -390,17 +396,19 @@ unsafe fn table_copy(
 ) -> Result<()> {
     let dst_table_index = TableIndex::from_u32(dst_table_index);
     let src_table_index = TableIndex::from_u32(src_table_index);
+    let store = store.store_opaque_mut();
     let dst_table = instance.get_table(dst_table_index);
     // Lazy-initialize the whole range in the source table first.
     let src_range = src..(src.checked_add(len).unwrap_or(u64::MAX));
     let src_table = instance.get_table_with_lazy_init(src_table_index, src_range);
-    let gc_store = (*instance.store()).optional_gc_store_mut()?;
+    let gc_store = store.optional_gc_store_mut()?;
     Table::copy(gc_store, dst_table, src_table, dst, src, len).err2anyhow()?;
     Ok(())
 }
 
 // Implementation of `table.init`.
 fn table_init(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     table_index: u32,
     elem_index: u32,
@@ -410,17 +418,25 @@ fn table_init(
 ) -> Result<(), Trap> {
     let table_index = TableIndex::from_u32(table_index);
     let elem_index = ElemIndex::from_u32(elem_index);
-    instance.table_init(table_index, elem_index, dst, src, len)
+    instance.table_init(
+        store.store_opaque_mut(),
+        table_index,
+        elem_index,
+        dst,
+        src,
+        len,
+    )
 }
 
 // Implementation of `elem.drop`.
-fn elem_drop(instance: &mut Instance, elem_index: u32) {
+fn elem_drop(_store: &mut dyn VMStore, instance: &mut Instance, elem_index: u32) {
     let elem_index = ElemIndex::from_u32(elem_index);
     instance.elem_drop(elem_index)
 }
 
 // Implementation of `memory.copy`.
 fn memory_copy(
+    _store: &mut dyn VMStore,
     instance: &mut Instance,
     dst_index: u32,
     dst: u64,
@@ -435,6 +451,7 @@ fn memory_copy(
 
 // Implementation of `memory.fill` for locally defined memories.
 fn memory_fill(
+    _store: &mut dyn VMStore,
     instance: &mut Instance,
     memory_index: u32,
     dst: u64,
@@ -448,6 +465,7 @@ fn memory_fill(
 
 // Implementation of `memory.init`.
 fn memory_init(
+    _store: &mut dyn VMStore,
     instance: &mut Instance,
     memory_index: u32,
     data_index: u32,
@@ -461,7 +479,7 @@ fn memory_init(
 }
 
 // Implementation of `ref.func`.
-fn ref_func(instance: &mut Instance, func_index: u32) -> *mut u8 {
+fn ref_func(_store: &mut dyn VMStore, instance: &mut Instance, func_index: u32) -> *mut u8 {
     instance
         .get_func_ref(FuncIndex::from_u32(func_index))
         .expect("ref_func: funcref should always be available for given func index")
@@ -469,13 +487,14 @@ fn ref_func(instance: &mut Instance, func_index: u32) -> *mut u8 {
 }
 
 // Implementation of `data.drop`.
-fn data_drop(instance: &mut Instance, data_index: u32) {
+fn data_drop(_store: &mut dyn VMStore, instance: &mut Instance, data_index: u32) {
     let data_index = DataIndex::from_u32(data_index);
     instance.data_drop(data_index)
 }
 
 // Returns a table entry after lazily initializing it.
 unsafe fn table_get_lazy_init_func_ref(
+    _store: &mut dyn VMStore,
     instance: &mut Instance,
     table_index: u32,
     index: u64,
@@ -491,10 +510,11 @@ unsafe fn table_get_lazy_init_func_ref(
 
 /// Drop a GC reference.
 #[cfg(feature = "gc-drc")]
-unsafe fn drop_gc_ref(instance: &mut Instance, gc_ref: u32) {
+unsafe fn drop_gc_ref(store: &mut dyn VMStore, _instance: &mut Instance, gc_ref: u32) {
     log::trace!("libcalls::drop_gc_ref({gc_ref:#x})");
     let gc_ref = VMGcRef::from_raw_u32(gc_ref).expect("non-null VMGcRef");
-    (*instance.store())
+    store
+        .store_opaque_mut()
         .unwrap_gc_store_mut()
         .drop_gc_ref(gc_ref);
 }
@@ -502,9 +522,14 @@ unsafe fn drop_gc_ref(instance: &mut Instance, gc_ref: u32) {
 /// Do a GC, keeping `gc_ref` rooted and returning the updated `gc_ref`
 /// reference.
 #[cfg(feature = "gc-drc")]
-unsafe fn gc(instance: &mut Instance, gc_ref: u32) -> Result<u32> {
+unsafe fn gc(store: &mut dyn VMStore, _instance: &mut Instance, gc_ref: u32) -> Result<u32> {
     let gc_ref = VMGcRef::from_raw_u32(gc_ref);
-    let gc_ref = gc_ref.map(|r| (*instance.store()).unwrap_gc_store_mut().clone_gc_ref(&r));
+    let gc_ref = gc_ref.map(|r| {
+        store
+            .store_opaque_mut()
+            .unwrap_gc_store_mut()
+            .clone_gc_ref(&r)
+    });
 
     if let Some(gc_ref) = &gc_ref {
         // It is possible that we are GC'ing because the DRC's activation
@@ -514,16 +539,17 @@ unsafe fn gc(instance: &mut Instance, gc_ref: u32) -> Result<u32> {
         // time of a GC. So make sure to "expose" this GC reference to Wasm (aka
         // insert it into the DRC's activation table) before we do the actual
         // GC.
-        let gc_store = (*instance.store()).unwrap_gc_store_mut();
+        let gc_store = store.store_opaque_mut().unwrap_gc_store_mut();
         let gc_ref = gc_store.clone_gc_ref(gc_ref);
         gc_store.expose_gc_ref_to_wasm(gc_ref);
     }
 
-    match (*instance.store()).gc(gc_ref)? {
+    match store.maybe_async_gc(gc_ref)? {
         None => Ok(0),
         Some(r) => {
             let raw = r.as_raw_u32();
-            (*instance.store())
+            store
+                .store_opaque_mut()
                 .unwrap_gc_store_mut()
                 .expose_gc_ref_to_wasm(r);
             Ok(raw)
@@ -536,6 +562,7 @@ unsafe fn gc(instance: &mut Instance, gc_ref: u32) -> Result<u32> {
 /// The Wasm code is responsible for initializing the object.
 #[cfg(feature = "gc-drc")]
 unsafe fn gc_alloc_raw(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     kind: u32,
     module_interned_type_index: u32,
@@ -565,17 +592,18 @@ unsafe fn gc_alloc_raw(
     let align = usize::try_from(align).unwrap();
     let layout = Layout::from_size_align(size, align).unwrap();
 
-    let gc_ref = match (*instance.store())
+    let gc_ref = match store
+        .store_opaque_mut()
         .unwrap_gc_store_mut()
         .alloc_raw(header, layout)?
     {
         Some(r) => r,
         None => {
             // If the allocation failed, do a GC to hopefully clean up space.
-            (*instance.store()).gc(None)?;
+            store.maybe_async_gc(None)?;
 
             // And then try again.
-            (*instance.store())
+            store
                 .unwrap_gc_store_mut()
                 .alloc_raw(header, layout)?
                 .ok_or_else(|| GcHeapOutOfMemory::new(()))
@@ -590,11 +618,15 @@ unsafe fn gc_alloc_raw(
 //
 // This libcall may not GC.
 #[cfg(feature = "gc")]
-unsafe fn intern_func_ref_for_gc_heap(instance: &mut Instance, func_ref: *mut u8) -> Result<u32> {
+unsafe fn intern_func_ref_for_gc_heap(
+    store: &mut dyn VMStore,
+    _instance: &mut Instance,
+    func_ref: *mut u8,
+) -> Result<u32> {
     use crate::{store::AutoAssertNoGc, vm::SendSyncPtr};
     use core::ptr::NonNull;
 
-    let mut store = AutoAssertNoGc::new((*instance.store()).store_opaque_mut());
+    let mut store = AutoAssertNoGc::new(store.store_opaque_mut());
 
     let func_ref = func_ref.cast::<VMFuncRef>();
     let func_ref = NonNull::new(func_ref).map(SendSyncPtr::new);
@@ -609,6 +641,7 @@ unsafe fn intern_func_ref_for_gc_heap(instance: &mut Instance, func_ref: *mut u8
 // This libcall may not GC.
 #[cfg(feature = "gc")]
 unsafe fn get_interned_func_ref(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     func_ref_id: u32,
     module_interned_type_index: u32,
@@ -617,7 +650,7 @@ unsafe fn get_interned_func_ref(
     use crate::store::AutoAssertNoGc;
     use wasmtime_environ::{packed_option::ReservedValue, ModuleInternedTypeIndex};
 
-    let store = AutoAssertNoGc::new((*instance.store()).store_opaque_mut());
+    let store = AutoAssertNoGc::new(store.store_opaque_mut());
 
     let func_ref_id = FuncRefTableId::from_raw(func_ref_id);
     let module_interned_type_index = ModuleInternedTypeIndex::from_bits(module_interned_type_index);
@@ -642,6 +675,7 @@ unsafe fn get_interned_func_ref(
 /// Implementation of the `array.new_data` instruction.
 #[cfg(feature = "gc")]
 unsafe fn array_new_data(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     array_type_index: u32,
     data_index: u32,
@@ -658,7 +692,7 @@ unsafe fn array_new_data(
     // of the array).
     let data_range = instance.wasm_data_range(data_index);
     let shared_ty = instance.engine_type_index(array_type_index);
-    let array_ty = ArrayType::from_shared_type_index((*instance.store()).engine(), shared_ty);
+    let array_ty = ArrayType::from_shared_type_index(store.store_opaque_mut().engine(), shared_ty);
     let one_elem_size = array_ty
         .element_type()
         .data_byte_size()
@@ -677,13 +711,15 @@ unsafe fn array_new_data(
         .ok_or_else(|| Trap::MemoryOutOfBounds.into_anyhow())?;
 
     // Allocate the (uninitialized) array.
-    let gc_layout = (*instance.store())
+    let gc_layout = store
+        .store_opaque_mut()
         .engine()
         .signatures()
         .layout(shared_ty)
         .expect("array types have GC layouts");
     let array_layout = gc_layout.unwrap_array();
-    let array_ref = match (*instance.store())
+    let array_ref = match store
+        .store_opaque_mut()
         .unwrap_gc_store_mut()
         .alloc_uninit_array(shared_ty, len, &array_layout)?
     {
@@ -691,8 +727,9 @@ unsafe fn array_new_data(
         None => {
             // Collect garbage to hopefully free up space, then try the
             // allocation again.
-            (*instance.store()).gc(None)?;
-            (*instance.store())
+            store.maybe_async_gc(None)?;
+            store
+                .store_opaque_mut()
                 .unwrap_gc_store_mut()
                 .alloc_uninit_array(shared_ty, u32::try_from(byte_len).unwrap(), &array_layout)?
                 .ok_or_else(|| GcHeapOutOfMemory::new(()).into_anyhow())?
@@ -700,14 +737,16 @@ unsafe fn array_new_data(
     };
 
     // Copy the data into the array, initializing it.
-    (*instance.store())
+    store
+        .store_opaque_mut()
         .unwrap_gc_store_mut()
         .gc_object_data(array_ref.as_gc_ref())
         .copy_from_slice(array_layout.base_size, data);
 
     // Return the array to Wasm!
     let raw = array_ref.as_gc_ref().as_raw_u32();
-    (*instance.store())
+    store
+        .store_opaque_mut()
         .unwrap_gc_store_mut()
         .expose_gc_ref_to_wasm(array_ref.into());
     Ok(raw)
@@ -716,6 +755,7 @@ unsafe fn array_new_data(
 /// Implementation of the `array.init_data` instruction.
 #[cfg(feature = "gc")]
 unsafe fn array_init_data(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     array_type_index: u32,
     array: u32,
@@ -737,7 +777,7 @@ unsafe fn array_init_data(
     // Null check the array.
     let gc_ref = VMGcRef::from_raw_u32(array).ok_or_else(|| Trap::NullReference.into_anyhow())?;
     let array = gc_ref
-        .into_arrayref(&*(*instance.store()).unwrap_gc_store().gc_heap)
+        .into_arrayref(&*store.unwrap_gc_store().gc_heap)
         .expect("gc ref should be an array");
 
     let dst = usize::try_from(dst).map_err(|_| Trap::MemoryOutOfBounds.into_anyhow())?;
@@ -745,7 +785,7 @@ unsafe fn array_init_data(
     let len = usize::try_from(len).map_err(|_| Trap::MemoryOutOfBounds.into_anyhow())?;
 
     // Bounds check the array.
-    let array_len = array.len((*instance.store()).store_opaque());
+    let array_len = array.len(store.store_opaque());
     let array_len = usize::try_from(array_len).map_err(|_| Trap::ArrayOutOfBounds.into_anyhow())?;
     if dst
         .checked_add(len)
@@ -757,7 +797,7 @@ unsafe fn array_init_data(
 
     // Calculate the byte length from the array length.
     let shared_ty = instance.engine_type_index(array_type_index);
-    let array_ty = ArrayType::from_shared_type_index((*instance.store()).engine(), shared_ty);
+    let array_ty = ArrayType::from_shared_type_index(store.engine(), shared_ty);
     let one_elem_size = array_ty
         .element_type()
         .data_byte_size()
@@ -781,7 +821,7 @@ unsafe fn array_init_data(
         .checked_mul(one_elem_size)
         .unwrap();
 
-    let array_layout = (*instance.store())
+    let array_layout = store
         .engine()
         .signatures()
         .layout(shared_ty)
@@ -790,7 +830,7 @@ unsafe fn array_init_data(
 
     let obj_offset = array_layout.base_size.checked_add(dst_offset).unwrap();
 
-    (*instance.store())
+    store
         .unwrap_gc_store_mut()
         .gc_object_data(array.as_gc_ref())
         .copy_from_slice(obj_offset, data);
@@ -800,6 +840,7 @@ unsafe fn array_init_data(
 
 #[cfg(feature = "gc")]
 unsafe fn array_new_elem(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     array_type_index: u32,
     elem_index: u32,
@@ -809,7 +850,7 @@ unsafe fn array_new_elem(
     use crate::{
         store::AutoAssertNoGc,
         vm::const_expr::{ConstEvalContext, ConstExprEvaluator},
-        ArrayRef, ArrayRefPre, ArrayType, Func, GcHeapOutOfMemory, RootedGcRefImpl, Val,
+        ArrayRef, ArrayRefPre, ArrayType, Func, GcHeapOutOfMemory, RootSet, RootedGcRefImpl, Val,
     };
     use wasmtime_environ::{ModuleInternedTypeIndex, TableSegmentElements};
 
@@ -824,15 +865,11 @@ unsafe fn array_new_elem(
     let len = usize::try_from(len).map_err(|_| Trap::TableOutOfBounds.into_anyhow())?;
 
     let shared_ty = instance.engine_type_index(array_type_index);
-    let array_ty = ArrayType::from_shared_type_index((*instance.store()).engine(), shared_ty);
+    let array_ty = ArrayType::from_shared_type_index(store.engine(), shared_ty);
     let elem_ty = array_ty.element_type();
-    let pre = ArrayRefPre::_new((*instance.store()).store_opaque_mut(), array_ty);
+    let pre = ArrayRefPre::_new(store, array_ty);
 
-    // NB: Don't use `OpaqueRootScope` here because we need to borrow the store
-    // through `instance` during const evaluation, which is within the same
-    // region that the `OpaqueRootScope` would otherwise span while borrowing
-    // the same store, resulting in double borrows.
-    instance.with_gc_lifo_scope(|instance| {
+    RootSet::with_lifo_scope(store, |store| {
         // Turn the elements into `Val`s.
         let mut vals = Vec::with_capacity(usize::try_from(elements.len()).unwrap());
         match elements {
@@ -845,10 +882,7 @@ unsafe fn array_new_elem(
                         .map(|f| {
                             let raw_func_ref =
                                 instance.get_func_ref(*f).unwrap_or(core::ptr::null_mut());
-                            let func = Func::from_vm_func_ref(
-                                (*instance.store()).store_opaque_mut(),
-                                raw_func_ref,
-                            );
+                            let func = Func::from_vm_func_ref(store, raw_func_ref);
                             Val::FuncRef(func)
                         }),
                 );
@@ -864,28 +898,26 @@ unsafe fn array_new_elem(
 
                 vals.extend(xs.iter().map(|x| unsafe {
                     let raw = const_evaluator
-                        .eval(&mut const_context, x)
+                        .eval(store, &mut const_context, x)
                         .expect("const expr should be valid");
-                    let mut store =
-                        AutoAssertNoGc::new((*const_context.instance.store()).store_opaque_mut());
+                    let mut store = AutoAssertNoGc::new(store);
                     Val::_from_raw(&mut store, raw, elem_ty.unwrap_val_type())
                 }));
             }
         }
 
-        let array = match ArrayRef::_new_fixed((*instance.store()).store_opaque_mut(), &pre, &vals)
-        {
+        let array = match ArrayRef::_new_fixed(store, &pre, &vals) {
             Ok(a) => a,
             Err(e) if e.is::<GcHeapOutOfMemory<()>>() => {
                 // Collect garbage to hopefully free up space, then try the
                 // allocation again.
-                (*instance.store()).gc(None)?;
-                ArrayRef::_new_fixed((*instance.store()).store_opaque_mut(), &pre, &vals)?
+                store.maybe_async_gc(None)?;
+                ArrayRef::_new_fixed(store, &pre, &vals)?
             }
             Err(e) => return Err(e),
         };
 
-        let mut store = AutoAssertNoGc::new((*instance.store()).store_opaque_mut());
+        let mut store = AutoAssertNoGc::new(store);
         let gc_ref = array.try_clone_gc_ref(&mut store)?;
         let raw = gc_ref.as_raw_u32();
         store.unwrap_gc_store_mut().expose_gc_ref_to_wasm(gc_ref);
@@ -895,6 +927,7 @@ unsafe fn array_new_elem(
 
 #[cfg(feature = "gc")]
 unsafe fn array_init_elem(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     array_type_index: u32,
     array: u32,
@@ -906,103 +939,90 @@ unsafe fn array_init_elem(
     use crate::{
         store::AutoAssertNoGc,
         vm::const_expr::{ConstEvalContext, ConstExprEvaluator},
-        ArrayRef, Func, Val,
+        ArrayRef, Func, OpaqueRootScope, Val,
     };
     use wasmtime_environ::{ModuleInternedTypeIndex, TableSegmentElements};
 
-    // NB: Don't use `OpaqueRootScope` here because we need to borrow the store
-    // through `instance` during const evaluation, which is within the same
-    // region that the `OpaqueRootScope` would otherwise span while borrowing
-    // the same store, resulting in double borrows.
-    instance.with_gc_lifo_scope(|instance| {
-        // Convert the indices into their typed forms.
-        let _array_type_index = ModuleInternedTypeIndex::from_u32(array_type_index);
-        let elem_index = ElemIndex::from_u32(elem_index);
+    let mut store = OpaqueRootScope::new(store.store_opaque_mut());
 
-        log::trace!(
+    // Convert the indices into their typed forms.
+    let _array_type_index = ModuleInternedTypeIndex::from_u32(array_type_index);
+    let elem_index = ElemIndex::from_u32(elem_index);
+
+    log::trace!(
             "array.init_elem(array={array:#x}, dst={dst}, elem_index={elem_index:?}, src={src}, len={len})",
         );
 
-        // Convert the raw GC ref into a `Rooted<ArrayRef>`.
-        let array =
-            VMGcRef::from_raw_u32(array).ok_or_else(|| Trap::NullReference.into_anyhow())?;
-        let array = (*instance.store()).unwrap_gc_store_mut().clone_gc_ref(&array);
-        let array = {
-            let mut no_gc = AutoAssertNoGc::new((*instance.store()).store_opaque_mut());
-            ArrayRef::from_cloned_gc_ref(&mut no_gc, array)
-        };
+    // Convert the raw GC ref into a `Rooted<ArrayRef>`.
+    let array = VMGcRef::from_raw_u32(array).ok_or_else(|| Trap::NullReference.into_anyhow())?;
+    let array = store.unwrap_gc_store_mut().clone_gc_ref(&array);
+    let array = {
+        let mut no_gc = AutoAssertNoGc::new(&mut store);
+        ArrayRef::from_cloned_gc_ref(&mut no_gc, array)
+    };
 
-        // Bounds check the destination within the array.
-        let array_len = array._len((*instance.store()).store_opaque())?;
-        log::trace!("array_len = {array_len}");
-        if dst
-            .checked_add(len)
-            .ok_or_else(|| Trap::ArrayOutOfBounds.into_anyhow())?
-            > array_len
-        {
-            return Err(Trap::ArrayOutOfBounds.into_anyhow());
-        }
+    // Bounds check the destination within the array.
+    let array_len = array._len(&store)?;
+    log::trace!("array_len = {array_len}");
+    if dst
+        .checked_add(len)
+        .ok_or_else(|| Trap::ArrayOutOfBounds.into_anyhow())?
+        > array_len
+    {
+        return Err(Trap::ArrayOutOfBounds.into_anyhow());
+    }
 
-        // Get the passive element segment.
-        let mut storage = None;
-        let elements = instance.passive_element_segment(&mut storage, elem_index);
+    // Get the passive element segment.
+    let mut storage = None;
+    let elements = instance.passive_element_segment(&mut storage, elem_index);
 
-        // Convert array offsets into `usize`s.
-        let src = usize::try_from(src).map_err(|_| Trap::TableOutOfBounds.into_anyhow())?;
-        let len = usize::try_from(len).map_err(|_| Trap::TableOutOfBounds.into_anyhow())?;
+    // Convert array offsets into `usize`s.
+    let src = usize::try_from(src).map_err(|_| Trap::TableOutOfBounds.into_anyhow())?;
+    let len = usize::try_from(len).map_err(|_| Trap::TableOutOfBounds.into_anyhow())?;
 
-        // Turn the elements into `Val`s.
-        let vals = match elements {
-            TableSegmentElements::Functions(fs) => fs
-                .get(src..)
+    // Turn the elements into `Val`s.
+    let vals = match elements {
+        TableSegmentElements::Functions(fs) => fs
+            .get(src..)
+            .and_then(|s| s.get(..len))
+            .ok_or_else(|| Trap::TableOutOfBounds.into_anyhow())?
+            .iter()
+            .map(|f| {
+                let raw_func_ref = instance.get_func_ref(*f).unwrap_or(core::ptr::null_mut());
+                let func = Func::from_vm_func_ref(&mut store, raw_func_ref);
+                Val::FuncRef(func)
+            })
+            .collect::<Vec<_>>(),
+        TableSegmentElements::Expressions(xs) => {
+            let elem_ty = array._ty(&store)?.element_type();
+            let elem_ty = elem_ty.unwrap_val_type();
+
+            let mut const_context = ConstEvalContext::new(instance);
+            let mut const_evaluator = ConstExprEvaluator::default();
+
+            xs.get(src..)
                 .and_then(|s| s.get(..len))
                 .ok_or_else(|| Trap::TableOutOfBounds.into_anyhow())?
                 .iter()
-                .map(|f| {
-                    let raw_func_ref = instance.get_func_ref(*f).unwrap_or(core::ptr::null_mut());
-                    let func = Func::from_vm_func_ref(
-                        (*instance.store()).store_opaque_mut(),
-                        raw_func_ref,
-                    );
-                    Val::FuncRef(func)
+                .map(|x| unsafe {
+                    let raw = const_evaluator
+                        .eval(&mut store, &mut const_context, x)
+                        .expect("const expr should be valid");
+                    let mut store = AutoAssertNoGc::new(&mut store);
+                    Val::_from_raw(&mut store, raw, elem_ty)
                 })
-                .collect::<Vec<_>>(),
-            TableSegmentElements::Expressions(xs) => {
-                let elem_ty = array
-                    ._ty((*instance.store()).store_opaque())?
-                    .element_type();
-                let elem_ty = elem_ty.unwrap_val_type();
-
-                let mut const_context = ConstEvalContext::new(instance);
-                let mut const_evaluator = ConstExprEvaluator::default();
-
-                xs.get(src..)
-                    .and_then(|s| s.get(..len))
-                    .ok_or_else(|| Trap::TableOutOfBounds.into_anyhow())?
-                    .iter()
-                    .map(|x| unsafe {
-                        let raw = const_evaluator
-                            .eval(&mut const_context, x)
-                            .expect("const expr should be valid");
-                        let mut store = AutoAssertNoGc::new(
-                            (*const_context.instance.store()).store_opaque_mut(),
-                        );
-                        Val::_from_raw(&mut store, raw, elem_ty)
-                    })
-                    .collect::<Vec<_>>()
-            }
-        };
-
-        // Copy the values into the array.
-        let store = (*instance.store()).store_opaque_mut();
-        for (i, val) in vals.into_iter().enumerate() {
-            let i = u32::try_from(i).unwrap();
-            let j = dst.checked_add(i).unwrap();
-            array._set(store, j, val)?;
+                .collect::<Vec<_>>()
         }
+    };
 
-        Ok(())
-    })
+    // Copy the values into the array.
+    for (i, val) in vals.into_iter().enumerate() {
+        let i = u32::try_from(i).unwrap();
+        let j = dst.checked_add(i).unwrap();
+        array._set(&mut store, j, val)?;
+    }
+
+    Ok(())
 }
 
 // TODO: Specialize this libcall for only non-GC array elements, so we never
@@ -1011,7 +1031,8 @@ unsafe fn array_init_elem(
 // `memcpy`-style APIs to do the actual copies here.
 #[cfg(feature = "gc")]
 unsafe fn array_copy(
-    instance: &mut Instance,
+    store: &mut dyn VMStore,
+    _instance: &mut Instance,
     dst_array: u32,
     dst: u32,
     src_array: u32,
@@ -1024,8 +1045,7 @@ unsafe fn array_copy(
             "array.copy(dst_array={dst_array:#x}, dst_index={dst}, src_array={src_array:#x}, src_index={src}, len={len})",
         );
 
-    let store = (*instance.store()).store_opaque_mut();
-    let mut store = OpaqueRootScope::new(store);
+    let mut store = OpaqueRootScope::new(store.store_opaque_mut());
     let mut store = AutoAssertNoGc::new(&mut store);
 
     // Convert the raw GC refs into `Rooted<ArrayRef>`s.
@@ -1082,7 +1102,8 @@ unsafe fn array_copy(
 
 #[cfg(feature = "gc")]
 unsafe fn is_subtype(
-    instance: &mut Instance,
+    store: &mut dyn VMStore,
+    _instance: &mut Instance,
     actual_engine_type: u32,
     expected_engine_type: u32,
 ) -> bool {
@@ -1091,7 +1112,7 @@ unsafe fn is_subtype(
     let actual = VMSharedTypeIndex::from_u32(actual_engine_type);
     let expected = VMSharedTypeIndex::from_u32(expected_engine_type);
 
-    let is_subtype: bool = (*instance.store())
+    let is_subtype: bool = store
         .engine()
         .signatures()
         .is_subtype(actual, expected)
@@ -1104,6 +1125,7 @@ unsafe fn is_subtype(
 // Implementation of `memory.atomic.notify` for locally defined memories.
 #[cfg(feature = "threads")]
 fn memory_atomic_notify(
+    _store: &mut dyn VMStore,
     instance: &mut Instance,
     memory_index: u32,
     addr_index: u64,
@@ -1118,6 +1140,7 @@ fn memory_atomic_notify(
 // Implementation of `memory.atomic.wait32` for locally defined memories.
 #[cfg(feature = "threads")]
 fn memory_atomic_wait32(
+    _store: &mut dyn VMStore,
     instance: &mut Instance,
     memory_index: u32,
     addr_index: u64,
@@ -1134,6 +1157,7 @@ fn memory_atomic_wait32(
 // Implementation of `memory.atomic.wait64` for locally defined memories.
 #[cfg(feature = "threads")]
 fn memory_atomic_wait64(
+    _store: &mut dyn VMStore,
     instance: &mut Instance,
     memory_index: u32,
     addr_index: u64,
@@ -1148,18 +1172,23 @@ fn memory_atomic_wait64(
 }
 
 // Hook for when an instance runs out of fuel.
-unsafe fn out_of_gas(instance: &mut Instance) -> Result<()> {
-    (*instance.store()).out_of_gas()
+fn out_of_gas(store: &mut dyn VMStore, _instance: &mut Instance) -> Result<()> {
+    store.out_of_gas()
 }
 
 // Hook for when an instance observes that the epoch has changed.
-unsafe fn new_epoch(instance: &mut Instance) -> Result<u64> {
-    (*instance.store()).new_epoch()
+fn new_epoch(store: &mut dyn VMStore, _instance: &mut Instance) -> Result<u64> {
+    store.new_epoch()
 }
 
 // Hook for validating malloc using wmemcheck_state.
 #[cfg(feature = "wmemcheck")]
-unsafe fn check_malloc(instance: &mut Instance, addr: u32, len: u32) -> Result<u32> {
+unsafe fn check_malloc(
+    _store: &mut dyn VMStore,
+    instance: &mut Instance,
+    addr: u32,
+    len: u32,
+) -> Result<u32> {
     if let Some(wmemcheck_state) = &mut instance.wmemcheck_state {
         let result = wmemcheck_state.malloc(addr as usize, len as usize);
         wmemcheck_state.memcheck_on();
@@ -1183,7 +1212,7 @@ unsafe fn check_malloc(instance: &mut Instance, addr: u32, len: u32) -> Result<u
 
 // Hook for validating free using wmemcheck_state.
 #[cfg(feature = "wmemcheck")]
-unsafe fn check_free(instance: &mut Instance, addr: u32) -> Result<u32> {
+unsafe fn check_free(_store: &mut dyn VMStore, instance: &mut Instance, addr: u32) -> Result<u32> {
     if let Some(wmemcheck_state) = &mut instance.wmemcheck_state {
         let result = wmemcheck_state.free(addr as usize);
         wmemcheck_state.memcheck_on();
@@ -1204,7 +1233,13 @@ unsafe fn check_free(instance: &mut Instance, addr: u32) -> Result<u32> {
 
 // Hook for validating load using wmemcheck_state.
 #[cfg(feature = "wmemcheck")]
-fn check_load(instance: &mut Instance, num_bytes: u32, addr: u32, offset: u32) -> Result<u32> {
+fn check_load(
+    _store: &mut dyn VMStore,
+    instance: &mut Instance,
+    num_bytes: u32,
+    addr: u32,
+    offset: u32,
+) -> Result<u32> {
     if let Some(wmemcheck_state) = &mut instance.wmemcheck_state {
         let result = wmemcheck_state.read(addr as usize + offset as usize, num_bytes as usize);
         match result {
@@ -1227,7 +1262,13 @@ fn check_load(instance: &mut Instance, num_bytes: u32, addr: u32, offset: u32) -
 
 // Hook for validating store using wmemcheck_state.
 #[cfg(feature = "wmemcheck")]
-fn check_store(instance: &mut Instance, num_bytes: u32, addr: u32, offset: u32) -> Result<u32> {
+fn check_store(
+    _store: &mut dyn VMStore,
+    instance: &mut Instance,
+    num_bytes: u32,
+    addr: u32,
+    offset: u32,
+) -> Result<u32> {
     if let Some(wmemcheck_state) = &mut instance.wmemcheck_state {
         let result = wmemcheck_state.write(addr as usize + offset as usize, num_bytes as usize);
         match result {
@@ -1250,7 +1291,7 @@ fn check_store(instance: &mut Instance, num_bytes: u32, addr: u32, offset: u32) 
 
 // Hook for turning wmemcheck load/store validation off when entering a malloc function.
 #[cfg(feature = "wmemcheck")]
-fn malloc_start(instance: &mut Instance) {
+fn malloc_start(_store: &mut dyn VMStore, instance: &mut Instance) {
     if let Some(wmemcheck_state) = &mut instance.wmemcheck_state {
         wmemcheck_state.memcheck_off();
     }
@@ -1258,7 +1299,7 @@ fn malloc_start(instance: &mut Instance) {
 
 // Hook for turning wmemcheck load/store validation off when entering a free function.
 #[cfg(feature = "wmemcheck")]
-fn free_start(instance: &mut Instance) {
+fn free_start(_store: &mut dyn VMStore, instance: &mut Instance) {
     if let Some(wmemcheck_state) = &mut instance.wmemcheck_state {
         wmemcheck_state.memcheck_off();
     }
@@ -1266,7 +1307,7 @@ fn free_start(instance: &mut Instance) {
 
 // Hook for tracking wasm stack updates using wmemcheck_state.
 #[cfg(feature = "wmemcheck")]
-fn update_stack_pointer(_instance: &mut Instance, _value: u32) {
+fn update_stack_pointer(_store: &mut dyn VMStore, _instance: &mut Instance, _value: u32) {
     // TODO: stack-tracing has yet to be finalized. All memory below
     // the address of the top of the stack is marked as valid for
     // loads and stores.
@@ -1277,7 +1318,7 @@ fn update_stack_pointer(_instance: &mut Instance, _value: u32) {
 
 // Hook updating wmemcheck_state memory state vector every time memory.grow is called.
 #[cfg(feature = "wmemcheck")]
-fn update_mem_size(instance: &mut Instance, num_pages: u32) {
+fn update_mem_size(_store: &mut dyn VMStore, instance: &mut Instance, num_pages: u32) {
     if let Some(wmemcheck_state) = &mut instance.wmemcheck_state {
         const KIB: usize = 1024;
         let num_bytes = num_pages as usize * 64 * KIB;
@@ -1285,13 +1326,17 @@ fn update_mem_size(instance: &mut Instance, num_pages: u32) {
     }
 }
 
-fn trap(_instance: &mut Instance, code: u8) -> Result<(), TrapReason> {
+fn trap(_store: &mut dyn VMStore, _instance: &mut Instance, code: u8) -> Result<(), TrapReason> {
     Err(TrapReason::Wasm(
         wasmtime_environ::Trap::from_u8(code).unwrap(),
     ))
 }
 
-fn f64_to_i64(_instance: &mut Instance, val: f64) -> Result<u64, TrapReason> {
+fn f64_to_i64(
+    _store: &mut dyn VMStore,
+    _instance: &mut Instance,
+    val: f64,
+) -> Result<u64, TrapReason> {
     if val.is_nan() {
         return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
     }
@@ -1303,7 +1348,11 @@ fn f64_to_i64(_instance: &mut Instance, val: f64) -> Result<u64, TrapReason> {
     return Ok((val as i64).unsigned());
 }
 
-fn f64_to_u64(_instance: &mut Instance, val: f64) -> Result<u64, TrapReason> {
+fn f64_to_u64(
+    _store: &mut dyn VMStore,
+    _instance: &mut Instance,
+    val: f64,
+) -> Result<u64, TrapReason> {
     if val.is_nan() {
         return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
     }
@@ -1315,7 +1364,11 @@ fn f64_to_u64(_instance: &mut Instance, val: f64) -> Result<u64, TrapReason> {
     return Ok(val as u64);
 }
 
-fn f64_to_i32(_instance: &mut Instance, val: f64) -> Result<u32, TrapReason> {
+fn f64_to_i32(
+    _store: &mut dyn VMStore,
+    _instance: &mut Instance,
+    val: f64,
+) -> Result<u32, TrapReason> {
     if val.is_nan() {
         return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
     }
@@ -1327,7 +1380,11 @@ fn f64_to_i32(_instance: &mut Instance, val: f64) -> Result<u32, TrapReason> {
     return Ok((val as i32).unsigned());
 }
 
-fn f64_to_u32(_instance: &mut Instance, val: f64) -> Result<u32, TrapReason> {
+fn f64_to_u32(
+    _store: &mut dyn VMStore,
+    _instance: &mut Instance,
+    val: f64,
+) -> Result<u32, TrapReason> {
     if val.is_nan() {
         return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
     }
@@ -1539,17 +1596,24 @@ pub mod relocs {
 // Builtins for continuations. These are thin wrappers around the
 // respective definitions in continuation.rs.
 fn tc_cont_new(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     func: *mut u8,
     param_count: u32,
     result_count: u32,
 ) -> Result<*mut u8, TrapReason> {
-    let ans =
-        crate::vm::continuation::optimized::cont_new(instance, func, param_count, result_count)?;
+    let ans = crate::vm::continuation::optimized::cont_new(
+        store,
+        instance,
+        func,
+        param_count,
+        result_count,
+    )?;
     Ok(ans.cast::<u8>())
 }
 
 fn tc_cont_ref_forward_tag_return_values_buffer(
+    _store: &mut dyn VMStore,
     _instance: &mut Instance,
     parent_contref: *mut u8,
     child_contref: *mut u8,
@@ -1560,14 +1624,19 @@ fn tc_cont_ref_forward_tag_return_values_buffer(
     )
 }
 
-fn tc_drop_cont_ref(instance: &mut Instance, contref: *mut u8) {
+fn tc_drop_cont_ref(_store: &mut dyn VMStore, instance: &mut Instance, contref: *mut u8) {
     crate::vm::continuation::optimized::drop_cont_ref(
         instance,
         contref.cast::<crate::vm::continuation::optimized::VMContRef>(),
     )
 }
 
-fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> Result<*mut u8, TrapReason> {
+fn tc_allocate(
+    _store: &mut dyn VMStore,
+    _instance: &mut Instance,
+    size: u64,
+    align: u64,
+) -> Result<*mut u8, TrapReason> {
     debug_assert!(size > 0);
     let size = usize::try_from(size)
         .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("size too large!")))?;
@@ -1592,6 +1661,7 @@ fn tc_allocate(_instance: &mut Instance, size: u64, align: u64) -> Result<*mut u
 }
 
 fn tc_deallocate(
+    _store: &mut dyn VMStore,
     _instance: &mut Instance,
     ptr: *mut u8,
     size: u64,
@@ -1612,6 +1682,7 @@ fn tc_deallocate(
 }
 
 fn tc_reallocate(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     ptr: *mut u8,
     old_size: u64,
@@ -1621,13 +1692,13 @@ fn tc_reallocate(
     debug_assert!(old_size < new_size);
 
     if old_size > 0 {
-        tc_deallocate(instance, ptr, old_size, align)?;
+        tc_deallocate(store, instance, ptr, old_size, align)?;
     }
 
-    tc_allocate(instance, new_size, align)
+    tc_allocate(store, instance, new_size, align)
 }
 
-fn tc_print_str(_instance: &mut Instance, s: *const u8, len: u64) {
+fn tc_print_str(_store: &mut dyn VMStore, _instance: &mut Instance, s: *const u8, len: u64) {
     let len = usize::try_from(len)
         .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("len too large!")));
     let str = unsafe { std::slice::from_raw_parts(s, len.unwrap()) };
@@ -1635,11 +1706,11 @@ fn tc_print_str(_instance: &mut Instance, s: *const u8, len: u64) {
     print!("{s}");
 }
 
-fn tc_print_int(_instance: &mut Instance, arg: u64) {
+fn tc_print_int(_store: &mut dyn VMStore, _instance: &mut Instance, arg: u64) {
     print!("{arg}");
 }
 
-fn tc_print_pointer(_instance: &mut Instance, arg: *const u8) {
+fn tc_print_pointer(_store: &mut dyn VMStore, _instance: &mut Instance, arg: *const u8) {
     print!("{arg:p}");
 }
 
@@ -1647,6 +1718,7 @@ fn tc_print_pointer(_instance: &mut Instance, arg: *const u8) {
 // Typed continuations aka WasmFX baseline implementation libcalls.
 //
 fn tc_baseline_cont_new(
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     func: *mut u8,
     param_count: u64,
@@ -1659,6 +1731,7 @@ fn tc_baseline_cont_new(
         TrapReason::user_without_backtrace(anyhow::anyhow!("result_count too large!"))
     })?;
     let ans = crate::runtime::vm::continuation::baseline::cont_new(
+        store,
         instance,
         func,
         param_count,
@@ -1669,17 +1742,28 @@ fn tc_baseline_cont_new(
     Ok(ans_ptr)
 }
 
-fn tc_baseline_resume(instance: &mut Instance, contref: *mut u8) -> Result<u32, TrapReason> {
+fn tc_baseline_resume(
+    store: &mut dyn VMStore,
+    instance: &mut Instance,
+    contref: *mut u8,
+) -> Result<u32, TrapReason> {
     let contref_ptr = contref.cast::<crate::runtime::vm::continuation::baseline::VMContRef>();
     assert!(contref_ptr as usize == contref as usize);
-    crate::runtime::vm::continuation::baseline::resume(instance, unsafe { &mut *(contref_ptr) })
+    crate::runtime::vm::continuation::baseline::resume(store, instance, unsafe {
+        &mut *(contref_ptr)
+    })
 }
 
-fn tc_baseline_suspend(instance: &mut Instance, tag_index: u32) -> Result<(), TrapReason> {
+fn tc_baseline_suspend(
+    _store: &mut dyn VMStore,
+    instance: &mut Instance,
+    tag_index: u32,
+) -> Result<(), TrapReason> {
     crate::runtime::vm::continuation::baseline::suspend(instance, tag_index)
 }
 
 fn tc_baseline_forward(
+    _store: &mut dyn VMStore,
     instance: &mut Instance,
     tag_index: u32,
     subcont: *mut u8,
@@ -1689,7 +1773,11 @@ fn tc_baseline_forward(
     })
 }
 
-fn tc_baseline_drop_continuation_reference(instance: &mut Instance, contref: *mut u8) {
+fn tc_baseline_drop_continuation_reference(
+    _store: &mut dyn VMStore,
+    instance: &mut Instance,
+    contref: *mut u8,
+) {
     crate::runtime::vm::continuation::baseline::drop_continuation_reference(
         instance,
         contref.cast::<crate::runtime::vm::continuation::baseline::VMContRef>(),
@@ -1697,6 +1785,7 @@ fn tc_baseline_drop_continuation_reference(instance: &mut Instance, contref: *mu
 }
 
 fn tc_baseline_continuation_arguments_ptr(
+    _store: &mut dyn VMStore,
     instance: &mut Instance,
     contref: *mut u8,
     nargs: u64,
@@ -1713,7 +1802,11 @@ fn tc_baseline_continuation_arguments_ptr(
     return ans.cast::<u8>();
 }
 
-fn tc_baseline_continuation_values_ptr(instance: &mut Instance, contref: *mut u8) -> *mut u8 {
+fn tc_baseline_continuation_values_ptr(
+    _store: &mut dyn VMStore,
+    instance: &mut Instance,
+    contref: *mut u8,
+) -> *mut u8 {
     let contref_ptr = contref.cast::<crate::runtime::vm::continuation::baseline::VMContRef>();
     assert!(contref_ptr as usize == contref as usize);
     let ans = crate::runtime::vm::continuation::baseline::get_values_ptr(instance, unsafe {
@@ -1724,7 +1817,11 @@ fn tc_baseline_continuation_values_ptr(instance: &mut Instance, contref: *mut u8
     return ans_ptr;
 }
 
-fn tc_baseline_clear_arguments(instance: &mut Instance, contref: *mut u8) {
+fn tc_baseline_clear_arguments(
+    _store: &mut dyn VMStore,
+    instance: &mut Instance,
+    contref: *mut u8,
+) {
     let contref_ptr = contref.cast::<crate::runtime::vm::continuation::baseline::VMContRef>();
     assert!(contref_ptr as usize == contref as usize);
     crate::runtime::vm::continuation::baseline::clear_arguments(instance, unsafe {
@@ -1732,7 +1829,11 @@ fn tc_baseline_clear_arguments(instance: &mut Instance, contref: *mut u8) {
     });
 }
 
-fn tc_baseline_get_payloads_ptr(instance: &mut Instance, nargs: u64) -> *mut u8 {
+fn tc_baseline_get_payloads_ptr(
+    _store: &mut dyn VMStore,
+    instance: &mut Instance,
+    nargs: u64,
+) -> *mut u8 {
     let nargs = usize::try_from(nargs)
         .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("nargs too large!")));
     let ans =
@@ -1742,10 +1843,13 @@ fn tc_baseline_get_payloads_ptr(instance: &mut Instance, nargs: u64) -> *mut u8 
     return ans_ptr;
 }
 
-fn tc_baseline_clear_payloads(instance: &mut Instance) {
+fn tc_baseline_clear_payloads(_store: &mut dyn VMStore, instance: &mut Instance) {
     crate::runtime::vm::continuation::baseline::clear_payloads(instance);
 }
 
-fn tc_baseline_get_current_continuation(_instance: &mut Instance) -> *mut u8 {
+fn tc_baseline_get_current_continuation(
+    _store: &mut dyn VMStore,
+    _instance: &mut Instance,
+) -> *mut u8 {
     crate::runtime::vm::continuation::baseline::get_current_continuation().cast::<u8>()
 }
