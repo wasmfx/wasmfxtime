@@ -182,7 +182,7 @@ fn manual_edge_cases(config: &mut Config) {
 #[cfg_attr(miri, ignore)]
 fn unconditionally_trapping_memory_accesses_save_fuel_before_trapping(config: &mut Config) {
     config.consume_fuel(true);
-    config.static_memory_maximum_size(0x1_0000);
+    config.memory_reservation(0x1_0000);
 
     let engine = Engine::new(&config).unwrap();
 
@@ -256,5 +256,25 @@ fn get_fuel_clamps_at_zero(config: &mut Config) -> Result<()> {
     // Any further attempts should fail.
     assert!(add2.call(&mut store, 10).is_err());
 
+    Ok(())
+}
+
+#[wasmtime_test(strategies(not(Cranelift)))]
+#[cfg_attr(miri, ignore)]
+fn ensure_stack_alignment(config: &mut Config) -> Result<()> {
+    config.consume_fuel(true);
+    let engine = Engine::new(config)?;
+    let mut store = Store::new(&engine, ());
+    store.set_fuel(100000000)?;
+
+    let bytes = include_bytes!("../misc_testsuite/winch/fuel_stack_alignment.wat");
+    let module = Module::new(&engine, bytes)?;
+    let instance = Instance::new(&mut store, &module, &[])?;
+    let func = instance.get_typed_func::<f32, ()>(&mut store, "")?;
+    let trap = func.call(&mut store, 50397184.0).unwrap_err();
+    assert_eq!(
+        trap.downcast::<Trap>().unwrap(),
+        Trap::UnreachableCodeReached
+    );
     Ok(())
 }
