@@ -1743,13 +1743,15 @@ fn tc_baseline_cont_new(
 }
 
 fn tc_baseline_resume(
-    _store: &mut dyn VMStore,
+    store: &mut dyn VMStore,
     instance: &mut Instance,
     contref: *mut u8,
 ) -> Result<u32, TrapReason> {
     let contref_ptr = contref.cast::<crate::runtime::vm::continuation::baseline::VMContRef>();
     assert!(contref_ptr as usize == contref as usize);
-    crate::runtime::vm::continuation::baseline::resume(instance, unsafe { &mut *(contref_ptr) })
+    crate::runtime::vm::continuation::baseline::resume(store, instance, unsafe {
+        &mut *(contref_ptr)
+    })
 }
 
 fn tc_baseline_suspend(

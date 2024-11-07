@@ -473,7 +473,11 @@ pub mod baseline {
 
     /// Continues a given continuation.
     #[inline(always)]
-    pub fn resume(instance: &mut Instance, contref: &mut VMContRef) -> Result<u32, TrapReason> {
+    pub fn resume(
+        store: &mut dyn VMStore,
+        instance: &mut Instance,
+        contref: &mut VMContRef,
+    ) -> Result<u32, TrapReason> {
         // Trigger fuse
         if !HAS_EVER_RUN_CONTINUATION.get() {
             HAS_EVER_RUN_CONTINUATION.set(true);
@@ -496,11 +500,7 @@ pub mod baseline {
         }
         // Change the current continuation.
         set_current_continuation(contref);
-        unsafe {
-            (*(*(*instance.store()).vmruntime_limits())
-                .stack_limit
-                .get_mut()) = 0
-        };
+        unsafe { *(*store.vmruntime_limits()).stack_limit.get_mut() = 0 };
 
         // Resume the current continuation.
         contref
@@ -877,7 +877,11 @@ pub mod baseline {
 
     #[inline(always)]
     #[allow(missing_docs)]
-    pub fn resume(_instance: &mut Instance, _contref: &mut VMContRef) -> Result<u32, TrapReason> {
+    pub fn resume(
+        _store: &mut dyn VMStore,
+        _instance: &mut Instance,
+        _contref: &mut VMContRef,
+    ) -> Result<u32, TrapReason> {
         panic!("attempt to execute continuation::baseline::resume without `typed_continuation_baseline_implementation` toggled!")
     }
 
