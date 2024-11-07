@@ -43,7 +43,7 @@ pub mod optimized {
     use super::stack_chain::StackChain;
     use crate::runtime::vm::{
         vmcontext::{VMFuncRef, ValRaw},
-        Instance, TrapReason,
+        Instance, TrapReason, VMStore,
     };
     use core::cmp;
     use core::mem;
@@ -205,6 +205,7 @@ pub mod optimized {
     /// TODO
     #[inline(always)]
     pub fn cont_new(
+        store: &mut dyn VMStore,
         instance: &mut Instance,
         func: *mut u8,
         param_count: u32,
@@ -214,7 +215,7 @@ pub mod optimized {
 
         let capacity = cmp::max(param_count, result_count);
 
-        let wasmfx_config = unsafe { &*(*instance.store()).wasmfx_config() };
+        let wasmfx_config = unsafe { &*(store.wasmfx_config()) };
         // TODO(frank-emrich) Currently, the general `stack_limit` configuration
         // option of wasmtime is unrelated to the stack size of our fiber stack.
         let stack_size = wasmfx_config.stack_size;
@@ -294,7 +295,7 @@ pub mod optimized {
 #[cfg(all(feature = "wasmfx_baseline", not(feature = "wasmfx_no_baseline")))]
 pub mod baseline {
     use super::stack_chain::{StackChain, StackLimits};
-    use crate::runtime::vm::{Instance, TrapReason, VMFuncRef, VMOpaqueContext, ValRaw};
+    use crate::runtime::vm::{Instance, TrapReason, VMFuncRef, VMOpaqueContext, VMStore, ValRaw};
     use core::{cell::Cell, cell::RefCell, cmp, mem};
     use wasmtime_environ::prelude::*;
     use wasmtime_fiber::{Fiber, Suspend};
@@ -385,6 +386,7 @@ pub mod baseline {
     /// Allocates a new continuation in suspended mode.
     #[inline(always)]
     pub fn cont_new(
+        _store: &mut dyn VMStore,
         instance: &mut Instance,
         func: *mut u8,
         param_count: usize,
@@ -824,7 +826,7 @@ pub mod stack_chain {
 #[allow(missing_docs)]
 #[cfg(all(feature = "wasmfx_baseline", not(feature = "wasmfx_no_baseline")))]
 pub mod optimized {
-    use crate::runtime::vm::{Instance, TrapReason};
+    use crate::runtime::vm::{Instance, TrapReason, VMStore};
 
     pub type VMContRef = super::baseline::VMContRef;
 
@@ -842,6 +844,7 @@ pub mod optimized {
 
     #[inline(always)]
     pub fn cont_new(
+        _store: &mut dyn VMStore,
         _instance: &mut Instance,
         _func: *mut u8,
         _param_count: u32,
@@ -854,7 +857,7 @@ pub mod optimized {
 #[allow(missing_docs)]
 #[cfg(any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline"))]
 pub mod baseline {
-    use crate::runtime::vm::{Instance, TrapReason};
+    use crate::runtime::vm::{Instance, TrapReason, VMStore};
 
     #[allow(missing_docs)]
     #[repr(C)]
@@ -863,6 +866,7 @@ pub mod baseline {
     #[inline(always)]
     #[allow(missing_docs)]
     pub fn cont_new(
+        _store: &mut dyn VMStore,
         _instance: &mut Instance,
         _func: *mut u8,
         _param_count: usize,
