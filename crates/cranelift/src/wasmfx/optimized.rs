@@ -18,6 +18,7 @@ pub(crate) use shared::{assemble_contobj, disassemble_contobj, vm_contobj_type, 
 #[macro_use]
 pub(crate) mod typed_continuation_helpers {
     use crate::wasmfx::shared::call_builtin;
+    use core::marker::PhantomData;
     use cranelift_codegen::ir;
     use cranelift_codegen::ir::condcodes::IntCC;
     use cranelift_codegen::ir::types::*;
@@ -289,19 +290,24 @@ pub(crate) mod typed_continuation_helpers {
     #[derive(Copy, Clone)]
     pub struct VMContRef {
         address: ir::Value,
-        pointer_type: ir::Type,
     }
 
     #[derive(Copy, Clone)]
-    pub struct Payloads {
+    pub struct Vector<T> {
         /// Base address of this object, which must be shifted by `offset` below.
         base: ir::Value,
 
         /// Adding this (statically) known offset gets us the overall address.
         offset: i32,
 
-        pointer_type: ir::Type,
+        /// The type parameter T is never used in the fields above. We still
+        /// want to have it for consistency with
+        /// `wasmtime_continuations::Vector` and to use it in the associated
+        /// functions.
+        phantom: PhantomData<T>,
     }
+
+    pub type Payloads = Vector<u128>;
 
     #[derive(Copy, Clone)]
     pub struct VMContext {
@@ -335,23 +341,20 @@ pub(crate) mod typed_continuation_helpers {
     }
 
     impl VMContRef {
-        pub fn new(address: ir::Value, pointer_type: ir::Type) -> VMContRef {
-            VMContRef {
-                address,
-                pointer_type,
-            }
+        pub fn new(address: ir::Value) -> VMContRef {
+            VMContRef { address }
         }
 
         #[allow(clippy::cast_possible_truncation)]
         pub fn args(&self) -> Payloads {
             let offset = wasmtime_continuations::offsets::vm_cont_ref::ARGS;
-            Payloads::new(self.address, offset as i32, self.pointer_type)
+            Payloads::new(self.address, offset as i32)
         }
 
         #[allow(clippy::cast_possible_truncation)]
         pub fn tag_return_values(&self) -> Payloads {
             let offset = wasmtime_continuations::offsets::vm_cont_ref::TAG_RETURN_VALUES;
-            Payloads::new(self.address, offset as i32, self.pointer_type)
+            Payloads::new(self.address, offset as i32)
         }
 
         pub fn common_stack_information<'a>(
@@ -379,7 +382,7 @@ pub(crate) mod typed_continuation_helpers {
                 );
                 emit_debug_assert!(env, builder, has_returned);
             }
-            return self.args().get_data(builder);
+            return self.args().get_data(env, builder);
         }
 
         /// Stores the parent of this continuation, which may either be another
@@ -451,12 +454,12 @@ pub(crate) mod typed_continuation_helpers {
         }
     }
 
-    impl Payloads {
-        pub(crate) fn new(base: ir::Value, offset: i32, pointer_type: ir::Type) -> Payloads {
-            Payloads {
+    impl<T> Vector<T> {
+        pub(crate) fn new(base: ir::Value, offset: i32) -> Self {
+            Self {
                 base,
                 offset,
-                pointer_type,
+                phantom: PhantomData::default(),
             }
         }
 
@@ -468,10 +471,10 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         #[allow(clippy::cast_possible_truncation)]
-        fn set<T>(&self, builder: &mut FunctionBuilder, offset: i32, value: ir::Value) {
+        fn set<U>(&self, builder: &mut FunctionBuilder, offset: i32, value: ir::Value) {
             debug_assert_eq!(
                 builder.func.dfg.value_type(value),
-                Type::int_with_byte_size(std::mem::size_of::<T>() as u16).unwrap()
+                Type::int_with_byte_size(std::mem::size_of::<U>() as u16).unwrap()
             );
             let mem_flags = ir::MemFlags::trusted();
             builder
@@ -480,63 +483,73 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         #[allow(clippy::cast_possible_truncation)]
-        pub fn get_data(&self, builder: &mut FunctionBuilder) -> ir::Value {
+        pub fn get_data<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
             self.get(
                 builder,
-                self.pointer_type,
-                wasmtime_continuations::offsets::payloads::DATA as i32,
+                env.pointer_type(),
+                wasmtime_continuations::offsets::vector::DATA as i32,
             )
         }
 
         #[allow(clippy::cast_possible_truncation)]
-        fn get_capacity(&self, builder: &mut FunctionBuilder) -> ir::Value {
-            let ty = Type::int_with_byte_size(std::mem::size_of::<
-                wasmtime_continuations::types::payloads::Capacity,
-            >() as u16)
-            .unwrap();
+        fn get_capacity<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            // Vector capacity is stored as u32.
+            let ty = Type::int_with_byte_size(std::mem::size_of::<u32>() as u16).unwrap();
             self.get(
                 builder,
                 ty,
-                wasmtime_continuations::offsets::payloads::CAPACITY as i32,
+                wasmtime_continuations::offsets::vector::CAPACITY as i32,
             )
         }
 
         #[allow(clippy::cast_possible_truncation)]
-        fn get_length(&self, builder: &mut FunctionBuilder) -> ir::Value {
-            let ty = Type::int_with_byte_size(std::mem::size_of::<
-                wasmtime_continuations::types::payloads::Length,
-            >() as u16)
-            .unwrap();
+        fn get_length<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            // Vector length is stored as u32.
+            let ty = Type::int_with_byte_size(std::mem::size_of::<u32>() as u16).unwrap();
             self.get(
                 builder,
                 ty,
-                wasmtime_continuations::offsets::payloads::LENGTH as i32,
+                wasmtime_continuations::offsets::vector::LENGTH as i32,
             )
         }
 
         #[allow(clippy::cast_possible_truncation)]
         fn set_length(&self, builder: &mut FunctionBuilder, length: ir::Value) {
-            self.set::<wasmtime_continuations::types::payloads::Length>(
+            // Vector length is stored as u32.
+            self.set::<u32>(
                 builder,
-                wasmtime_continuations::offsets::payloads::LENGTH as i32,
+                wasmtime_continuations::offsets::vector::LENGTH as i32,
                 length,
             );
         }
 
         #[allow(clippy::cast_possible_truncation)]
         fn set_capacity(&self, builder: &mut FunctionBuilder, capacity: ir::Value) {
-            self.set::<wasmtime_continuations::types::payloads::Capacity>(
+            // Vector capacity is stored as u32.
+            self.set::<u32>(
                 builder,
-                wasmtime_continuations::offsets::payloads::CAPACITY as i32,
+                wasmtime_continuations::offsets::vector::CAPACITY as i32,
                 capacity,
             );
         }
 
         #[allow(clippy::cast_possible_truncation)]
         fn set_data(&self, builder: &mut FunctionBuilder, data: ir::Value) {
-            self.set::<*mut u8>(
+            self.set::<*mut T>(
                 builder,
-                wasmtime_continuations::offsets::payloads::DATA as i32,
+                wasmtime_continuations::offsets::vector::DATA as i32,
                 data,
             );
         }
@@ -549,18 +562,17 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
             arg_count: i32,
         ) -> ir::Value {
-            let data = self.get_data(builder);
-            let original_length = self.get_length(builder);
+            let data = self.get_data(env, builder);
+            let original_length = self.get_length(env, builder);
             let new_length = builder.ins().iadd_imm(original_length, arg_count as i64);
             self.set_length(builder, new_length);
 
             if cfg!(debug_assertions) {
-                let capacity = self.get_capacity(builder);
+                let capacity = self.get_capacity(env, builder);
                 emit_debug_assert_ule!(env, builder, new_length, capacity);
             }
 
-            let value_size =
-                mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>() as i64;
+            let value_size = mem::size_of::<T>() as i64;
             let original_length = builder.ins().uextend(I64, original_length);
             let byte_offset = builder.ins().imul_imm(original_length, value_size);
             builder.ins().iadd(data, byte_offset)
@@ -574,17 +586,13 @@ pub(crate) mod typed_continuation_helpers {
         ) {
             let zero32 = builder.ins().iconst(ir::types::I32, 0);
             let zero64 = builder.ins().iconst(ir::types::I64, 0);
-            let capacity = self.get_capacity(builder);
+            let capacity = self.get_capacity(env, builder);
             emit_debug_assert_ne!(env, builder, capacity, zero32);
 
-            let align = builder.ins().iconst(
-                I64,
-                std::mem::align_of::<wasmtime_continuations::types::payloads::DataEntries>() as i64,
-            );
-            let entry_size =
-                std::mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>();
+            let align = builder.ins().iconst(I64, std::mem::align_of::<T>() as i64);
+            let entry_size = std::mem::size_of::<T>();
             let size = builder.ins().imul_imm(capacity, entry_size as i64);
-            let ptr = self.get_data(builder);
+            let ptr = self.get_data(env, builder);
 
             call_builtin!(builder, env, tc_deallocate(ptr, size, align));
 
@@ -603,7 +611,7 @@ pub(crate) mod typed_continuation_helpers {
             emit_debug_assert_ne!(env, builder, required_capacity, zero);
 
             if cfg!(debug_assertions) {
-                let data = self.get_data(builder);
+                let data = self.get_data(env, builder);
                 emit_debug_println!(
                     env,
                     builder,
@@ -613,7 +621,7 @@ pub(crate) mod typed_continuation_helpers {
                 );
             }
 
-            let capacity = self.get_capacity(builder);
+            let capacity = self.get_capacity(env, builder);
 
             let sufficient_capacity_block = builder.create_block();
             let insufficient_capacity_block = builder.create_block();
@@ -645,17 +653,12 @@ pub(crate) mod typed_continuation_helpers {
 
                 if cfg!(debug_assertions) {
                     // We must only re-allocate while there is no data in the buffer.
-                    let length = self.get_length(builder);
+                    let length = self.get_length(env, builder);
                     emit_debug_assert_eq!(env, builder, length, zero);
                 }
 
-                let align = builder.ins().iconst(
-                    I64,
-                    std::mem::align_of::<wasmtime_continuations::types::payloads::DataEntries>()
-                        as i64,
-                );
-                let entry_size =
-                    std::mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>();
+                let align = builder.ins().iconst(I64, std::mem::align_of::<T>() as i64);
+                let entry_size = std::mem::size_of::<T>();
                 let old_size = builder.ins().imul_imm(capacity, entry_size as i64);
                 let new_size = builder.ins().imul_imm(required_capacity, entry_size as i64);
 
@@ -664,7 +667,7 @@ pub(crate) mod typed_continuation_helpers {
                 let old_size = builder.ins().uextend(I64, old_size);
                 let new_size = builder.ins().uextend(I64, new_size);
 
-                let ptr = self.get_data(builder);
+                let ptr = self.get_data(env, builder);
                 call_builtin!(
                     builder, env, let new_data = tc_reallocate(ptr, old_size, new_size, align)
                 );
@@ -679,9 +682,9 @@ pub(crate) mod typed_continuation_helpers {
             builder.seal_block(sufficient_capacity_block);
         }
 
-        /// Loads n entries from this Payloads object, where n is the length of
+        /// Loads n entries from this Vector object, where n is the length of
         /// `load_types`, which also gives the types of the values to load.
-        /// Loading starts at index 0 of the Payloads object.
+        /// Loading starts at index 0 of the Vector object.
         #[allow(clippy::cast_possible_truncation)]
         pub fn load_data_entries<'a>(
             &self,
@@ -690,14 +693,14 @@ pub(crate) mod typed_continuation_helpers {
             load_types: &[ir::Type],
         ) -> Vec<ir::Value> {
             if cfg!(debug_assertions) {
-                let length = self.get_length(builder);
+                let length = self.get_length(env, builder);
                 let load_count = builder.ins().iconst(I32, load_types.len() as i64);
                 emit_debug_assert_ule!(env, builder, load_count, length);
             }
 
             let memflags = ir::MemFlags::trusted();
 
-            let data_start_pointer = self.get_data(builder);
+            let data_start_pointer = self.get_data(env, builder);
             let mut values = vec![];
             let mut offset = 0;
             for valtype in load_types {
@@ -705,29 +708,40 @@ pub(crate) mod typed_continuation_helpers {
                     .ins()
                     .load(*valtype, memflags, data_start_pointer, offset);
                 values.push(val);
-                offset +=
-                    std::mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>()
-                        as i32;
+                offset += std::mem::size_of::<T>() as i32;
             }
             values
         }
 
-        /// Stores the given `values` in this Payloads object, beginning at
-        /// index 0. This expects the Payloads object to be empty (i.e., current
+        /// Stores the given `values` in this Vector object, beginning at
+        /// index 0. This expects the Vector object to be empty (i.e., current
         /// length is 0), and to be of sufficient capacity to store |`values`|
         /// entries.
+        /// If `allow_smaller` is true, we allow storing values whose type has a
+        /// smaller size than T's. In that case, such values will be stored at
+        /// the beginning of a `T`-sized slot.
         #[allow(clippy::cast_possible_truncation)]
         pub fn store_data_entries<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
             values: &[ir::Value],
+            allow_smaller: bool,
         ) {
             let store_count = builder.ins().iconst(I32, values.len() as i64);
 
             if cfg!(debug_assertions) {
-                let capacity = self.get_capacity(builder);
-                let length = self.get_length(builder);
+                for val in values {
+                    let ty = builder.func.dfg.value_type(*val);
+                    if allow_smaller {
+                        debug_assert!(ty.bytes() as usize <= std::mem::size_of::<T>());
+                    } else {
+                        debug_assert!(ty.bytes() as usize == std::mem::size_of::<T>());
+                    }
+                }
+
+                let capacity = self.get_capacity(env, builder);
+                let length = self.get_length(env, builder);
                 let zero = builder.ins().iconst(I32, 0);
                 emit_debug_assert_ule!(env, builder, store_count, capacity);
                 emit_debug_assert_eq!(env, builder, length, zero);
@@ -735,16 +749,14 @@ pub(crate) mod typed_continuation_helpers {
 
             let memflags = ir::MemFlags::trusted();
 
-            let data_start_pointer = self.get_data(builder);
+            let data_start_pointer = self.get_data(env, builder);
 
             let mut offset = 0;
             for value in values {
                 builder
                     .ins()
                     .store(memflags, *value, data_start_pointer, offset);
-                offset +=
-                    std::mem::size_of::<wasmtime_continuations::types::payloads::DataEntries>()
-                        as i32;
+                offset += std::mem::size_of::<T>() as i32;
             }
 
             self.set_length(builder, store_count);
@@ -1267,7 +1279,7 @@ fn typed_continuations_load_return_values<'a>(
     valtypes: &[WasmValType],
     contref: ir::Value,
 ) -> std::vec::Vec<ir::Value> {
-    let co = tc::VMContRef::new(contref, env.pointer_type());
+    let co = tc::VMContRef::new(contref);
     let mut values = vec![];
 
     if valtypes.len() > 0 {
@@ -1315,7 +1327,6 @@ fn typed_continuations_load_payloads<'a>(
         let vmctx_payloads = tc::Payloads::new(
             vmctx,
             env.offsets.vmctx_typed_continuations_payloads() as i32,
-            env.pointer_type(),
         );
 
         values = vmctx_payloads.load_data_entries(env, builder, valtypes);
@@ -1340,10 +1351,10 @@ pub(crate) fn typed_continuations_load_tag_return_values<'a>(
     let mut values = vec![];
 
     if valtypes.len() > 0 {
-        let co = tc::VMContRef::new(contref, env.pointer_type());
+        let co = tc::VMContRef::new(contref);
         let tag_return_values = co.tag_return_values();
 
-        let payload_ptr = tag_return_values.get_data(builder);
+        let payload_ptr = tag_return_values.get_data(env, builder);
 
         let mut offset = 0;
         for valtype in valtypes {
@@ -1381,7 +1392,7 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
         let store_data_block = builder.create_block();
         builder.append_block_param(store_data_block, env.pointer_type());
 
-        let co = tc::VMContRef::new(contref, env.pointer_type());
+        let co = tc::VMContRef::new(contref);
         let csi = co.common_stack_information(env, builder);
         let was_invoked = csi.was_invoked(env, builder);
         builder
@@ -1443,13 +1454,12 @@ pub(crate) fn typed_continuations_store_payloads<'a>(
         let payloads = tc::Payloads::new(
             vmctx,
             env.offsets.vmctx_typed_continuations_payloads() as i32,
-            env.pointer_type(),
         );
 
         let nargs = builder.ins().iconst(I32, values.len() as i64);
         payloads.ensure_capacity(env, builder, nargs);
 
-        payloads.store_data_entries(env, builder, values);
+        payloads.store_data_entries(env, builder, values, true);
     }
 }
 
@@ -1475,7 +1485,7 @@ pub(crate) fn translate_cont_bind<'a>(
 ) -> ir::Value {
     //let contref = typed_continuations_cont_obj_get_cont_ref(env, builder, contobj);
     let (witness, contref) = shared::disassemble_contobj(env, builder, contobj);
-    let mut vmcontref = tc::VMContRef::new(contref, env.pointer_type());
+    let mut vmcontref = tc::VMContRef::new(contref);
     let revision = vmcontref.get_revision(env, builder);
     let evidence = builder.ins().icmp(IntCC::Equal, witness, revision);
     emit_debug_println!(
@@ -1511,7 +1521,7 @@ pub(crate) fn translate_cont_new<'a>(
     let nargs = builder.ins().iconst(I32, arg_types.len() as i64);
     let nreturns = builder.ins().iconst(I32, return_types.len() as i64);
     call_builtin!(builder, env, let contref = tc_cont_new(func, nargs, nreturns));
-    let tag = tc::VMContRef::new(contref, env.pointer_type()).get_revision(env, builder);
+    let tag = tc::VMContRef::new(contref).get_revision(env, builder);
     let contobj = shared::assemble_contobj(env, builder, tag, contref);
     emit_debug_println!(env, builder, "[cont_new] contref = {:p}", contref);
     Ok(contobj)
@@ -1587,7 +1597,7 @@ pub(crate) fn translate_resume<'a>(
     let (next_revision, resume_contref, parent_stack_chain) = {
         let (witness, resume_contref) = shared::disassemble_contobj(env, builder, contobj);
 
-        let mut vmcontref = tc::VMContRef::new(resume_contref, env.pointer_type());
+        let mut vmcontref = tc::VMContRef::new(resume_contref);
 
         let revision = vmcontref.get_revision(env, builder);
         let evidence = builder.ins().icmp(IntCC::Equal, revision, witness);
@@ -1657,7 +1667,7 @@ pub(crate) fn translate_resume<'a>(
         // limits.
 
         // `resume_contref` is now active, and its parent is suspended.
-        let co = tc::VMContRef::new(resume_contref, env.pointer_type());
+        let co = tc::VMContRef::new(resume_contref);
         let resume_csi = co.common_stack_information(env, builder);
         let parent_csi = parent_stack_chain.get_common_stack_information(env, builder);
         resume_csi.set_state(env, builder, wasmtime_continuations::State::Running);
@@ -1788,7 +1798,7 @@ pub(crate) fn translate_resume<'a>(
         let parent_contref =
             parent_stack_chain.unwrap_continuation_or_trap(env, builder, crate::TRAP_UNHANDLED_TAG);
 
-        let cref = tc::VMContRef::new(parent_contref, env.pointer_type());
+        let cref = tc::VMContRef::new(parent_contref);
         let fiber_stack = cref.get_fiber_stack(env, builder);
         let control_context_ptr = fiber_stack.load_control_context(env, builder);
 
@@ -1866,7 +1876,7 @@ pub(crate) fn translate_resume<'a>(
         // `StackChain::Absent`.
         let pointer_type = env.pointer_type();
         let chain = tc::StackChain::absent(builder, pointer_type);
-        let mut vmcontref = tc::VMContRef::new(resume_contref, pointer_type);
+        let mut vmcontref = tc::VMContRef::new(resume_contref);
         vmcontref.set_parent_stack_chain(env, builder, &chain);
 
         // Create and push the continuation object. We only create
@@ -1902,7 +1912,7 @@ pub(crate) fn translate_resume<'a>(
         let parent_csi = parent_stack_chain.get_common_stack_information(env, builder);
         parent_csi.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
-        let co = tc::VMContRef::new(resume_contref, env.pointer_type());
+        let co = tc::VMContRef::new(resume_contref);
         let resume_csi = co.common_stack_information(env, builder);
         resume_csi.set_state(env, builder, wasmtime_continuations::State::Returned);
 
@@ -1936,7 +1946,7 @@ pub(crate) fn translate_suspend<'a>(
 
     // This traps with an unhandled tag code if we are on the main stack.
     let contref = typed_continuations_load_continuation_reference(env, builder);
-    let cref = tc::VMContRef::new(contref, env.pointer_type());
+    let cref = tc::VMContRef::new(contref);
 
     let fiber_stack = cref.get_fiber_stack(env, builder);
     let control_context_ptr = fiber_stack.load_control_context(env, builder);
