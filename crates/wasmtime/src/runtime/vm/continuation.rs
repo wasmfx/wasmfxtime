@@ -13,6 +13,30 @@ cfg_if::cfg_if! {
 /// once. The linearity is checked dynamically in the generated code
 /// by comparing the revision witness embedded in the pointer to the
 /// actual revision counter on the continuation reference.
+///
+/// In the optimized implementation, the continuation logically
+/// represented by a VMContObj not only encompasses the pointed-to
+/// VMContRef, but also all of its parents:
+///
+///                     +----------------+
+///                 +-->|   VMContRef    |
+///                 |   +----------------+
+///                 |            ^
+///                 |            | parent
+///                 |            |
+///                 |   +----------------+
+///                 |   |   VMContRef    |
+///                 |   +----------------+
+///                 |            ^
+///                 |            | parent
+///  last ancestor  |            |
+///                 |   +----------------+
+///                 +---|   VMContRef    |    <--  VMContObj
+///                     +----------------+
+///
+/// For performance reasons, the VMContRef at the bottom of this chain
+/// (i.e., the one pointed to by the VMContObj) has a pointer to the
+/// other end of the chain (i.e., its last ancestor).
 pub mod safe_vm_contobj {
     use super::imp::VMContRef;
     use core::ptr::NonNull;
@@ -46,7 +70,8 @@ pub mod optimized {
         Instance, TrapReason, VMStore,
     };
     use core::cmp;
-    use core::mem;
+    use std::marker::PhantomPinned;
+    use wasmtime_continuations::HandlerList;
     #[allow(unused)]
     use wasmtime_continuations::{debug_println, CommonStackInformation, ENABLE_DEBUG_PRINTING};
     pub use wasmtime_continuations::{Payloads, StackLimits, State};
@@ -64,6 +89,13 @@ pub mod optimized {
         /// main stack, or absent (in case of a suspended continuation).
         pub parent_chain: StackChain,
 
+        /// Only used if `common_stack_information.state` is `Suspended` or `Fresh`. In
+        /// that case, this points to the end of the stack chain (i.e., the
+        /// continuation in the parent chain whose own `parent_chain` field is
+        /// `StackChain::Absent`).
+        /// Note that this may be a pointer to iself (if the state is `Fresh`, this is always the case).
+        pub last_ancestor: *mut VMContRef,
+
         /// The underlying stack.
         pub stack: FiberStack,
 
@@ -80,6 +112,10 @@ pub mod optimized {
 
         /// Revision counter.
         pub revision: u64,
+
+        /// Tell the compiler that this structure has potential self-references
+        /// through the `last_ancestor` pointer.
+        _marker: core::marker::PhantomPinned,
     }
 
     impl VMContRef {
@@ -93,23 +129,34 @@ pub mod optimized {
 
         /// This is effectively a `Default` implementation, without calling it
         /// so. Used to create `VMContRef`s when initializing pooling allocator.
+        #[allow(clippy::cast_possible_truncation)]
         pub fn empty() -> Self {
             let limits = StackLimits::with_stack_limit(Default::default());
             let state = State::Fresh;
-            let common_stack_information = CommonStackInformation { limits, state };
+            let handlers =
+                HandlerList::new(wasmtime_continuations::INITIAL_HANDLER_LIST_CAPACITY as u32);
+            let common_stack_information = CommonStackInformation {
+                limits,
+                state,
+                handlers,
+            };
             let parent_chain = StackChain::Absent;
+            let last_ancestor = std::ptr::null_mut();
             let stack = FiberStack::unallocated();
             let args = Payloads::new(0);
             let tag_return_values = Payloads::new(0);
             let revision = 0;
+            let _marker = PhantomPinned;
 
             Self {
                 common_stack_information,
                 parent_chain,
+                last_ancestor,
                 stack,
                 args,
                 tag_return_values,
                 revision,
+                _marker,
             }
         }
     }
@@ -123,6 +170,8 @@ pub mod optimized {
             self.args.deallocate();
             self.tag_return_values.deallocate();
 
+            self.common_stack_information.handlers.deallocate();
+
             // We would like to enforce the invariant that any continuation that
             // was created for a cont.new (rather than, say, just living in a
             // pool and never being touched), either ran to completion or was
@@ -135,33 +184,6 @@ pub mod optimized {
     // `VMContRef`s.
     unsafe impl Send for VMContRef {}
     unsafe impl Sync for VMContRef {}
-
-    /// TODO
-    pub fn cont_ref_forward_tag_return_values_buffer(
-        parent: *mut VMContRef,
-        child: *mut VMContRef,
-    ) -> Result<(), TrapReason> {
-        let parent = unsafe {
-            parent.as_mut().ok_or_else(|| {
-                TrapReason::user_without_backtrace(anyhow::anyhow!(
-                    "Attempt to dereference null (parent) VMContRef"
-                ))
-            })?
-        };
-        let child = unsafe {
-            child.as_mut().ok_or_else(|| {
-                TrapReason::user_without_backtrace(anyhow::anyhow!(
-                    "Attempt to dereference null (child) VMContRef"
-                ))
-            })?
-        };
-        debug_assert!(parent.common_stack_information.state == State::Running);
-        debug_assert!(child.common_stack_information.state == State::Suspended);
-        debug_assert!(child.tag_return_values.length == 0);
-
-        mem::swap(&mut child.tag_return_values, &mut parent.tag_return_values);
-        Ok(())
-    }
 
     /// Drops the given continuation, which either means deallocating it
     /// (together with its stack) or returning it (and its stack) to a pool for
@@ -236,6 +258,9 @@ pub mod optimized {
             csi.state = State::Fresh;
             contref.parent_chain = StackChain::Absent;
             contref.args.ensure_capacity(capacity);
+            // The continuation is fresh, which is a special case of being suspended.
+            // Thus we need to set the correct end of the continuation chain: itself.
+            contref.last_ancestor = contref;
 
             // In order to give the pool a uniform interface for the optimized
             // and baseline implementation, it returns the `FiberStack` as a
@@ -274,6 +299,10 @@ pub mod optimized {
         assert_eq!(
             offset_of!(VMContRef, parent_chain),
             vm_cont_ref::PARENT_CHAIN
+        );
+        assert_eq!(
+            offset_of!(VMContRef, last_ancestor),
+            vm_cont_ref::LAST_ANCESTOR
         );
         assert_eq!(offset_of!(VMContRef, stack), vm_cont_ref::STACK);
         assert_eq!(offset_of!(VMContRef, args), vm_cont_ref::ARGS);
@@ -829,13 +858,6 @@ pub mod optimized {
     use crate::runtime::vm::{Instance, TrapReason, VMStore};
 
     pub type VMContRef = super::baseline::VMContRef;
-
-    pub fn cont_ref_forward_tag_return_values_buffer(
-        _parent: *mut VMContRef,
-        _child: *mut VMContRef,
-    ) -> Result<(), TrapReason> {
-        panic!("attempt to execute continuation::optimized::cont_ref_forward_tag_return_values_buffer with `typed_continuation_baseline_implementation` toggled!")
-    }
 
     #[inline(always)]
     pub fn drop_cont_ref(_instance: &mut Instance, _contref: *mut VMContRef) {

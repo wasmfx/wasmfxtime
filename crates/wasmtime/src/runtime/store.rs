@@ -2866,6 +2866,14 @@ impl Drop for StoreOpaque {
                 }
             }
 
+            // FIXME(frank-emrich) The handlers can only be non-empty at this
+            // point if we trapped while inside a continuation (i.e., the main
+            // stack was a parent of the trapping continuation). Once we
+            // properly clean up the Store/Instance at that point (see issue
+            // #253), this `clear` should no longer be necessary.
+            self.main_stack_information.handlers.clear();
+            self.main_stack_information.handlers.deallocate();
+
             // See documentation for these fields on `StoreOpaque` for why they
             // must be dropped in this order.
             ManuallyDrop::drop(&mut self.store_data);

@@ -24,6 +24,7 @@ macro_rules! call_builtin {
 
 #[allow(unused_imports)]
 pub(crate) use call_builtin;
+use cranelift_codegen::ir::types::{I32, I64};
 
 /// The Cranelfift type used to represent all of the following:
 /// - wasm values of type `(ref null $ct)` and `(ref $ct)`
@@ -128,6 +129,7 @@ pub(crate) fn typed_continuations_drop_cont_ref<'a>(
 #[repr(transparent)]
 pub struct TaggedPointer(pub ir::Value);
 
+#[allow(dead_code)]
 impl TaggedPointer {
     const LOW_TAG_BITS: i64 = 2;
     const LOW_TAG_MASK: i64 = (1 << Self::LOW_TAG_BITS) - 1;
@@ -170,39 +172,62 @@ impl TaggedPointer {
 /// pointer. This instance is used at compile time. There is a runtime
 /// counterpart in `continuations/src/lib.rs`.
 #[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct ControlEffect(pub TaggedPointer);
+pub struct ControlEffect(ir::Value);
 
 impl ControlEffect {
-    pub fn new(val: ir::Value) -> Self {
-        Self(TaggedPointer::new(val))
+    // Returns the discriminant
+    pub fn signal<'a>(
+        &self,
+        _env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+    ) -> ir::Value {
+        builder.ins().ushr_imm(self.0, 32)
+    }
+
+    pub fn from_u64(val: ir::Value) -> Self {
+        Self(val)
+    }
+
+    pub fn to_u64(&self) -> ir::Value {
+        self.0
+    }
+
+    pub fn make_resume<'a>(
+        _env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+    ) -> Self {
+        let discriminant = builder.ins().iconst(
+            I64,
+            wasmtime_continuations::CONTROL_EFFECT_RESUME_DISCRIMINANT as i64,
+        );
+        let val = builder.ins().ishl_imm(discriminant, 32);
+
+        Self(val)
     }
 
     pub fn make_suspend<'a>(
-        env: &mut crate::func_environ::FuncEnvironment<'a>,
+        _env: &mut crate::func_environ::FuncEnvironment<'a>,
         builder: &mut FunctionBuilder,
-        tag_addr: ir::Value,
+        handler_index: ir::Value,
     ) -> Self {
-        let untagged = Self::new(tag_addr);
-        // Need to keep this in sync with tag used by suspend in
-        // wasmtime_continuation::ControlEffect
-        Self(untagged.0.low_tag(env, builder, 0b01_usize))
+        let discriminant = builder.ins().iconst(
+            I64,
+            wasmtime_continuations::CONTROL_EFFECT_SUSPEND_DISCRIMINANT as i64,
+        );
+        let val = builder.ins().ishl_imm(discriminant, 32);
+        let handler_index = builder.ins().uextend(I64, handler_index);
+        let val = builder.ins().bor(val, handler_index);
+
+        Self(val)
     }
 
-    pub fn signal<'a>(
+    // Returns the payload of the `Suspend` variant
+    pub fn handler_index<'a>(
         self,
-        env: &mut crate::func_environ::FuncEnvironment<'a>,
+        _env: &mut crate::func_environ::FuncEnvironment<'a>,
         builder: &mut FunctionBuilder,
     ) -> ir::Value {
-        TaggedPointer::get_low_tag(self.0, env, builder)
-    }
-
-    pub fn value<'a>(
-        self,
-        env: &mut crate::func_environ::FuncEnvironment<'a>,
-        builder: &mut FunctionBuilder,
-    ) -> ir::Value {
-        TaggedPointer::unmask(self.0, env, builder)
+        builder.ins().ireduce(I32, self.0)
     }
 }
 

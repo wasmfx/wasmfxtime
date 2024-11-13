@@ -5,7 +5,7 @@ use crate::wasmfx::shared::call_builtin;
 use cranelift_codegen::ir;
 use cranelift_codegen::ir::condcodes::*;
 use cranelift_codegen::ir::types::*;
-use cranelift_codegen::ir::InstBuilder;
+use cranelift_codegen::ir::{BlockCall, InstBuilder, JumpTableData};
 use cranelift_frontend::FunctionBuilder;
 use wasmtime_environ::PtrSize;
 use wasmtime_environ::{WasmResult, WasmValType};
@@ -289,7 +289,7 @@ pub(crate) mod typed_continuation_helpers {
 
     #[derive(Copy, Clone)]
     pub struct VMContRef {
-        address: ir::Value,
+        pub address: ir::Value,
     }
 
     #[derive(Copy, Clone)]
@@ -308,10 +308,12 @@ pub(crate) mod typed_continuation_helpers {
     }
 
     pub type Payloads = Vector<u128>;
+    // Actually a vector of *mut VMTagDefinition
+    pub type HandlerList = Vector<*mut u8>;
 
     #[derive(Copy, Clone)]
     pub struct VMContext {
-        address: ir::Value,
+        pub address: ir::Value,
         pointer_type: ir::Type,
     }
 
@@ -397,6 +399,46 @@ pub(crate) mod typed_continuation_helpers {
         ) {
             let offset = wasmtime_continuations::offsets::vm_cont_ref::PARENT_CHAIN as i32;
             new_stack_chain.store(env, builder, self.address, offset)
+        }
+
+        /// Loads the parent of this continuation, which may either be another
+        /// continuation or the main stack. It is therefore represented as a
+        /// `StackChain` element.
+        #[allow(clippy::cast_possible_truncation)]
+        pub fn get_parent_stack_chain<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> StackChain {
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::PARENT_CHAIN as i32;
+            StackChain::load(env, builder, self.address, offset, env.pointer_type())
+        }
+
+        #[allow(clippy::cast_possible_truncation)]
+        pub fn set_last_ancestor<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            last_ancestor: ir::Value,
+        ) {
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::LAST_ANCESTOR as i32;
+            let mem_flags = ir::MemFlags::trusted();
+            builder
+                .ins()
+                .store(mem_flags, last_ancestor, self.address, offset);
+        }
+
+        #[allow(clippy::cast_possible_truncation)]
+        pub fn get_last_ancestor<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::LAST_ANCESTOR as i32;
+            let mem_flags = ir::MemFlags::trusted();
+            builder
+                .ins()
+                .load(env.pointer_type(), mem_flags, self.address, offset)
         }
 
         /// Gets the revision counter the a given continuation
@@ -511,7 +553,7 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         #[allow(clippy::cast_possible_truncation)]
-        fn get_length<'a>(
+        pub fn get_length<'a>(
             &self,
             _env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
@@ -910,6 +952,30 @@ pub(crate) mod typed_continuation_helpers {
             emit_debug_assert_ne!(env, builder, self.discriminant, discriminant);
         }
 
+        pub fn is_main_stack<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            builder.ins().icmp_imm(
+                IntCC::Equal,
+                self.discriminant,
+                wasmtime_continuations::STACK_CHAIN_MAIN_STACK_DISCRIMINANT as i64,
+            )
+        }
+
+        pub fn is_absent<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            builder.ins().icmp_imm(
+                IntCC::Equal,
+                self.discriminant,
+                wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT as i64,
+            )
+        }
+
         /// Return the two raw `ir::Value`s that represent this StackChain.
         pub fn to_raw_parts(&self) -> [ir::Value; STACK_CHAIN_POINTER_COUNT] {
             [self.discriminant, self.payload]
@@ -970,39 +1036,22 @@ pub(crate) mod typed_continuation_helpers {
             }
         }
 
-        /// If `self` corresponds to a `StackChain::Continuation`, return the
-        /// pointer to the `VMContRef` stored in the variant.
-        /// If `self` corresponds to `StackChain::MainStack`, trap with the
-        /// given `trap_code`.
-        /// Calling this if `self` corresponds to `StackChain::Absent` indicates
-        /// an internal bug.
-        pub fn unwrap_continuation_or_trap<'a>(
+        /// Use this only if you've already checked that `self` corresponds to a `StackChain::Continuation`.
+        pub fn unchecked_get_continuation<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
-            trap_code: crate::TrapCode,
         ) -> ir::Value {
             if cfg!(debug_assertions) {
-                let absent_discriminant = wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT;
-                let is_initialized = builder.ins().icmp_imm(
+                let continuation_discriminant =
+                    wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT;
+                let is_continuation = builder.ins().icmp_imm(
                     IntCC::NotEqual,
                     self.discriminant,
-                    absent_discriminant as i64,
+                    continuation_discriminant as i64,
                 );
-                emit_debug_assert!(env, builder, is_initialized);
+                emit_debug_assert!(env, builder, is_continuation);
             }
-
-            let continuation_discriminant =
-                wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT;
-            let is_continuation = builder.ins().icmp_imm(
-                IntCC::Equal,
-                self.discriminant,
-                continuation_discriminant as i64,
-            );
-            builder.ins().trapz(is_continuation, trap_code);
-
-            // The representation of StackChain::Continuation stores
-            // the pointer right after the discriminant.
             self.payload
         }
 
@@ -1125,6 +1174,12 @@ pub(crate) mod typed_continuation_helpers {
             builder
                 .ins()
                 .icmp_imm(IntCC::NotEqual, actual_state, allocated as i64)
+        }
+
+        #[allow(clippy::cast_possible_truncation)]
+        pub fn get_handler_list(&self) -> HandlerList {
+            let offset = wasmtime_continuations::offsets::common_stack_information::HANDLERS;
+            HandlerList::new(self.address, offset as i32)
         }
 
         /// Sets `last_wasm_entry_sp` and `stack_limit` fields in
@@ -1270,6 +1325,7 @@ pub(crate) mod typed_continuation_helpers {
     }
 }
 
+use crate::wasmfx::optimized::tc::StackChain;
 use typed_continuation_helpers as tc;
 
 #[allow(clippy::cast_possible_truncation)]
@@ -1299,19 +1355,6 @@ fn typed_continuations_load_return_values<'a>(
         }
     }
     return values;
-}
-
-fn typed_continuations_forward_tag_return_values<'a>(
-    env: &mut crate::func_environ::FuncEnvironment<'a>,
-    builder: &mut FunctionBuilder,
-    parent_contref: ir::Value,
-    child_contref: ir::Value,
-) {
-    call_builtin!(
-        builder,
-        env,
-        tc_cont_ref_forward_tag_return_values_buffer(parent_contref, child_contref)
-    );
 }
 
 #[allow(clippy::cast_possible_truncation)]
@@ -1463,17 +1506,158 @@ pub(crate) fn typed_continuations_store_payloads<'a>(
     }
 }
 
-/// We only use this when we want to get the current continuation for the
-/// purpose of suspending. Thus, if there is no such continuation (because we
-/// are on the main stack), we trap with an unhandled tag error.
-pub(crate) fn typed_continuations_load_continuation_reference<'a>(
+/// This function generates code that searches for a handler for `tag_address`,
+/// which must be a `*mut VMTagDefinition`. The search walks up the chain of
+/// continuations beginning at `start`.
+///
+/// The returned values are:
+/// 1. The continuation whose *parent* (another continuation or the
+///    main stack) handles `tag_address`.
+/// 2. The index of the handler in the parent's HandlerList.
+///
+/// In pseudo-code, the generated code's behavior can be expressed as
+/// follows:
+///
+/// chain_link = start
+/// while !chain_link.is_main_stack() {
+///   contref = chain_link.get_contref()
+///   parent_link = contref.parent
+///   parent_csi = parent_link.get_common_stack_information();
+///   handlers = parent_csi.handlers;
+///   len = handlers.length;
+///   for index in 0..len {
+///     if handlers[index] == tag_address {
+///       goto on_match(contref, index)
+///     }
+///   }
+///   chain_link = parent_link
+/// }
+/// trap(unhandled_tag)
+///
+/// on_match(conref : VMContRef, handler_index : u32)
+/// ... execution continues here here ...
+///
+fn search_handler<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-) -> ir::Value {
-    let vmctx = env.vmctx_val(&mut builder.cursor());
-    let vmctx = tc::VMContext::new(vmctx, env.pointer_type());
-    let active_stack_chain = vmctx.load_stack_chain(env, builder);
-    active_stack_chain.unwrap_continuation_or_trap(env, builder, crate::TRAP_UNHANDLED_TAG)
+    start: &tc::StackChain,
+    tag_address: ir::Value,
+) -> (ir::Value, ir::Value) {
+    let handle_link = builder.create_block();
+    let begin_search_handler_list = builder.create_block();
+    let try_index = builder.create_block();
+    let compare_tags = builder.create_block();
+    let on_match = builder.create_block();
+    let on_no_match = builder.create_block();
+
+    // Terminate previous block:
+    builder.ins().jump(handle_link, &start.to_raw_parts());
+
+    // Block handle_link
+    let chain_link = {
+        builder.append_block_param(handle_link, env.pointer_type());
+        builder.append_block_param(handle_link, env.pointer_type());
+        builder.switch_to_block(handle_link);
+
+        let raw_parts = builder.block_params(handle_link);
+        let chain_link =
+            tc::StackChain::from_raw_parts([raw_parts[0], raw_parts[1]], env.pointer_type());
+        let is_main_stack = chain_link.is_main_stack(env, builder);
+        builder.ins().brif(
+            is_main_stack,
+            on_no_match,
+            &[],
+            begin_search_handler_list,
+            &[],
+        );
+        chain_link
+    };
+
+    // Block begin_search_handler_list
+    let (contref, parent_link, handler_list_data_ptr, len) = {
+        builder.switch_to_block(begin_search_handler_list);
+        let contref = chain_link.unchecked_get_continuation(env, builder);
+        let contref = tc::VMContRef::new(contref);
+
+        let parent_link = contref.get_parent_stack_chain(env, builder);
+
+        emit_debug_println!(
+            env,
+            builder,
+            "[search_handler] beginning search in parent of continuation {:p}",
+            contref.address
+        );
+
+        let parent_csi = parent_link.get_common_stack_information(env, builder);
+
+        let handlers = parent_csi.get_handler_list();
+        let handler_list_data_ptr = handlers.get_data(env, builder);
+        let len = handlers.get_length(env, builder);
+
+        let zero = builder.ins().iconst(I32, 0);
+        builder.ins().jump(try_index, &[zero]);
+
+        (contref, parent_link, handler_list_data_ptr, len)
+    };
+
+    // Block try_index
+    let index = {
+        builder.append_block_param(try_index, I32);
+        builder.switch_to_block(try_index);
+        let index = builder.block_params(try_index)[0];
+
+        let in_bounds = builder.ins().icmp(IntCC::UnsignedLessThan, index, len);
+        builder.ins().brif(
+            in_bounds,
+            compare_tags,
+            &[],
+            handle_link,
+            &parent_link.to_raw_parts(),
+        );
+        index
+    };
+
+    // Block compare_tags
+    {
+        builder.switch_to_block(compare_tags);
+
+        let base = handler_list_data_ptr;
+        let entry_size = std::mem::size_of::<*mut u8>();
+        let offset = builder.ins().imul_imm(index, entry_size as i64);
+        let offset = builder.ins().uextend(I64, offset);
+        let entry_address = builder.ins().iadd(base, offset);
+
+        let memflags = ir::MemFlags::trusted();
+
+        let handled_tag = builder
+            .ins()
+            .load(env.pointer_type(), memflags, entry_address, 0);
+
+        let tags_match = builder.ins().icmp(IntCC::Equal, handled_tag, tag_address);
+        let incremented_index = builder.ins().iadd_imm(index, 1);
+        builder
+            .ins()
+            .brif(tags_match, on_match, &[], try_index, &[incremented_index]);
+    }
+
+    // Block on_no_match
+    {
+        builder.switch_to_block(on_no_match);
+        builder.set_cold_block(on_no_match);
+        builder.ins().trap(crate::TRAP_UNHANDLED_TAG);
+    }
+
+    builder.seal_block(handle_link);
+    builder.seal_block(begin_search_handler_list);
+    builder.seal_block(try_index);
+    builder.seal_block(compare_tags);
+    builder.seal_block(on_match);
+    builder.seal_block(on_no_match);
+
+    // final block: on_match
+    builder.switch_to_block(on_match);
+
+    (contref.address, index)
 }
 
 pub(crate) fn translate_cont_bind<'a>(
@@ -1531,7 +1715,7 @@ pub(crate) fn translate_resume<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     type_index: u32,
-    contobj: ir::Value,
+    resume_contobj: ir::Value,
     resume_args: &[ir::Value],
     resumetable: &[(u32, ir::Block)],
 ) -> Vec<ir::Value> {
@@ -1539,63 +1723,53 @@ pub(crate) fn translate_resume<'a>(
     // compile as it is responsible for both continuation application
     // and control tag dispatch.
     //
-    // We store the continuation arguments, continuation return
-    // values, and suspension payloads on the vm context.
-    //
     // Here we translate a resume instruction into several basic
     // blocks as follows:
     //
     //        previous block
     //              |
     //              |
-    //        resume_block <-----------\
-    //              |                  |
-    //              |                  |
-    //         control_block           |
-    //        /             \          |
-    //        |             |          |
-    //  return_block  dispatch_block   |
-    //                      |          |
-    //                      |          |
-    //                 forward_block --/
+    //        resume_block
+    //         /           \
+    //        /             \
+    //        |             |
+    //  return_block        |
+    //                suspend block
+    //                      |
+    //                dispatch block
     //
-    // * previous block is the current active builder block upon
-    //   entering `translate_resume`, in this block we push the
-    //   continuation arguments onto the buffer in the libcall
-    //   context.
-    // * resume_block continues a given `contref`. It jumps to
-    //   the `control_block`.
-    // * control_block handles the control effect of resume, i.e. on
-    //   ordinary return from resume, it jumps to the `return_block`,
-    //   whereas on suspension it jumps to the `dispatch_block`.
-    // * return_block reads the return values from the libcall
-    //   context.
-    // * dispatch_block(NOTE1) dispatches on a tag provided by the
-    //   control_block to an associated user-defined block. If
-    //   there is no suitable user-defined block, then it jumps to
-    //   the forward_block.
-    // * forward_block dispatches the handling of a given tag to
-    //   the ambient context. Once control returns it jumps to the
-    //   resume_block to continue continuation at the suspension
-    //   site.
+    // * resume_block handles continuation arguments and performs
+    //   actual stack switch. On ordinary return from resume, it jumps
+    //   to the `return_block`, whereas on suspension it jumps to the
+    //   `suspend_block`.
+    // * suspend_block is used on suspension, jumps onward to
+    //   `dispatch_block`.
+    // * dispatch_block uses a jump table to dispatch to actual
+    //   user-defined handler blocks, based on the handler index
+    //   provided on suspension. Note that we do not jump to the
+    //   handler blocks directly. Instead, each handler block has a
+    //   corresponding premable block, which we jump to in order to
+    //   reach a particular handler block. The preamble block prepares
+    //   the arguments and continuation object to be passed to the
+    //   actual handler block.
     //
-    // NOTE1: The dispatch block is the head of a collection of blocks
-    // which encodes a right-leaning (almost binary) decision tree,
-    // that is a series of nested if-then-else. The `then` branch
-    // contains a "leaf" node which sets up the jump to a user-defined
-    // handler block, whilst the `else` branch contains another
-    // decision tree or the forward_block.
     let resume_block = builder.create_block();
     let return_block = builder.create_block();
-    let control_block = builder.create_block();
+    let suspend_block = builder.create_block();
     let dispatch_block = builder.create_block();
-    let forward_block = builder.create_block();
 
-    let vmctx = env.vmctx_val(&mut builder.cursor());
+    let vmctx = tc::VMContext::new(env.vmctx_val(&mut builder.cursor()), env.pointer_type());
 
-    // Preamble: Part of previously active block.
-    let (next_revision, resume_contref, parent_stack_chain) = {
-        let (witness, resume_contref) = shared::disassemble_contobj(env, builder, contobj);
+    // Technically, there is no need to have a dedicated resume block, we could
+    // just put all of its contents into the current block.
+    builder.ins().jump(resume_block, &[]);
+
+    // Resume block: actually resume the continuation chain ending at `resume_contref`.
+    let (resume_result, vm_runtime_limits_ptr, original_stack_chain, new_stack_chain) = {
+        builder.switch_to_block(resume_block);
+        builder.seal_block(resume_block);
+
+        let (witness, resume_contref) = shared::disassemble_contobj(env, builder, resume_contobj);
 
         let mut vmcontref = tc::VMContRef::new(resume_contref);
 
@@ -1630,27 +1804,37 @@ pub(crate) fn translate_resume<'a>(
             typed_continuations_store_resume_args(env, builder, resume_args, count, resume_contref);
         }
 
+        // Splice together stack chains:
+        // Connect the end of the chain starting at `resume_contref` to the currently active chain.
+        let mut last_ancestor = tc::VMContRef::new(vmcontref.get_last_ancestor(env, builder));
+
         // Make the currently running continuation (if any) the parent of the one we are about to resume.
         let original_stack_chain =
-            tc::VMContext::new(vmctx, env.pointer_type()).load_stack_chain(env, builder);
+            tc::VMContext::new(vmctx.address, env.pointer_type()).load_stack_chain(env, builder);
         original_stack_chain.assert_not_absent(env, builder);
-        vmcontref.set_parent_stack_chain(env, builder, &original_stack_chain);
+        if cfg!(debug_assertions) {
+            // The continuation we are about to resume should have its chain broken up at last_ancestor.
+            let last_ancestor_chain = last_ancestor.get_parent_stack_chain(env, builder);
+            let is_absent = last_ancestor_chain.is_absent(env, builder);
+            emit_debug_assert!(env, builder, is_absent);
+        }
+        last_ancestor.set_parent_stack_chain(env, builder, &original_stack_chain);
 
-        builder.ins().jump(resume_block, &[]);
-        (next_revision, resume_contref, original_stack_chain)
-    };
+        emit_debug_println!(
+            env,
+            builder,
+            "[resume] spliced together stack chains: parent of {:p} (last ancestor of {:p}) is now pointing to ({}, {:p})",
+            last_ancestor.address,
+            vmcontref.address,
+            original_stack_chain.to_raw_parts()[0],
+            original_stack_chain.to_raw_parts()[1]
+        );
 
-    // Resume block: actually resume the fiber corresponding to the
-    // `VMContRef` given as a parameter to the block. This
-    // parameterisation is necessary to enable forwarding, requiring us
-    // to resume objects other than `original_contref`.
-    // We make the `VMContRef` that was actually resumed available via
-    // `resumed_contref`, so that subsequent blocks can refer to it.
-    let (resume_result, vm_runtime_limits_ptr) = {
-        builder.switch_to_block(resume_block);
+        // Just for consistency: `vmcontref` is about to get state Running, so let's zero out its last_ancestor field.
+        let zero = builder.ins().iconst(env.pointer_type(), 0);
+        vmcontref.set_last_ancestor(env, builder, zero);
 
         // We mark `resume_contref` as the currently running one
-        let vmctx = tc::VMContext::new(vmctx, env.pointer_type());
         vmctx.set_active_continuation(env, builder, resume_contref);
 
         // Note that the resume_contref libcall a few lines further below
@@ -1667,9 +1851,9 @@ pub(crate) fn translate_resume<'a>(
         // limits.
 
         // `resume_contref` is now active, and its parent is suspended.
-        let co = tc::VMContRef::new(resume_contref);
-        let resume_csi = co.common_stack_information(env, builder);
-        let parent_csi = parent_stack_chain.get_common_stack_information(env, builder);
+        let resume_contref = tc::VMContRef::new(resume_contref);
+        let resume_csi = resume_contref.common_stack_information(env, builder);
+        let parent_csi = original_stack_chain.get_common_stack_information(env, builder);
         resume_csi.set_state(env, builder, wasmtime_continuations::State::Running);
         parent_csi.set_state(env, builder, wasmtime_continuations::State::Parent);
 
@@ -1702,16 +1886,35 @@ pub(crate) fn translate_resume<'a>(
         );
         resume_csi.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
-        let fiber_stack = co.get_fiber_stack(env, builder);
-        let control_context_ptr = fiber_stack.load_control_context(env, builder);
+        // Install handlers in (soon to be) parent's HandlerList:
+        // Let the i-th handler clause be (on $tag $block).
+        // Then the i-th entry of the HandlerList will be the address of $tag.
+        let handler_list = parent_csi.get_handler_list();
 
-        let resume_payload: u64 = wasmtime_continuations::ControlEffect::resume().into();
-        let resume_payload = builder.ins().iconst(I64, resume_payload as i64);
+        if resumetable.len() > 0 {
+            // If the existing list is too small, reallocate (in runtime).
+            let resumetable_len = builder.ins().iconst(I32, resumetable.len() as i64);
+            handler_list.ensure_capacity(env, builder, resumetable_len);
+
+            // Note that we currently don't remove duplicate tags.
+            let tag_addresses: Vec<ir::Value> = resumetable
+                .iter()
+                .map(|(tag_index, _)| shared::tag_address(env, builder, *tag_index))
+                .collect();
+            handler_list.store_data_entries(env, builder, &tag_addresses, false);
+        }
+
+        let resume_payload = ControlEffect::make_resume(env, builder).to_u64();
+
+        // Note that the control context we use for switching is not the one in
+        // (the stack of) resume_contref, but in (the stack of) last_ancestor!
+        let fiber_stack = last_ancestor.get_fiber_stack(env, builder);
+        let control_context_ptr = fiber_stack.load_control_context(env, builder);
 
         emit_debug_println!(
             env,
             builder,
-            "[resume] control_context_ptr_loc is {:p}",
+            "[resume] about to execute stack_switch, control_context_ptr is {:p}",
             control_context_ptr
         );
 
@@ -1723,18 +1926,29 @@ pub(crate) fn translate_resume<'a>(
         emit_debug_println!(
             env,
             builder,
-            "[resume] continuing after stack_switch, result is {:p}",
+            "[resume] continuing after stack_switch in frame with parent_stack_chain ({}, {:p}), result is {:p}",
+            original_stack_chain.to_raw_parts()[0],
+            original_stack_chain.to_raw_parts()[1],
             result
         );
 
+        // At this point we know nothing about the continuation that just
+        // suspended or returned. In particular, it does not have to be what we
+        // called `resume_contref` earlier on. We must reload the information
+        // about the now active continuation from the VMContext.
+        let new_stack_chain = vmctx.load_stack_chain(env, builder);
+
         // Now the parent contref (or main stack) is active again
-        vmctx.store_stack_chain(env, builder, &parent_stack_chain);
+        vmctx.store_stack_chain(env, builder, &original_stack_chain);
         parent_csi.set_state(env, builder, wasmtime_continuations::State::Running);
-        resume_csi.set_state(env, builder, wasmtime_continuations::State::Suspended);
+
+        // Just for consistency: Reset the length of the handler list to 0,
+        // these handlers are no longer active.
+        handler_list.clear(builder);
 
         // Extract the result and signal bit.
-        let result = ControlEffect::new(result);
-        let signal = ControlEffect::signal(result, env, builder);
+        let result = ControlEffect::from_u64(result);
+        let signal = result.signal(env, builder);
 
         emit_debug_println!(
             env,
@@ -1747,24 +1961,32 @@ pub(crate) fn translate_resume<'a>(
         // the suspend block.
         builder
             .ins()
-            .brif(signal, control_block, &[], return_block, &[]);
+            .brif(signal, suspend_block, &[], return_block, &[]);
 
-        // We do not seal this block, yet, because the effect forwarding block has a back edge to it
-        (result, vm_runtime_limits_ptr)
+        (
+            result,
+            vm_runtime_limits_ptr,
+            original_stack_chain,
+            new_stack_chain,
+        )
     };
 
-    // The control block; here we extract the tag of the suspension
-    // (regardless of whether an actual suspension occurred... the
-    // return_block never reads `tag`).
-    let suspend_tag_addr = {
-        builder.switch_to_block(control_block);
-        builder.seal_block(control_block);
+    // The suspend block: Only used when we suspended, not for returns.
+    // Here we extract the index of the handler to use.
+    let (handler_index, suspended_contobj) = {
+        builder.switch_to_block(suspend_block);
+        builder.seal_block(suspend_block);
+
+        let suspended_continuation = new_stack_chain.unchecked_get_continuation(env, builder);
+        let mut suspended_continuation = tc::VMContRef::new(suspended_continuation);
+        let suspended_csi = suspended_continuation.common_stack_information(env, builder);
+
+        // Note that at the suspend site, we already
+        // 1. Set the state of suspended_continuation to Suspended
+        // 2. Set suspended_continuation.last_ancestor
+        // 3. Broke the continuation chain at suspended_continuation.last_ancestor
 
         // We store parts of the VMRuntimeLimits into the continuation that just suspended.
-        let suspended_chain =
-            tc::StackChain::from_continuation(builder, resume_contref, env.pointer_type());
-        let suspended_csi = suspended_chain.get_common_stack_information(env, builder);
-        let parent_csi = parent_stack_chain.get_common_stack_information(env, builder);
         suspended_csi.load_limits_from_vmcontext(
             env,
             builder,
@@ -1776,130 +1998,92 @@ pub(crate) fn translate_resume<'a>(
 
         // Afterwards (!), restore parts of the VMRuntimeLimits from the
         // parent of the suspended continuation (which is now active).
+        let parent_csi = original_stack_chain.get_common_stack_information(env, builder);
         parent_csi.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
-        // Extract the tag
-        let tag = ControlEffect::value(resume_result, env, builder);
-        emit_debug_println!(env, builder, "[resume] in suspend block, tag is {:p}", tag);
+        // Extract the handler index
+        let handler_index = ControlEffect::handler_index(resume_result, env, builder);
 
-        // We need to terminate this block before being allowed to switch to another one
+        let revision = suspended_continuation.get_revision(env, builder);
+        let suspended_contobj =
+            shared::assemble_contobj(env, builder, revision, suspended_continuation.address);
+
+        emit_debug_println!(
+            env,
+            builder,
+            "[resume] in suspend block, handler index is {}, new continuation is {:p}, with existing revision {}",
+            handler_index,
+            suspended_continuation.address,
+            revision
+        );
+
+        // We need to terminate this block before being allowed to switch to
+        // another one.
         builder.ins().jump(dispatch_block, &[]);
-        builder.seal_block(dispatch_block);
 
-        tag
+        (handler_index, suspended_contobj)
     };
 
-    // Forward block: The last block in the if-then-else dispatch
-    // chain. Control flows to this block when the table on (resume
-    // ...) does not have a matching mapping (on ...).
+    // For technical reasons, the jump table needs to have a default
+    // block. In our case, it should be unreachable, since the handler
+    // index we dispatch on should correspond to a an actual handler
+    // block in the jump table.
+    let jt_default_block = builder.create_block();
     {
-        builder.switch_to_block(forward_block);
+        builder.switch_to_block(jt_default_block);
+        builder.set_cold_block(jt_default_block);
 
-        let parent_contref =
-            parent_stack_chain.unwrap_continuation_or_trap(env, builder, crate::TRAP_UNHANDLED_TAG);
-
-        let cref = tc::VMContRef::new(parent_contref);
-        let fiber_stack = cref.get_fiber_stack(env, builder);
-        let control_context_ptr = fiber_stack.load_control_context(env, builder);
-
-        // We pass on the previosuly received ControlEffect value as is.
-        let suspend_payload = resume_result.0 .0;
-
-        // We suspend, thus deferring handling to the parent.  We do
-        // nothing about tag *parameters*, these remain unchanged
-        // within the payload buffer associated with the whole
-        // VMContext.
-        builder
-            .ins()
-            .stack_switch(control_context_ptr, control_context_ptr, suspend_payload);
-
-        // "Tag return values" (i.e., values provided by cont.bind or
-        // resume to the continuation) are actually stored in
-        // `VMContRef`s, and we need to move them down the chain back
-        // to the `VMContRef` where we originally suspended.
-        typed_continuations_forward_tag_return_values(env, builder, parent_contref, resume_contref);
-
-        // We create a back edge to the resume block.  Note that both
-        // `resume_contobj` and `parent_stack_chain` remain unchanged:
-        // In the current design, where forwarding is implemented by
-        // suspending up the chain of parent continuations and
-        // subsequently resume-ing back down the chain, both the
-        // continuation being resumed and its parent stay the same.
-        builder.ins().jump(resume_block, &[]);
-        builder.seal_block(resume_block);
+        builder.ins().trap(crate::TRAP_UNREACHABLE);
     }
 
-    // Dispatch block. Now we create the nested if-then-else chain,
-    // which attempts to find a suitable handler for
-    // `suspend_tag_addr`.
-    let mut tag_seen = std::collections::HashSet::new(); // Used to keep track of tags
-    let mut tail_block = dispatch_block;
-    for &(handle_tag, target_block) in resumetable {
-        // Skip if this tag has been seen previously.
-        if !tag_seen.insert(handle_tag) {
-            continue;
+    // We create a preamble block for each of the actual handler blocks: It
+    // reads the necessary arguments and passes them to the actual handler
+    // block, together with the continuation object.
+    let target_preamble_blocks = {
+        let mut preamble_blocks = vec![];
+
+        for &(handle_tag, target_block) in resumetable {
+            let preamble_block = builder.create_block();
+            preamble_blocks.push(preamble_block);
+            builder.switch_to_block(preamble_block);
+
+            let param_types = env.tag_params(handle_tag);
+            let param_types: Vec<ir::Type> = param_types
+                .iter()
+                .map(|wty| crate::value_type(env.isa, *wty))
+                .collect();
+            let mut args = typed_continuations_load_payloads(env, builder, &param_types);
+            args.push(suspended_contobj);
+
+            builder.ins().jump(target_block, &args);
         }
-        // Switch to the current tail of the dispatch chain.
-        builder.switch_to_block(tail_block);
-        // Generate the test for whether `handle_tag` matches the suspension tag.
-        let tag_addr = shared::tag_address(env, builder, handle_tag);
-        emit_debug_println!(
-            env,
-            builder,
-            "[resume] comparing handle_tag_addr = {:p} and suspend_tag_addr = {:p}",
-            tag_addr,
-            suspend_tag_addr
-        );
-        let cond = builder.ins().icmp(IntCC::Equal, suspend_tag_addr, tag_addr);
-        // Create landing sites:
-        // 1. If the tags match, then jump to the preamble block to load data
-        // 2. Otherwise jump to the next tail block
-        let target_preamble_block = builder.create_block();
-        tail_block = builder.create_block();
-        builder
-            .ins()
-            .brif(cond, target_preamble_block, &[], tail_block, &[]);
-        builder.seal_block(tail_block);
-        builder.seal_block(target_preamble_block);
 
-        // Fill the preamble block.
-        builder.switch_to_block(target_preamble_block);
-        // Load and push arguments.
-        let param_types = env.tag_params(handle_tag);
-        let param_types: Vec<ir::Type> = param_types
+        preamble_blocks
+    };
+
+    // Dispatch block. All it does is jump to the right premable block based on
+    // the handler index.
+    {
+        builder.switch_to_block(dispatch_block);
+        builder.seal_block(dispatch_block);
+
+        let default_bc = builder.func.dfg.block_call(jt_default_block, &[]);
+
+        let adapter_bcs: Vec<BlockCall> = target_preamble_blocks
             .iter()
-            .map(|wty| crate::value_type(env.isa, *wty))
+            .map(|b| builder.func.dfg.block_call(*b, &[]))
             .collect();
-        let mut args = typed_continuations_load_payloads(env, builder, &param_types);
 
-        // Detatch the `VMContRef` by setting its parent link to
-        // `StackChain::Absent`.
-        let pointer_type = env.pointer_type();
-        let chain = tc::StackChain::absent(builder, pointer_type);
-        let mut vmcontref = tc::VMContRef::new(resume_contref);
-        vmcontref.set_parent_stack_chain(env, builder, &chain);
+        let jt_data = JumpTableData::new(default_bc, &adapter_bcs);
+        let jt = builder.create_jump_table(jt_data);
 
-        // Create and push the continuation object. We only create
-        // them here because we don't need them when forwarding.
-        let contobj = shared::assemble_contobj(env, builder, next_revision, resume_contref);
-        emit_debug_println!(
-            env,
-            builder,
-            "[resume] revision = {}, contref = {:p}",
-            next_revision,
-            resume_contref
-        );
-        args.push(contobj);
+        builder.ins().br_table(handler_index, jt);
 
-        // Now jump to the actual user-defined block handling this
-        // tag, as given by the resume table.
-        builder.ins().jump(target_block, &args);
+        for preamble_block in target_preamble_blocks {
+            builder.seal_block(preamble_block);
+        }
+        builder.seal_block(jt_default_block);
     }
-    // The last tail_block unconditionally jumps to the forwarding
-    // block.
-    builder.switch_to_block(tail_block);
-    builder.ins().jump(forward_block, &[]);
-    builder.seal_block(forward_block);
 
     // Return block: Jumped to by resume block if continuation
     // returned normally.
@@ -1907,18 +2091,26 @@ pub(crate) fn translate_resume<'a>(
         builder.switch_to_block(return_block);
         builder.seal_block(return_block);
 
+        // If we got a return signal, a continuation must have been running.
+        let returned_contref = new_stack_chain.unchecked_get_continuation(env, builder);
+        let returned_contref = tc::VMContRef::new(returned_contref);
+
         // Restore parts of the VMRuntimeLimits from the parent of the
         // returned continuation (which is now active).
-        let parent_csi = parent_stack_chain.get_common_stack_information(env, builder);
+        let parent_csi = original_stack_chain.get_common_stack_information(env, builder);
         parent_csi.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
-        let co = tc::VMContRef::new(resume_contref);
-        let resume_csi = co.common_stack_information(env, builder);
-        resume_csi.set_state(env, builder, wasmtime_continuations::State::Returned);
+        let returned_csi = returned_contref.common_stack_information(env, builder);
+        returned_csi.set_state(env, builder, wasmtime_continuations::State::Returned);
 
         // Load and push the results.
         let returns = env.continuation_returns(type_index).to_vec();
-        let values = typed_continuations_load_return_values(env, builder, &returns, resume_contref);
+        let values = typed_continuations_load_return_values(
+            env,
+            builder,
+            &returns,
+            returned_contref.address,
+        );
 
         // The continuation has returned and all `VMContObjs` to it
         // should have been be invalidated. We may safely deallocate
@@ -1926,7 +2118,7 @@ pub(crate) fn translate_resume<'a>(
         // object if there are no lingering references to it,
         // otherwise we have to keep it alive (though it can be
         // repurposed).
-        shared::typed_continuations_drop_cont_ref(env, builder, resume_contref);
+        shared::typed_continuations_drop_cont_ref(env, builder, returned_contref.address);
 
         return values;
     }
@@ -1944,30 +2136,62 @@ pub(crate) fn translate_suspend<'a>(
     let tag_addr = shared::tag_address(env, builder, tag_index);
     emit_debug_println!(env, builder, "[suspend] suspending with tag {:p}", tag_addr);
 
-    // This traps with an unhandled tag code if we are on the main stack.
-    let contref = typed_continuations_load_continuation_reference(env, builder);
-    let cref = tc::VMContRef::new(contref);
+    let vmctx = env.vmctx_val(&mut builder.cursor());
+    let vmctx = tc::VMContext::new(vmctx, env.pointer_type());
+    let active_stack_chain = vmctx.load_stack_chain(env, builder);
 
-    let fiber_stack = cref.get_fiber_stack(env, builder);
-    let control_context_ptr = fiber_stack.load_control_context(env, builder);
+    let (end_of_chain_contref, handler_index) =
+        search_handler(env, builder, &active_stack_chain, tag_addr);
 
-    let suspend_payload = ControlEffect::make_suspend(env, builder, tag_addr).0 .0;
+    emit_debug_println!(
+        env,
+        builder,
+        "[suspend] found handler: end of chain contref is {:p}, handler index is {}",
+        end_of_chain_contref,
+        handler_index
+    );
 
+    // If we get here, the search_handler logic succeeded (i.e., did not trap).
+    // Thus, there is at least one parent, so we are not on the main stack.
+    // Can therefore extract continuation directly.
+    let active_contref = active_stack_chain.unchecked_get_continuation(env, builder);
+    let active_contref = tc::VMContRef::new(active_contref);
+    let mut end_of_chain_contref = tc::VMContRef::new(end_of_chain_contref);
+
+    active_contref.set_last_ancestor(env, builder, end_of_chain_contref.address);
+
+    // Set current continuation to suspended and break up handler chain.
+    let active_contref_csi = active_contref.common_stack_information(env, builder);
     if cfg!(debug_assertions) {
-        let is_running = cref.common_stack_information(env, builder).has_state(
-            env,
-            builder,
-            wasmtime_continuations::State::Running,
-        );
+        let is_running =
+            active_contref_csi.has_state(env, builder, wasmtime_continuations::State::Running);
         emit_debug_assert!(env, builder, is_running);
     }
+
+    active_contref_csi.set_state(env, builder, wasmtime_continuations::State::Suspended);
+    let absent_chain_link = StackChain::absent(builder, env.pointer_type());
+    end_of_chain_contref.set_parent_stack_chain(env, builder, &absent_chain_link);
+
+    let suspend_payload = ControlEffect::make_suspend(env, builder, handler_index).to_u64();
+
+    // Note that the control context we use for switching is the one
+    // at the end of the chain, not the one in active_contref!
+    // This also means that stack_switch saves the information about
+    // the current stack in the control context located in the stack
+    // of end_of_chain_contref.
+    let fiber_stack = end_of_chain_contref.get_fiber_stack(env, builder);
+    let control_context_ptr = fiber_stack.load_control_context(env, builder);
 
     builder
         .ins()
         .stack_switch(control_context_ptr, control_context_ptr, suspend_payload);
 
-    let return_values =
-        typed_continuations_load_tag_return_values(env, builder, contref, tag_return_types);
+    let return_values = typed_continuations_load_tag_return_values(
+        env,
+        builder,
+        active_contref.address,
+        tag_return_types,
+    );
 
     return_values
 }

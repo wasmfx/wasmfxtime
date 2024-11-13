@@ -212,12 +212,6 @@ macro_rules! foreach_builtin_function {
             // Creates a new continuation from a funcref.
             tc_cont_new(vmctx: vmctx, r: pointer, param_count: i32, result_count: i32) -> pointer;
 
-            // Sets the tag return values of `child_contref` to those of `parent_contref`.
-            // This is implemented by exchanging the pointers to the underlying buffers.
-            // `child_contref` must not currently have a tag return value buffer.
-            // `parent_contref` may or may not have one.
-            tc_cont_ref_forward_tag_return_values_buffer(vmctx: vmctx, parent_contref: pointer, child_contref : pointer);
-
             // TODO
             tc_drop_cont_ref(vmctx: vmctx, contref: pointer);
 
