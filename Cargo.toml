@@ -122,6 +122,7 @@ capstone = { workspace = true }
 object = { workspace = true, features = ['std'] }
 wasmtime-test-macros = { path = "crates/test-macros" }
 pulley-interpreter = { workspace = true, features = ["disas"] }
+wasmtime-wast-util = { path = 'crates/wast-util' }
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_Memory"] }
@@ -320,7 +321,7 @@ serde = { version = "1.0.188", default-features = false, features = ['alloc'] }
 serde_derive = "1.0.188"
 serde_json = "1.0.80"
 glob = "0.3.0"
-libfuzzer-sys = "0.4.0"
+libfuzzer-sys = "0.4.8"
 walkdir = "2.3.3"
 cfg-if = "1.0"
 tempfile = "3.1.0"
