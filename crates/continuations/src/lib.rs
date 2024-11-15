@@ -33,19 +33,6 @@ macro_rules! debug_println {
     }
 }
 
-/// Makes the types available that we use for various fields.
-pub mod types {
-    /// Types used by `Payloads` struct
-    pub mod payloads {
-        /// type of length
-        pub type Length = u32;
-        /// type of capacity
-        pub type Capacity = u32;
-        /// Type of the entries in the actual buffer
-        pub type DataEntries = u128;
-    }
-}
-
 /// Runtime configuration options for WasmFX that can be set via the command
 /// line.
 ///
@@ -111,20 +98,20 @@ unsafe impl Sync for StackLimits {}
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-/// This is a Vector-like type. However, we consider `Payloads` objects NOT to
-/// own the underlying data buffer. As a result, it does not implement Drop, all
-/// (de)allocation must be done manually.
-pub struct Payloads {
+/// A growable container type. Unlike Rust's `Vec`, we consider `Vector`
+/// objects NOT to own the underlying data buffer. As a result, it does not
+/// implement `Drop`, all (de)allocation must be done manually.
+pub struct Vector<T> {
     /// Number of currently occupied slots.
-    pub length: types::payloads::Length,
+    pub length: u32,
     /// Number of slots in the data buffer. Note that this is *not* the size of
     /// the buffer in bytes!
-    pub capacity: types::payloads::Capacity,
+    pub capacity: u32,
     /// This is null if and only if capacity (and thus also `length`) are 0.
-    pub data: *mut u128,
+    pub data: *mut T,
 }
 
-impl Payloads {
+impl<T> Vector<T> {
     #[inline]
     pub fn new(capacity: u32) -> Self {
         let data = if capacity == 0 {
@@ -143,7 +130,7 @@ impl Payloads {
     }
 
     /// Ensures that we can hold at least the required number of elements.
-    /// Does not preserve existing elements and can therefore only be called on empty `Payloads`.
+    /// Does not preserve existing elements and can therefore only be called on empty `Vector`.
     #[inline]
     pub fn ensure_capacity(&mut self, required_capacity: u32) {
         assert_eq!(self.length, 0);
@@ -175,6 +162,12 @@ impl Payloads {
         self.length = 0;
     }
 }
+
+/// Type of vectors used for handling payloads passed between continuations.
+///
+/// The actual type argument should be wasmtime::runtime::vm::vmcontext::ValRaw,
+/// but we don't have access to that here.
+pub type Payloads = Vector<u128>;
 
 /// Discriminant of variant `Absent` in
 /// `wasmtime_runtime::continuation::StackChain`.
@@ -224,17 +217,18 @@ impl From<State> for i32 {
 
 /// Defines offsets of the fields in the continuation-related types
 pub mod offsets {
-    /// Offsets of fields in `Payloads`
-    pub mod payloads {
-        use crate::Payloads;
+    /// Offsets of fields in `Vector`.
+    /// Note that these are independent from the type parameter `T`.
+    pub mod vector {
+        use crate::Vector;
         use memoffset::offset_of;
 
         /// Offset of `capacity` field
-        pub const CAPACITY: usize = offset_of!(Payloads, capacity);
+        pub const CAPACITY: usize = offset_of!(Vector<()>, capacity);
         /// Offset of `data` field
-        pub const DATA: usize = offset_of!(Payloads, data);
+        pub const DATA: usize = offset_of!(Vector<()>, data);
         /// Offset of `length` field
-        pub const LENGTH: usize = offset_of!(Payloads, length);
+        pub const LENGTH: usize = offset_of!(Vector<()>, length);
     }
 
     /// Offsets of fields in `wasmtime_runtime::continuation::VMContRef`.
