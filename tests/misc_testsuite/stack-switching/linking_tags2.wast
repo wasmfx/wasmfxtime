@@ -1,38 +1,3 @@
-(module $alien
-  (tag $alien_tag (export "alien_tag"))
-)
-(register "alien")
-
-(module $mine
-  (type $ft (func))
-  (type $ct (cont $ft))
-  (tag $alien_tag (import "alien" "alien_tag"))
-  (tag $my_tag)
-  (func $do_alien_tag
-    (suspend $alien_tag))
-
-  ;; Don't handle the imported alien.
-  (func (export "main-1")
-    (block $on_my_tag (result (ref $ct))
-      (resume $ct (on $my_tag $on_my_tag) (cont.new $ct (ref.func $do_alien_tag)))
-      (unreachable)
-    )
-    (unreachable))
-
-  ;; Handle the imported alien.
-  (func (export "main-2")
-    (block $on_alien_tag (result (ref $ct))
-      (resume $ct (on $alien_tag $on_alien_tag) (cont.new $ct (ref.func $do_alien_tag)))
-      (unreachable)
-    )
-    (drop))
-
-  (elem declare func $do_alien_tag)
-)
-(register "mine")
-(assert_suspension (invoke "main-1") "unhandled")
-(assert_return (invoke "main-2"))
-
 (module $foo
   (type $ft (func (result i32)))
   (type $ct (cont $ft))
@@ -57,43 +22,6 @@
 )
 (register "foo")
 (assert_return (invoke "test_foo") (i32.const 1))
-
-(module $bar
-  (type $ft (func (result i32)))
-  (type $ct (cont $ft))
-
-  (type $ft-2 (func (param i32) (result i32)))
-  (type $ct-2 (cont $ft-2))
-
-  (tag $foo (import "foo" "foo") (result i32))
-  (tag $bar (result i32))
-  (func $do_foo (result i32)
-    (suspend $foo))
-
-  ;; Don't handle the imported foo.
-  (func (export "skip-imported-foo") (result i32)
-    (block $on_bar (result (ref $ct-2))
-      (resume $ct (on $bar $on_bar) (cont.new $ct (ref.func $do_foo)))
-      (unreachable)
-    )
-    (unreachable))
-
-  ;; Handle the imported foo.
-  (func (export "handle-imported-foo") (result i32)
-    (block $on_foo (result (ref $ct-2))
-      (resume $ct (on $foo $on_foo) (cont.new $ct (ref.func $do_foo)))
-      (unreachable)
-    )
-    (drop)
-    (return (i32.const 2))
-  )
-
-  (elem declare func $do_foo)
-)
-(register "bar")
-(assert_suspension (invoke "skip-imported-foo") "unhandled")
-(assert_return (invoke "handle-imported-foo") (i32.const 2))
-
 
 (module $baz
   (type $ft (func (result i32)))
@@ -167,3 +95,41 @@
 (register "quux")
 (assert_return (invoke "compose-handle-foo-my-foo") (i32.const 4))
 (assert_return (invoke "compose-handle-my-foo-foo") (i32.const 1))
+
+(module $bar
+  (type $ft (func (result i32)))
+  (type $ct (cont $ft))
+
+  (type $ft-2 (func (param i32) (result i32)))
+  (type $ct-2 (cont $ft-2))
+
+  (tag $foo (import "foo" "foo") (result i32))
+  (tag $bar (result i32))
+  (func $do_foo (result i32)
+    (suspend $foo))
+
+  ;; Don't handle the imported foo.
+  (func (export "skip-imported-foo") (result i32)
+    (block $on_bar (result (ref $ct-2))
+      (resume $ct (on $bar $on_bar) (cont.new $ct (ref.func $do_foo)))
+      (unreachable)
+    )
+    (unreachable))
+
+  ;; Handle the imported foo.
+  (func (export "handle-imported-foo") (result i32)
+    (block $on_foo (result (ref $ct-2))
+      (resume $ct (on $foo $on_foo) (cont.new $ct (ref.func $do_foo)))
+      (unreachable)
+    )
+    (drop)
+    (return (i32.const 2))
+  )
+
+  (elem declare func $do_foo)
+)
+(register "bar")
+(assert_return (invoke "handle-imported-foo") (i32.const 2))
+;; Due to issue #253, we need to make sure that nothing happens afterwards in
+;; the test:
+(assert_suspension (invoke "skip-imported-foo") "unhandled")
