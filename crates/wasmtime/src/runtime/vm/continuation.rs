@@ -18,6 +18,8 @@ cfg_if::cfg_if! {
 /// represented by a VMContObj not only encompasses the pointed-to
 /// VMContRef, but also all of its parents:
 ///
+/// ```text
+///
 ///                     +----------------+
 ///                 +-->|   VMContRef    |
 ///                 |   +----------------+
@@ -33,6 +35,7 @@ cfg_if::cfg_if! {
 ///                 |   +----------------+
 ///                 +---|   VMContRef    |    <--  VMContObj
 ///                     +----------------+
+/// ```
 ///
 /// For performance reasons, the VMContRef at the bottom of this chain
 /// (i.e., the one pointed to by the VMContObj) has a pointer to the
