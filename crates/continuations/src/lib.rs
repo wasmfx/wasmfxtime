@@ -74,7 +74,7 @@ pub struct CommonStackInformation {
     pub state: State,
 
     /// Only in use when state is `Parent`.
-    /// Otherwise, the list may remaining allocated, but its `length` must be 0.
+    /// Otherwise, the list may remain allocated, but its `length` must be 0.
     ///
     /// Represents the handlers that this stack installed when resume-ing a
     /// continuation with
