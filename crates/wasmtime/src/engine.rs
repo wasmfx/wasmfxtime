@@ -11,7 +11,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use object::write::{Object, StandardSegment};
 use object::SectionKind;
 #[cfg(feature = "std")]
-use std::path::Path;
+use std::{fs::File, path::Path};
 use wasmparser::WasmFeatures;
 use wasmtime_environ::obj;
 use wasmtime_environ::{FlagValue, ObjectKind, Tunables};
@@ -97,6 +97,7 @@ impl Engine {
             // configured. This is the per-program initialization required for
             // handling traps, such as configuring signals, vectored exception
             // handlers, etc.
+            #[cfg(all(feature = "signals-based-traps", not(miri)))]
             crate::runtime::vm::init_traps(config.macos_use_mach_ports);
             #[cfg(feature = "debug-builtins")]
             crate::runtime::vm::debug_builtins::ensure_exported();
@@ -708,13 +709,12 @@ impl Engine {
     #[cfg(feature = "std")]
     pub(crate) fn load_code_file(
         &self,
-        path: &Path,
+        file: File,
         expected: ObjectKind,
     ) -> Result<Arc<crate::CodeMemory>> {
         self.load_code(
-            crate::runtime::vm::MmapVec::from_file(path).with_context(|| {
-                format!("failed to create file mapping for: {}", path.display())
-            })?,
+            crate::runtime::vm::MmapVec::from_file(file)
+                .with_context(|| "Failed to create file mapping".to_string())?,
             expected,
         )
     }
@@ -777,10 +777,12 @@ impl Engine {
     /// If other crashes are seen from using this method please feel free to
     /// file an issue to update the documentation here with more preconditions
     /// that must be met.
+    #[cfg(feature = "signals-based-traps")]
     pub unsafe fn unload_process_handlers(self) {
         assert_eq!(Arc::weak_count(&self.inner), 0);
         assert_eq!(Arc::strong_count(&self.inner), 1);
 
+        #[cfg(not(miri))]
         crate::runtime::vm::deinit_traps();
     }
 }

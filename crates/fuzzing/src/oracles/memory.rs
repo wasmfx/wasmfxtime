@@ -56,7 +56,10 @@ pub fn check_memory_accesses(input: MemoryAccesses) {
         Ok(x) => x,
         Err(e) => {
             log::info!("Failed to instantiate: {e:?}");
-            assert!(format!("{e:?}").contains("Cannot allocate memory"));
+            assert!(
+                format!("{e:?}").contains("Cannot allocate memory"),
+                "bad error: {e:?}",
+            );
             return;
         }
     };
@@ -235,7 +238,8 @@ pub fn check_memory_accesses(input: MemoryAccesses) {
     };
 
     do_accesses(&mut store, "initial size");
-    let _ = memory.grow(&mut store, u64::from(growth));
+    let res = memory.grow(&mut store, u64::from(growth));
+    log::debug!("grow {growth} -> {res:?}");
     do_accesses(&mut store, "after growing");
 }
 
