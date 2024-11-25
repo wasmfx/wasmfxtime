@@ -64,7 +64,7 @@ pub mod wasmfx_pooling {
         round_up_to_pow2,
     };
     use crate::runtime::vm::sys::vm::commit_pages;
-    use crate::vm::Mmap;
+    use crate::vm::{mmap::AlignedLength, Mmap};
     use anyhow::{anyhow, bail, Context, Result};
 
     /// Represents a pool of `VMContRef`s and their corresponding execution stacks.
@@ -81,7 +81,7 @@ pub mod wasmfx_pooling {
     /// from the pool.
     pub struct InnerAllocator {
         continuations: Vec<VMContRef>,
-        stack_mapping: Mmap,
+        stack_mapping: Mmap<AlignedLength>,
         stack_size: usize,
         max_stacks: usize,
         page_size: usize,
