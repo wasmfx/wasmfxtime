@@ -378,6 +378,7 @@ impl Metadata<'_> {
             relaxed_simd_deterministic,
             winch_callable,
             signals_based_traps,
+            memory_init_cow,
             // This doesn't affect compilation, it's just a runtime setting.
             memory_reservation_for_growth: _,
 
@@ -439,6 +440,11 @@ impl Metadata<'_> {
             signals_based_traps,
             other.signals_based_traps,
             "Signals-based traps",
+        )?;
+        Self::check_bool(
+            memory_init_cow,
+            other.memory_init_cow,
+            "memory initialization with CoW",
         )?;
 
         Ok(())
