@@ -54,12 +54,15 @@ use super::{
     index_allocator::{MemoryInModule, ModuleAffinityIndexAllocator, SlotId},
     MemoryAllocationIndex,
 };
-use crate::runtime::vm::mpk::{self, ProtectionKey, ProtectionMask};
 use crate::runtime::vm::{
     mmap::AlignedLength, CompiledModuleId, InstanceAllocationRequest, InstanceLimits, Memory,
     MemoryImageSlot, Mmap, MpkEnabled, PoolingInstanceAllocatorConfig,
 };
 use crate::{prelude::*, vm::round_usize_up_to_host_pages};
+use crate::{
+    runtime::vm::mpk::{self, ProtectionKey, ProtectionMask},
+    vm::HostAlignedByteCount,
+};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -129,7 +132,7 @@ pub struct MemoryPool {
     /// with `madvise` back to the kernel.
     ///
     /// Only applicable on Linux.
-    pub(super) keep_resident: usize,
+    pub(super) keep_resident: HostAlignedByteCount,
 
     /// Keep track of protection keys handed out to initialized stores; this
     /// allows us to round-robin the assignment of stores to stripes.
@@ -187,8 +190,9 @@ impl MemoryPool {
             "creating memory pool: {constraints:?} -> {layout:?} (total: {})",
             layout.total_slab_bytes()?
         );
-        let mut mapping = Mmap::accessible_reserved(0, layout.total_slab_bytes()?)
-            .context("failed to create memory pool mapping")?;
+        let mut mapping =
+            Mmap::accessible_reserved(HostAlignedByteCount::ZERO, layout.total_slab_bytes()?)
+                .context("failed to create memory pool mapping")?;
 
         // Then, stripe the memory with the available protection keys. This is
         // unnecessary if there is only one stripe color.
@@ -236,7 +240,9 @@ impl MemoryPool {
             image_slots,
             layout,
             memories_per_instance: usize::try_from(config.limits.max_memories_per_module).unwrap(),
-            keep_resident: round_usize_up_to_host_pages(config.linear_memory_keep_resident)?,
+            keep_resident: HostAlignedByteCount::new_rounded_up(
+                config.linear_memory_keep_resident,
+            )?,
             next_available_pkey: AtomicUsize::new(0),
         };
 
@@ -470,7 +476,7 @@ impl MemoryPool {
         maybe_slot.unwrap_or_else(|| {
             MemoryImageSlot::create(
                 self.get_base(allocation_index) as *mut c_void,
-                0,
+                HostAlignedByteCount::ZERO,
                 self.layout.max_memory_bytes,
             )
         })
@@ -618,12 +624,19 @@ impl SlabLayout {
     /// │pre_slab_guard_bytes│slot 1│slot 2│...│slot n│post_slab_guard_bytes│
     /// └────────────────────┴──────┴──────┴───┴──────┴─────────────────────┘
     /// ```
-    fn total_slab_bytes(&self) -> Result<usize> {
-        self.slot_bytes
+    fn total_slab_bytes(&self) -> Result<HostAlignedByteCount> {
+        let byte_count = self
+            .slot_bytes
             .checked_mul(self.num_slots)
             .and_then(|c| c.checked_add(self.pre_slab_guard_bytes))
             .and_then(|c| c.checked_add(self.post_slab_guard_bytes))
-            .ok_or_else(|| anyhow!("total size of memory reservation exceeds addressable memory"))
+            .ok_or_else(|| {
+                anyhow!("total size of memory reservation exceeds addressable memory")
+            })?;
+
+        // TODO: pre_slab_guard_bytes and post_slab_guard_bytes should be
+        // HostAlignedByteCount instances.
+        HostAlignedByteCount::new(byte_count).err2anyhow()
     }
 
     /// Returns the number of Wasm bytes from the beginning of one slot to the
@@ -915,10 +928,6 @@ mod tests {
         assert!(
             is_aligned(s.post_slab_guard_bytes),
             "post-slab guard region is not page-aligned: {c:?} => {s:?}"
-        );
-        assert!(
-            is_aligned(s.total_slab_bytes().unwrap()),
-            "slab is not page-aligned: {c:?} => {s:?}"
         );
 
         // Check that we use no more or less stripes than needed.
