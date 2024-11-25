@@ -16,7 +16,7 @@ use core::future::Future;
 use core::mem::{self, MaybeUninit};
 use core::num::NonZeroUsize;
 use core::pin::Pin;
-use core::ptr::{self, NonNull};
+use core::ptr::NonNull;
 use wasmtime_environ::VMSharedTypeIndex;
 
 /// A reference to the abstract `nofunc` heap value.
@@ -1056,36 +1056,25 @@ impl Func {
     pub unsafe fn call_unchecked(
         &self,
         mut store: impl AsContextMut,
-        params_and_returns: *mut ValRaw,
-        params_and_returns_capacity: usize,
+        params_and_returns: *mut [ValRaw],
     ) -> Result<()> {
         let mut store = store.as_context_mut();
         let data = &store.0.store_data()[self.0];
         let func_ref = data.export().func_ref;
-        Self::call_unchecked_raw(
-            &mut store,
-            func_ref,
-            params_and_returns,
-            params_and_returns_capacity,
-        )
+        Self::call_unchecked_raw(&mut store, func_ref, params_and_returns)
     }
 
     pub(crate) unsafe fn call_unchecked_raw<T>(
         store: &mut StoreContextMut<'_, T>,
         func_ref: NonNull<VMFuncRef>,
-        params_and_returns: *mut ValRaw,
-        params_and_returns_capacity: usize,
+        params_and_returns: *mut [ValRaw],
     ) -> Result<()> {
         invoke_wasm_and_catch_traps(
             store,
             |caller| {
-                let func_ref = func_ref.as_ref();
-                (func_ref.array_call)(
-                    func_ref.vmctx,
-                    caller.cast::<VMOpaqueContext>(),
-                    params_and_returns,
-                    params_and_returns_capacity,
-                )
+                func_ref
+                    .as_ref()
+                    .array_call(caller.cast::<VMOpaqueContext>(), params_and_returns)
             },
             func_ref.as_ref().vmctx,
         )
@@ -1261,7 +1250,10 @@ impl Func {
         }
 
         unsafe {
-            self.call_unchecked(&mut *store, values_vec.as_mut_ptr(), values_vec_size)?;
+            self.call_unchecked(
+                &mut *store,
+                core::ptr::slice_from_raw_parts_mut(values_vec.as_mut_ptr(), values_vec_size),
+            )?;
         }
 
         for ((i, slot), val) in results.iter_mut().enumerate().zip(&values_vec) {
@@ -2336,12 +2328,8 @@ impl HostContext {
 
         let ctx = unsafe {
             VMArrayCallHostFuncContext::new(
-                VMFuncRef {
-                    array_call,
-                    wasm_call: None,
-                    type_index,
-                    vmctx: ptr::null_mut(),
-                },
+                array_call,
+                type_index,
                 Box::new(HostFuncState {
                     func,
                     ty: ty.into_registered_type(),

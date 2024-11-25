@@ -117,6 +117,9 @@ define_tunables! {
         /// Whether or not the host will be using native signals (e.g. SIGILL,
         /// SIGSEGV, etc) to implement traps.
         pub signals_based_traps: bool,
+
+        /// Whether CoW images might be used to initialize linear memories.
+        pub memory_init_cow: bool,
     }
 
     pub struct ConfigTunables {
@@ -151,7 +154,7 @@ impl Tunables {
     }
 
     /// Returns the default set of tunables for running under MIRI.
-    pub fn default_miri() -> Tunables {
+    pub const fn default_miri() -> Tunables {
         Tunables {
             collector: None,
 
@@ -175,11 +178,12 @@ impl Tunables {
             relaxed_simd_deterministic: false,
             winch_callable: false,
             signals_based_traps: true,
+            memory_init_cow: true,
         }
     }
 
     /// Returns the default set of tunables for running under a 32-bit host.
-    pub fn default_u32() -> Tunables {
+    pub const fn default_u32() -> Tunables {
         Tunables {
             // For 32-bit we scale way down to 10MB of reserved memory. This
             // impacts performance severely but allows us to have more than a
@@ -193,7 +197,7 @@ impl Tunables {
     }
 
     /// Returns the default set of tunables for running under a 64-bit host.
-    pub fn default_u64() -> Tunables {
+    pub const fn default_u64() -> Tunables {
         Tunables {
             // 64-bit has tons of address space to static memories can have 4gb
             // address space reservations liberally by default, allowing us to

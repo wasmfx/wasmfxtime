@@ -490,6 +490,10 @@ pub struct CommonOptions {
     pub wasm: WasmOptions,
     #[arg(skip)]
     pub wasi: WasiOptions,
+
+    /// The target triple; default is the host triple
+    #[arg(long, value_name = "TARGET")]
+    pub target: Option<String>,
 }
 
 macro_rules! match_feature {
@@ -551,11 +555,7 @@ impl CommonOptions {
         Ok(())
     }
 
-    pub fn config(
-        &mut self,
-        target: Option<&str>,
-        pooling_allocator_default: Option<bool>,
-    ) -> Result<Config> {
+    pub fn config(&mut self, pooling_allocator_default: Option<bool>) -> Result<Config> {
         self.configure();
         let mut config = Config::new();
 
@@ -570,7 +570,7 @@ impl CommonOptions {
             _ => err,
         }
         match_feature! {
-            ["cranelift" : target]
+            ["cranelift" : &self.target]
             target => config.target(target)?,
             _ => err,
         }
@@ -933,33 +933,5 @@ impl CommonOptions {
             ("gc", function_references, wasm_function_references)
         }
         Ok(())
-    }
-}
-
-impl PartialEq for CommonOptions {
-    fn eq(&self, other: &CommonOptions) -> bool {
-        let mut me = self.clone();
-        me.configure();
-        let mut other = other.clone();
-        other.configure();
-        let CommonOptions {
-            opts_raw: _,
-            codegen_raw: _,
-            debug_raw: _,
-            wasm_raw: _,
-            wasi_raw: _,
-            configured: _,
-
-            opts,
-            codegen,
-            debug,
-            wasm,
-            wasi,
-        } = me;
-        opts == other.opts
-            && codegen == other.codegen
-            && debug == other.debug
-            && wasm == other.wasm
-            && wasi == other.wasi
     }
 }

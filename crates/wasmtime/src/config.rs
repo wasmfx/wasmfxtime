@@ -152,7 +152,6 @@ pub struct Config {
     pub(crate) async_support: bool,
     pub(crate) module_version: ModuleVersionStrategy,
     pub(crate) parallel_compilation: bool,
-    pub(crate) memory_init_cow: bool,
     pub(crate) memory_guaranteed_dense_image_size: u64,
     pub(crate) force_memory_init_memfd: bool,
     pub(crate) wmemcheck: bool,
@@ -258,9 +257,6 @@ impl Config {
             async_support: false,
             module_version: ModuleVersionStrategy::default(),
             parallel_compilation: !cfg!(miri),
-            // If signals are disabled then virtual memory is probably mostly
-            // disabled so also disable the use of CoW by default.
-            memory_init_cow: cfg!(feature = "signals-based-traps"),
             memory_guaranteed_dense_image_size: 16 << 20,
             force_memory_init_memfd: false,
             wmemcheck: false,
@@ -1842,7 +1838,7 @@ impl Config {
     /// [IPI]: https://en.wikipedia.org/wiki/Inter-processor_interrupt
     #[cfg(feature = "signals-based-traps")]
     pub fn memory_init_cow(&mut self, enable: bool) -> &mut Self {
-        self.memory_init_cow = enable;
+        self.tunables.memory_init_cow = Some(enable);
         self
     }
 
@@ -1953,7 +1949,42 @@ impl Config {
     fn compiler_panicking_wasm_features(&self) -> WasmFeatures {
         #[cfg(any(feature = "cranelift", feature = "winch"))]
         match self.compiler_config.strategy {
-            None | Some(Strategy::Cranelift) => WasmFeatures::empty(),
+            None | Some(Strategy::Cranelift) => match self.compiler_target().architecture {
+                // Pulley doesn't support most of wasm at this time and there's
+                // lots of panicking bits and pieces within the backend. This
+                // doesn't fully cover all panicking cases but it's at least a
+                // starting place to have a ratchet. As the pulley backend is
+                // developed this'll get filtered down over time.
+                target_lexicon::Architecture::Pulley32 | target_lexicon::Architecture::Pulley64 => {
+                    WasmFeatures::SATURATING_FLOAT_TO_INT
+                        | WasmFeatures::SIGN_EXTENSION
+                        | WasmFeatures::REFERENCE_TYPES
+                        | WasmFeatures::MULTI_VALUE
+                        | WasmFeatures::BULK_MEMORY
+                        | WasmFeatures::SIMD
+                        | WasmFeatures::RELAXED_SIMD
+                        | WasmFeatures::THREADS
+                        | WasmFeatures::SHARED_EVERYTHING_THREADS
+                        | WasmFeatures::TAIL_CALL
+                        | WasmFeatures::FLOATS
+                        | WasmFeatures::MULTI_MEMORY
+                        | WasmFeatures::EXCEPTIONS
+                        | WasmFeatures::MEMORY64
+                        | WasmFeatures::EXTENDED_CONST
+                        | WasmFeatures::FUNCTION_REFERENCES
+                        | WasmFeatures::MEMORY_CONTROL
+                        | WasmFeatures::GC
+                        | WasmFeatures::CUSTOM_PAGE_SIZES
+                        | WasmFeatures::LEGACY_EXCEPTIONS
+                        | WasmFeatures::GC_TYPES
+                        | WasmFeatures::STACK_SWITCHING
+                        | WasmFeatures::WIDE_ARITHMETIC
+                }
+
+                // Other Cranelift backends are either 100% missing or complete
+                // at this time, so no need to further filter.
+                _ => WasmFeatures::empty(),
+            },
             Some(Strategy::Winch) => {
                 let mut unsupported = WasmFeatures::GC
                     | WasmFeatures::FUNCTION_REFERENCES
@@ -2103,6 +2134,7 @@ impl Config {
             tunables.memory_reservation = 0;
             tunables.memory_guard_size = 0;
             tunables.memory_reservation_for_growth = 1 << 20; // 1MB
+            tunables.memory_init_cow = false;
         }
 
         self.tunables.configure(&mut tunables);
@@ -2133,7 +2165,7 @@ impl Config {
         // the defaults here.
         if !cfg!(feature = "signals-based-traps") {
             assert!(!tunables.signals_based_traps);
-            assert!(!self.memory_init_cow);
+            assert!(!tunables.memory_init_cow);
         }
 
         Ok((tunables, features))

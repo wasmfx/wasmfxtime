@@ -10,7 +10,6 @@ use crate::store::StoreOpaque;
 use alloc::sync::Arc;
 use continuation::stack_chain::StackChainCell;
 use core::fmt;
-use core::mem;
 use core::ops::Deref;
 use core::ops::DerefMut;
 use core::ptr::NonNull;
@@ -92,6 +91,8 @@ mod module_id;
 pub use module_id::CompiledModuleId;
 
 #[cfg(feature = "signals-based-traps")]
+mod byte_count;
+#[cfg(feature = "signals-based-traps")]
 mod cow;
 #[cfg(not(feature = "signals-based-traps"))]
 mod cow_disabled;
@@ -100,6 +101,7 @@ mod mmap;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "signals-based-traps")] {
+        pub use crate::runtime::vm::byte_count::*;
         pub use crate::runtime::vm::mmap::Mmap;
         pub use self::cow::{MemoryImage, MemoryImageSlot, ModuleMemoryImages};
     } else {
@@ -294,16 +296,16 @@ impl ModuleRuntimeInfo {
     ///
     /// Returns `None` for Wasm functions which do not escape, and therefore are
     /// not callable from outside the Wasm module itself.
-    fn array_to_wasm_trampoline(&self, index: DefinedFuncIndex) -> Option<VMArrayCallFunction> {
+    fn array_to_wasm_trampoline(
+        &self,
+        index: DefinedFuncIndex,
+    ) -> Option<NonNull<VMArrayCallFunction>> {
         let m = match self {
             ModuleRuntimeInfo::Module(m) => m,
             ModuleRuntimeInfo::Bare(_) => unreachable!(),
         };
-        let ptr = m
-            .compiled_module()
-            .array_to_wasm_trampoline(index)?
-            .as_ptr();
-        Some(unsafe { mem::transmute::<*const u8, VMArrayCallFunction>(ptr) })
+        let ptr = NonNull::from(m.compiled_module().array_to_wasm_trampoline(index)?);
+        Some(ptr.cast())
     }
 
     /// Returns the `MemoryImage` structure used for copy-on-write
@@ -381,15 +383,11 @@ pub fn host_page_size() -> usize {
     };
 }
 
-/// Is `bytes` a multiple of the host page size?
-#[cfg(feature = "signals-based-traps")]
-pub fn usize_is_multiple_of_host_page_size(bytes: usize) -> bool {
-    bytes % host_page_size() == 0
-}
-
 /// Round the given byte size up to a multiple of the host OS page size.
 ///
 /// Returns an error if rounding up overflows.
+///
+/// (Deprecated: consider switching to `HostAlignedByteCount`.)
 #[cfg(feature = "signals-based-traps")]
 pub fn round_u64_up_to_host_pages(bytes: u64) -> Result<u64> {
     let page_size = u64::try_from(crate::runtime::vm::host_page_size()).err2anyhow()?;
@@ -403,6 +401,8 @@ pub fn round_u64_up_to_host_pages(bytes: u64) -> Result<u64> {
 }
 
 /// Same as `round_u64_up_to_host_pages` but for `usize`s.
+///
+/// (Deprecated: consider switching to `HostAlignedByteCount`.)
 #[cfg(feature = "signals-based-traps")]
 pub fn round_usize_up_to_host_pages(bytes: usize) -> Result<usize> {
     let bytes = u64::try_from(bytes).err2anyhow()?;

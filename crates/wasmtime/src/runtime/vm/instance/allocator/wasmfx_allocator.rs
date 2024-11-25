@@ -59,12 +59,11 @@ pub mod wasmfx_on_demand {
 pub mod wasmfx_pooling {
     use super::*;
 
-    use crate::runtime::vm::instance::allocator::pooling::{
-        index_allocator::{SimpleIndexAllocator, SlotId},
-        round_up_to_pow2,
+    use crate::runtime::vm::instance::allocator::pooling::index_allocator::{
+        SimpleIndexAllocator, SlotId,
     };
     use crate::runtime::vm::sys::vm::commit_pages;
-    use crate::vm::Mmap;
+    use crate::vm::{mmap::AlignedLength, HostAlignedByteCount, Mmap};
     use anyhow::{anyhow, bail, Context, Result};
 
     /// Represents a pool of `VMContRef`s and their corresponding execution stacks.
@@ -81,10 +80,10 @@ pub mod wasmfx_pooling {
     /// from the pool.
     pub struct InnerAllocator {
         continuations: Vec<VMContRef>,
-        stack_mapping: Mmap,
-        stack_size: usize,
+        stack_mapping: Mmap<AlignedLength>,
+        stack_size: HostAlignedByteCount,
         max_stacks: usize,
-        page_size: usize,
+        page_size: HostAlignedByteCount,
         index_allocator: SimpleIndexAllocator,
     }
 
@@ -94,34 +93,44 @@ pub mod wasmfx_pooling {
 
             let total_stacks : u32 = 1024 /* total amount of stacks */;
 
-            let page_size = crate::vm::host_page_size();
+            let page_size = HostAlignedByteCount::host_page_size();
 
             // Add a page to the stack size for the guard page when using fiber stacks
             let stack_size = if config.stack_size == 0 {
-                0
+                HostAlignedByteCount::ZERO
             } else {
-                round_up_to_pow2(config.stack_size, page_size)
-                    .checked_add(page_size)
-                    .ok_or_else(|| anyhow!("stack size exceeds addressable memory"))?
+                HostAlignedByteCount::new_rounded_up(config.stack_size)
+                    .and_then(|size| size.checked_add(HostAlignedByteCount::host_page_size()))
+                    .err2anyhow()
+                    .context("stack size exceeds addressable memory")?
             };
 
             let max_stacks = usize::try_from(total_stacks).unwrap();
 
-            let allocation_size = stack_size.checked_mul(max_stacks).ok_or_else(|| {
-                anyhow!("total size of execution stacks exceeds addressable memory")
-            })?;
+            let allocation_size = stack_size
+                .checked_mul(max_stacks)
+                .err2anyhow()
+                .context("total size of execution stacks exceeds addressable memory")?;
 
             let stack_mapping = Mmap::accessible_reserved(allocation_size, allocation_size)
                 .context("failed to create stack pool mapping")?;
 
             // Set up the stack guard pages.
-            if allocation_size > 0 {
+            if !allocation_size.is_zero() {
                 unsafe {
                     for i in 0..max_stacks {
+                        // Safety: i < max_stacks and we've already checked that
+                        // stack_size * max_stacks is valid.
+                        let offset = stack_size.unchecked_mul(i);
                         // Make the stack guard page inaccessible.
-                        let bottom_of_stack = stack_mapping.as_ptr().add(i * stack_size).cast_mut();
-                        mprotect(bottom_of_stack.cast(), page_size, MprotectFlags::empty())
-                            .context("failed to protect stack guard page")?;
+                        let bottom_of_stack =
+                            stack_mapping.as_ptr().add(offset.byte_count()).cast_mut();
+                        mprotect(
+                            bottom_of_stack.cast(),
+                            page_size.byte_count(),
+                            MprotectFlags::empty(),
+                        )
+                        .context("failed to protect stack guard page")?;
                     }
                 }
             }
@@ -160,19 +169,19 @@ pub mod wasmfx_pooling {
 
             unsafe {
                 // Remove the guard page from the size
-                let size_without_guard = self.stack_size - self.page_size;
+                let size_without_guard = self.stack_size.byte_count() - self.page_size.byte_count();
 
                 let bottom_of_stack = self
                     .stack_mapping
                     .as_ptr()
-                    .add(index * self.stack_size)
+                    .add(self.stack_size.unchecked_mul(index).byte_count())
                     .cast_mut();
 
                 commit_pages(bottom_of_stack, size_without_guard)?;
 
                 let stack = super::FiberStack::from_raw_parts(
                     bottom_of_stack,
-                    self.page_size,
+                    self.page_size.byte_count(),
                     size_without_guard,
                 )?;
                 let continuation = &mut self.continuations[index];
@@ -208,7 +217,7 @@ pub mod wasmfx_pooling {
             );
 
             // Remove the guard page from the size
-            let stack_size = self.stack_size - self.page_size;
+            let stack_size = self.stack_size.byte_count() - self.page_size.byte_count();
             let bottom_of_stack = top - stack_size;
             let start_of_stack =
                 // TODO(dhil): The fiber and fibre
@@ -217,14 +226,14 @@ pub mod wasmfx_pooling {
                 // stack size, in the other it isn't. We should bring
                 // them into sync.
                 if cfg!(feature = "wasmfx_baseline") && cfg!(not(feature = "wasmfx_no_baseline")) {
-                    bottom_of_stack - self.page_size
+                    bottom_of_stack - self.page_size.byte_count()
                 } else {
                     bottom_of_stack
                 };
             assert!(start_of_stack >= base && start_of_stack < (base + len));
-            assert!((start_of_stack - base) % self.stack_size == 0);
+            assert!((start_of_stack - base) % self.stack_size.byte_count() == 0);
 
-            let index = (start_of_stack - base) / self.stack_size;
+            let index = (start_of_stack - base) / self.stack_size.byte_count();
             assert!(index < self.max_stacks);
 
             // If the `FiberStack` has the given `index` in the pool, then the
