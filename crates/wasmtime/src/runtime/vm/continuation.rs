@@ -143,14 +143,14 @@ pub mod optimized {
     ) -> Result<(), TrapReason> {
         let parent = unsafe {
             parent.as_mut().ok_or_else(|| {
-                TrapReason::user_without_backtrace(anyhow::anyhow!(
+                TrapReason::user(anyhow::anyhow!(
                     "Attempt to dereference null (parent) VMContRef"
                 ))
             })?
         };
         let child = unsafe {
             child.as_mut().ok_or_else(|| {
-                TrapReason::user_without_backtrace(anyhow::anyhow!(
+                TrapReason::user(anyhow::anyhow!(
                     "Attempt to dereference null (child) VMContRef"
                 ))
             })?
@@ -222,7 +222,7 @@ pub mod optimized {
         let red_zone_size = wasmfx_config.red_zone_size;
 
         let (contref, mut stack) = instance.wasmfx_allocate_continuation().map_err(|_error| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!("Fiber stack allocation failed!"))
+            TrapReason::user(anyhow::anyhow!("Fiber stack allocation failed!"))
         })?;
 
         let tsp = stack.top().unwrap();
@@ -398,7 +398,7 @@ pub mod baseline {
         let (contref, fiber) = {
             let (contref, stack) = instance
                 .wasmfx_allocate_continuation()
-                .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+                .map_err(|error| TrapReason::user(error.into()))?;
 
             let fiber = match unsafe { func.cast::<VMFuncRef>().as_ref() } {
                 None => Fiber::new(stack, |_instance: &mut Instance, _suspend: &mut Yield| {
@@ -427,7 +427,7 @@ pub mod baseline {
                     )
                 }
             };
-            let fiber = fiber.map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+            let fiber = fiber.map_err(|error| TrapReason::user(error.into()))?;
             (contref, fiber)
         };
 

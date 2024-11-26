@@ -573,12 +573,11 @@ impl Func {
 
     pub(crate) unsafe fn from_vm_func_ref(
         store: &mut StoreOpaque,
-        raw: *mut VMFuncRef,
-    ) -> Option<Func> {
-        let func_ref = NonNull::new(raw)?;
+        func_ref: NonNull<VMFuncRef>,
+    ) -> Func {
         debug_assert!(func_ref.as_ref().type_index != VMSharedTypeIndex::default());
         let export = ExportFunction { func_ref };
-        Some(Func::from_wasmtime_function(export, store))
+        Func::from_wasmtime_function(export, store)
     }
 
     /// Creates a new `Func` from the given Rust closure.
@@ -1095,7 +1094,7 @@ impl Func {
     }
 
     pub(crate) unsafe fn _from_raw(store: &mut StoreOpaque, raw: *mut c_void) -> Option<Func> {
-        Func::from_vm_func_ref(store, raw.cast())
+        Some(Func::from_vm_func_ref(store, NonNull::new(raw.cast())?))
     }
 
     /// Extracts the raw value of this `Func`, which is owned by `store`.
@@ -1642,15 +1641,7 @@ pub(crate) fn invoke_wasm_and_catch_traps<T>(
             exit_wasm(store, exit);
             return Err(trap);
         }
-        let result = crate::runtime::vm::catch_traps(
-            store.0.signal_handler(),
-            store.0.engine().config().wasm_backtrace,
-            store.0.engine().config().coredump_on_trap,
-            store.0.async_guard_range(),
-            store.0.default_caller(),
-            callee,
-            closure,
-        );
+        let result = crate::runtime::vm::catch_traps(store, callee, closure);
         exit_wasm(store, exit);
         store.0.call_hook(CallHook::ReturningFromWasm)?;
         result.map_err(|t| crate::trap::from_runtime_box(store.0, t))
@@ -2412,7 +2403,7 @@ impl HostContext {
 
         match result {
             Ok(val) => val,
-            Err(err) => crate::trap::raise(err),
+            Err(err) => crate::runtime::vm::raise_user_trap(err),
         }
     }
 }

@@ -16,9 +16,11 @@ mod signals;
 pub use self::signals::*;
 
 use crate::prelude::*;
+use crate::runtime::store::StoreOpaque;
 use crate::runtime::vm::continuation::stack_chain::StackChainCell;
 use crate::runtime::vm::sys::traphandlers;
 use crate::runtime::vm::{Instance, VMContext, VMOpaqueContext, VMRuntimeLimits};
+use crate::{StoreContextMut, WasmBacktrace};
 use core::cell::{Cell, UnsafeCell};
 use core::mem::MaybeUninit;
 use core::ops::Range;
@@ -59,11 +61,8 @@ pub unsafe fn raise_trap(reason: TrapReason) -> ! {
 /// Only safe to call when wasm code is on the stack, aka `catch_traps` must
 /// have been previously called. Additionally no Rust destructors can be on the
 /// stack. They will be skipped and not executed.
-pub unsafe fn raise_user_trap(error: Error, needs_backtrace: bool) -> ! {
-    raise_trap(TrapReason::User {
-        error,
-        needs_backtrace,
-    })
+pub unsafe fn raise_user_trap(error: Error) -> ! {
+    raise_trap(TrapReason::User(error))
 }
 
 /// Invokes the closure `f` and returns the result.
@@ -114,12 +113,7 @@ pub struct Trap {
 #[derive(Debug)]
 pub enum TrapReason {
     /// A user-raised trap through `raise_user_trap`.
-    User {
-        /// The actual user trap error.
-        error: Error,
-        /// Whether we need to capture a backtrace for this error or not.
-        needs_backtrace: bool,
-    },
+    User(Error),
 
     /// A trap raised from Cranelift-generated code.
     #[cfg(all(feature = "signals-based-traps", not(miri)))]
@@ -151,17 +145,14 @@ pub enum TrapReason {
 
 impl TrapReason {
     /// Create a new `TrapReason::User` that does not have a backtrace yet.
-    pub fn user_without_backtrace(error: Error) -> Self {
-        TrapReason::User {
-            error,
-            needs_backtrace: true,
-        }
+    pub fn user(error: Error) -> Self {
+        TrapReason::User(error)
     }
 }
 
 impl From<Error> for TrapReason {
     fn from(err: Error) -> Self {
-        TrapReason::user_without_backtrace(err)
+        TrapReason::user(err)
     }
 }
 
@@ -175,31 +166,20 @@ impl From<wasmtime_environ::Trap> for TrapReason {
 /// returning them as a `Result`.
 ///
 /// Highly unsafe since `closure` won't have any dtors run.
-pub unsafe fn catch_traps<F>(
-    signal_handler: Option<*const SignalHandler>,
-    capture_backtrace: bool,
-    capture_coredump: bool,
-    async_guard_range: Range<*mut u8>,
-    caller: *mut VMContext,
+pub unsafe fn catch_traps<T, F>(
+    store: &mut StoreContextMut<'_, T>,
     callee: *mut VMOpaqueContext,
     mut closure: F,
 ) -> Result<(), Box<Trap>>
 where
     F: FnMut(*mut VMContext),
 {
-    let limits = Instance::from_vmctx(caller, |i| i.runtime_limits());
     let callee_stack_chain = VMContext::try_from_opaque(callee)
         .map(|vmctx| Instance::from_vmctx(vmctx, |i| *i.stack_chain() as *const StackChainCell));
 
-    let result = CallThreadState::new(
-        signal_handler,
-        capture_backtrace,
-        capture_coredump,
-        *limits,
-        callee_stack_chain,
-        async_guard_range,
-    )
-    .with(|cx| {
+    let caller = store.0.default_caller();
+
+    let result = CallThreadState::new(store.0, caller, callee_stack_chain).with(|cx| {
         traphandlers::wasmtime_setjmp(
             cx.jmp_buf.as_ptr(),
             call_closure::<F>,
@@ -305,27 +285,28 @@ mod call_thread_state {
     impl CallThreadState {
         #[inline]
         pub(super) fn new(
-            signal_handler: Option<*const SignalHandler>,
-            capture_backtrace: bool,
-            capture_coredump: bool,
-            limits: *const VMRuntimeLimits,
+            store: &mut StoreOpaque,
+            caller: *mut VMContext,
             callee_stack_chain: Option<*const StackChainCell>,
-            async_guard_range: Range<*mut u8>,
         ) -> CallThreadState {
-            let _ = (capture_coredump, signal_handler, &async_guard_range);
+            let limits = unsafe { *Instance::from_vmctx(caller, |i| i.runtime_limits()) };
+
+            // Don't try to plumb #[cfg] everywhere for this field, just pretend
+            // we're using it on miri/windows to silence compiler warnings.
+            let _: Range<_> = store.async_guard_range();
 
             CallThreadState {
                 unwind: UnsafeCell::new(MaybeUninit::uninit()),
                 jmp_buf: Cell::new(ptr::null()),
                 #[cfg(all(feature = "signals-based-traps", not(miri)))]
-                signal_handler,
-                capture_backtrace,
+                signal_handler: store.signal_handler(),
+                capture_backtrace: store.engine().config().wasm_backtrace,
                 #[cfg(feature = "coredump")]
-                capture_coredump,
+                capture_coredump: store.engine().config().coredump_on_trap,
                 limits,
                 callee_stack_chain,
                 #[cfg(all(feature = "signals-based-traps", unix, not(miri)))]
-                async_guard_range,
+                async_guard_range: store.async_guard_range(),
                 prev: Cell::new(ptr::null()),
                 old_last_wasm_exit_fp: Cell::new(unsafe { *(*limits).last_wasm_exit_fp.get() }),
                 old_last_wasm_exit_pc: Cell::new(unsafe { *(*limits).last_wasm_exit_pc.get() }),
@@ -395,7 +376,7 @@ impl CallThreadState {
     }
 
     fn unwind_with(&self, reason: UnwindReason) -> ! {
-        let (backtrace, coredump) = match reason {
+        let (backtrace, coredump) = match &reason {
             // Panics don't need backtraces. There is nowhere to attach the
             // hypothetical backtrace to and it doesn't really make sense to try
             // in the first place since this is a Rust problem rather than a
@@ -405,10 +386,11 @@ impl CallThreadState {
             // And if we are just propagating an existing trap that already has
             // a backtrace attached to it, then there is no need to capture a
             // new backtrace either.
-            UnwindReason::Trap(TrapReason::User {
-                needs_backtrace: false,
-                ..
-            }) => (None, None),
+            UnwindReason::Trap(TrapReason::User(err))
+                if err.downcast_ref::<WasmBacktrace>().is_some() =>
+            {
+                (None, None)
+            }
             UnwindReason::Trap(_) => (
                 self.capture_backtrace(self.limits, None),
                 self.capture_coredump(self.limits, None),
