@@ -1544,18 +1544,6 @@ fn tc_cont_new(
     Ok(ans.cast::<u8>())
 }
 
-fn tc_cont_ref_forward_tag_return_values_buffer(
-    _store: &mut dyn VMStore,
-    _instance: &mut Instance,
-    parent_contref: *mut u8,
-    child_contref: *mut u8,
-) -> Result<(), TrapReason> {
-    crate::vm::continuation::optimized::cont_ref_forward_tag_return_values_buffer(
-        parent_contref.cast::<crate::vm::continuation::optimized::VMContRef>(),
-        child_contref.cast::<crate::vm::continuation::optimized::VMContRef>(),
-    )
-}
-
 fn tc_drop_cont_ref(_store: &mut dyn VMStore, instance: &mut Instance, contref: *mut u8) {
     crate::vm::continuation::optimized::drop_cont_ref(
         instance,

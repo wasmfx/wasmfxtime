@@ -94,5 +94,5 @@ asm_func!(
 #[test]
 fn test_return_payload() {
   // The following assumption is baked into `wasmtime_fibre_switch_to_parent`.
-  assert_eq!(u64::from(wasmtime_continuations::ControlEffect::return_()), 0);
+  assert_eq!(wasmtime_continuations::CONTROL_EFFECT_RETURN_DISCRIMINANT, 0);
 }

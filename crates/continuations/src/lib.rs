@@ -19,6 +19,10 @@ pub const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
 /// from the bottom of the fiber stack.
 pub const DEFAULT_RED_ZONE_SIZE: usize = 32768; // 32K = 8 pages of 4k size
 
+/// Capacity of the `HandlerList` initially created for the main stack and every
+/// continuation.
+pub const INITIAL_HANDLER_LIST_CAPACITY: usize = 4;
+
 /// TODO
 #[allow(dead_code)]
 pub const ENABLE_DEBUG_PRINTING: bool = false;
@@ -68,6 +72,18 @@ pub struct CommonStackInformation {
     /// - Running
     /// - Parent
     pub state: State,
+
+    /// Only in use when state is `Parent`.
+    /// Otherwise, the list may remain allocated, but its `length` must be 0.
+    ///
+    /// Represents the handlers that this stack installed when resume-ing a
+    /// continuation with
+    /// (resume $ct handler_clause_1 ... handler_clause_n)
+    /// The actual entries are tag identifiers (i.e., *mut VMTagDefinition). The
+    /// order of entries is relevant: The tag in the i-th entry in the list is
+    /// handled by the block mentioned in the i-th handler clause in the resume
+    /// instruction above.
+    pub handlers: HandlerList,
 }
 
 impl CommonStackInformation {
@@ -75,6 +91,7 @@ impl CommonStackInformation {
         Self {
             limits: StackLimits::default(),
             state: State::Running,
+            handlers: HandlerList::new(INITIAL_HANDLER_LIST_CAPACITY as u32),
         }
     }
 }
@@ -95,6 +112,10 @@ impl StackLimits {
 // of their fields from other threads.
 unsafe impl Send for StackLimits {}
 unsafe impl Sync for StackLimits {}
+
+// Same for HandlerList: They appear in the `StoreOpaque`.
+unsafe impl Send for HandlerList {}
+unsafe impl Sync for HandlerList {}
 
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -169,6 +190,10 @@ impl<T> Vector<T> {
 /// but we don't have access to that here.
 pub type Payloads = Vector<u128>;
 
+/// List of handlers, represented by the handled tag.
+/// Thus, the stored data is actually `*mut VMTagDefinition`.
+pub type HandlerList = Vector<*mut u8>;
+
 /// Discriminant of variant `Absent` in
 /// `wasmtime_runtime::continuation::StackChain`.
 pub const STACK_CHAIN_ABSENT_DISCRIMINANT: usize = 0;
@@ -241,8 +266,10 @@ pub mod offsets {
         /// Offset of `parent_chain` field
         pub const PARENT_CHAIN: usize =
             COMMON_STACK_INFORMATION + core::mem::size_of::<CommonStackInformation>();
+        /// Offset of `last_ancestor` field
+        pub const LAST_ANCESTOR: usize = PARENT_CHAIN + 2 * core::mem::size_of::<usize>();
         /// Offset of `stack` field
-        pub const STACK: usize = PARENT_CHAIN + 2 * core::mem::size_of::<usize>();
+        pub const STACK: usize = LAST_ANCESTOR + core::mem::size_of::<usize>();
         /// Offset of `args` field
         pub const ARGS: usize = STACK + super::FIBER_STACK_SIZE;
         /// Offset of `tag_return_values` field
@@ -267,6 +294,7 @@ pub mod offsets {
 
         pub const LIMITS: usize = offset_of!(CommonStackInformation, limits);
         pub const STATE: usize = offset_of!(CommonStackInformation, state);
+        pub const HANDLERS: usize = offset_of!(CommonStackInformation, handlers);
     }
 
     /// Size of wasmtime_runtime::continuation::FiberStack.
@@ -282,6 +310,7 @@ pub mod offsets {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TaggedPointer(usize);
 
+#[allow(dead_code)]
 impl TaggedPointer {
     const LOW_TAG_BITS: usize = 2;
     const LOW_TAG_MASK: usize = (1 << Self::LOW_TAG_BITS) - 1;
@@ -316,53 +345,42 @@ impl From<usize> for TaggedPointer {
     }
 }
 
+/// Discriminant of variant `Return` in
+/// `ControlEffect`.
+pub const CONTROL_EFFECT_RETURN_DISCRIMINANT: u32 = 0;
+/// Discriminant of variant `Resume` in
+/// `ControlEffect`.
+pub const CONTROL_EFFECT_RESUME_DISCRIMINANT: u32 = 1;
+/// Discriminant of variant `Suspend` in
+/// `ControlEffect`.
+pub const CONTROL_EFFECT_SUSPEND_DISCRIMINANT: u32 = 2;
+
 /// Universal control effect. This structure encodes return signal,
-/// resume signal, suspension signal, and suspension tags into a
-/// pointer. This instance is used at runtime. There is a codegen
+/// resume signal, suspension signal, and the handler to suspend to in a single variant type.
+/// This instance is used at runtime. There is a codegen
 /// counterpart in `cranelift/src/wasmfx/shared.rs`.
-#[repr(transparent)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ControlEffect(TaggedPointer);
-
-impl ControlEffect {
-    pub fn suspend(ptr: *const u8) -> Self {
-        let tptr = TaggedPointer::untagged(ptr as usize);
-        Self(TaggedPointer::low_tag(tptr, 0b01_usize))
-    }
-
-    pub fn return_() -> Self {
-        Self((0b00_usize).into())
-    }
-
-    pub fn resume() -> Self {
-        Self((0b11_usize).into())
-    }
-
-    fn new(raw: usize) -> Self {
-        Self(TaggedPointer::untagged(raw))
-    }
-
-    pub fn is_suspend(self) -> bool {
-        TaggedPointer::get_low_tag(self.0) == 0b01
-    }
+#[repr(u32)]
+pub enum ControlEffect {
+    Return = CONTROL_EFFECT_RETURN_DISCRIMINANT,
+    Resume = CONTROL_EFFECT_RESUME_DISCRIMINANT,
+    Suspend { handler_index: u32 } = CONTROL_EFFECT_SUSPEND_DISCRIMINANT,
 }
 
+// TODO(frank-emrich) This conversion assumes little-endian data layout.
+// We convert to and from u64 as follows: The 4 LSBs of the u64 are the
+// discriminant, the 4 MSBs are the handler_index (if `Suspend`)
 impl From<u64> for ControlEffect {
     fn from(val: u64) -> ControlEffect {
-        ControlEffect::new(val as usize)
+        unsafe { core::mem::transmute::<u64, ControlEffect>(val) }
     }
 }
 
+// TODO(frank-emrich) This conversion assumes little-endian data layout.
+// We convert to and from u64 as follows: The 4 LSBs of the u64 are the
+// discriminant, the 4 MSBs are the handler_index (if `Suspend`)
 impl From<ControlEffect> for u64 {
     fn from(val: ControlEffect) -> u64 {
-        let raw: usize = val.0.into();
-        raw as u64
-    }
-}
-
-impl From<ControlEffect> for *mut u8 {
-    fn from(val: ControlEffect) -> *mut u8 {
-        let raw: usize = val.0.into();
-        raw as *mut u8
+        unsafe { core::mem::transmute::<ControlEffect, u64>(val) }
     }
 }
