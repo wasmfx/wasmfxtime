@@ -571,21 +571,6 @@ impl MachineState {
 
         state
     }
-
-    /// `*sp = val; sp += size_of::<T>()`
-    fn push<T>(&mut self, val: T) {
-        let sp = self[XReg::sp].get_ptr::<T>();
-        unsafe { sp.write_unaligned(val) }
-        self[XReg::sp].set_ptr(sp.wrapping_add(1));
-    }
-
-    /// `ret = *sp; sp -= size_of::<T>()`
-    fn pop<T>(&mut self) -> T {
-        let sp = self[XReg::sp].get_ptr::<T>();
-        let val = unsafe { sp.read_unaligned() };
-        self[XReg::sp].set_ptr(sp.wrapping_sub(1));
-        val
-    }
 }
 
 /// The reason the interpreter loop terminated.
@@ -614,6 +599,76 @@ impl Interpreter<'_> {
         self.pc = unsafe { self.pc.offset(offset - inst_size) };
         ControlFlow::Continue(())
     }
+
+    /// `sp -= size_of::<T>(); *sp = val;`
+    #[must_use]
+    fn push<T>(&mut self, val: T) -> ControlFlow<Done> {
+        let new_sp = self.state[XReg::sp].get_ptr::<T>().wrapping_sub(1);
+        self.set_sp(new_sp)?;
+        unsafe {
+            new_sp.write_unaligned(val);
+        }
+        ControlFlow::Continue(())
+    }
+
+    /// `ret = *sp; sp -= size_of::<T>()`
+    fn pop<T>(&mut self) -> T {
+        let sp = self.state[XReg::sp].get_ptr::<T>();
+        let val = unsafe { sp.read_unaligned() };
+        self.set_sp_unchecked(sp.wrapping_add(1));
+        val
+    }
+
+    /// Sets the stack pointer to the `sp` provided.
+    ///
+    /// Returns a trap if this would result in stack overflow, or if `sp` is
+    /// beneath the base pointer of `self.state.stack`.
+    #[must_use]
+    fn set_sp<T>(&mut self, sp: *mut T) -> ControlFlow<Done> {
+        let sp_raw = sp as usize;
+        let base_raw = self.state.stack.as_ptr() as usize;
+        if sp_raw < base_raw {
+            return ControlFlow::Break(Done::Trap(self.pc.as_ptr()));
+        }
+        self.set_sp_unchecked(sp);
+        ControlFlow::Continue(())
+    }
+
+    /// Same as `set_sp` but does not check to see if `sp` is in-bounds. Should
+    /// only be used with stack increment operations such as `pop`.
+    fn set_sp_unchecked<T>(&mut self, sp: *mut T) {
+        if cfg!(debug_assertions) {
+            let sp_raw = sp as usize;
+            let base = self.state.stack.as_ptr() as usize;
+            let end = base + self.state.stack.len();
+            assert!(base <= sp_raw && sp_raw <= end);
+        }
+        self.state[XReg::sp].set_ptr(sp);
+    }
+}
+
+#[test]
+fn simple_push_pop() {
+    let mut state = MachineState::with_stack(vec![0; 16]);
+    unsafe {
+        let mut i = Interpreter {
+            state: &mut state,
+            // this isn't actually read so just manufacture a dummy one
+            pc: UnsafeBytecodeStream::new((&mut 0).into()),
+        };
+        assert!(i.push(0_i32).is_continue());
+        assert_eq!(i.pop::<i32>(), 0_i32);
+        assert!(i.push(1_i32).is_continue());
+        assert!(i.push(2_i32).is_continue());
+        assert!(i.push(3_i32).is_continue());
+        assert!(i.push(4_i32).is_continue());
+        assert!(i.push(5_i32).is_break());
+        assert!(i.push(6_i32).is_break());
+        assert_eq!(i.pop::<i32>(), 4_i32);
+        assert_eq!(i.pop::<i32>(), 3_i32);
+        assert_eq!(i.pop::<i32>(), 2_i32);
+        assert_eq!(i.pop::<i32>(), 1_i32);
+    }
 }
 
 impl OpVisitor for Interpreter<'_> {
@@ -639,6 +694,18 @@ impl OpVisitor for Interpreter<'_> {
         let return_addr = self.pc.as_ptr();
         self.state[XReg::lr].set_ptr(return_addr.as_ptr());
         self.pc_rel_jump(offset, 5);
+        ControlFlow::Continue(())
+    }
+
+    fn call_indirect(&mut self, dst: XReg) -> ControlFlow<Done> {
+        let return_addr = self.pc.as_ptr();
+        self.state[XReg::lr].set_ptr(return_addr.as_ptr());
+        // SAFETY: part of the unsafe contract of the interpreter is only valid
+        // bytecode is interpreted, so the jump destination is part of the validity
+        // of the bytecode itself.
+        unsafe {
+            self.pc = UnsafeBytecodeStream::new(NonNull::new_unchecked(self.state[dst].get_ptr()));
+        }
         ControlFlow::Continue(())
     }
 
@@ -1071,68 +1138,68 @@ impl OpVisitor for Interpreter<'_> {
     }
 
     fn xpush32(&mut self, src: XReg) -> ControlFlow<Done> {
-        self.state.push(self.state[src].get_u32());
+        self.push(self.state[src].get_u32())?;
         ControlFlow::Continue(())
     }
 
     fn xpush32_many(&mut self, srcs: RegSet<XReg>) -> ControlFlow<Done> {
         for src in srcs {
-            self.state.push(self.state[src].get_u32());
+            self.xpush32(src)?;
         }
         ControlFlow::Continue(())
     }
 
     fn xpush64(&mut self, src: XReg) -> ControlFlow<Done> {
-        self.state.push(self.state[src].get_u64());
+        self.push(self.state[src].get_u64())?;
         ControlFlow::Continue(())
     }
 
     fn xpush64_many(&mut self, srcs: RegSet<XReg>) -> ControlFlow<Done> {
         for src in srcs {
-            self.state.push(self.state[src].get_u64());
+            self.xpush64(src)?;
         }
         ControlFlow::Continue(())
     }
 
     fn xpop32(&mut self, dst: XReg) -> ControlFlow<Done> {
-        let val = self.state.pop();
+        let val = self.pop();
         self.state[dst].set_u32(val);
         ControlFlow::Continue(())
     }
 
     fn xpop32_many(&mut self, dsts: RegSet<XReg>) -> ControlFlow<Done> {
         for dst in dsts.into_iter().rev() {
-            let val = self.state.pop();
+            let val = self.pop();
             self.state[dst].set_u32(val);
         }
         ControlFlow::Continue(())
     }
 
     fn xpop64(&mut self, dst: XReg) -> ControlFlow<Done> {
-        let val = self.state.pop();
+        let val = self.pop();
         self.state[dst].set_u64(val);
         ControlFlow::Continue(())
     }
 
     fn xpop64_many(&mut self, dsts: RegSet<XReg>) -> ControlFlow<Done> {
         for dst in dsts.into_iter().rev() {
-            let val = self.state.pop();
+            let val = self.pop();
             self.state[dst].set_u64(val);
         }
         ControlFlow::Continue(())
     }
 
     fn push_frame(&mut self) -> ControlFlow<Done> {
-        self.state.push(self.state[XReg::lr].get_ptr::<u8>());
-        self.state.push(self.state[XReg::fp].get_ptr::<u8>());
+        self.push(self.state[XReg::lr].get_ptr::<u8>())?;
+        self.push(self.state[XReg::fp].get_ptr::<u8>())?;
         self.state[XReg::fp] = self.state[XReg::sp];
         ControlFlow::Continue(())
     }
 
     fn pop_frame(&mut self) -> ControlFlow<Done> {
-        self.state[XReg::sp] = self.state[XReg::fp];
-        let fp = self.state.pop();
-        let lr = self.state.pop();
+        self.set_sp_unchecked(self.state[XReg::fp].get_ptr::<u8>());
+        let fp = self.pop();
+        let lr = self.pop();
         self.state[XReg::fp].set_ptr::<u8>(fp);
         self.state[XReg::lr].set_ptr::<u8>(lr);
         ControlFlow::Continue(())
@@ -1175,6 +1242,79 @@ impl ExtendedOpVisitor for Interpreter<'_> {
     fn get_sp(&mut self, dst: XReg) -> ControlFlow<Done> {
         let sp = self.state[XReg::sp].get_u64();
         self.state[dst].set_u64(sp);
+        ControlFlow::Continue(())
+    }
+
+    /// This instructions is sort of like a `call` instruction except that it
+    /// delegates to the host itself. That means that ABI details are baked in
+    /// here such as where various arguments are.
+    ///
+    /// This will load the arguments from the `xN` registers, the first being
+    /// the function pointer on the host to call. Since we don't have a
+    /// libffi-like solution here the way this works is that the
+    /// `for_each_host_signature!` macro statically enumerates all possible
+    /// signatures. The `sig` payload here selects one of the mwhich we dispatch
+    /// to here. Note that we mostly just try to get the width of each argument
+    /// correct, whether or not it's a pointer is not actually tracked here.
+    /// That means that, like the rest of Pulley, this isn't compatible with
+    /// strict provenance pointer rules.
+    fn call_indirect_host(&mut self, sig: u8) -> ControlFlow<Done> {
+        let raw = self.state[XReg::x0].get_ptr::<u8>();
+        let mut n = 0;
+        let mut arg = 1;
+
+        type I8 = i8;
+        type I32 = i32;
+        type I64 = i64;
+
+        macro_rules! call_host {
+            ($(fn($($args:ident),*) $(-> $ret:ident)?;)*) => {$(
+                // We're relying on LLVM to boil away most of this boilerplate
+                // as this is a bunch of `if` statements that should be a
+                // `match`.
+                if sig == n {
+                    union Convert {
+                        raw: *mut u8,
+                        f: unsafe extern "C" fn($($args),*) $(-> $ret)?,
+                    }
+                    let ptr = Convert { raw }.f;
+
+                    // Arguments are loaded from subsequent registers after
+                    // `x0` and are tracked by `arg`.
+                    let ret = ptr(
+                        $({
+                            let reg = XReg::new_unchecked(arg);
+                            arg += 1;
+                            let reg = &self.state[reg];
+                            call_host!(@get $args reg)
+                        },)*
+                    );
+                    let _ = arg; // ignore the last increment of `arg`
+
+                    // If this function produce a result the ABI is that we
+                    // place it into `x0`.
+                    let dst = &mut self.state[XReg::x0];
+                    $(call_host!(@set $ret dst ret);)?
+                    let _ = (ret, dst); // ignore if there was no return value
+                }
+                n += 1;
+            )*};
+
+            (@get I8 $reg:ident) => ($reg.get_i32() as i8);
+            (@get I32 $reg:ident) => ($reg.get_i32());
+            (@get I64 $reg:ident) => ($reg.get_i64());
+
+            (@set I32 $dst:ident $val:ident) => ($dst.set_i32($val););
+            (@set I64 $dst:ident $val:ident) => ($dst.set_i64($val););
+
+        }
+
+        unsafe {
+            for_each_host_signature!(call_host);
+        }
+
+        let _ = n; // ignore the last increment of `n`
+
         ControlFlow::Continue(())
     }
 }
