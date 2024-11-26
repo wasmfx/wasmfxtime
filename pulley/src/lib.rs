@@ -255,7 +255,9 @@ macro_rules! for_each_host_signature {
             fn(I64) -> I64;
             fn(I64, I64); // NOTE(dhil): added by me; signature for stack switching libcall
             fn(I64, I64) -> I32;
+            fn(I64, I64) -> I64; // NOTE(dhil): added by me; signature for stack switching baseline libcall
             fn(I64, I64, I32) -> I64;
+            fn(I64, I32, I64); // NOTE(dhil): added by me; signature for stack switching baseline libcall
             fn(I64, I64, I32, I32) -> I64; // NOTE(dhil): added by me; signature for stack switching libcall
             fn(I64, I64, I32, I64, I64, I64, I8, I64, I64);
             fn(I64, I64, I64);
