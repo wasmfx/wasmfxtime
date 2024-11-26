@@ -151,6 +151,9 @@ audit-as-crates-io = false
 [policy.wasmtime-wasi]
 audit-as-crates-io = true
 
+[policy.wasmtime-wasi-config]
+audit-as-crates-io = true
+
 [policy.wasmtime-wasi-http]
 audit-as-crates-io = true
 
@@ -367,6 +370,21 @@ criteria = "safe-to-deploy"
 [[exemptions.listenfd]]
 version = "1.0.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.logos]]
+version = "0.14.2"
+criteria = "safe-to-deploy"
+notes = "safe when forbid_unsafe feature enabled, which it is in our dep through wasm-wave"
+
+[[exemptions.logos-codegen]]
+version = "0.14.2"
+criteria = "safe-to-deploy"
+notes = "safe when forbid_unsafe feature enabled, which it is in our dep through wasm-wave"
+
+[[exemptions.logos-derive]]
+version = "0.14.2"
+criteria = "safe-to-deploy"
+notes = "safe when forbid_unsafe feature enabled, which it is in our dep through wasm-wave"
 
 [[exemptions.matrixmultiply]]
 version = "0.3.9"

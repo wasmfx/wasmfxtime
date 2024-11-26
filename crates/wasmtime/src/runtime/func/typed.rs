@@ -10,7 +10,7 @@ use core::ffi::c_void;
 use core::marker;
 use core::mem::{self, MaybeUninit};
 use core::num::NonZeroUsize;
-use core::ptr::{self};
+use core::ptr::{self, NonNull};
 use wasmtime_environ::VMSharedTypeIndex;
 
 /// A statically typed WebAssembly function.
@@ -216,13 +216,14 @@ where
             store,
             |caller| {
                 let (func_ref, storage) = &mut captures;
-                let func_ref = func_ref.as_ref();
-                (func_ref.array_call)(
-                    func_ref.vmctx,
-                    VMOpaqueContext::from_vmcontext(caller),
-                    (storage as *mut Storage<_, _>) as *mut ValRaw,
-                    mem::size_of_val::<Storage<_, _>>(storage) / mem::size_of::<ValRaw>(),
-                );
+                let storage_len =
+                    mem::size_of_val::<Storage<_, _>>(storage) / mem::size_of::<ValRaw>();
+                let storage: *mut Storage<_, _> = storage;
+                let storage = storage.cast::<ValRaw>();
+                let storage = core::ptr::slice_from_raw_parts_mut(storage, storage_len);
+                func_ref
+                    .as_ref()
+                    .array_call(VMOpaqueContext::from_vmcontext(caller), storage);
             },
             vmctx,
         );
@@ -571,9 +572,8 @@ unsafe impl WasmTy for Func {
 
     #[inline]
     unsafe fn load(store: &mut AutoAssertNoGc<'_>, ptr: &ValRaw) -> Self {
-        let p = ptr.get_funcref();
-        debug_assert!(!p.is_null());
-        Func::from_vm_func_ref(store, p.cast()).unwrap()
+        let p = NonNull::new(ptr.get_funcref()).unwrap().cast();
+        Func::from_vm_func_ref(store, p)
     }
 }
 
@@ -622,7 +622,8 @@ unsafe impl WasmTy for Option<Func> {
 
     #[inline]
     unsafe fn load(store: &mut AutoAssertNoGc<'_>, ptr: &ValRaw) -> Self {
-        Func::from_vm_func_ref(store, ptr.get_funcref().cast())
+        let ptr = NonNull::new(ptr.get_funcref())?.cast();
+        Some(Func::from_vm_func_ref(store, ptr))
     }
 }
 

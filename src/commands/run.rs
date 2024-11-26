@@ -39,7 +39,7 @@ fn parse_preloads(s: &str) -> Result<(String, PathBuf)> {
 }
 
 /// Runs a WebAssembly module
-#[derive(Parser, PartialEq)]
+#[derive(Parser)]
 pub struct RunCommand {
     #[command(flatten)]
     #[allow(missing_docs)]
@@ -87,7 +87,7 @@ impl RunCommand {
     pub fn execute(mut self) -> Result<()> {
         self.run.common.init_logging()?;
 
-        let mut config = self.run.common.config(None, None)?;
+        let mut config = self.run.common.config(None)?;
         config.async_support(true);
 
         if self.run.common.wasm.timeout.is_some() {

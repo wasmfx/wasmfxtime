@@ -60,9 +60,9 @@ use crate::prelude::*;
 use crate::runtime::vm::table::{Table, TableElementType};
 use crate::runtime::vm::vmcontext::VMFuncRef;
 use crate::runtime::vm::{Instance, TrapReason, VMGcRef, VMStore};
+use core::ptr::NonNull;
 #[cfg(feature = "threads")]
 use core::time::Duration;
-use wasmtime_environ::Unsigned;
 use wasmtime_environ::{DataIndex, ElemIndex, FuncIndex, MemoryIndex, TableIndex, Trap};
 #[cfg(feature = "wmemcheck")]
 use wasmtime_wmemcheck::AccessError::{
@@ -89,6 +89,7 @@ pub mod raw {
     #![allow(unused_doc_comments, unused_attributes)]
 
     use crate::runtime::vm::{InstanceAndStore, TrapReason, VMContext};
+    use core::ptr::NonNull;
 
     macro_rules! libcall {
         (
@@ -143,7 +144,6 @@ pub mod raw {
 
         (@ty i32) => (u32);
         (@ty i64) => (u64);
-        (@ty f64) => (f64);
         (@ty u8) => (u8);
         (@ty reference) => (u32);
         (@ty pointer) => (*mut u8);
@@ -186,6 +186,13 @@ pub mod raw {
         }
     }
 
+    impl LibcallResult for NonNull<u8> {
+        type Abi = *mut u8;
+        unsafe fn convert(self) -> *mut u8 {
+            self.as_ptr()
+        }
+    }
+
     impl LibcallResult for bool {
         type Abi = u32;
         unsafe fn convert(self) -> u32 {
@@ -201,12 +208,7 @@ fn memory32_grow(
     memory_index: u32,
 ) -> Result<*mut u8, TrapReason> {
     let memory_index = MemoryIndex::from_u32(memory_index);
-    let result = match instance
-        .memory_grow(store, memory_index, delta)
-        .map_err(|error| TrapReason::User {
-            error,
-            needs_backtrace: true,
-        })? {
+    let result = match instance.memory_grow(store, memory_index, delta)? {
         Some(size_in_bytes) => size_in_bytes / instance.memory_page_size(memory_index),
         None => usize::max_value(),
     };
@@ -224,7 +226,7 @@ unsafe fn table_grow_func_ref(
     let table_index = TableIndex::from_u32(table_index);
 
     let element = match instance.table_element_type(table_index) {
-        TableElementType::Func => (init_value as *mut VMFuncRef).into(),
+        TableElementType::Func => NonNull::new(init_value.cast::<VMFuncRef>()).into(),
         TableElementType::GcRef => unreachable!(),
         TableElementType::Cont => unreachable!(),
     };
@@ -314,7 +316,7 @@ unsafe fn table_fill_func_ref(
     let table = &mut *instance.get_table(table_index);
     match table.element_type() {
         TableElementType::Func => {
-            let val = val.cast::<VMFuncRef>();
+            let val = NonNull::new(val.cast::<VMFuncRef>());
             table
                 .fill(store.optional_gc_store_mut()?, dst, val.into(), len)
                 .err2anyhow()?;
@@ -479,7 +481,7 @@ fn memory_init(
 }
 
 // Implementation of `ref.func`.
-fn ref_func(_store: &mut dyn VMStore, instance: &mut Instance, func_index: u32) -> *mut u8 {
+fn ref_func(_store: &mut dyn VMStore, instance: &mut Instance, func_index: u32) -> NonNull<u8> {
     instance
         .get_func_ref(FuncIndex::from_u32(func_index))
         .expect("ref_func: funcref should always be available for given func index")
@@ -505,7 +507,10 @@ unsafe fn table_get_lazy_init_func_ref(
         .get(None, index)
         .expect("table access already bounds-checked");
 
-    elem.into_func_ref_asserting_initialized().cast()
+    match elem.into_func_ref_asserting_initialized() {
+        Some(ptr) => ptr.as_ptr().cast(),
+        None => core::ptr::null_mut(),
+    }
 }
 
 /// Drop a GC reference.
@@ -880,9 +885,8 @@ unsafe fn array_new_elem(
                         .ok_or_else(|| Trap::TableOutOfBounds.into_anyhow())?
                         .iter()
                         .map(|f| {
-                            let raw_func_ref =
-                                instance.get_func_ref(*f).unwrap_or(core::ptr::null_mut());
-                            let func = Func::from_vm_func_ref(store, raw_func_ref);
+                            let raw_func_ref = instance.get_func_ref(*f);
+                            let func = raw_func_ref.map(|p| Func::from_vm_func_ref(store, p));
                             Val::FuncRef(func)
                         }),
                 );
@@ -988,8 +992,8 @@ unsafe fn array_init_elem(
             .ok_or_else(|| Trap::TableOutOfBounds.into_anyhow())?
             .iter()
             .map(|f| {
-                let raw_func_ref = instance.get_func_ref(*f).unwrap_or(core::ptr::null_mut());
-                let func = Func::from_vm_func_ref(&mut store, raw_func_ref);
+                let raw_func_ref = instance.get_func_ref(*f);
+                let func = raw_func_ref.map(|p| Func::from_vm_func_ref(&mut store, p));
                 Val::FuncRef(func)
             })
             .collect::<Vec<_>>(),
@@ -1188,14 +1192,12 @@ unsafe fn check_malloc(
     instance: &mut Instance,
     addr: u32,
     len: u32,
-) -> Result<u32> {
+) -> Result<()> {
     if let Some(wmemcheck_state) = &mut instance.wmemcheck_state {
         let result = wmemcheck_state.malloc(addr as usize, len as usize);
         wmemcheck_state.memcheck_on();
         match result {
-            Ok(()) => {
-                return Ok(0);
-            }
+            Ok(()) => {}
             Err(DoubleMalloc { addr, len }) => {
                 bail!("Double malloc at addr {:#x} of size {}", addr, len)
             }
@@ -1207,19 +1209,17 @@ unsafe fn check_malloc(
             }
         }
     }
-    Ok(0)
+    Ok(())
 }
 
 // Hook for validating free using wmemcheck_state.
 #[cfg(feature = "wmemcheck")]
-unsafe fn check_free(_store: &mut dyn VMStore, instance: &mut Instance, addr: u32) -> Result<u32> {
+unsafe fn check_free(_store: &mut dyn VMStore, instance: &mut Instance, addr: u32) -> Result<()> {
     if let Some(wmemcheck_state) = &mut instance.wmemcheck_state {
         let result = wmemcheck_state.free(addr as usize);
         wmemcheck_state.memcheck_on();
         match result {
-            Ok(()) => {
-                return Ok(0);
-            }
+            Ok(()) => {}
             Err(InvalidFree { addr }) => {
                 bail!("Invalid free at addr {:#x}", addr)
             }
@@ -1228,7 +1228,7 @@ unsafe fn check_free(_store: &mut dyn VMStore, instance: &mut Instance, addr: u3
             }
         }
     }
-    Ok(0)
+    Ok(())
 }
 
 // Hook for validating load using wmemcheck_state.
@@ -1239,13 +1239,11 @@ fn check_load(
     num_bytes: u32,
     addr: u32,
     offset: u32,
-) -> Result<u32> {
+) -> Result<()> {
     if let Some(wmemcheck_state) = &mut instance.wmemcheck_state {
         let result = wmemcheck_state.read(addr as usize + offset as usize, num_bytes as usize);
         match result {
-            Ok(()) => {
-                return Ok(0);
-            }
+            Ok(()) => {}
             Err(InvalidRead { addr, len }) => {
                 bail!("Invalid load at addr {:#x} of size {}", addr, len);
             }
@@ -1257,7 +1255,7 @@ fn check_load(
             }
         }
     }
-    Ok(0)
+    Ok(())
 }
 
 // Hook for validating store using wmemcheck_state.
@@ -1268,13 +1266,11 @@ fn check_store(
     num_bytes: u32,
     addr: u32,
     offset: u32,
-) -> Result<u32> {
+) -> Result<()> {
     if let Some(wmemcheck_state) = &mut instance.wmemcheck_state {
         let result = wmemcheck_state.write(addr as usize + offset as usize, num_bytes as usize);
         match result {
-            Ok(()) => {
-                return Ok(0);
-            }
+            Ok(()) => {}
             Err(InvalidWrite { addr, len }) => {
                 bail!("Invalid store at addr {:#x} of size {}", addr, len)
             }
@@ -1286,7 +1282,7 @@ fn check_store(
             }
         }
     }
-    Ok(0)
+    Ok(())
 }
 
 // Hook for turning wmemcheck load/store validation off when entering a malloc function.
@@ -1330,70 +1326,6 @@ fn trap(_store: &mut dyn VMStore, _instance: &mut Instance, code: u8) -> Result<
     Err(TrapReason::Wasm(
         wasmtime_environ::Trap::from_u8(code).unwrap(),
     ))
-}
-
-fn f64_to_i64(
-    _store: &mut dyn VMStore,
-    _instance: &mut Instance,
-    val: f64,
-) -> Result<u64, TrapReason> {
-    if val.is_nan() {
-        return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
-    }
-    let val = relocs::truncf64(val);
-    if val <= -9223372036854777856.0 || val >= 9223372036854775808.0 {
-        return Err(TrapReason::Wasm(Trap::IntegerOverflow));
-    }
-    #[allow(clippy::cast_possible_truncation)]
-    return Ok((val as i64).unsigned());
-}
-
-fn f64_to_u64(
-    _store: &mut dyn VMStore,
-    _instance: &mut Instance,
-    val: f64,
-) -> Result<u64, TrapReason> {
-    if val.is_nan() {
-        return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
-    }
-    let val = relocs::truncf64(val);
-    if val <= -1.0 || val >= 18446744073709551616.0 {
-        return Err(TrapReason::Wasm(Trap::IntegerOverflow));
-    }
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    return Ok(val as u64);
-}
-
-fn f64_to_i32(
-    _store: &mut dyn VMStore,
-    _instance: &mut Instance,
-    val: f64,
-) -> Result<u32, TrapReason> {
-    if val.is_nan() {
-        return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
-    }
-    let val = relocs::truncf64(val);
-    if val <= -2147483649.0 || val >= 2147483648.0 {
-        return Err(TrapReason::Wasm(Trap::IntegerOverflow));
-    }
-    #[allow(clippy::cast_possible_truncation)]
-    return Ok((val as i32).unsigned());
-}
-
-fn f64_to_u32(
-    _store: &mut dyn VMStore,
-    _instance: &mut Instance,
-    val: f64,
-) -> Result<u32, TrapReason> {
-    if val.is_nan() {
-        return Err(TrapReason::Wasm(Trap::BadConversionToInteger));
-    }
-    let val = relocs::truncf64(val);
-    if val <= -1.0 || val >= 4294967296.0 {
-        return Err(TrapReason::Wasm(Trap::IntegerOverflow));
-    }
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    return Ok(val as u32);
 }
 
 /// This module contains functions which are used for resolving relocations at
@@ -1627,20 +1559,17 @@ fn tc_allocate(
 ) -> Result<*mut u8, TrapReason> {
     debug_assert!(size > 0);
     let size = usize::try_from(size)
-        .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("size too large!")))?;
-    let align = usize::try_from(align).map_err(|_error| {
-        TrapReason::user_without_backtrace(anyhow::anyhow!("align too large!"))
-    })?;
+        .map_err(|_error| TrapReason::user(anyhow::anyhow!("size too large!")))?;
+    let align = usize::try_from(align)
+        .map_err(|_error| TrapReason::user(anyhow::anyhow!("align too large!")))?;
     let layout = std::alloc::Layout::from_size_align(size, align).map_err(|_error| {
-        TrapReason::user_without_backtrace(anyhow::anyhow!(
-            "Continuation layout construction failed!"
-        ))
+        TrapReason::user(anyhow::anyhow!("Continuation layout construction failed!"))
     })?;
     let ptr = unsafe { alloc::alloc::alloc(layout) };
     // TODO(dhil): We can consider making this a debug-build only
     // check.
     if ptr.is_null() {
-        Err(TrapReason::user_without_backtrace(anyhow::anyhow!(
+        Err(TrapReason::user(anyhow::anyhow!(
             "Memory allocation failed!"
         )))
     } else {
@@ -1657,14 +1586,11 @@ fn tc_deallocate(
 ) -> Result<(), TrapReason> {
     debug_assert!(size > 0);
     let size = usize::try_from(size)
-        .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("size too large!")))?;
-    let align = usize::try_from(align).map_err(|_error| {
-        TrapReason::user_without_backtrace(anyhow::anyhow!("align too large!"))
-    })?;
+        .map_err(|_error| TrapReason::user(anyhow::anyhow!("size too large!")))?;
+    let align = usize::try_from(align)
+        .map_err(|_error| TrapReason::user(anyhow::anyhow!("align too large!")))?;
     let layout = std::alloc::Layout::from_size_align(size, align).map_err(|_error| {
-        TrapReason::user_without_backtrace(anyhow::anyhow!(
-            "Continuation layout construction failed!"
-        ))
+        TrapReason::user(anyhow::anyhow!("Continuation layout construction failed!"))
     })?;
     Ok(unsafe { std::alloc::dealloc(ptr, layout) })
 }
@@ -1687,8 +1613,8 @@ fn tc_reallocate(
 }
 
 fn tc_print_str(_store: &mut dyn VMStore, _instance: &mut Instance, s: *const u8, len: u64) {
-    let len = usize::try_from(len)
-        .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("len too large!")));
+    let len =
+        usize::try_from(len).map_err(|_error| TrapReason::user(anyhow::anyhow!("len too large!")));
     let str = unsafe { std::slice::from_raw_parts(s, len.unwrap()) };
     let s = std::str::from_utf8(str).unwrap();
     print!("{s}");
@@ -1712,12 +1638,10 @@ fn tc_baseline_cont_new(
     param_count: u64,
     result_count: u64,
 ) -> Result<*mut u8, TrapReason> {
-    let param_count = usize::try_from(param_count).map_err(|_error| {
-        TrapReason::user_without_backtrace(anyhow::anyhow!("param_count too large!"))
-    })?;
-    let result_count = usize::try_from(result_count).map_err(|_error| {
-        TrapReason::user_without_backtrace(anyhow::anyhow!("result_count too large!"))
-    })?;
+    let param_count = usize::try_from(param_count)
+        .map_err(|_error| TrapReason::user(anyhow::anyhow!("param_count too large!")))?;
+    let result_count = usize::try_from(result_count)
+        .map_err(|_error| TrapReason::user(anyhow::anyhow!("result_count too large!")))?;
     let ans = crate::runtime::vm::continuation::baseline::cont_new(
         store,
         instance,
@@ -1779,7 +1703,7 @@ fn tc_baseline_continuation_arguments_ptr(
     nargs: u64,
 ) -> *mut u8 {
     let nargs = usize::try_from(nargs)
-        .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("nargs too large!")));
+        .map_err(|_error| TrapReason::user(anyhow::anyhow!("nargs too large!")));
     let contref_ptr = contref.cast::<crate::runtime::vm::continuation::baseline::VMContRef>();
     assert!(contref_ptr as usize == contref as usize);
     let ans = crate::runtime::vm::continuation::baseline::get_arguments_ptr(
@@ -1823,7 +1747,7 @@ fn tc_baseline_get_payloads_ptr(
     nargs: u64,
 ) -> *mut u8 {
     let nargs = usize::try_from(nargs)
-        .map_err(|_error| TrapReason::user_without_backtrace(anyhow::anyhow!("nargs too large!")));
+        .map_err(|_error| TrapReason::user(anyhow::anyhow!("nargs too large!")));
     let ans =
         crate::runtime::vm::continuation::baseline::get_payloads_ptr(instance, nargs.unwrap());
     let ans_ptr = ans.cast::<u8>();

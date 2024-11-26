@@ -16,7 +16,7 @@ use core::future::Future;
 use core::mem::{self, MaybeUninit};
 use core::num::NonZeroUsize;
 use core::pin::Pin;
-use core::ptr::{self, NonNull};
+use core::ptr::NonNull;
 use wasmtime_environ::VMSharedTypeIndex;
 
 /// A reference to the abstract `nofunc` heap value.
@@ -573,12 +573,11 @@ impl Func {
 
     pub(crate) unsafe fn from_vm_func_ref(
         store: &mut StoreOpaque,
-        raw: *mut VMFuncRef,
-    ) -> Option<Func> {
-        let func_ref = NonNull::new(raw)?;
+        func_ref: NonNull<VMFuncRef>,
+    ) -> Func {
         debug_assert!(func_ref.as_ref().type_index != VMSharedTypeIndex::default());
         let export = ExportFunction { func_ref };
-        Some(Func::from_wasmtime_function(export, store))
+        Func::from_wasmtime_function(export, store)
     }
 
     /// Creates a new `Func` from the given Rust closure.
@@ -1056,36 +1055,25 @@ impl Func {
     pub unsafe fn call_unchecked(
         &self,
         mut store: impl AsContextMut,
-        params_and_returns: *mut ValRaw,
-        params_and_returns_capacity: usize,
+        params_and_returns: *mut [ValRaw],
     ) -> Result<()> {
         let mut store = store.as_context_mut();
         let data = &store.0.store_data()[self.0];
         let func_ref = data.export().func_ref;
-        Self::call_unchecked_raw(
-            &mut store,
-            func_ref,
-            params_and_returns,
-            params_and_returns_capacity,
-        )
+        Self::call_unchecked_raw(&mut store, func_ref, params_and_returns)
     }
 
     pub(crate) unsafe fn call_unchecked_raw<T>(
         store: &mut StoreContextMut<'_, T>,
         func_ref: NonNull<VMFuncRef>,
-        params_and_returns: *mut ValRaw,
-        params_and_returns_capacity: usize,
+        params_and_returns: *mut [ValRaw],
     ) -> Result<()> {
         invoke_wasm_and_catch_traps(
             store,
             |caller| {
-                let func_ref = func_ref.as_ref();
-                (func_ref.array_call)(
-                    func_ref.vmctx,
-                    caller.cast::<VMOpaqueContext>(),
-                    params_and_returns,
-                    params_and_returns_capacity,
-                )
+                func_ref
+                    .as_ref()
+                    .array_call(caller.cast::<VMOpaqueContext>(), params_and_returns)
             },
             func_ref.as_ref().vmctx,
         )
@@ -1106,7 +1094,7 @@ impl Func {
     }
 
     pub(crate) unsafe fn _from_raw(store: &mut StoreOpaque, raw: *mut c_void) -> Option<Func> {
-        Func::from_vm_func_ref(store, raw.cast())
+        Some(Func::from_vm_func_ref(store, NonNull::new(raw.cast())?))
     }
 
     /// Extracts the raw value of this `Func`, which is owned by `store`.
@@ -1261,7 +1249,10 @@ impl Func {
         }
 
         unsafe {
-            self.call_unchecked(&mut *store, values_vec.as_mut_ptr(), values_vec_size)?;
+            self.call_unchecked(
+                &mut *store,
+                core::ptr::slice_from_raw_parts_mut(values_vec.as_mut_ptr(), values_vec_size),
+            )?;
         }
 
         for ((i, slot), val) in results.iter_mut().enumerate().zip(&values_vec) {
@@ -1650,15 +1641,7 @@ pub(crate) fn invoke_wasm_and_catch_traps<T>(
             exit_wasm(store, exit);
             return Err(trap);
         }
-        let result = crate::runtime::vm::catch_traps(
-            store.0.signal_handler(),
-            store.0.engine().config().wasm_backtrace,
-            store.0.engine().config().coredump_on_trap,
-            store.0.async_guard_range(),
-            store.0.default_caller(),
-            callee,
-            closure,
-        );
+        let result = crate::runtime::vm::catch_traps(store, callee, closure);
         exit_wasm(store, exit);
         store.0.call_hook(CallHook::ReturningFromWasm)?;
         result.map_err(|t| crate::trap::from_runtime_box(store.0, t))
@@ -2336,12 +2319,8 @@ impl HostContext {
 
         let ctx = unsafe {
             VMArrayCallHostFuncContext::new(
-                VMFuncRef {
-                    array_call,
-                    wasm_call: None,
-                    type_index,
-                    vmctx: ptr::null_mut(),
-                },
+                array_call,
+                type_index,
                 Box::new(HostFuncState {
                     func,
                     ty: ty.into_registered_type(),
@@ -2424,7 +2403,7 @@ impl HostContext {
 
         match result {
             Ok(val) => val,
-            Err(err) => crate::trap::raise(err),
+            Err(err) => crate::runtime::vm::raise_user_trap(err),
         }
     }
 }

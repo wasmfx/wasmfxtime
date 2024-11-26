@@ -91,7 +91,7 @@ fn pulley_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_def(dst);
         }
 
-        Inst::Call { info } => {
+        Inst::Call { info } | Inst::IndirectCallHost { info } => {
             let CallInfo { uses, defs, .. } = &mut **info;
             for CallArgPair { vreg, preg } in uses {
                 collector.reg_fixed_use(vreg, *preg);
@@ -309,7 +309,7 @@ where
     type LabelUse = LabelUse;
     type ABIMachineSpec = PulleyMachineDeps<P>;
 
-    const TRAP_OPCODE: &'static [u8] = &[0];
+    const TRAP_OPCODE: &'static [u8] = TRAP_OPCODE;
 
     fn gen_dummy_use(_reg: Reg) -> Self {
         todo!()
@@ -468,6 +468,19 @@ where
     }
 }
 
+const TRAP_OPCODE: &'static [u8] = &[
+    pulley_interpreter::opcode::Opcode::ExtendedOp as u8,
+    ((pulley_interpreter::opcode::ExtendedOpcode::Trap as u16) >> 0) as u8,
+    ((pulley_interpreter::opcode::ExtendedOpcode::Trap as u16) >> 8) as u8,
+];
+
+#[test]
+fn test_trap_encoding() {
+    let mut dst = std::vec::Vec::new();
+    pulley_interpreter::encode::trap(&mut dst);
+    assert_eq!(dst, TRAP_OPCODE);
+}
+
 //=============================================================================
 // Pretty-printing of instructions.
 
@@ -567,6 +580,10 @@ impl Inst {
             Inst::IndirectCall { info } => {
                 let callee = format_reg(*info.dest);
                 format!("indirect_call {callee}, {info:?}")
+            }
+
+            Inst::IndirectCallHost { info } => {
+                format!("indirect_call_host {info:?}")
             }
 
             Inst::Jump { label } => format!("jump {}", label.to_string()),

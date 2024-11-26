@@ -247,7 +247,7 @@ pub mod optimized {
         let red_zone_size = wasmfx_config.red_zone_size;
 
         let (contref, mut stack) = instance.wasmfx_allocate_continuation().map_err(|_error| {
-            TrapReason::user_without_backtrace(anyhow::anyhow!("Fiber stack allocation failed!"))
+            TrapReason::user(anyhow::anyhow!("Fiber stack allocation failed!"))
         })?;
 
         let tsp = stack.top().unwrap();
@@ -351,8 +351,8 @@ pub mod baseline {
         pub limits: StackLimits,
         pub parent_chain: StackChain,
         pub parent: *mut VMContRef,
-        pub args: Vec<u128>,
-        pub values: Vec<u128>,
+        pub args: Vec<ValRaw>,
+        pub values: Vec<ValRaw>,
         pub _marker: core::marker::PhantomPinned,
     }
 
@@ -425,20 +425,18 @@ pub mod baseline {
         result_count: usize,
     ) -> Result<*mut VMContRef, TrapReason> {
         let capacity = cmp::max(param_count, result_count);
-        let mut values: Vec<u128> = Vec::with_capacity(capacity);
+        let mut values: Vec<ValRaw> = Vec::with_capacity(capacity);
 
         let (contref, fiber) = {
             let (contref, stack) = instance
                 .wasmfx_allocate_continuation()
-                .map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+                .map_err(|error| TrapReason::user(error.into()))?;
 
             let fiber = match unsafe { func.cast::<VMFuncRef>().as_ref() } {
                 None => Fiber::new(stack, |_instance: &mut Instance, _suspend: &mut Yield| {
                     panic!("Attempt to invoke null VMFuncRef!");
                 }),
                 Some(func_ref) => {
-                    let callee_ctx = func_ref.vmctx;
-
                     let vals_ptr = values.as_mut_ptr();
                     Fiber::new(
                         stack,
@@ -450,11 +448,9 @@ pub mod baseline {
                             // Yield lives as long as the object it is
                             // embedded in.
                             (*get_current_continuation()).suspend = suspend as *mut Yield;
-                            let results = (func_ref.array_call)(
-                                callee_ctx,
+                            let results = func_ref.array_call(
                                 caller_ctx,
-                                vals_ptr.cast::<ValRaw>(),
-                                capacity,
+                                std::slice::from_raw_parts_mut(vals_ptr, capacity),
                             );
                             // As a precaution we null the suspender.
                             (*get_current_continuation()).suspend = core::ptr::null_mut();
@@ -463,7 +459,7 @@ pub mod baseline {
                     )
                 }
             };
-            let fiber = fiber.map_err(|error| TrapReason::user_without_backtrace(error.into()))?;
+            let fiber = fiber.map_err(|error| TrapReason::user(error.into()))?;
             (contref, fiber)
         };
 
@@ -616,18 +612,18 @@ pub mod baseline {
         // Zero initialise `nargs` cells for writing.
         if nargs > 0 {
             for _ in 0..nargs {
-                contref.args.push(0); // zero initialise
+                contref.args.push(ValRaw::v128(0)); // zero initialise
             }
             offset = (contref.args.len() - nargs) as isize;
         }
-        unsafe { contref.args.as_mut_ptr().offset(offset) }
+        unsafe { contref.args.as_mut_ptr().offset(offset).cast::<u128>() }
     }
 
     /// Returns the pointer to the (return) values buffer of a given
     /// continuation reference.
     #[inline(always)]
     pub fn get_values_ptr(_instance: &mut Instance, contref: &mut VMContRef) -> *mut u128 {
-        contref.values.as_mut_ptr()
+        contref.values.as_mut_ptr().cast::<u128>()
     }
 
     /// Returns the pointer to the tag payloads buffer.

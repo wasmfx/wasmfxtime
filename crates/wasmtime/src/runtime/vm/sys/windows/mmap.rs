@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::runtime::vm::SendSyncPtr;
+use crate::runtime::vm::{HostAlignedByteCount, SendSyncPtr};
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::ops::Range;
@@ -9,6 +9,22 @@ use std::ptr::{self, NonNull};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Storage::FileSystem::*;
 use windows_sys::Win32::System::Memory::*;
+
+/// Open a file so that it can be mmap'd for executing.
+///
+/// Open the file with read/execute access and only share for
+/// read. This will enable us to perform the proper mmap below
+/// while also disallowing other processes modifying the file
+/// and having those modifications show up in our address space.
+pub fn open_file_for_mmap(path: &Path) -> Result<File> {
+    OpenOptions::new()
+        .read(true)
+        .access_mode(FILE_GENERIC_READ | FILE_GENERIC_EXECUTE)
+        .share_mode(FILE_SHARE_READ)
+        .open(path)
+        .err2anyhow()
+        .context("failed to open file")
+}
 
 #[derive(Debug)]
 pub struct Mmap {
@@ -24,11 +40,11 @@ impl Mmap {
         }
     }
 
-    pub fn new(size: usize) -> Result<Self> {
+    pub fn new(size: HostAlignedByteCount) -> Result<Self> {
         let ptr = unsafe {
             VirtualAlloc(
                 ptr::null_mut(),
-                size,
+                size.byte_count(),
                 MEM_RESERVE | MEM_COMMIT,
                 PAGE_READWRITE,
             )
@@ -37,7 +53,7 @@ impl Mmap {
             bail!(io::Error::last_os_error())
         }
 
-        let memory = std::ptr::slice_from_raw_parts_mut(ptr.cast(), size);
+        let memory = std::ptr::slice_from_raw_parts_mut(ptr.cast(), size.byte_count());
         let memory = SendSyncPtr::new(NonNull::new(memory).unwrap());
         Ok(Self {
             memory,
@@ -45,12 +61,19 @@ impl Mmap {
         })
     }
 
-    pub fn reserve(size: usize) -> Result<Self> {
-        let ptr = unsafe { VirtualAlloc(ptr::null_mut(), size, MEM_RESERVE, PAGE_NOACCESS) };
+    pub fn reserve(size: HostAlignedByteCount) -> Result<Self> {
+        let ptr = unsafe {
+            VirtualAlloc(
+                ptr::null_mut(),
+                size.byte_count(),
+                MEM_RESERVE,
+                PAGE_NOACCESS,
+            )
+        };
         if ptr.is_null() {
             bail!(io::Error::last_os_error())
         }
-        let memory = std::ptr::slice_from_raw_parts_mut(ptr.cast(), size);
+        let memory = std::ptr::slice_from_raw_parts_mut(ptr.cast(), size.byte_count());
         let memory = SendSyncPtr::new(NonNull::new(memory).unwrap());
         Ok(Self {
             memory,
@@ -58,20 +81,8 @@ impl Mmap {
         })
     }
 
-    pub fn from_file(path: &Path) -> Result<(Self, File)> {
+    pub fn from_file(file: &File) -> Result<Self> {
         unsafe {
-            // Open the file with read/execute access and only share for
-            // read. This will enable us to perform the proper mmap below
-            // while also disallowing other processes modifying the file
-            // and having those modifications show up in our address space.
-            let file = OpenOptions::new()
-                .read(true)
-                .access_mode(FILE_GENERIC_READ | FILE_GENERIC_EXECUTE)
-                .share_mode(FILE_SHARE_READ)
-                .open(path)
-                .err2anyhow()
-                .context("failed to open file")?;
-
             let len = file
                 .metadata()
                 .err2anyhow()
@@ -131,15 +142,19 @@ impl Mmap {
                     .context("failed change pages to `PAGE_READONLY`");
             }
 
-            Ok((ret, file))
+            Ok(ret)
         }
     }
 
-    pub fn make_accessible(&mut self, start: usize, len: usize) -> Result<()> {
+    pub fn make_accessible(
+        &mut self,
+        start: HostAlignedByteCount,
+        len: HostAlignedByteCount,
+    ) -> Result<()> {
         if unsafe {
             VirtualAlloc(
-                self.as_ptr().add(start) as _,
-                len,
+                self.as_ptr().add(start.byte_count()) as _,
+                len.byte_count(),
                 MEM_COMMIT,
                 PAGE_READWRITE,
             )

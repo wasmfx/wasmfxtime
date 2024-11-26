@@ -6,12 +6,16 @@
 //! but it's enough to get various tests running relying on memories and such.
 
 use crate::prelude::*;
-use crate::runtime::vm::SendSyncPtr;
+use crate::runtime::vm::{HostAlignedByteCount, SendSyncPtr};
 use std::alloc::{self, Layout};
 use std::fs::File;
 use std::ops::Range;
 use std::path::Path;
 use std::ptr::NonNull;
+
+pub fn open_file_for_mmap(_path: &Path) -> Result<File> {
+    bail!("not supported on miri");
+}
 
 #[derive(Debug)]
 pub struct Mmap {
@@ -25,36 +29,44 @@ impl Mmap {
         }
     }
 
-    pub fn new(size: usize) -> Result<Self> {
+    pub fn new(size: HostAlignedByteCount) -> Result<Self> {
         let mut ret = Mmap::reserve(size)?;
-        ret.make_accessible(0, size)?;
+        ret.make_accessible(HostAlignedByteCount::ZERO, size)?;
         Ok(ret)
     }
 
-    pub fn reserve(size: usize) -> Result<Self> {
-        if size > 1 << 32 {
+    pub fn reserve(size: HostAlignedByteCount) -> Result<Self> {
+        if size.byte_count() > 1 << 32 {
             bail!("failed to allocate memory");
         }
-        let layout = Layout::from_size_align(size, crate::runtime::vm::host_page_size()).unwrap();
+        let layout = make_layout(size.byte_count());
         let ptr = unsafe { alloc::alloc(layout) };
         if ptr.is_null() {
             bail!("failed to allocate memory");
         }
 
-        let memory = std::ptr::slice_from_raw_parts_mut(ptr.cast(), size);
+        let memory = std::ptr::slice_from_raw_parts_mut(ptr.cast(), size.byte_count());
         let memory = SendSyncPtr::new(NonNull::new(memory).unwrap());
         Ok(Mmap { memory })
     }
 
-    pub fn from_file(_path: &Path) -> Result<(Self, File)> {
+    pub fn from_file(_file: &File) -> Result<Self> {
         bail!("not supported on miri");
     }
 
-    pub fn make_accessible(&mut self, start: usize, len: usize) -> Result<()> {
+    pub fn make_accessible(
+        &mut self,
+        start: HostAlignedByteCount,
+        len: HostAlignedByteCount,
+    ) -> Result<()> {
         // The memory is technically always accessible but this marks it as
         // initialized for miri-level checking.
         unsafe {
-            std::ptr::write_bytes(self.as_mut_ptr().add(start), 0u8, len);
+            std::ptr::write_bytes(
+                self.as_mut_ptr().add(start.byte_count()),
+                0u8,
+                len.byte_count(),
+            );
         }
         Ok(())
     }
@@ -90,9 +102,12 @@ impl Drop for Mmap {
             return;
         }
         unsafe {
-            let layout =
-                Layout::from_size_align(self.len(), crate::runtime::vm::host_page_size()).unwrap();
+            let layout = make_layout(self.len());
             alloc::dealloc(self.as_mut_ptr(), layout);
         }
     }
+}
+
+fn make_layout(size: usize) -> Layout {
+    Layout::from_size_align(size, crate::runtime::vm::host_page_size()).unwrap()
 }

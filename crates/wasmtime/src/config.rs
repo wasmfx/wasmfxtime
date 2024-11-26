@@ -152,7 +152,6 @@ pub struct Config {
     pub(crate) async_support: bool,
     pub(crate) module_version: ModuleVersionStrategy,
     pub(crate) parallel_compilation: bool,
-    pub(crate) memory_init_cow: bool,
     pub(crate) memory_guaranteed_dense_image_size: u64,
     pub(crate) force_memory_init_memfd: bool,
     pub(crate) wmemcheck: bool,
@@ -258,7 +257,6 @@ impl Config {
             async_support: false,
             module_version: ModuleVersionStrategy::default(),
             parallel_compilation: !cfg!(miri),
-            memory_init_cow: true,
             memory_guaranteed_dense_image_size: 16 << 20,
             force_memory_init_memfd: false,
             wmemcheck: false,
@@ -1547,6 +1545,7 @@ impl Config {
     ///
     /// For 32-bit platforms this value defaults to 10MiB. This means that
     /// bounds checks will be required on 32-bit platforms.
+    #[cfg(feature = "signals-based-traps")]
     pub fn memory_reservation(&mut self, bytes: u64) -> &mut Self {
         self.tunables.memory_reservation = Some(bytes);
         self
@@ -1582,6 +1581,7 @@ impl Config {
     ///   the memory configuration works at runtime.
     ///
     /// The default value for this option is `true`.
+    #[cfg(feature = "signals-based-traps")]
     pub fn memory_may_move(&mut self, enable: bool) -> &mut Self {
         self.tunables.memory_may_move = Some(enable);
         self
@@ -1630,6 +1630,7 @@ impl Config {
     /// allows eliminating almost all bounds checks on loads/stores with an
     /// immediate offset of less than 32MiB. On 32-bit platforms this defaults
     /// to 64KiB.
+    #[cfg(feature = "signals-based-traps")]
     pub fn memory_guard_size(&mut self, bytes: u64) -> &mut Self {
         self.tunables.memory_guard_size = Some(bytes);
         self
@@ -1719,6 +1720,7 @@ impl Config {
     /// ## Default
     ///
     /// This value defaults to `true`.
+    #[cfg(feature = "signals-based-traps")]
     pub fn guard_before_linear_memory(&mut self, enable: bool) -> &mut Self {
         self.tunables.guard_before_linear_memory = Some(enable);
         self
@@ -1834,8 +1836,9 @@ impl Config {
     /// [`Module::deserialize_file`]: crate::Module::deserialize_file
     /// [`Module`]: crate::Module
     /// [IPI]: https://en.wikipedia.org/wiki/Inter-processor_interrupt
+    #[cfg(feature = "signals-based-traps")]
     pub fn memory_init_cow(&mut self, enable: bool) -> &mut Self {
-        self.memory_init_cow = enable;
+        self.tunables.memory_init_cow = Some(enable);
         self
     }
 
@@ -1946,7 +1949,42 @@ impl Config {
     fn compiler_panicking_wasm_features(&self) -> WasmFeatures {
         #[cfg(any(feature = "cranelift", feature = "winch"))]
         match self.compiler_config.strategy {
-            None | Some(Strategy::Cranelift) => WasmFeatures::empty(),
+            None | Some(Strategy::Cranelift) => match self.compiler_target().architecture {
+                // Pulley doesn't support most of wasm at this time and there's
+                // lots of panicking bits and pieces within the backend. This
+                // doesn't fully cover all panicking cases but it's at least a
+                // starting place to have a ratchet. As the pulley backend is
+                // developed this'll get filtered down over time.
+                target_lexicon::Architecture::Pulley32 | target_lexicon::Architecture::Pulley64 => {
+                    WasmFeatures::SATURATING_FLOAT_TO_INT
+                        | WasmFeatures::SIGN_EXTENSION
+                        | WasmFeatures::REFERENCE_TYPES
+                        | WasmFeatures::MULTI_VALUE
+                        | WasmFeatures::BULK_MEMORY
+                        | WasmFeatures::SIMD
+                        | WasmFeatures::RELAXED_SIMD
+                        | WasmFeatures::THREADS
+                        | WasmFeatures::SHARED_EVERYTHING_THREADS
+                        | WasmFeatures::TAIL_CALL
+                        | WasmFeatures::FLOATS
+                        | WasmFeatures::MULTI_MEMORY
+                        | WasmFeatures::EXCEPTIONS
+                        | WasmFeatures::MEMORY64
+                        | WasmFeatures::EXTENDED_CONST
+                        | WasmFeatures::FUNCTION_REFERENCES
+                        | WasmFeatures::MEMORY_CONTROL
+                        | WasmFeatures::GC
+                        | WasmFeatures::CUSTOM_PAGE_SIZES
+                        | WasmFeatures::LEGACY_EXCEPTIONS
+                        | WasmFeatures::GC_TYPES
+                        | WasmFeatures::STACK_SWITCHING
+                        | WasmFeatures::WIDE_ARITHMETIC
+                }
+
+                // Other Cranelift backends are either 100% missing or complete
+                // at this time, so no need to further filter.
+                _ => WasmFeatures::empty(),
+            },
             Some(Strategy::Winch) => {
                 let mut unsupported = WasmFeatures::GC
                     | WasmFeatures::FUNCTION_REFERENCES
@@ -2068,25 +2106,6 @@ impl Config {
             panic!("should have returned an error by now")
         }
 
-        if features.contains(WasmFeatures::REFERENCE_TYPES)
-            && !features.contains(WasmFeatures::BULK_MEMORY)
-        {
-            bail!("feature 'reference_types' requires 'bulk_memory' to be enabled");
-        }
-        if features.contains(WasmFeatures::THREADS) && !features.contains(WasmFeatures::BULK_MEMORY)
-        {
-            bail!("feature 'threads' requires 'bulk_memory' to be enabled");
-        }
-        if features.contains(WasmFeatures::FUNCTION_REFERENCES)
-            && !features.contains(WasmFeatures::REFERENCE_TYPES)
-        {
-            bail!("feature 'function_references' requires 'reference_types' to be enabled");
-        }
-        if features.contains(WasmFeatures::GC)
-            && !features.contains(WasmFeatures::FUNCTION_REFERENCES)
-        {
-            bail!("feature 'gc' requires 'function_references' to be enabled");
-        }
         #[cfg(feature = "async")]
         if self.async_support && self.max_wasm_stack > self.async_stack_size {
             bail!("max_wasm_stack size cannot exceed the async_stack_size");
@@ -2106,6 +2125,17 @@ impl Config {
             Some(target) => Tunables::default_for_target(target)?,
             None => Tunables::default_host(),
         };
+
+        // When signals-based traps are disabled use slightly different defaults
+        // for tunables to be more amenable to `MallocMemory`. Note that these
+        // can still be overridden by config options.
+        if !cfg!(feature = "signals-based-traps") {
+            tunables.signals_based_traps = false;
+            tunables.memory_reservation = 0;
+            tunables.memory_guard_size = 0;
+            tunables.memory_reservation_for_growth = 1 << 20; // 1MB
+            tunables.memory_init_cow = false;
+        }
 
         self.tunables.configure(&mut tunables);
 
@@ -2130,6 +2160,13 @@ impl Config {
         } else {
             None
         };
+
+        // These `Config` accessors are disabled at compile time so double-check
+        // the defaults here.
+        if !cfg!(feature = "signals-based-traps") {
+            assert!(!tunables.signals_based_traps);
+            assert!(!tunables.memory_init_cow);
+        }
 
         Ok((tunables, features))
     }
@@ -2483,6 +2520,7 @@ impl Config {
     /// are enabled by default.
     ///
     /// **Note** Disabling this option is not compatible with the Winch compiler.
+    #[cfg(feature = "signals-based-traps")]
     pub fn signals_based_traps(&mut self, enable: bool) -> &mut Self {
         self.tunables.signals_based_traps = Some(enable);
         self

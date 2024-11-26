@@ -10,12 +10,17 @@ mod coredump;
 #[path = "traphandlers/coredump_disabled.rs"]
 mod coredump;
 
+#[cfg(all(feature = "signals-based-traps", not(miri)))]
+mod signals;
+#[cfg(all(feature = "signals-based-traps", not(miri)))]
+pub use self::signals::*;
+
 use crate::prelude::*;
-use crate::runtime::module::lookup_code;
+use crate::runtime::store::StoreOpaque;
 use crate::runtime::vm::continuation::stack_chain::StackChainCell;
 use crate::runtime::vm::sys::traphandlers;
 use crate::runtime::vm::{Instance, VMContext, VMOpaqueContext, VMRuntimeLimits};
-use crate::sync::RwLock;
+use crate::{StoreContextMut, WasmBacktrace};
 use core::cell::{Cell, UnsafeCell};
 use core::mem::MaybeUninit;
 use core::ops::Range;
@@ -26,60 +31,6 @@ pub use self::coredump::CoreDumpStack;
 pub use self::tls::{tls_eager_initialize, AsyncWasmCallState, PreviousAsyncWasmCallState};
 
 pub use traphandlers::SignalHandler;
-
-/// Platform-specific trap-handler state.
-///
-/// This state is protected by a lock to synchronize access to it. Right now
-/// it's a `RwLock` but it could be a `Mutex`, and `RwLock` is just chosen for
-/// convenience as it's what's implemented in no_std. The performance here
-/// should not be of consequence.
-///
-/// This is initialized to `None` and then set as part of `init_traps`.
-static TRAP_HANDLER: RwLock<Option<traphandlers::TrapHandler>> = RwLock::new(None);
-
-/// This function is required to be called before any WebAssembly is entered.
-/// This will configure global state such as signal handlers to prepare the
-/// process to receive wasm traps.
-///
-/// # Panics
-///
-/// This function will panic on macOS if it is called twice or more times with
-/// different values of `macos_use_mach_ports`.
-///
-/// This function will also panic if the `std` feature is disabled and it's
-/// called concurrently.
-pub fn init_traps(macos_use_mach_ports: bool) {
-    let mut lock = TRAP_HANDLER.write();
-    match lock.as_mut() {
-        Some(state) => state.validate_config(macos_use_mach_ports),
-        None => *lock = Some(unsafe { traphandlers::TrapHandler::new(macos_use_mach_ports) }),
-    }
-}
-
-/// De-initializes platform-specific state for trap handling.
-///
-/// # Panics
-///
-/// This function will also panic if the `std` feature is disabled and it's
-/// called concurrently.
-///
-/// # Aborts
-///
-/// This may abort the process on some platforms where trap handling state
-/// cannot be unloaded.
-///
-/// # Unsafety
-///
-/// This is not safe to be called unless all wasm code is unloaded. This is not
-/// safe to be called on some platforms, like Unix, when other libraries
-/// installed their own signal handlers after `init_traps` was called.
-///
-/// There's more reasons for unsafety here than those articulated above,
-/// generally this can only be called "if you know what you're doing".
-pub unsafe fn deinit_traps() {
-    let mut lock = TRAP_HANDLER.write();
-    let _ = lock.take();
-}
 
 fn lazy_per_thread_init() {
     traphandlers::lazy_per_thread_init();
@@ -110,11 +61,8 @@ pub unsafe fn raise_trap(reason: TrapReason) -> ! {
 /// Only safe to call when wasm code is on the stack, aka `catch_traps` must
 /// have been previously called. Additionally no Rust destructors can be on the
 /// stack. They will be skipped and not executed.
-pub unsafe fn raise_user_trap(error: Error, needs_backtrace: bool) -> ! {
-    raise_trap(TrapReason::User {
-        error,
-        needs_backtrace,
-    })
+pub unsafe fn raise_user_trap(error: Error) -> ! {
+    raise_trap(TrapReason::User(error))
 }
 
 /// Invokes the closure `f` and returns the result.
@@ -165,14 +113,10 @@ pub struct Trap {
 #[derive(Debug)]
 pub enum TrapReason {
     /// A user-raised trap through `raise_user_trap`.
-    User {
-        /// The actual user trap error.
-        error: Error,
-        /// Whether we need to capture a backtrace for this error or not.
-        needs_backtrace: bool,
-    },
+    User(Error),
 
     /// A trap raised from Cranelift-generated code.
+    #[cfg(all(feature = "signals-based-traps", not(miri)))]
     Jit {
         /// The program counter where this trap originated.
         ///
@@ -201,17 +145,14 @@ pub enum TrapReason {
 
 impl TrapReason {
     /// Create a new `TrapReason::User` that does not have a backtrace yet.
-    pub fn user_without_backtrace(error: Error) -> Self {
-        TrapReason::User {
-            error,
-            needs_backtrace: true,
-        }
+    pub fn user(error: Error) -> Self {
+        TrapReason::User(error)
     }
 }
 
 impl From<Error> for TrapReason {
     fn from(err: Error) -> Self {
-        TrapReason::user_without_backtrace(err)
+        TrapReason::user(err)
     }
 }
 
@@ -221,54 +162,24 @@ impl From<wasmtime_environ::Trap> for TrapReason {
     }
 }
 
-pub(crate) struct TrapRegisters {
-    pub pc: usize,
-    pub fp: usize,
-}
-
-/// Return value from `test_if_trap`.
-pub(crate) enum TrapTest {
-    /// Not a wasm trap, need to delegate to whatever process handler is next.
-    NotWasm,
-    /// This trap was handled by the embedder via custom embedding APIs.
-    HandledByEmbedder,
-    /// This is a wasm trap, it needs to be handled.
-    #[cfg_attr(miri, allow(dead_code))]
-    Trap {
-        /// How to longjmp back to the original wasm frame.
-        jmp_buf: *const u8,
-    },
-}
-
 /// Catches any wasm traps that happen within the execution of `closure`,
 /// returning them as a `Result`.
 ///
 /// Highly unsafe since `closure` won't have any dtors run.
-pub unsafe fn catch_traps<F>(
-    signal_handler: Option<*const SignalHandler<'static>>,
-    capture_backtrace: bool,
-    capture_coredump: bool,
-    async_guard_range: Range<*mut u8>,
-    caller: *mut VMContext,
+pub unsafe fn catch_traps<T, F>(
+    store: &mut StoreContextMut<'_, T>,
     callee: *mut VMOpaqueContext,
     mut closure: F,
 ) -> Result<(), Box<Trap>>
 where
     F: FnMut(*mut VMContext),
 {
-    let limits = Instance::from_vmctx(caller, |i| i.runtime_limits());
     let callee_stack_chain = VMContext::try_from_opaque(callee)
         .map(|vmctx| Instance::from_vmctx(vmctx, |i| *i.stack_chain() as *const StackChainCell));
 
-    let result = CallThreadState::new(
-        signal_handler,
-        capture_backtrace,
-        capture_coredump,
-        *limits,
-        callee_stack_chain,
-        async_guard_range,
-    )
-    .with(|cx| {
+    let caller = store.0.default_caller();
+
+    let result = CallThreadState::new(store.0, caller, callee_stack_chain).with(|cx| {
         traphandlers::wasmtime_setjmp(
             cx.jmp_buf.as_ptr(),
             call_closure::<F>,
@@ -332,7 +243,8 @@ mod call_thread_state {
         pub(super) unwind:
             UnsafeCell<MaybeUninit<(UnwindReason, Option<Backtrace>, Option<CoreDumpStack>)>>,
         pub(super) jmp_buf: Cell<*const u8>,
-        pub(super) signal_handler: Option<*const SignalHandler<'static>>,
+        #[cfg(all(feature = "signals-based-traps", not(miri)))]
+        pub(super) signal_handler: Option<*const SignalHandler>,
         pub(super) capture_backtrace: bool,
         #[cfg(feature = "coredump")]
         pub(super) capture_coredump: bool,
@@ -344,7 +256,7 @@ mod call_thread_state {
         pub(crate) callee_stack_chain: Option<*const StackChainCell>,
 
         pub(super) prev: Cell<tls::Ptr>,
-        #[cfg_attr(any(windows, miri), allow(dead_code))]
+        #[cfg(all(feature = "signals-based-traps", unix, not(miri)))]
         pub(crate) async_guard_range: Range<*mut u8>,
 
         // The values of `VMRuntimeLimits::last_wasm_{exit_{pc,fp},entry_sp}`
@@ -373,25 +285,28 @@ mod call_thread_state {
     impl CallThreadState {
         #[inline]
         pub(super) fn new(
-            signal_handler: Option<*const SignalHandler<'static>>,
-            capture_backtrace: bool,
-            capture_coredump: bool,
-            limits: *const VMRuntimeLimits,
+            store: &mut StoreOpaque,
+            caller: *mut VMContext,
             callee_stack_chain: Option<*const StackChainCell>,
-            async_guard_range: Range<*mut u8>,
         ) -> CallThreadState {
-            let _ = capture_coredump;
+            let limits = unsafe { *Instance::from_vmctx(caller, |i| i.runtime_limits()) };
+
+            // Don't try to plumb #[cfg] everywhere for this field, just pretend
+            // we're using it on miri/windows to silence compiler warnings.
+            let _: Range<_> = store.async_guard_range();
 
             CallThreadState {
                 unwind: UnsafeCell::new(MaybeUninit::uninit()),
                 jmp_buf: Cell::new(ptr::null()),
-                signal_handler,
-                capture_backtrace,
+                #[cfg(all(feature = "signals-based-traps", not(miri)))]
+                signal_handler: store.signal_handler(),
+                capture_backtrace: store.engine().config().wasm_backtrace,
                 #[cfg(feature = "coredump")]
-                capture_coredump,
+                capture_coredump: store.engine().config().coredump_on_trap,
                 limits,
                 callee_stack_chain,
-                async_guard_range,
+                #[cfg(all(feature = "signals-based-traps", unix, not(miri)))]
+                async_guard_range: store.async_guard_range(),
                 prev: Cell::new(ptr::null()),
                 old_last_wasm_exit_fp: Cell::new(unsafe { *(*limits).last_wasm_exit_fp.get() }),
                 old_last_wasm_exit_pc: Cell::new(unsafe { *(*limits).last_wasm_exit_pc.get() }),
@@ -461,7 +376,7 @@ impl CallThreadState {
     }
 
     fn unwind_with(&self, reason: UnwindReason) -> ! {
-        let (backtrace, coredump) = match reason {
+        let (backtrace, coredump) = match &reason {
             // Panics don't need backtraces. There is nowhere to attach the
             // hypothetical backtrace to and it doesn't really make sense to try
             // in the first place since this is a Rust problem rather than a
@@ -471,10 +386,11 @@ impl CallThreadState {
             // And if we are just propagating an existing trap that already has
             // a backtrace attached to it, then there is no need to capture a
             // new backtrace either.
-            UnwindReason::Trap(TrapReason::User {
-                needs_backtrace: false,
-                ..
-            }) => (None, None),
+            UnwindReason::Trap(TrapReason::User(err))
+                if err.downcast_ref::<WasmBacktrace>().is_some() =>
+            {
+                (None, None)
+            }
             UnwindReason::Trap(_) => (
                 self.capture_backtrace(self.limits, None),
                 self.capture_coredump(self.limits, None),
@@ -485,86 +401,6 @@ impl CallThreadState {
                 .as_mut_ptr()
                 .write((reason, backtrace, coredump));
             traphandlers::wasmtime_longjmp(self.jmp_buf.get());
-        }
-    }
-
-    /// Trap handler using our thread-local state.
-    ///
-    /// * `pc` - the program counter the trap happened at
-    /// * `call_handler` - a closure used to invoke the platform-specific
-    ///   signal handler for each instance, if available.
-    ///
-    /// Attempts to handle the trap if it's a wasm trap. Returns a few
-    /// different things:
-    ///
-    /// * null - the trap didn't look like a wasm trap and should continue as a
-    ///   trap
-    /// * 1 as a pointer - the trap was handled by a custom trap handler on an
-    ///   instance, and the trap handler should quickly return.
-    /// * a different pointer - a jmp_buf buffer to longjmp to, meaning that
-    ///   the wasm trap was successfully handled.
-    #[cfg_attr(miri, allow(dead_code))] // miri doesn't handle traps yet
-    pub(crate) fn test_if_trap(
-        &self,
-        regs: TrapRegisters,
-        faulting_addr: Option<usize>,
-        call_handler: impl Fn(&SignalHandler) -> bool,
-    ) -> TrapTest {
-        // If we haven't even started to handle traps yet, bail out.
-        if self.jmp_buf.get().is_null() {
-            return TrapTest::NotWasm;
-        }
-
-        // First up see if any instance registered has a custom trap handler,
-        // in which case run them all. If anything handles the trap then we
-        // return that the trap was handled.
-        if let Some(handler) = self.signal_handler {
-            if unsafe { call_handler(&*handler) } {
-                return TrapTest::HandledByEmbedder;
-            }
-        }
-
-        // If this fault wasn't in wasm code, then it's not our problem
-        let Some((code, text_offset)) = lookup_code(regs.pc) else {
-            return TrapTest::NotWasm;
-        };
-
-        let Some(trap) = code.lookup_trap_code(text_offset) else {
-            return TrapTest::NotWasm;
-        };
-
-        self.set_jit_trap(regs, faulting_addr, trap);
-
-        // If all that passed then this is indeed a wasm trap, so return the
-        // `jmp_buf` passed to `wasmtime_longjmp` to resume.
-        TrapTest::Trap {
-            jmp_buf: self.take_jmp_buf(),
-        }
-    }
-
-    pub(crate) fn take_jmp_buf(&self) -> *const u8 {
-        self.jmp_buf.replace(ptr::null())
-    }
-
-    #[cfg_attr(miri, allow(dead_code))] // miri doesn't handle traps yet
-    pub(crate) fn set_jit_trap(
-        &self,
-        TrapRegisters { pc, fp, .. }: TrapRegisters,
-        faulting_addr: Option<usize>,
-        trap: wasmtime_environ::Trap,
-    ) {
-        let backtrace = self.capture_backtrace(self.limits, Some((pc, fp)));
-        let coredump = self.capture_coredump(self.limits, Some((pc, fp)));
-        unsafe {
-            (*self.unwind.get()).as_mut_ptr().write((
-                UnwindReason::Trap(TrapReason::Jit {
-                    pc,
-                    faulting_addr,
-                    trap,
-                }),
-                backtrace,
-                coredump,
-            ));
         }
     }
 

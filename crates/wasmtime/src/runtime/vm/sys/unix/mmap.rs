@@ -1,10 +1,16 @@
 use crate::prelude::*;
-use crate::runtime::vm::SendSyncPtr;
+use crate::runtime::vm::{HostAlignedByteCount, SendSyncPtr};
 use rustix::mm::{mprotect, MprotectFlags};
 use std::ops::Range;
 use std::ptr::{self, NonNull};
 #[cfg(feature = "std")]
 use std::{fs::File, path::Path};
+
+/// Open a file so that it can be mmap'd for executing.
+#[cfg(feature = "std")]
+pub fn open_file_for_mmap(path: &Path) -> Result<File> {
+    File::open(path).err2anyhow().context("failed to open file")
+}
 
 #[derive(Debug)]
 pub struct Mmap {
@@ -14,7 +20,7 @@ pub struct Mmap {
 cfg_if::cfg_if! {
     if #[cfg(any(target_os = "illumos", target_os = "linux"))] {
         // On illumos, by default, mmap reserves what it calls "swap space" ahead of time, so that
-        // memory accesses are guaranteed not to fail once mmap succeeds. NORESERVE is for cases
+        // memory accesses a`re guaranteed not to fail once mmap succeeds. NORESERVE is for cases
         // where that memory is never meant to be accessed -- e.g. memory that's used as guard
         // pages.
         //
@@ -35,26 +41,26 @@ impl Mmap {
         }
     }
 
-    pub fn new(size: usize) -> Result<Self> {
+    pub fn new(size: HostAlignedByteCount) -> Result<Self> {
         let ptr = unsafe {
             rustix::mm::mmap_anonymous(
                 ptr::null_mut(),
-                size,
+                size.byte_count(),
                 rustix::mm::ProtFlags::READ | rustix::mm::ProtFlags::WRITE,
                 rustix::mm::MapFlags::PRIVATE | MMAP_NORESERVE_FLAG,
             )
             .err2anyhow()?
         };
-        let memory = std::ptr::slice_from_raw_parts_mut(ptr.cast(), size);
+        let memory = std::ptr::slice_from_raw_parts_mut(ptr.cast(), size.byte_count());
         let memory = SendSyncPtr::new(NonNull::new(memory).unwrap());
         Ok(Mmap { memory })
     }
 
-    pub fn reserve(size: usize) -> Result<Self> {
+    pub fn reserve(size: HostAlignedByteCount) -> Result<Self> {
         let ptr = unsafe {
             rustix::mm::mmap_anonymous(
                 ptr::null_mut(),
-                size,
+                size.byte_count(),
                 rustix::mm::ProtFlags::empty(),
                 // Astute readers might be wondering why a function called "reserve" passes in a
                 // NORESERVE flag. That's because "reserve" in this context means one of two
@@ -72,16 +78,13 @@ impl Mmap {
             .err2anyhow()?
         };
 
-        let memory = std::ptr::slice_from_raw_parts_mut(ptr.cast(), size);
+        let memory = std::ptr::slice_from_raw_parts_mut(ptr.cast(), size.byte_count());
         let memory = SendSyncPtr::new(NonNull::new(memory).unwrap());
         Ok(Mmap { memory })
     }
 
     #[cfg(feature = "std")]
-    pub fn from_file(path: &Path) -> Result<(Self, File)> {
-        let file = File::open(path)
-            .err2anyhow()
-            .context("failed to open file")?;
+    pub fn from_file(file: &File) -> Result<Self> {
         let len = file
             .metadata()
             .err2anyhow()
@@ -103,15 +106,19 @@ impl Mmap {
         let memory = std::ptr::slice_from_raw_parts_mut(ptr.cast(), len);
         let memory = SendSyncPtr::new(NonNull::new(memory).unwrap());
 
-        Ok((Mmap { memory }, file))
+        Ok(Mmap { memory })
     }
 
-    pub fn make_accessible(&mut self, start: usize, len: usize) -> Result<()> {
+    pub fn make_accessible(
+        &mut self,
+        start: HostAlignedByteCount,
+        len: HostAlignedByteCount,
+    ) -> Result<()> {
         let ptr = self.memory.as_ptr();
         unsafe {
             mprotect(
-                ptr.byte_add(start).cast(),
-                len,
+                ptr.byte_add(start.byte_count()).cast(),
+                len.byte_count(),
                 MprotectFlags::READ | MprotectFlags::WRITE,
             )
             .err2anyhow()?;
@@ -132,6 +139,9 @@ impl Mmap {
 
     #[inline]
     pub fn len(&self) -> usize {
+        // Note: while the start of memory is host page-aligned, the length might
+        // not be, and in particular is not aligned for file-backed mmaps. Be
+        // careful!
         self.memory.as_ptr().len()
     }
 

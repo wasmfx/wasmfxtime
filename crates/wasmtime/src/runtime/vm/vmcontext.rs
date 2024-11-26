@@ -37,8 +37,14 @@ use wasmtime_environ::{
 ///
 /// * The capacity of the `ValRaw` buffer. Must always be at least
 ///   `max(len(wasm_params), len(wasm_results))`.
-pub type VMArrayCallFunction =
+pub type VMArrayCallNative =
     unsafe extern "C" fn(*mut VMOpaqueContext, *mut VMOpaqueContext, *mut ValRaw, usize);
+
+/// An opaque function pointer which might be `VMArrayCallNative` or it might be
+/// pulley bytecode. Requires external knowledge to determine what kind of
+/// function pointer this is.
+#[repr(transparent)]
+pub struct VMArrayCallFunction(VMFunctionBody);
 
 /// A function pointer that exposes the Wasm calling convention.
 ///
@@ -60,7 +66,7 @@ pub struct VMFunctionImport {
 
     /// Function pointer to use when calling this imported function with the
     /// "array" calling convention that `Func::new` et al use.
-    pub array_call: VMArrayCallFunction,
+    pub array_call: NonNull<VMArrayCallFunction>,
 
     /// The VM state associated with this function.
     ///
@@ -730,7 +736,7 @@ mod test_vmtag_definition {
 pub struct VMFuncRef {
     /// Function pointer for this funcref if being called via the "array"
     /// calling convention that `Func::new` et al use.
-    pub array_call: VMArrayCallFunction,
+    pub array_call: NonNull<VMArrayCallFunction>,
 
     /// Function pointer for this funcref if being called via the calling
     /// convention we use when compiling Wasm.
@@ -767,6 +773,42 @@ pub struct VMFuncRef {
 
 unsafe impl Send for VMFuncRef {}
 unsafe impl Sync for VMFuncRef {}
+
+impl VMFuncRef {
+    /// Invokes the `array_call` field of this `VMFuncRef` with the supplied
+    /// arguments.
+    ///
+    /// This will invoke the function pointer in the `array_call` field with:
+    ///
+    /// * the `callee` vmctx as `self.vmctx`
+    /// * the `caller` as `caller` specified here
+    /// * the args pointer as `args_and_results`
+    /// * the args length as `args_and_results`
+    ///
+    /// The `args_and_results` area must be large enough to both load all
+    /// arguments from and store all results to.
+    ///
+    /// # Unsafety
+    ///
+    /// This method is unsafe because it can be called with any pointers. They
+    /// must all be valid for this wasm function call to proceed.
+    pub unsafe fn array_call(&self, caller: *mut VMOpaqueContext, args_and_results: *mut [ValRaw]) {
+        union GetNativePointer {
+            native: VMArrayCallNative,
+            ptr: NonNull<VMArrayCallFunction>,
+        }
+        let native = GetNativePointer {
+            ptr: self.array_call,
+        }
+        .native;
+        native(
+            self.vmctx,
+            caller,
+            args_and_results.cast(),
+            args_and_results.len(),
+        )
+    }
+}
 
 #[cfg(test)]
 mod test_vm_func_ref {
@@ -832,7 +874,6 @@ macro_rules! define_builtin_array {
 
     (@ty i32) => (u32);
     (@ty i64) => (u64);
-    (@ty f64) => (f64);
     (@ty u8) => (u8);
     (@ty reference) => (u32);
     (@ty pointer) => (*mut u8);

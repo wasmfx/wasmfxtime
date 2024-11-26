@@ -25,7 +25,7 @@ const AFTER_HELP: &str =
         wasmtime compile --target x86_64-unknown-linux -Ccranelift-skylake foo.wasm\n";
 
 /// Compiles a WebAssembly module.
-#[derive(Parser, PartialEq)]
+#[derive(Parser)]
 #[command(
     version,
     after_help = AFTER_HELP,
@@ -34,10 +34,6 @@ pub struct CompileCommand {
     #[command(flatten)]
     #[allow(missing_docs)]
     pub common: CommonOptions,
-
-    /// The target triple; default is the host triple
-    #[arg(long, value_name = "TARGET")]
-    pub target: Option<String>,
 
     /// The path of the output compiled module; defaults to `<MODULE>.cwasm`
     #[arg(short = 'o', long, value_name = "OUTPUT")]
@@ -66,7 +62,7 @@ impl CompileCommand {
 
         self.common.init_logging()?;
 
-        let mut config = self.common.config(self.target.as_deref(), None)?;
+        let mut config = self.common.config(None)?;
 
         if let Some(path) = self.emit_clif {
             if !path.exists() {

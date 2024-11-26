@@ -4,7 +4,6 @@ use crate::decode::*;
 use crate::imms::*;
 use crate::regs::*;
 use crate::ExtendedOpcode;
-use crate::Opcode;
 use alloc::string::ToString;
 use alloc::{vec, vec::Vec};
 use core::fmt;
@@ -14,7 +13,10 @@ use core::ops::{Index, IndexMut};
 use core::ptr::{self, NonNull};
 use sptr::Strict;
 
-mod interp_loop;
+#[cfg(not(pulley_tail_calls))]
+mod match_loop;
+#[cfg(pulley_tail_calls)]
+mod tail_loop;
 
 const DEFAULT_STACK_SIZE: usize = 1 << 20; // 1 MiB
 
@@ -122,8 +124,11 @@ impl Vm {
     }
 
     unsafe fn run(&mut self, pc: NonNull<u8>) -> Result<(), NonNull<u8>> {
-        let mut bytecode = UnsafeBytecodeStream::new(pc);
-        match interp_loop::interpreter_loop(self, &mut bytecode) {
+        let interpreter = Interpreter {
+            state: &mut self.state,
+            pc: UnsafeBytecodeStream::new(pc),
+        };
+        match interpreter.run() {
             Done::ReturnToHost => self.return_to_host(),
             Done::Trap(pc) => self.trap(pc),
             Done::HostCall => self.host_call(),
@@ -566,21 +571,6 @@ impl MachineState {
 
         state
     }
-
-    /// `*sp = val; sp += size_of::<T>()`
-    fn push<T>(&mut self, val: T) {
-        let sp = self[XReg::sp].get_ptr::<T>();
-        unsafe { sp.write_unaligned(val) }
-        self[XReg::sp].set_ptr(sp.wrapping_add(1));
-    }
-
-    /// `ret = *sp; sp -= size_of::<T>()`
-    fn pop<T>(&mut self) -> T {
-        let sp = self[XReg::sp].get_ptr::<T>();
-        let val = unsafe { sp.read_unaligned() };
-        self[XReg::sp].set_ptr(sp.wrapping_sub(1));
-        val
-    }
 }
 
 /// The reason the interpreter loop terminated.
@@ -595,4 +585,736 @@ enum Done {
 
     #[allow(dead_code)]
     HostCall,
+}
+
+struct Interpreter<'a> {
+    state: &'a mut MachineState,
+    pc: UnsafeBytecodeStream,
+}
+
+impl Interpreter<'_> {
+    #[inline]
+    fn pc_rel_jump(&mut self, offset: PcRelOffset, inst_size: isize) -> ControlFlow<Done> {
+        let offset = isize::try_from(i32::from(offset)).unwrap();
+        self.pc = unsafe { self.pc.offset(offset - inst_size) };
+        ControlFlow::Continue(())
+    }
+
+    /// `sp -= size_of::<T>(); *sp = val;`
+    #[must_use]
+    fn push<T>(&mut self, val: T) -> ControlFlow<Done> {
+        let new_sp = self.state[XReg::sp].get_ptr::<T>().wrapping_sub(1);
+        self.set_sp(new_sp)?;
+        unsafe {
+            new_sp.write_unaligned(val);
+        }
+        ControlFlow::Continue(())
+    }
+
+    /// `ret = *sp; sp -= size_of::<T>()`
+    fn pop<T>(&mut self) -> T {
+        let sp = self.state[XReg::sp].get_ptr::<T>();
+        let val = unsafe { sp.read_unaligned() };
+        self.set_sp_unchecked(sp.wrapping_add(1));
+        val
+    }
+
+    /// Sets the stack pointer to the `sp` provided.
+    ///
+    /// Returns a trap if this would result in stack overflow, or if `sp` is
+    /// beneath the base pointer of `self.state.stack`.
+    #[must_use]
+    fn set_sp<T>(&mut self, sp: *mut T) -> ControlFlow<Done> {
+        let sp_raw = sp as usize;
+        let base_raw = self.state.stack.as_ptr() as usize;
+        if sp_raw < base_raw {
+            return ControlFlow::Break(Done::Trap(self.pc.as_ptr()));
+        }
+        self.set_sp_unchecked(sp);
+        ControlFlow::Continue(())
+    }
+
+    /// Same as `set_sp` but does not check to see if `sp` is in-bounds. Should
+    /// only be used with stack increment operations such as `pop`.
+    fn set_sp_unchecked<T>(&mut self, sp: *mut T) {
+        if cfg!(debug_assertions) {
+            let sp_raw = sp as usize;
+            let base = self.state.stack.as_ptr() as usize;
+            let end = base + self.state.stack.len();
+            assert!(base <= sp_raw && sp_raw <= end);
+        }
+        self.state[XReg::sp].set_ptr(sp);
+    }
+}
+
+#[test]
+fn simple_push_pop() {
+    let mut state = MachineState::with_stack(vec![0; 16]);
+    unsafe {
+        let mut i = Interpreter {
+            state: &mut state,
+            // this isn't actually read so just manufacture a dummy one
+            pc: UnsafeBytecodeStream::new((&mut 0).into()),
+        };
+        assert!(i.push(0_i32).is_continue());
+        assert_eq!(i.pop::<i32>(), 0_i32);
+        assert!(i.push(1_i32).is_continue());
+        assert!(i.push(2_i32).is_continue());
+        assert!(i.push(3_i32).is_continue());
+        assert!(i.push(4_i32).is_continue());
+        assert!(i.push(5_i32).is_break());
+        assert!(i.push(6_i32).is_break());
+        assert_eq!(i.pop::<i32>(), 4_i32);
+        assert_eq!(i.pop::<i32>(), 3_i32);
+        assert_eq!(i.pop::<i32>(), 2_i32);
+        assert_eq!(i.pop::<i32>(), 1_i32);
+    }
+}
+
+impl OpVisitor for Interpreter<'_> {
+    type BytecodeStream = UnsafeBytecodeStream;
+    type Return = ControlFlow<Done>;
+
+    fn bytecode(&mut self) -> &mut UnsafeBytecodeStream {
+        &mut self.pc
+    }
+
+    fn ret(&mut self) -> ControlFlow<Done> {
+        let lr = self.state[XReg::lr];
+        if lr == XRegVal::HOST_RETURN_ADDR {
+            ControlFlow::Break(Done::ReturnToHost)
+        } else {
+            let return_addr = lr.get_ptr();
+            self.pc = unsafe { UnsafeBytecodeStream::new(NonNull::new_unchecked(return_addr)) };
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn call(&mut self, offset: PcRelOffset) -> ControlFlow<Done> {
+        let return_addr = self.pc.as_ptr();
+        self.state[XReg::lr].set_ptr(return_addr.as_ptr());
+        self.pc_rel_jump(offset, 5);
+        ControlFlow::Continue(())
+    }
+
+    fn call_indirect(&mut self, dst: XReg) -> ControlFlow<Done> {
+        let return_addr = self.pc.as_ptr();
+        self.state[XReg::lr].set_ptr(return_addr.as_ptr());
+        // SAFETY: part of the unsafe contract of the interpreter is only valid
+        // bytecode is interpreted, so the jump destination is part of the validity
+        // of the bytecode itself.
+        unsafe {
+            self.pc = UnsafeBytecodeStream::new(NonNull::new_unchecked(self.state[dst].get_ptr()));
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn jump(&mut self, offset: PcRelOffset) -> ControlFlow<Done> {
+        self.pc_rel_jump(offset, 5);
+        ControlFlow::Continue(())
+    }
+
+    fn br_if(&mut self, cond: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let cond = self.state[cond].get_u64();
+        if cond != 0 {
+            self.pc_rel_jump(offset, 6)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_not(&mut self, cond: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let cond = self.state[cond].get_u64();
+        if cond == 0 {
+            self.pc_rel_jump(offset, 6)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xeq32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_u32();
+        let b = self.state[b].get_u32();
+        if a == b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xneq32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_u32();
+        let b = self.state[b].get_u32();
+        if a != b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xslt32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_i32();
+        let b = self.state[b].get_i32();
+        if a < b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xslteq32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_i32();
+        let b = self.state[b].get_i32();
+        if a <= b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xult32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_u32();
+        let b = self.state[b].get_u32();
+        if a < b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xulteq32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_u32();
+        let b = self.state[b].get_u32();
+        if a <= b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xeq64(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_u64();
+        let b = self.state[b].get_u64();
+        if a == b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xneq64(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_u64();
+        let b = self.state[b].get_u64();
+        if a != b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xslt64(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_i64();
+        let b = self.state[b].get_i64();
+        if a < b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xslteq64(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_i64();
+        let b = self.state[b].get_i64();
+        if a <= b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xult64(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_u64();
+        let b = self.state[b].get_u64();
+        if a < b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn br_if_xulteq64(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> ControlFlow<Done> {
+        let a = self.state[a].get_u64();
+        let b = self.state[b].get_u64();
+        if a <= b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn xmov(&mut self, dst: XReg, src: XReg) -> ControlFlow<Done> {
+        let val = self.state[src];
+        self.state[dst] = val;
+        ControlFlow::Continue(())
+    }
+
+    fn fmov(&mut self, dst: FReg, src: FReg) -> ControlFlow<Done> {
+        let val = self.state[src];
+        self.state[dst] = val;
+        ControlFlow::Continue(())
+    }
+
+    fn vmov(&mut self, dst: VReg, src: VReg) -> ControlFlow<Done> {
+        let val = self.state[src];
+        self.state[dst] = val;
+        ControlFlow::Continue(())
+    }
+
+    fn xconst8(&mut self, dst: XReg, imm: i8) -> ControlFlow<Done> {
+        self.state[dst].set_i64(i64::from(imm));
+        ControlFlow::Continue(())
+    }
+
+    fn xconst16(&mut self, dst: XReg, imm: i16) -> ControlFlow<Done> {
+        self.state[dst].set_i64(i64::from(imm));
+        ControlFlow::Continue(())
+    }
+
+    fn xconst32(&mut self, dst: XReg, imm: i32) -> ControlFlow<Done> {
+        self.state[dst].set_i64(i64::from(imm));
+        ControlFlow::Continue(())
+    }
+
+    fn xconst64(&mut self, dst: XReg, imm: i64) -> ControlFlow<Done> {
+        self.state[dst].set_i64(imm);
+        ControlFlow::Continue(())
+    }
+
+    fn xadd32(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_u32();
+        let b = self.state[operands.src2].get_u32();
+        self.state[operands.dst].set_u32(a.wrapping_add(b));
+        ControlFlow::Continue(())
+    }
+
+    fn xadd64(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_u64();
+        let b = self.state[operands.src2].get_u64();
+        self.state[operands.dst].set_u64(a.wrapping_add(b));
+        ControlFlow::Continue(())
+    }
+
+    fn xeq64(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_u64();
+        let b = self.state[operands.src2].get_u64();
+        self.state[operands.dst].set_u64(u64::from(a == b));
+        ControlFlow::Continue(())
+    }
+
+    fn xneq64(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_u64();
+        let b = self.state[operands.src2].get_u64();
+        self.state[operands.dst].set_u64(u64::from(a != b));
+        ControlFlow::Continue(())
+    }
+
+    fn xslt64(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_i64();
+        let b = self.state[operands.src2].get_i64();
+        self.state[operands.dst].set_u64(u64::from(a < b));
+        ControlFlow::Continue(())
+    }
+
+    fn xslteq64(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_i64();
+        let b = self.state[operands.src2].get_i64();
+        self.state[operands.dst].set_u64(u64::from(a <= b));
+        ControlFlow::Continue(())
+    }
+
+    fn xult64(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_u64();
+        let b = self.state[operands.src2].get_u64();
+        self.state[operands.dst].set_u64(u64::from(a < b));
+        ControlFlow::Continue(())
+    }
+
+    fn xulteq64(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_u64();
+        let b = self.state[operands.src2].get_u64();
+        self.state[operands.dst].set_u64(u64::from(a <= b));
+        ControlFlow::Continue(())
+    }
+
+    fn xeq32(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_u32();
+        let b = self.state[operands.src2].get_u32();
+        self.state[operands.dst].set_u64(u64::from(a == b));
+        ControlFlow::Continue(())
+    }
+
+    fn xneq32(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_u32();
+        let b = self.state[operands.src2].get_u32();
+        self.state[operands.dst].set_u64(u64::from(a != b));
+        ControlFlow::Continue(())
+    }
+
+    fn xslt32(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_i32();
+        let b = self.state[operands.src2].get_i32();
+        self.state[operands.dst].set_u64(u64::from(a < b));
+        ControlFlow::Continue(())
+    }
+
+    fn xslteq32(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_i32();
+        let b = self.state[operands.src2].get_i32();
+        self.state[operands.dst].set_u64(u64::from(a <= b));
+        ControlFlow::Continue(())
+    }
+
+    fn xult32(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_u32();
+        let b = self.state[operands.src2].get_u32();
+        self.state[operands.dst].set_u64(u64::from(a < b));
+        ControlFlow::Continue(())
+    }
+
+    fn xulteq32(&mut self, operands: BinaryOperands<XReg>) -> ControlFlow<Done> {
+        let a = self.state[operands.src1].get_u32();
+        let b = self.state[operands.src2].get_u32();
+        self.state[operands.dst].set_u64(u64::from(a <= b));
+        ControlFlow::Continue(())
+    }
+
+    fn load32_u(&mut self, dst: XReg, ptr: XReg) -> ControlFlow<Done> {
+        let ptr = self.state[ptr].get_ptr::<u32>();
+        let val = unsafe { ptr::read_unaligned(ptr) };
+        self.state[dst].set_u64(u64::from(val));
+        ControlFlow::Continue(())
+    }
+
+    fn load32_s(&mut self, dst: XReg, ptr: XReg) -> ControlFlow<Done> {
+        let ptr = self.state[ptr].get_ptr::<i32>();
+        let val = unsafe { ptr::read_unaligned(ptr) };
+        self.state[dst].set_i64(i64::from(val));
+        ControlFlow::Continue(())
+    }
+
+    fn load64(&mut self, dst: XReg, ptr: XReg) -> ControlFlow<Done> {
+        let ptr = self.state[ptr].get_ptr::<u64>();
+        let val = unsafe { ptr::read_unaligned(ptr) };
+        self.state[dst].set_u64(val);
+        ControlFlow::Continue(())
+    }
+
+    fn load32_u_offset8(&mut self, dst: XReg, ptr: XReg, offset: i8) -> ControlFlow<Done> {
+        let val = unsafe {
+            self.state[ptr]
+                .get_ptr::<u32>()
+                .byte_offset(offset.into())
+                .read_unaligned()
+        };
+        self.state[dst].set_u64(u64::from(val));
+        ControlFlow::Continue(())
+    }
+
+    fn load32_s_offset8(&mut self, dst: XReg, ptr: XReg, offset: i8) -> ControlFlow<Done> {
+        let val = unsafe {
+            self.state[ptr]
+                .get_ptr::<i32>()
+                .byte_offset(offset.into())
+                .read_unaligned()
+        };
+        self.state[dst].set_i64(i64::from(val));
+        ControlFlow::Continue(())
+    }
+
+    fn load32_u_offset64(&mut self, dst: XReg, ptr: XReg, offset: i64) -> ControlFlow<Done> {
+        let val = unsafe {
+            self.state[ptr]
+                .get_ptr::<u32>()
+                .byte_offset(offset as isize)
+                .read_unaligned()
+        };
+        self.state[dst].set_u64(u64::from(val));
+        ControlFlow::Continue(())
+    }
+
+    fn load32_s_offset64(&mut self, dst: XReg, ptr: XReg, offset: i64) -> ControlFlow<Done> {
+        let val = unsafe {
+            self.state[ptr]
+                .get_ptr::<i32>()
+                .byte_offset(offset as isize)
+                .read_unaligned()
+        };
+        self.state[dst].set_i64(i64::from(val));
+        ControlFlow::Continue(())
+    }
+
+    fn load64_offset8(&mut self, dst: XReg, ptr: XReg, offset: i8) -> ControlFlow<Done> {
+        let val = unsafe {
+            self.state[ptr]
+                .get_ptr::<u64>()
+                .byte_offset(offset.into())
+                .read_unaligned()
+        };
+        self.state[dst].set_u64(val);
+        ControlFlow::Continue(())
+    }
+
+    fn load64_offset64(&mut self, dst: XReg, ptr: XReg, offset: i64) -> ControlFlow<Done> {
+        let val = unsafe {
+            self.state[ptr]
+                .get_ptr::<u64>()
+                .byte_offset(offset as isize)
+                .read_unaligned()
+        };
+        self.state[dst].set_u64(val);
+        ControlFlow::Continue(())
+    }
+
+    fn store32(&mut self, ptr: XReg, src: XReg) -> ControlFlow<Done> {
+        let ptr = self.state[ptr].get_ptr::<u32>();
+        let val = self.state[src].get_u32();
+        unsafe {
+            ptr::write_unaligned(ptr, val);
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn store64(&mut self, ptr: XReg, src: XReg) -> ControlFlow<Done> {
+        let ptr = self.state[ptr].get_ptr::<u64>();
+        let val = self.state[src].get_u64();
+        unsafe {
+            ptr::write_unaligned(ptr, val);
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn store32_offset8(&mut self, ptr: XReg, offset: i8, src: XReg) -> ControlFlow<Done> {
+        let val = self.state[src].get_u32();
+        unsafe {
+            self.state[ptr]
+                .get_ptr::<u32>()
+                .byte_offset(offset.into())
+                .write_unaligned(val);
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn store64_offset8(&mut self, ptr: XReg, offset: i8, src: XReg) -> ControlFlow<Done> {
+        let val = self.state[src].get_u64();
+        unsafe {
+            self.state[ptr]
+                .get_ptr::<u64>()
+                .byte_offset(offset.into())
+                .write_unaligned(val);
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn store32_offset64(&mut self, ptr: XReg, offset: i64, src: XReg) -> ControlFlow<Done> {
+        let val = self.state[src].get_u32();
+        unsafe {
+            self.state[ptr]
+                .get_ptr::<u32>()
+                .byte_offset(offset as isize)
+                .write_unaligned(val);
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn store64_offset64(&mut self, ptr: XReg, offset: i64, src: XReg) -> ControlFlow<Done> {
+        let val = self.state[src].get_u64();
+        unsafe {
+            self.state[ptr]
+                .get_ptr::<u64>()
+                .byte_offset(offset as isize)
+                .write_unaligned(val);
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn xpush32(&mut self, src: XReg) -> ControlFlow<Done> {
+        self.push(self.state[src].get_u32())?;
+        ControlFlow::Continue(())
+    }
+
+    fn xpush32_many(&mut self, srcs: RegSet<XReg>) -> ControlFlow<Done> {
+        for src in srcs {
+            self.xpush32(src)?;
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn xpush64(&mut self, src: XReg) -> ControlFlow<Done> {
+        self.push(self.state[src].get_u64())?;
+        ControlFlow::Continue(())
+    }
+
+    fn xpush64_many(&mut self, srcs: RegSet<XReg>) -> ControlFlow<Done> {
+        for src in srcs {
+            self.xpush64(src)?;
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn xpop32(&mut self, dst: XReg) -> ControlFlow<Done> {
+        let val = self.pop();
+        self.state[dst].set_u32(val);
+        ControlFlow::Continue(())
+    }
+
+    fn xpop32_many(&mut self, dsts: RegSet<XReg>) -> ControlFlow<Done> {
+        for dst in dsts.into_iter().rev() {
+            let val = self.pop();
+            self.state[dst].set_u32(val);
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn xpop64(&mut self, dst: XReg) -> ControlFlow<Done> {
+        let val = self.pop();
+        self.state[dst].set_u64(val);
+        ControlFlow::Continue(())
+    }
+
+    fn xpop64_many(&mut self, dsts: RegSet<XReg>) -> ControlFlow<Done> {
+        for dst in dsts.into_iter().rev() {
+            let val = self.pop();
+            self.state[dst].set_u64(val);
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn push_frame(&mut self) -> ControlFlow<Done> {
+        self.push(self.state[XReg::lr].get_ptr::<u8>())?;
+        self.push(self.state[XReg::fp].get_ptr::<u8>())?;
+        self.state[XReg::fp] = self.state[XReg::sp];
+        ControlFlow::Continue(())
+    }
+
+    fn pop_frame(&mut self) -> ControlFlow<Done> {
+        self.set_sp_unchecked(self.state[XReg::fp].get_ptr::<u8>());
+        let fp = self.pop();
+        let lr = self.pop();
+        self.state[XReg::fp].set_ptr::<u8>(fp);
+        self.state[XReg::lr].set_ptr::<u8>(lr);
+        ControlFlow::Continue(())
+    }
+
+    fn bitcast_int_from_float_32(&mut self, dst: XReg, src: FReg) -> ControlFlow<Done> {
+        let val = self.state[src].get_f32();
+        self.state[dst].set_u64(u32::from_ne_bytes(val.to_ne_bytes()).into());
+        ControlFlow::Continue(())
+    }
+
+    fn bitcast_int_from_float_64(&mut self, dst: XReg, src: FReg) -> ControlFlow<Done> {
+        let val = self.state[src].get_f64();
+        self.state[dst].set_u64(u64::from_ne_bytes(val.to_ne_bytes()));
+        ControlFlow::Continue(())
+    }
+
+    fn bitcast_float_from_int_32(&mut self, dst: FReg, src: XReg) -> ControlFlow<Done> {
+        let val = self.state[src].get_u32();
+        self.state[dst].set_f32(f32::from_ne_bytes(val.to_ne_bytes()));
+        ControlFlow::Continue(())
+    }
+
+    fn bitcast_float_from_int_64(&mut self, dst: FReg, src: XReg) -> ControlFlow<Done> {
+        let val = self.state[src].get_u64();
+        self.state[dst].set_f64(f64::from_ne_bytes(val.to_ne_bytes()));
+        ControlFlow::Continue(())
+    }
+}
+
+impl ExtendedOpVisitor for Interpreter<'_> {
+    fn nop(&mut self) -> ControlFlow<Done> {
+        ControlFlow::Continue(())
+    }
+
+    fn trap(&mut self) -> ControlFlow<Done> {
+        ControlFlow::Break(Done::Trap(self.pc.as_ptr()))
+    }
+
+    fn get_sp(&mut self, dst: XReg) -> ControlFlow<Done> {
+        let sp = self.state[XReg::sp].get_u64();
+        self.state[dst].set_u64(sp);
+        ControlFlow::Continue(())
+    }
+
+    /// This instructions is sort of like a `call` instruction except that it
+    /// delegates to the host itself. That means that ABI details are baked in
+    /// here such as where various arguments are.
+    ///
+    /// This will load the arguments from the `xN` registers, the first being
+    /// the function pointer on the host to call. Since we don't have a
+    /// libffi-like solution here the way this works is that the
+    /// `for_each_host_signature!` macro statically enumerates all possible
+    /// signatures. The `sig` payload here selects one of the mwhich we dispatch
+    /// to here. Note that we mostly just try to get the width of each argument
+    /// correct, whether or not it's a pointer is not actually tracked here.
+    /// That means that, like the rest of Pulley, this isn't compatible with
+    /// strict provenance pointer rules.
+    fn call_indirect_host(&mut self, sig: u8) -> ControlFlow<Done> {
+        let raw = self.state[XReg::x0].get_ptr::<u8>();
+        let mut n = 0;
+        let mut arg = 1;
+
+        type I8 = i8;
+        type I32 = i32;
+        type I64 = i64;
+
+        macro_rules! call_host {
+            ($(fn($($args:ident),*) $(-> $ret:ident)?;)*) => {$(
+                // We're relying on LLVM to boil away most of this boilerplate
+                // as this is a bunch of `if` statements that should be a
+                // `match`.
+                if sig == n {
+                    union Convert {
+                        raw: *mut u8,
+                        f: unsafe extern "C" fn($($args),*) $(-> $ret)?,
+                    }
+                    let ptr = Convert { raw }.f;
+
+                    // Arguments are loaded from subsequent registers after
+                    // `x0` and are tracked by `arg`.
+                    let ret = ptr(
+                        $({
+                            let reg = XReg::new_unchecked(arg);
+                            arg += 1;
+                            let reg = &self.state[reg];
+                            call_host!(@get $args reg)
+                        },)*
+                    );
+                    let _ = arg; // ignore the last increment of `arg`
+
+                    // If this function produce a result the ABI is that we
+                    // place it into `x0`.
+                    let dst = &mut self.state[XReg::x0];
+                    $(call_host!(@set $ret dst ret);)?
+                    let _ = (ret, dst); // ignore if there was no return value
+                }
+                n += 1;
+            )*};
+
+            (@get I8 $reg:ident) => ($reg.get_i32() as i8);
+            (@get I32 $reg:ident) => ($reg.get_i32());
+            (@get I64 $reg:ident) => ($reg.get_i64());
+
+            (@set I32 $dst:ident $val:ident) => ($dst.set_i32($val););
+            (@set I64 $dst:ident $val:ident) => ($dst.set_i64($val););
+
+        }
+
+        unsafe {
+            for_each_host_signature!(call_host);
+        }
+
+        let _ = n; // ignore the last increment of `n`
+
+        ControlFlow::Continue(())
+    }
 }

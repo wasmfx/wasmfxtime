@@ -260,10 +260,13 @@ extern "C" fn fiber_start(
     args_capacity: usize,
 ) {
     unsafe {
-        let func_ref = &*func_ref;
-        let array_call_trampoline = func_ref.array_call;
+        let func_ref = func_ref.as_ref().expect("Non-null function reference");
         let caller_vmxtx = VMOpaqueContext::from_vmcontext(caller_vmctx);
-        let callee_vmxtx = func_ref.vmctx;
+        let params_and_returns = if args_ptr.is_null() {
+            &mut []
+        } else {
+            std::slice::from_raw_parts_mut(args_ptr, args_capacity)
+        };
 
         // NOTE(frank-emrich) The usage of the `caller_vmctx` is probably not
         // 100% correct here. Currently, we determine the "caller" vmctx when
@@ -275,7 +278,7 @@ extern "C" fn fiber_start(
         // since the caller vmctx is only really used to access stuff in the
         // underlying `Store`, it's fine to be slightly sloppy about the exact
         // value we set.
-        array_call_trampoline(callee_vmxtx, caller_vmxtx, args_ptr, args_capacity);
+        func_ref.array_call(caller_vmxtx, params_and_returns);
 
         // Switch back to parent, indicating that the continuation returned.
         switch_to_parent(top_of_stack);

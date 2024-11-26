@@ -3,6 +3,8 @@ use crate::component::types;
 use crate::component::InstanceExportLookup;
 use crate::prelude::*;
 use crate::runtime::vm::component::ComponentRuntimeInfo;
+#[cfg(feature = "std")]
+use crate::runtime::vm::open_file_for_mmap;
 use crate::runtime::vm::{
     CompiledModuleId, VMArrayCallFunction, VMFuncRef, VMFunctionBody, VMWasmCallFunction,
 };
@@ -13,7 +15,6 @@ use crate::{
 use crate::{FuncType, ValType};
 use alloc::sync::Arc;
 use core::any::Any;
-use core::mem;
 use core::ops::Range;
 use core::ptr::NonNull;
 #[cfg(feature = "std")]
@@ -96,7 +97,7 @@ struct ComponentInner {
 
 pub(crate) struct AllCallFuncPointers {
     pub wasm_call: NonNull<VMWasmCallFunction>,
-    pub array_call: VMArrayCallFunction,
+    pub array_call: NonNull<VMArrayCallFunction>,
 }
 
 impl Component {
@@ -228,7 +229,10 @@ impl Component {
     /// [`Module::deserialize_file`]: crate::Module::deserialize_file
     #[cfg(feature = "std")]
     pub unsafe fn deserialize_file(engine: &Engine, path: impl AsRef<Path>) -> Result<Component> {
-        let code = engine.load_code_file(path.as_ref(), ObjectKind::Component)?;
+        let file = open_file_for_mmap(path.as_ref())?;
+        let code = engine
+            .load_code_file(file, ObjectKind::Component)
+            .with_context(|| format!("failed to load code for: {}", path.as_ref().display()))?;
         Component::from_parts(engine, code, None)
     }
 
@@ -464,11 +468,7 @@ impl Component {
         } = &self.inner.info.trampolines[index];
         AllCallFuncPointers {
             wasm_call: self.func(wasm_call).cast(),
-            array_call: unsafe {
-                mem::transmute::<NonNull<VMFunctionBody>, VMArrayCallFunction>(
-                    self.func(array_call),
-                )
-            },
+            array_call: self.func(array_call).cast(),
         }
     }
 

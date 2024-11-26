@@ -10,7 +10,6 @@ use crate::store::StoreOpaque;
 use alloc::sync::Arc;
 use continuation::stack_chain::StackChainCell;
 use core::fmt;
-use core::mem;
 use core::ops::Deref;
 use core::ops::DerefMut;
 use core::ptr::NonNull;
@@ -31,7 +30,6 @@ mod gc;
 mod imports;
 mod instance;
 mod memory;
-mod mmap;
 mod mmap_vec;
 mod send_sync_ptr;
 mod send_sync_unsafe_cell;
@@ -42,8 +40,8 @@ mod traphandlers;
 mod vmcontext;
 
 pub mod continuation;
-mod threads;
-pub use self::threads::*;
+#[cfg(feature = "threads")]
+mod parking_spot;
 
 #[cfg(feature = "debug-builtins")]
 pub mod debug_builtins;
@@ -69,11 +67,14 @@ pub use crate::runtime::vm::instance::{
     InstanceLimits, PoolConcurrencyLimitError, PoolingInstanceAllocator,
     PoolingInstanceAllocatorConfig,
 };
-pub use crate::runtime::vm::memory::{Memory, RuntimeLinearMemory, RuntimeMemoryCreator};
-pub use crate::runtime::vm::mmap::Mmap;
+pub use crate::runtime::vm::memory::{
+    Memory, RuntimeLinearMemory, RuntimeMemoryCreator, SharedMemory,
+};
 pub use crate::runtime::vm::mmap_vec::MmapVec;
 pub use crate::runtime::vm::mpk::MpkEnabled;
 pub use crate::runtime::vm::store_box::*;
+#[cfg(feature = "std")]
+pub use crate::runtime::vm::sys::mmap::open_file_for_mmap;
 pub use crate::runtime::vm::sys::unwind::UnwindRegistration;
 pub use crate::runtime::vm::table::{Table, TableElement};
 pub use crate::runtime::vm::traphandlers::*;
@@ -89,8 +90,24 @@ pub use send_sync_unsafe_cell::SendSyncUnsafeCell;
 mod module_id;
 pub use module_id::CompiledModuleId;
 
+#[cfg(feature = "signals-based-traps")]
+mod byte_count;
+#[cfg(feature = "signals-based-traps")]
 mod cow;
-pub use crate::runtime::vm::cow::{MemoryImage, MemoryImageSlot, ModuleMemoryImages};
+#[cfg(not(feature = "signals-based-traps"))]
+mod cow_disabled;
+#[cfg(feature = "signals-based-traps")]
+mod mmap;
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "signals-based-traps")] {
+        pub use crate::runtime::vm::byte_count::*;
+        pub use crate::runtime::vm::mmap::Mmap;
+        pub use self::cow::{MemoryImage, MemoryImageSlot, ModuleMemoryImages};
+    } else {
+        pub use self::cow_disabled::{MemoryImage, MemoryImageSlot, ModuleMemoryImages};
+    }
+}
 
 /// Dynamic runtime functionality needed by this crate throughout the execution
 /// of a wasm instance.
@@ -279,16 +296,16 @@ impl ModuleRuntimeInfo {
     ///
     /// Returns `None` for Wasm functions which do not escape, and therefore are
     /// not callable from outside the Wasm module itself.
-    fn array_to_wasm_trampoline(&self, index: DefinedFuncIndex) -> Option<VMArrayCallFunction> {
+    fn array_to_wasm_trampoline(
+        &self,
+        index: DefinedFuncIndex,
+    ) -> Option<NonNull<VMArrayCallFunction>> {
         let m = match self {
             ModuleRuntimeInfo::Module(m) => m,
             ModuleRuntimeInfo::Bare(_) => unreachable!(),
         };
-        let ptr = m
-            .compiled_module()
-            .array_to_wasm_trampoline(index)?
-            .as_ptr();
-        Some(unsafe { mem::transmute::<*const u8, VMArrayCallFunction>(ptr) })
+        let ptr = NonNull::from(m.compiled_module().array_to_wasm_trampoline(index)?);
+        Some(ptr.cast())
     }
 
     /// Returns the `MemoryImage` structure used for copy-on-write
@@ -351,6 +368,7 @@ impl ModuleRuntimeInfo {
 }
 
 /// Returns the host OS page size, in bytes.
+#[cfg(feature = "signals-based-traps")]
 pub fn host_page_size() -> usize {
     static PAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
 
@@ -363,32 +381,6 @@ pub fn host_page_size() -> usize {
         }
         n => n,
     };
-}
-
-/// Is `bytes` a multiple of the host page size?
-pub fn usize_is_multiple_of_host_page_size(bytes: usize) -> bool {
-    bytes % host_page_size() == 0
-}
-
-/// Round the given byte size up to a multiple of the host OS page size.
-///
-/// Returns an error if rounding up overflows.
-pub fn round_u64_up_to_host_pages(bytes: u64) -> Result<u64> {
-    let page_size = u64::try_from(crate::runtime::vm::host_page_size()).err2anyhow()?;
-    debug_assert!(page_size.is_power_of_two());
-    bytes
-        .checked_add(page_size - 1)
-        .ok_or_else(|| anyhow!(
-            "{bytes} is too large to be rounded up to a multiple of the host page size of {page_size}"
-        ))
-        .map(|val| val & !(page_size - 1))
-}
-
-/// Same as `round_u64_up_to_host_pages` but for `usize`s.
-pub fn round_usize_up_to_host_pages(bytes: usize) -> Result<usize> {
-    let bytes = u64::try_from(bytes).err2anyhow()?;
-    let rounded = round_u64_up_to_host_pages(bytes)?;
-    Ok(usize::try_from(rounded).err2anyhow()?)
 }
 
 /// Result of `Memory::atomic_wait32` and `Memory::atomic_wait64`

@@ -11,7 +11,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use object::write::{Object, StandardSegment};
 use object::SectionKind;
 #[cfg(feature = "std")]
-use std::path::Path;
+use std::{fs::File, path::Path};
 use wasmparser::WasmFeatures;
 use wasmtime_environ::obj;
 use wasmtime_environ::{FlagValue, ObjectKind, Tunables};
@@ -97,6 +97,7 @@ impl Engine {
             // configured. This is the per-program initialization required for
             // handling traps, such as configuring signals, vectored exception
             // handlers, etc.
+            #[cfg(all(feature = "signals-based-traps", not(miri)))]
             crate::runtime::vm::init_traps(config.macos_use_mach_ports);
             #[cfg(feature = "debug-builtins")]
             crate::runtime::vm::debug_builtins::ensure_exported();
@@ -256,11 +257,32 @@ impl Engine {
     fn _check_compatible_with_native_host(&self) -> Result<(), String> {
         #[cfg(any(feature = "cranelift", feature = "winch"))]
         {
+            use target_lexicon::{Architecture, PointerWidth, Triple};
+
             let compiler = self.compiler();
 
-            // Check to see that the config's target matches the host
             let target = compiler.triple();
-            if *target != target_lexicon::Triple::host() {
+            let host = Triple::host();
+            let target_matches_host = || {
+                // If the host target and target triple match, then it's valid
+                // to run results of compilation on this host.
+                if host == *target {
+                    return true;
+                }
+
+                // Otherwise if there's a mismatch the only allowed
+                // configuration at this time is that any target can run Pulley,
+                // Wasmtime's interpreter. This only works though if the
+                // pointer-width of pulley matches the pointer-width of the
+                // host, so check that here.
+                match host.pointer_width() {
+                    Ok(PointerWidth::U32) => target.architecture == Architecture::Pulley32,
+                    Ok(PointerWidth::U64) => target.architecture == Architecture::Pulley64,
+                    _ => false,
+                }
+            };
+
+            if !target_matches_host() {
                 return Err(format!(
                     "target '{target}' specified in the configuration does not match the host"
                 ));
@@ -409,6 +431,22 @@ impl Engine {
             // Fall through below where we test at runtime that features are
             // available.
             FlagValue::Bool(true) => {}
+
+            // Pulley's pointer_width must match the host.
+            FlagValue::Enum("pointer32") => {
+                return if cfg!(target_pointer_width = "32") {
+                    Ok(())
+                } else {
+                    Err("wrong host pointer width".to_string())
+                }
+            }
+            FlagValue::Enum("pointer64") => {
+                return if cfg!(target_pointer_width = "64") {
+                    Ok(())
+                } else {
+                    Err("wrong host pointer width".to_string())
+                }
+            }
 
             // Only `bool` values are supported right now, other settings would
             // need more support here.
@@ -708,13 +746,12 @@ impl Engine {
     #[cfg(feature = "std")]
     pub(crate) fn load_code_file(
         &self,
-        path: &Path,
+        file: File,
         expected: ObjectKind,
     ) -> Result<Arc<crate::CodeMemory>> {
         self.load_code(
-            crate::runtime::vm::MmapVec::from_file(path).with_context(|| {
-                format!("failed to create file mapping for: {}", path.display())
-            })?,
+            crate::runtime::vm::MmapVec::from_file(file)
+                .with_context(|| "Failed to create file mapping".to_string())?,
             expected,
         )
     }
@@ -777,10 +814,12 @@ impl Engine {
     /// If other crashes are seen from using this method please feel free to
     /// file an issue to update the documentation here with more preconditions
     /// that must be met.
+    #[cfg(feature = "signals-based-traps")]
     pub unsafe fn unload_process_handlers(self) {
         assert_eq!(Arc::weak_count(&self.inner), 0);
         assert_eq!(Arc::strong_count(&self.inner), 1);
 
+        #[cfg(not(miri))]
         crate::runtime::vm::deinit_traps();
     }
 }
