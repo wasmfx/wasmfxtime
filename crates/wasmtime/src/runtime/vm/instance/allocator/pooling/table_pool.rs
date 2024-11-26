@@ -8,7 +8,6 @@ use crate::runtime::vm::{
     SendSyncPtr, Table,
 };
 use crate::{prelude::*, vm::HostAlignedByteCount};
-use std::mem;
 use std::ptr::NonNull;
 use wasmtime_environ::{Module, Tunables};
 
