@@ -448,13 +448,18 @@ pub mod baseline {
                             // Yield lives as long as the object it is
                             // embedded in.
                             (*get_current_continuation()).suspend = suspend as *mut Yield;
-                            let results = func_ref.array_call(
+                            let _result = func_ref.array_call(
                                 caller_ctx,
                                 std::slice::from_raw_parts_mut(vals_ptr, capacity),
                             );
+                            // TODO(dhil): We are ignoring the boolean
+                            // return value, which indicates success
+                            // or failure. We probably shouldn't
+                            // ignore it...
+
                             // As a precaution we null the suspender.
                             (*get_current_continuation()).suspend = core::ptr::null_mut();
-                            return results;
+                            return ();
                         },
                     )
                 }

@@ -231,41 +231,45 @@ macro_rules! for_each_extended_op {
 macro_rules! for_each_host_signature {
     ($m:ident) => {
         $m! {
-            fn(I64);
-            fn(I64, I32);
-            fn(I64, I32) -> I32;
-            fn(I64, I32, I32) -> I32;
             fn(I64, I32, I32, I32) -> I32;
-            fn(I64, I32, I32, I32, I32, I32);
-            fn(I64, I32, I32, I32, I32) -> I32;
-            fn(I64, I32, I32, I32, I32, I32, I32);
+            fn(I64, I32, I32) -> I32;
             fn(I64, I32, I32) -> I64;
+            fn(I64, I64, I32, I64, I64, I64, I8, I64, I64) -> I8;
+            fn(I64, I64, I64, I64, I64) -> I64;
+            fn(I64, I64, I64, I64) -> I64;
+            fn(I64, I64, I64) -> I64;
+            fn(I64, I64, I64);
+            fn(I64);
+            fn(I64, I32, I32, I32, I32, I32);
+            fn(I64, I32) -> I32;
+            fn(I64, I32, I32, I32, I32, I32, I32);
+            fn(I64, I32, I32, I32, I32) -> I32;
             fn(I64, I32, I32, I64, I32, I32);
             fn(I64, I32, I32, I64, I64, I64);
-            fn(I64, I32) -> I64;
-            fn(I64, I32, I64, I32) -> I32;
+            fn(I64, I32, I32) -> I32;
+            fn(I64, I32, I32) -> I64;
             fn(I64, I32, I64, I32, I64);
             fn(I64, I32, I64, I32) -> I64;
-            fn(I64, I32, I64, I32, I64) -> I32;
             fn(I64, I32, I64, I32, I64, I64);
-            fn(I64, I32, I64) -> I64;
+            fn(I64, I32, I64, I32, I64) -> I32;
+            fn(I64, I32, I64, I32, I64);
+            fn(I64, I32, I64, I32) -> I32;
+            fn(I64, I32, I64, I64, I64) -> I32;
             fn(I64, I32, I64, I64, I64);
             fn(I64, I32, I64, I64) -> I64;
-            fn(I64, I32, I64, I64, I64) -> I32;
-            fn(I64) -> I64;
-            fn(I64, I64); // NOTE(dhil): added by me; signature for stack switching libcall
-            fn(I64, I64) -> I32;
-            fn(I64, I64) -> I64; // NOTE(dhil): added by me; signature for stack switching baseline libcall
+            fn(I64, I32, I64) -> I64;
+            fn(I64, I32) -> I64;
+            fn(I64, I32);
             fn(I64, I64, I32) -> I64;
+            fn(I64, I64, I64, I64) -> I8;
+            fn(I64, I64) -> I32;
+            fn(I64, I8);
+            fn(I64) -> I64;
+            fn(I64);
+            fn(I64, I64); // NOTE(dhil): added by me; signature for stack switching libcall
+            fn(I64, I64) -> I64; // NOTE(dhil): added by me; signature for stack switching baseline libcall
             fn(I64, I32, I64); // NOTE(dhil): added by me; signature for stack switching baseline libcall
             fn(I64, I64, I32, I32) -> I64; // NOTE(dhil): added by me; signature for stack switching libcall
-            fn(I64, I64, I32, I64, I64, I64, I8, I64, I64);
-            fn(I64, I64, I64);
-            fn(I64, I64, I64, I64);
-            fn(I64, I64, I64) -> I64;
-            fn(I64, I64, I64, I64) -> I64;
-            fn(I64, I64, I64, I64, I64) -> I64;
-            fn(I64, I8);
         }
     };
 }
