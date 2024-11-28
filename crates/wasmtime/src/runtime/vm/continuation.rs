@@ -108,10 +108,11 @@ pub mod optimized {
         /// Note that this is *not* used for tag payloads.
         pub args: Payloads,
 
-        /// Once a continuation is suspended, this buffer is used to hold payloads
-        /// provided by cont.bind and resume and received at the suspend site.
-        /// In particular, this may only be Some when `state` is `Invoked`.
-        pub tag_return_values: Payloads,
+        /// Once a continuation is suspended, this buffer is used to hold
+        /// payloads provided by cont.bind and resume and received at the
+        /// suspend site. In particular, this may not be used while the
+        /// continuation's state is `Fresh`.
+        pub values: Payloads,
 
         /// Revision counter.
         pub revision: u64,
@@ -147,7 +148,7 @@ pub mod optimized {
             let last_ancestor = std::ptr::null_mut();
             let stack = FiberStack::unallocated();
             let args = Payloads::new(0);
-            let tag_return_values = Payloads::new(0);
+            let values = Payloads::new(0);
             let revision = 0;
             let _marker = PhantomPinned;
 
@@ -157,7 +158,7 @@ pub mod optimized {
                 last_ancestor,
                 stack,
                 args,
-                tag_return_values,
+                values,
                 revision,
                 _marker,
             }
@@ -171,7 +172,7 @@ pub mod optimized {
 
             // `Payloads` must be deallocated explicitly, they are considered non-owning.
             self.args.deallocate();
-            self.tag_return_values.deallocate();
+            self.values.deallocate();
 
             self.common_stack_information.handlers.deallocate();
 
@@ -209,7 +210,7 @@ pub mod optimized {
             debug_assert!(contref.common_stack_information.state == State::Returned);
 
             // Note that we *could* deallocate the `Payloads` (i.e., `args` and
-            // `tag_return_values`) here, but choose not to:
+            // `values`) here, but choose not to:
             // - If we are using on-demand allocation of `VMContRef`s, the
             //   `Payloads` get deallocated as part of `Drop`-ing the `VMContRef`.
             // - If we are using the pooling allocator, we deliberately return
@@ -219,7 +220,7 @@ pub mod optimized {
             //
             // So instead we just clear the elements.
             contref.args.clear();
-            contref.tag_return_values.clear();
+            contref.values.clear();
         }
 
         // The WasmFX allocator decides if "deallocating" a continuation means
@@ -309,10 +310,7 @@ pub mod optimized {
         );
         assert_eq!(offset_of!(VMContRef, stack), vm_cont_ref::STACK);
         assert_eq!(offset_of!(VMContRef, args), vm_cont_ref::ARGS);
-        assert_eq!(
-            offset_of!(VMContRef, tag_return_values),
-            vm_cont_ref::TAG_RETURN_VALUES
-        );
+        assert_eq!(offset_of!(VMContRef, values), vm_cont_ref::VALUES);
 
         assert_eq!(offset_of!(VMContRef, revision), vm_cont_ref::REVISION);
 

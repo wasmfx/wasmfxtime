@@ -272,10 +272,10 @@ pub mod offsets {
         pub const STACK: usize = LAST_ANCESTOR + core::mem::size_of::<usize>();
         /// Offset of `args` field
         pub const ARGS: usize = STACK + super::FIBER_STACK_SIZE;
-        /// Offset of `tag_return_values` field
-        pub const TAG_RETURN_VALUES: usize = ARGS + core::mem::size_of::<Payloads>();
+        /// Offset of `values` field
+        pub const VALUES: usize = ARGS + core::mem::size_of::<Payloads>();
         /// Offset of `revision` field
-        pub const REVISION: usize = TAG_RETURN_VALUES + core::mem::size_of::<Payloads>();
+        pub const REVISION: usize = VALUES + core::mem::size_of::<Payloads>();
     }
 
     pub mod stack_limits {
