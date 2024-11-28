@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Similar to cont_nested1, but with payloads
 
 (module

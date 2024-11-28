@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; test using continuations from within a continuation
 
 

@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; This test requires the following to work:
 ;; 1. Passing arguments to tags and receiving values back at suspend sites
 ;; 2. Passing values to a continuation obtained from a handler

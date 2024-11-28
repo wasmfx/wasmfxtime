@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Tests using support for n-ary continuations
 ;; Uses a function as continuation that has 3 param and 5 return values
 ;; Uses tag that has 4 elements of payloads

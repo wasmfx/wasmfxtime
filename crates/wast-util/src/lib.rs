@@ -250,6 +250,8 @@ impl Compiler {
                     || config.gc == Some(true)
                     || config.relaxed_simd == Some(true)
                     || config.gc_types == Some(true)
+                    || config.exceptions == Some(true)
+                    || config.stack_switching == Some(true)
                 {
                     return true;
                 }
@@ -285,6 +287,14 @@ impl WastTest {
     /// Returns whether this test should fail under the specified extra
     /// configuration.
     pub fn should_fail(&self, config: &WastConfig) -> bool {
+        // The stack-switching baseline does not support proper linking of tags yet.
+        if cfg!(feature = "wasmfx_baseline")
+            && cfg!(not(feature = "wasmfx_no_baseline"))
+            && self.path.ends_with("linking_tags2.wast")
+        {
+            return true;
+        }
+
         // Winch only supports x86_64 at this time.
         if config.compiler == Compiler::Winch && !cfg!(target_arch = "x86_64") {
             return true;

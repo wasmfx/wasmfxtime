@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Testing cont.bind on continuations received from suspending rather than cont.new.
 
 (module

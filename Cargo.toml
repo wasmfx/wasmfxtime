@@ -429,12 +429,14 @@ disable-logging = ["log/max_level_off", "tracing/max_level_off"]
 wasmfx_baseline = [
   "wasmtime-cranelift/wasmfx_baseline",
   "wasmtime/wasmfx_baseline",
+  "wasmtime-wast-util/wasmfx_baseline",
 ]
 
 # Synthetic feature to enable CI testing of the optimised implementation
 wasmfx_no_baseline = [
   "wasmtime-cranelift/wasmfx_no_baseline",
   "wasmtime/wasmfx_no_baseline",
+  "wasmtime-wast-util/wasmfx_no_baseline",
 ]
 
 # Toggle the WasmFX pooling allocator

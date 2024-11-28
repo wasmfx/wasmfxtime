@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Testing that the creation of the necessary payload buffers works as expect,
 ;; even when the same continuation reference is suspended multiple times
 

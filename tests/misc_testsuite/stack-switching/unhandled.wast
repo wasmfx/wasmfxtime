@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Test unhandled suspension
 
 (module

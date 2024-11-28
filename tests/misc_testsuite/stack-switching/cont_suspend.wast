@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Small continuation resume test
 ;; expected output:
 ;; 1 : i32

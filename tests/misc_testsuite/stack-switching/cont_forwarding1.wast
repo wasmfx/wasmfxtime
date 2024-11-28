@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Simple forwarding, no payloads, no param or return values on
 ;; function, immediately resumed by handler
 
