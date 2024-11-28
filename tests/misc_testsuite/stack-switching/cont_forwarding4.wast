@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Continuation is not immediately resumed, instead we run a different continuation in the meantime.
 
 (module

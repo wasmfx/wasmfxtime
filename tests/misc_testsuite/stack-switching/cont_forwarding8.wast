@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; The resumed continuation suspends again, to the same and different tags.
 ;; We use the same outer handler in a loop
 

@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Like previous test, but with param and return values on functions (but no tag payloads)
 
 (module

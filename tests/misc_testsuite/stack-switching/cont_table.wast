@@ -1,3 +1,4 @@
+;;! stack_switching = true
 (module
   (type $ft (func (param i32) (result i32)))
   (type $ct (cont $ft))

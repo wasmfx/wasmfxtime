@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Simple test for cont.bind: cont.bind supplies 0 arguments
 
 (module

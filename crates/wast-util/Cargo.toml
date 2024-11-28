@@ -17,3 +17,7 @@ toml = { workspace = true }
 
 [lints]
 workspace = true
+
+[features]
+wasmfx_baseline = []
+wasmfx_no_baseline = []

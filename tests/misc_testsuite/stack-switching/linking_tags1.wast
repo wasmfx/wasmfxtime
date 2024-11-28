@@ -1,3 +1,4 @@
+;;! stack_switching = true
 (module $alien
   (tag $alien_tag (export "alien_tag"))
 )

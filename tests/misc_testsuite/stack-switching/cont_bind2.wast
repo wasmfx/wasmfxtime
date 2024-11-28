@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Simple test for cont.bind: cont.bind turns 2-arg continution into 1-arg one before calling resume
 
 (module

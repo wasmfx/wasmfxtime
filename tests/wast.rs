@@ -238,6 +238,8 @@ fn run_wast(test: &WastTest, config: WastConfig) -> anyhow::Result<()> {
             if result.is_ok() {
                 bail!("this test is flagged as should-fail but it succeeded")
             }
+        } else {
+            result?;
         }
     }
 

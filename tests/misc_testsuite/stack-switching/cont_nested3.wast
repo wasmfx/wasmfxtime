@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Minimal test for resuming continuation after its original parent is gone
 
 (module

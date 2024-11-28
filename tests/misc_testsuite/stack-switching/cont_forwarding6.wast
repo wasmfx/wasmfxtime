@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; The resumed continuation suspends again (from the same inner function), using the same tag.
 ;; We install a new handler at the outermost level, which should be forwarded to correctly.
 

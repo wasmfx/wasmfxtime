@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Continuation is not immediately resumed, we pass it to a different one as an
 ;; argument, increasing the length of the chain by adding yet another useless
 ;; handler.

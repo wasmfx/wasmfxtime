@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; test proper handling of TSP pointer after a continuation returns normally
 
 (module

@@ -1,3 +1,4 @@
+;;! stack_switching = true
 ;; Test returning value from continuation function without any suspending
 
 (module
