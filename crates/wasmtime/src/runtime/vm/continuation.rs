@@ -108,10 +108,11 @@ pub mod optimized {
         /// Note that this is *not* used for tag payloads.
         pub args: Payloads,
 
-        /// Once a continuation is suspended, this buffer is used to hold
-        /// payloads provided by cont.bind and resume and received at the
-        /// suspend site. In particular, this may not be used while the
-        /// continuation's state is `Fresh`.
+        /// Once a continuation has been suspended (using suspend or switch),
+        /// this buffer is used to hold payloads provided by cont.bind, resume,
+        /// and switch. They are received at the suspend site (i.e., the
+        /// corrsponding suspend or switch instruction). In particular, this may
+        /// not be used while the continuation's state is `Fresh`.
         pub values: Payloads,
 
         /// Revision counter.

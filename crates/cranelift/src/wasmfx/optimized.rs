@@ -1570,7 +1570,7 @@ pub(crate) fn vmctx_store_payloads<'a>(
 /// continuations beginning at `start`.
 ///
 /// The flag `search_suspend_handlers` determines whether we search for a
-/// suspend or switch handlers. Concretely, this influences which part of each
+/// suspend or switch handler. Concretely, this influences which part of each
 /// handler list we will search.
 ///
 /// We trap if no handler was found.
@@ -1857,7 +1857,9 @@ pub(crate) fn translate_resume<'a>(
 
     let vmctx = tc::VMContext::new(env.vmctx_val(&mut builder.cursor()), env.pointer_type());
 
-    // Split the resumetable into suspend handlers (each represented by the tag index and  handler block) and the switch handlers (represented just by the tag index).
+    // Split the resumetable into suspend handlers (each represented by the tag
+    // index and handler block) and the switch handlers (represented just by the
+    // tag index). Note that we currently don't remove duplicate tags.
     let (suspend_handlers, switch_tags): (Vec<(u32, Block)>, Vec<u32>) = resumetable
         .iter()
         .partition_map(|(tag_index, block_opt)| match block_opt {
