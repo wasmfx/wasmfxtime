@@ -354,8 +354,8 @@ pub(crate) mod typed_continuation_helpers {
         }
 
         #[allow(clippy::cast_possible_truncation)]
-        pub fn tag_return_values(&self) -> Payloads {
-            let offset = wasmtime_continuations::offsets::vm_cont_ref::TAG_RETURN_VALUES;
+        pub fn values(&self) -> Payloads {
+            let offset = wasmtime_continuations::offsets::vm_cont_ref::VALUES;
             Payloads::new(self.address, offset as i32)
         }
 
@@ -1329,7 +1329,7 @@ use crate::wasmfx::optimized::tc::StackChain;
 use typed_continuation_helpers as tc;
 
 #[allow(clippy::cast_possible_truncation)]
-fn typed_continuations_load_return_values<'a>(
+fn vmcontref_load_return_values<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     valtypes: &[WasmValType],
@@ -1357,8 +1357,9 @@ fn typed_continuations_load_return_values<'a>(
     return values;
 }
 
+/// Loads values of the given types from the `Payloads` object in the `VMContext`.
 #[allow(clippy::cast_possible_truncation)]
-fn typed_continuations_load_payloads<'a>(
+fn vmctx_load_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     valtypes: &[ir::Type],
@@ -1383,21 +1384,22 @@ fn typed_continuations_load_payloads<'a>(
     values
 }
 
+/// Loads values of the given types from the continuation's `values` field.
 #[allow(clippy::cast_possible_truncation)]
-pub(crate) fn typed_continuations_load_tag_return_values<'a>(
+pub(crate) fn vmcontref_load_values<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     contref: ir::Value,
     valtypes: &[WasmValType],
 ) -> Vec<ir::Value> {
     let memflags = ir::MemFlags::trusted();
-    let mut values = vec![];
+    let mut result = vec![];
 
     if valtypes.len() > 0 {
         let co = tc::VMContRef::new(contref);
-        let tag_return_values = co.tag_return_values();
+        let values = co.values();
 
-        let payload_ptr = tag_return_values.get_data(env, builder);
+        let payload_ptr = values.get_data(env, builder);
 
         let mut offset = 0;
         for valtype in valtypes {
@@ -1407,22 +1409,24 @@ pub(crate) fn typed_continuations_load_tag_return_values<'a>(
                 payload_ptr,
                 offset,
             );
-            values.push(val);
+            result.push(val);
             offset += env.offsets.ptr.maximum_value_size() as i32;
         }
 
         // In theory, we way want to deallocate the buffer instead of just
         // clearing it if its size is above a certain threshold. That would
         // avoid keeping a large object unnecessarily long.
-        tag_return_values.clear(builder);
+        values.clear(builder);
     }
 
-    values
+    result
 }
 
-/// TODO
+/// Stores the given arguments in the appropriate `Payloads` object in the continuation.
+/// If the continuation was never invoked, use the `args` object.
+/// Otherwise, use the `values` object.
 #[allow(clippy::cast_possible_truncation)]
-pub(crate) fn typed_continuations_store_resume_args<'a>(
+pub(crate) fn vmcontref_store_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     values: &[ir::Value],
@@ -1456,15 +1460,15 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
             builder.switch_to_block(use_payloads_block);
             builder.seal_block(use_payloads_block);
 
-            let tag_return_values = co.tag_return_values();
+            let payloads = co.values();
 
             // Unlike for the args buffer (where we know the maximum
             // required capacity at the time of creation of the
             // `VMContRef`), tag return buffers are re-used and may
             // be too small.
-            tag_return_values.ensure_capacity(env, builder, remaining_arg_count);
+            payloads.ensure_capacity(env, builder, remaining_arg_count);
 
-            let ptr = tag_return_values.occupy_next_slots(env, builder, values.len() as i32);
+            let ptr = payloads.occupy_next_slots(env, builder, values.len() as i32);
             builder.ins().jump(store_data_block, &[ptr]);
         }
 
@@ -1485,9 +1489,10 @@ pub(crate) fn typed_continuations_store_resume_args<'a>(
     }
 }
 
+/// Stores the given values in the `Payloads` object of the `VMContext`.
 //TODO(frank-emrich) Consider removing `valtypes` argument, as values are inherently typed
 #[allow(clippy::cast_possible_truncation)]
-pub(crate) fn typed_continuations_store_payloads<'a>(
+pub(crate) fn vmctx_store_payloads<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
     values: &[ir::Value],
@@ -1685,7 +1690,7 @@ pub(crate) fn translate_cont_bind<'a>(
         .trapz(evidence, crate::TRAP_CONTINUATION_ALREADY_CONSUMED);
 
     let remaining_arg_count = builder.ins().iconst(I32, remaining_arg_count as i64);
-    typed_continuations_store_resume_args(env, builder, args, remaining_arg_count, contref);
+    vmcontref_store_payloads(env, builder, args, remaining_arg_count, contref);
 
     let revision = vmcontref.incr_revision(env, builder, revision);
     emit_debug_println!(env, builder, "new revision = {}", revision);
@@ -1801,7 +1806,7 @@ pub(crate) fn translate_resume<'a>(
         if resume_args.len() > 0 {
             // We store the arguments in the `VMContRef` to be resumed.
             let count = builder.ins().iconst(I32, resume_args.len() as i64);
-            typed_continuations_store_resume_args(env, builder, resume_args, count, resume_contref);
+            vmcontref_store_payloads(env, builder, resume_args, count, resume_contref);
         }
 
         // Splice together stack chains:
@@ -2052,7 +2057,7 @@ pub(crate) fn translate_resume<'a>(
                 .iter()
                 .map(|wty| crate::value_type(env.isa, *wty))
                 .collect();
-            let mut args = typed_continuations_load_payloads(env, builder, &param_types);
+            let mut args = vmctx_load_payloads(env, builder, &param_types);
             args.push(suspended_contobj);
 
             builder.ins().jump(target_block, &args);
@@ -2105,12 +2110,7 @@ pub(crate) fn translate_resume<'a>(
 
         // Load and push the results.
         let returns = env.continuation_returns(type_index).to_vec();
-        let values = typed_continuations_load_return_values(
-            env,
-            builder,
-            &returns,
-            returned_contref.address,
-        );
+        let values = vmcontref_load_return_values(env, builder, &returns, returned_contref.address);
 
         // The continuation has returned and all `VMContObjs` to it
         // should have been be invalidated. We may safely deallocate
@@ -2131,7 +2131,7 @@ pub(crate) fn translate_suspend<'a>(
     suspend_args: &[ir::Value],
     tag_return_types: &[WasmValType],
 ) -> Vec<ir::Value> {
-    typed_continuations_store_payloads(env, builder, suspend_args);
+    vmctx_store_payloads(env, builder, suspend_args);
 
     let tag_addr = shared::tag_address(env, builder, tag_index);
     emit_debug_println!(env, builder, "[suspend] suspending with tag {:p}", tag_addr);
@@ -2186,12 +2186,8 @@ pub(crate) fn translate_suspend<'a>(
         .ins()
         .stack_switch(control_context_ptr, control_context_ptr, suspend_payload);
 
-    let return_values = typed_continuations_load_tag_return_values(
-        env,
-        builder,
-        active_contref.address,
-        tag_return_types,
-    );
+    let return_values =
+        vmcontref_load_values(env, builder, active_contref.address, tag_return_types);
 
     return_values
 }
