@@ -1,16 +1,21 @@
 use super::shared;
+use itertools::{Either, Itertools};
 
 use crate::translate::{FuncEnvironment, FuncTranslationState};
 use crate::wasmfx::shared::call_builtin;
-use cranelift_codegen::ir;
 use cranelift_codegen::ir::condcodes::*;
 use cranelift_codegen::ir::types::*;
-use cranelift_codegen::ir::{BlockCall, InstBuilder, JumpTableData};
+use cranelift_codegen::ir::{self, MemFlags};
+use cranelift_codegen::ir::{Block, BlockCall, InstBuilder, JumpTableData};
 use cranelift_frontend::FunctionBuilder;
 use wasmtime_environ::PtrSize;
 use wasmtime_environ::{WasmResult, WasmValType};
 
 pub const DEBUG_ASSERT_TRAP_CODE: crate::TrapCode = crate::TRAP_DEBUG_ASSERTION;
+
+// TODO(frank-emrich) This is the size for x64 Linux. Once we support different
+// platforms for stack switching, must select appropriate value for target.
+pub const CONTROL_CONTEXT_SIZE: usize = 24;
 
 #[cfg_attr(feature = "wasmfx_baseline", allow(unused_imports))]
 pub(crate) use shared::{assemble_contobj, disassemble_contobj, vm_contobj_type, ControlEffect};
@@ -258,7 +263,9 @@ pub(crate) mod typed_continuation_helpers {
                 std::line!(),
                 "\n"
             );
-            tc::emit_debug_assert_generic($env, $builder, $condition, msg);
+            // This makes the borrow checker happy if $condition uses env or builder.
+            let c = $condition;
+            tc::emit_debug_assert_generic($env, $builder, c, msg);
         };
     }
 
@@ -1044,9 +1051,9 @@ pub(crate) mod typed_continuation_helpers {
         ) -> ir::Value {
             if cfg!(debug_assertions) {
                 let continuation_discriminant =
-                    wasmtime_continuations::STACK_CHAIN_ABSENT_DISCRIMINANT;
+                    wasmtime_continuations::STACK_CHAIN_CONTINUATION_DISCRIMINANT;
                 let is_continuation = builder.ins().icmp_imm(
-                    IntCC::NotEqual,
+                    IntCC::Equal,
                     self.discriminant,
                     continuation_discriminant as i64,
                 );
@@ -1149,17 +1156,32 @@ pub(crate) mod typed_continuation_helpers {
             builder.ins().store(mem_flags, discriminant, state_ptr, 0);
         }
 
+        pub fn has_state_any_of<'a>(
+            &self,
+            env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            states: &[wasmtime_continuations::State],
+        ) -> ir::Value {
+            let actual_state = self.load_state(env, builder);
+            let zero = builder.ins().iconst(I8, 0);
+            let mut res = zero;
+            for state in states {
+                let eq =
+                    builder
+                        .ins()
+                        .icmp_imm(IntCC::Equal, actual_state, state.discriminant() as i64);
+                res = builder.ins().bor(res, eq);
+            }
+            res
+        }
+
         pub fn has_state<'a>(
             &self,
             env: &mut crate::func_environ::FuncEnvironment<'a>,
             builder: &mut FunctionBuilder,
             state: wasmtime_continuations::State,
         ) -> ir::Value {
-            let actual_state = self.load_state(env, builder);
-
-            builder
-                .ins()
-                .icmp_imm(IntCC::Equal, actual_state, state.discriminant() as i64)
+            self.has_state_any_of(env, builder, &[state])
         }
 
         /// Checks whether the `State` reflects that the stack has ever been
@@ -1180,6 +1202,35 @@ pub(crate) mod typed_continuation_helpers {
         pub fn get_handler_list(&self) -> HandlerList {
             let offset = wasmtime_continuations::offsets::common_stack_information::HANDLERS;
             HandlerList::new(self.address, offset as i32)
+        }
+
+        #[allow(clippy::cast_possible_truncation)]
+        pub fn get_first_switch_handler_index<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+        ) -> ir::Value {
+            // Field first_switch_handler_index has type u32
+            let memflags = ir::MemFlags::trusted();
+            let offset = wasmtime_continuations::offsets::common_stack_information::FIRST_SWITCH_HANDLER_INDEX;
+            builder
+                .ins()
+                .load(I32, memflags, self.address, offset as i32)
+        }
+
+        #[allow(clippy::cast_possible_truncation)]
+        pub fn set_first_switch_handler_index<'a>(
+            &self,
+            _env: &mut crate::func_environ::FuncEnvironment<'a>,
+            builder: &mut FunctionBuilder,
+            value: ir::Value,
+        ) {
+            // Field first_switch_handler_index has type u32
+            let memflags = ir::MemFlags::trusted();
+            let offset = wasmtime_continuations::offsets::common_stack_information::FIRST_SWITCH_HANDLER_INDEX;
+            builder
+                .ins()
+                .store(memflags, value, self.address, offset as i32);
         }
 
         /// Sets `last_wasm_entry_sp` and `stack_limit` fields in
@@ -1327,6 +1378,9 @@ pub(crate) mod typed_continuation_helpers {
 
 use crate::wasmfx::optimized::tc::StackChain;
 use typed_continuation_helpers as tc;
+use wasmtime_continuations::{
+    State, CONTROL_EFFECT_RESUME_DISCRIMINANT, CONTROL_EFFECT_SWITCH_DISCRIMINANT,
+};
 
 #[allow(clippy::cast_possible_truncation)]
 fn vmcontref_load_return_values<'a>(
@@ -1515,10 +1569,18 @@ pub(crate) fn vmctx_store_payloads<'a>(
 /// which must be a `*mut VMTagDefinition`. The search walks up the chain of
 /// continuations beginning at `start`.
 ///
+/// The flag `search_suspend_handlers` determines whether we search for a
+/// suspend or switch handlers. Concretely, this influences which part of each
+/// handler list we will search.
+///
+/// We trap if no handler was found.
+///
 /// The returned values are:
-/// 1. The continuation whose *parent* (another continuation or the
-///    main stack) handles `tag_address`.
-/// 2. The index of the handler in the parent's HandlerList.
+/// 1. The stack (continuation or main stack, represented as a StackChain) in
+///    whose handler list we found the tag (i.e., the stack that performed the
+///    resume instruction that installed handler for the tag).
+/// 2. The continuation whose parent is the stack mentioned in 1.
+/// 3. The index of the handler in the handler list.
 ///
 /// In pseudo-code, the generated code's behavior can be expressed as
 /// follows:
@@ -1529,8 +1591,12 @@ pub(crate) fn vmctx_store_payloads<'a>(
 ///   parent_link = contref.parent
 ///   parent_csi = parent_link.get_common_stack_information();
 ///   handlers = parent_csi.handlers;
-///   len = handlers.length;
-///   for index in 0..len {
+///   (begin_range, end_range) = if search_suspend_handlers {
+///     (0, parent_csi.first_switch_handler_index)
+///   } else {
+///     (parent_csi.first_switch_handler_index, handlers.length)
+///   };
+///   for index in begin_range..end_range {
 ///     if handlers[index] == tag_address {
 ///       goto on_match(contref, index)
 ///     }
@@ -1547,7 +1613,8 @@ fn search_handler<'a>(
     builder: &mut FunctionBuilder,
     start: &tc::StackChain,
     tag_address: ir::Value,
-) -> (ir::Value, ir::Value) {
+    search_suspend_handlers: bool,
+) -> (StackChain, ir::Value, ir::Value) {
     let handle_link = builder.create_block();
     let begin_search_handler_list = builder.create_block();
     let try_index = builder.create_block();
@@ -1579,7 +1646,7 @@ fn search_handler<'a>(
     };
 
     // Block begin_search_handler_list
-    let (contref, parent_link, handler_list_data_ptr, len) = {
+    let (contref, parent_link, handler_list_data_ptr, end_range) = {
         builder.switch_to_block(begin_search_handler_list);
         let contref = chain_link.unchecked_get_continuation(env, builder);
         let contref = tc::VMContRef::new(contref);
@@ -1597,12 +1664,25 @@ fn search_handler<'a>(
 
         let handlers = parent_csi.get_handler_list();
         let handler_list_data_ptr = handlers.get_data(env, builder);
-        let len = handlers.get_length(env, builder);
 
-        let zero = builder.ins().iconst(I32, 0);
-        builder.ins().jump(try_index, &[zero]);
+        let first_switch_handler_index = parent_csi.get_first_switch_handler_index(env, builder);
 
-        (contref, parent_link, handler_list_data_ptr, len)
+        // Note that these indices are inclusive-exclusive.
+        let (begin_range, end_range) = if search_suspend_handlers {
+            let zero = builder.ins().iconst(I32, 0);
+            if cfg!(debug_assertions) {
+                let length = handlers.get_length(env, builder);
+                emit_debug_assert_ule!(env, builder, first_switch_handler_index, length);
+            }
+            (zero, first_switch_handler_index)
+        } else {
+            let length = handlers.get_length(env, builder);
+            (first_switch_handler_index, length)
+        };
+
+        builder.ins().jump(try_index, &[begin_range]);
+
+        (contref, parent_link, handler_list_data_ptr, end_range)
     };
 
     // Block try_index
@@ -1611,7 +1691,9 @@ fn search_handler<'a>(
         builder.switch_to_block(try_index);
         let index = builder.block_params(try_index)[0];
 
-        let in_bounds = builder.ins().icmp(IntCC::UnsignedLessThan, index, len);
+        let in_bounds = builder
+            .ins()
+            .icmp(IntCC::UnsignedLessThan, index, end_range);
         builder.ins().brif(
             in_bounds,
             compare_tags,
@@ -1662,7 +1744,17 @@ fn search_handler<'a>(
     // final block: on_match
     builder.switch_to_block(on_match);
 
-    (contref.address, index)
+    emit_debug_println!(
+        env,
+        builder,
+        "[search_handler] found handler at stack chain ({}, {:p}), whose child continuation is {:p}, index is {}",
+        parent_link.to_raw_parts()[0],
+        parent_link.to_raw_parts()[1],
+        contref.address,
+        index
+    );
+
+    (parent_link, contref.address, index)
 }
 
 pub(crate) fn translate_cont_bind<'a>(
@@ -1722,8 +1814,8 @@ pub(crate) fn translate_resume<'a>(
     type_index: u32,
     resume_contobj: ir::Value,
     resume_args: &[ir::Value],
-    resumetable: &[(u32, ir::Block)],
-) -> Vec<ir::Value> {
+    resumetable: &[(u32, Option<ir::Block>)],
+) -> WasmResult<Vec<ir::Value>> {
     // The resume instruction is the most involved instruction to
     // compile as it is responsible for both continuation application
     // and control tag dispatch.
@@ -1764,6 +1856,14 @@ pub(crate) fn translate_resume<'a>(
     let dispatch_block = builder.create_block();
 
     let vmctx = tc::VMContext::new(env.vmctx_val(&mut builder.cursor()), env.pointer_type());
+
+    // Split the resumetable into suspend handlers (each represented by the tag index and  handler block) and the switch handlers (represented just by the tag index).
+    let (suspend_handlers, switch_tags): (Vec<(u32, Block)>, Vec<u32>) = resumetable
+        .iter()
+        .partition_map(|(tag_index, block_opt)| match block_opt {
+            Some(block) => Either::Left((*tag_index, *block)),
+            None => Either::Right(*tag_index),
+        });
 
     // Technically, there is no need to have a dedicated resume block, we could
     // just put all of its contents into the current block.
@@ -1897,16 +1997,34 @@ pub(crate) fn translate_resume<'a>(
         let handler_list = parent_csi.get_handler_list();
 
         if resumetable.len() > 0 {
-            // If the existing list is too small, reallocate (in runtime).
-            let resumetable_len = builder.ins().iconst(I32, resumetable.len() as i64);
-            handler_list.ensure_capacity(env, builder, resumetable_len);
+            // Total number of handlers (suspend and switch).
+            let handler_count = builder.ins().iconst(I32, resumetable.len() as i64);
 
-            // Note that we currently don't remove duplicate tags.
-            let tag_addresses: Vec<ir::Value> = resumetable
+            // If the existing list is too small, reallocate (in runtime).
+            handler_list.ensure_capacity(env, builder, handler_count);
+
+            let suspend_handler_count = suspend_handlers.len();
+
+            // All handlers, represented by the indices of the tags they handle.
+            // All the suspend handlers come first, followed by all the switch handlers.
+            let all_handlers = suspend_handlers
                 .iter()
-                .map(|(tag_index, _)| shared::tag_address(env, builder, *tag_index))
+                .map(|(tag_index, _block)| *tag_index)
+                .chain(switch_tags);
+
+            // Translate all tag indices to tag addresses (i.e., the corresponding *mut VMTagDefinition).
+            let all_tag_addresses: Vec<ir::Value> = all_handlers
+                .map(|tag_index| shared::tag_address(env, builder, tag_index))
                 .collect();
-            handler_list.store_data_entries(env, builder, &tag_addresses, false);
+
+            // Store all tag addresess in the handler list.
+            handler_list.store_data_entries(env, builder, &all_tag_addresses, false);
+
+            // To enable distinguishing switch and suspend handlers when searching the handler list:
+            // Store at which index the switch handlers start.
+            let first_switch_handler_index =
+                builder.ins().iconst(I32, suspend_handler_count as i64);
+            parent_csi.set_first_switch_handler_index(env, builder, first_switch_handler_index);
         }
 
         let resume_payload = ControlEffect::make_resume(env, builder).to_u64();
@@ -1947,9 +2065,9 @@ pub(crate) fn translate_resume<'a>(
         vmctx.store_stack_chain(env, builder, &original_stack_chain);
         parent_csi.set_state(env, builder, wasmtime_continuations::State::Running);
 
-        // Just for consistency: Reset the length of the handler list to 0,
-        // these handlers are no longer active.
+        // Just for consistency: Reset the handler list.
         handler_list.clear(builder);
+        parent_csi.set_first_switch_handler_index(env, builder, zero);
 
         // Extract the result and signal bit.
         let result = ControlEffect::from_u64(result);
@@ -2047,7 +2165,7 @@ pub(crate) fn translate_resume<'a>(
     let target_preamble_blocks = {
         let mut preamble_blocks = vec![];
 
-        for &(handle_tag, target_block) in resumetable {
+        for &(handle_tag, target_block) in &suspend_handlers {
             let preamble_block = builder.create_block();
             preamble_blocks.push(preamble_block);
             builder.switch_to_block(preamble_block);
@@ -2120,7 +2238,7 @@ pub(crate) fn translate_resume<'a>(
         // repurposed).
         shared::typed_continuations_drop_cont_ref(env, builder, returned_contref.address);
 
-        return values;
+        Ok(values)
     }
 }
 
@@ -2140,8 +2258,8 @@ pub(crate) fn translate_suspend<'a>(
     let vmctx = tc::VMContext::new(vmctx, env.pointer_type());
     let active_stack_chain = vmctx.load_stack_chain(env, builder);
 
-    let (end_of_chain_contref, handler_index) =
-        search_handler(env, builder, &active_stack_chain, tag_addr);
+    let (_, end_of_chain_contref, handler_index) =
+        search_handler(env, builder, &active_stack_chain, tag_addr, true);
 
     emit_debug_println!(
         env,
@@ -2190,4 +2308,295 @@ pub(crate) fn translate_suspend<'a>(
         vmcontref_load_values(env, builder, active_contref.address, tag_return_types);
 
     return_values
+}
+
+#[allow(clippy::cast_possible_truncation)]
+pub(crate) fn translate_switch<'a>(
+    env: &mut crate::func_environ::FuncEnvironment<'a>,
+    builder: &mut FunctionBuilder,
+    tag_index: u32,
+    switchee_contobj: ir::Value,
+    switch_args: &[ir::Value],
+    return_types: &[WasmValType],
+) -> WasmResult<Vec<ir::Value>> {
+    let vmctx = tc::VMContext::new(env.vmctx_val(&mut builder.cursor()), env.pointer_type());
+
+    // Check and increment revision on switchee continuation object (i.e., the
+    // one being switched to). Logically, the switchee continuation extends from
+    // `switchee_contref` to `switchee_contref.last_ancestor` (i.e., the end of
+    // the parent chain starting at `switchee_contref`).
+    let switchee_contref = {
+        let (witness, target_contref) = shared::disassemble_contobj(env, builder, switchee_contobj);
+        let mut target_contref = tc::VMContRef::new(target_contref);
+
+        let revision = target_contref.get_revision(env, builder);
+        let evidence = builder.ins().icmp(IntCC::Equal, revision, witness);
+        emit_debug_println!(
+            env,
+            builder,
+            "[switch] target_contref = {:p} witness = {}, revision = {}, evidence = {}",
+            target_contref.address,
+            witness,
+            revision,
+            evidence
+        );
+        builder
+            .ins()
+            .trapz(evidence, crate::TRAP_CONTINUATION_ALREADY_CONSUMED);
+        let _next_revision = target_contref.incr_revision(env, builder, revision);
+        target_contref
+    };
+
+    // We create the "switcher continuation" (i.e., the one executing switch)
+    // from the current execution context: Logically, it extends from the
+    // continuation reference executing `switch` (subsequently called
+    // `switcher_contref`) to the immediate child (called
+    // `switcher_contref_last_ancestor`) of the stack with the corresponding
+    // handler (saved in `handler_stack_chain`).
+    let (
+        switcher_contref,
+        switcher_contobj,
+        switcher_contref_last_ancestor,
+        handler_stack_chain,
+        vm_runtime_limits_ptr,
+    ) = {
+        let tag_addr = shared::tag_address(env, builder, tag_index);
+        let active_stack_chain = vmctx.load_stack_chain(env, builder);
+        let (handler_stack_chain, last_ancestor, _handler_index) =
+            search_handler(env, builder, &active_stack_chain, tag_addr, false);
+        let mut last_ancestor = tc::VMContRef::new(last_ancestor);
+
+        // If we get here, the search_handler logic succeeded (i.e., did not trap).
+        // Thus, there is at least one parent, so we are not on the main stack.
+        // Can therefore extract continuation directly.
+        let switcher_contref = active_stack_chain.unchecked_get_continuation(env, builder);
+        let mut switcher_contref = tc::VMContRef::new(switcher_contref);
+
+        switcher_contref.set_last_ancestor(env, builder, last_ancestor.address);
+
+        let switcher_contref_csi = switcher_contref.common_stack_information(env, builder);
+        emit_debug_assert!(
+            env,
+            builder,
+            switcher_contref_csi.has_state(env, builder, State::Running)
+        );
+        switcher_contref_csi.set_state(env, builder, State::Suspended);
+        // We break off `switcher_contref` from the chain of active
+        // continuations, by separating the link between `last_ancestor` and its
+        // parent stack.
+        let absent = StackChain::absent(builder, env.pointer_type());
+        last_ancestor.set_parent_stack_chain(env, builder, &absent);
+
+        // Load current runtime limits from `VMContext` and store in the
+        // switcher continuation.
+        let vm_runtime_limits_ptr = vmctx.load_vm_runtime_limits_ptr(env, builder);
+        switcher_contref_csi.load_limits_from_vmcontext(
+            env,
+            builder,
+            vm_runtime_limits_ptr,
+            false,
+            None,
+            None,
+        );
+
+        let revision = switcher_contref.get_revision(env, builder);
+        let new_contobj =
+            shared::assemble_contobj(env, builder, revision, switcher_contref.address);
+
+        emit_debug_println!(
+            env,
+            builder,
+            "[switch] created new contref = {:p}, revision = {}",
+            switcher_contref.address,
+            revision
+        );
+
+        (
+            switcher_contref,
+            new_contobj,
+            last_ancestor,
+            handler_stack_chain,
+            vm_runtime_limits_ptr,
+        )
+    };
+
+    // Prepare switchee continuation:
+    // - Store "ordinary" switch arguments as well as the contobj just
+    //   synthesized from the current context (i.e., `switcher_contobj`) in the
+    //   switchee continuation's payload buffer.
+    // - Splice switchee's continuation chain with handler stack to form new
+    //   overall chain of active continuations.
+    let (switchee_contref_csi, switchee_contref_last_ancestor) = {
+        let mut combined_payloads = switch_args.to_vec();
+        combined_payloads.push(switcher_contobj);
+        let count = builder.ins().iconst(I32, combined_payloads.len() as i64);
+        vmcontref_store_payloads(
+            env,
+            builder,
+            &combined_payloads,
+            count,
+            switchee_contref.address,
+        );
+
+        let switchee_contref_csi = switchee_contref.common_stack_information(env, builder);
+
+        emit_debug_assert!(
+            env,
+            builder,
+            switchee_contref_csi.has_state_any_of(env, builder, &[State::Fresh, State::Suspended])
+        );
+        switchee_contref_csi.set_state(env, builder, State::Running);
+
+        let switchee_contref_last_ancestor = switchee_contref.get_last_ancestor(env, builder);
+        let mut switchee_contref_last_ancestor = tc::VMContRef::new(switchee_contref_last_ancestor);
+
+        switchee_contref_last_ancestor.set_parent_stack_chain(env, builder, &handler_stack_chain);
+
+        (switchee_contref_csi, switchee_contref_last_ancestor)
+    };
+
+    // Update VMContext/Store: Update active continuation and `VMRuntimeLimits`.
+    {
+        vmctx.set_active_continuation(env, builder, switchee_contref.address);
+
+        switchee_contref_csi.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
+    }
+
+    // Perform actual stack switch
+    {
+        let switcher_last_ancestor_fs =
+            switcher_contref_last_ancestor.get_fiber_stack(env, builder);
+        let switcher_last_ancestor_cc =
+            switcher_last_ancestor_fs.load_control_context(env, builder);
+
+        let switchee_last_ancestor_fs =
+            switchee_contref_last_ancestor.get_fiber_stack(env, builder);
+        let switchee_last_ancestor_cc =
+            switchee_last_ancestor_fs.load_control_context(env, builder);
+
+        // The stack switch involves the following control contexts (e.g., IP,
+        // SP, FP, ...):
+        // - `switchee_last_ancestor_cc` contains the information to continue
+        //    execution in the switchee/target continuation.
+        // - `switcher_last_ancestor_cc` contains the information about how to
+        //    continue execution once we suspend/return to the stack with the
+        //    switch handler.
+        //
+        // In total, the following needs to happen:
+        // 1. Load control context at `switchee_last_ancestor_cc` to perform
+        //    stack switch.
+        // 2. Move control context at `switcher_last_ancestor_cc` over to
+        //    `switchee_last_ancestor_cc`.
+        // 3. Upon actual switch, save current control context at
+        //    `switcher_last_ancestor_cc`.
+        //
+        // We implement this as follows:
+        // 1. We copy `switchee_last_ancestor_cc` to a temporary area on the
+        //    stack (`tmp_control_context`).
+        // 2. We copy `switcher_last_ancestor_cc` over to
+        //    `switchee_last_ancestor_cc`.
+        // 3. We invoke the stack switch instruction such that it reads from the
+        //    temporary area, and writes to `switcher_last_ancestor_cc`.
+        //
+        // Note that the temporary area is only accessed once by the
+        // `stack_switch` instruction emitted later in this block, meaning that we
+        // don't have to worry about its lifetime.
+        //
+        // NOTE(frank-emrich) We could avoid the copying to a temporary area by
+        // making `stack_switch` do all of the necessary moving itself. However,
+        // that would be a rather ad-hoc change to how the instruction uses the
+        // two pointers given to it.
+
+        let slot_size = ir::StackSlotData::new(
+            ir::StackSlotKind::ExplicitSlot,
+            CONTROL_CONTEXT_SIZE as u32,
+            env.pointer_type().bytes() as u8,
+        );
+        let slot = builder.create_sized_stack_slot(slot_size);
+        let tmp_control_context = builder.ins().stack_addr(env.pointer_type(), slot, 0);
+
+        let flags = MemFlags::trusted();
+        let mut offset: i32 = 0;
+        while offset < CONTROL_CONTEXT_SIZE as i32 {
+            // switchee_last_ancestor_cc -> tmp control context
+            let tmp1 =
+                builder
+                    .ins()
+                    .load(env.pointer_type(), flags, switchee_last_ancestor_cc, offset);
+            builder
+                .ins()
+                .store(flags, tmp1, tmp_control_context, offset);
+
+            // switcher_last_ancestor_cc -> switchee_last_ancestor_cc
+            let tmp2 =
+                builder
+                    .ins()
+                    .load(env.pointer_type(), flags, switcher_last_ancestor_cc, offset);
+            builder
+                .ins()
+                .store(flags, tmp2, switchee_last_ancestor_cc, offset);
+
+            offset += env.pointer_type().bytes() as i32;
+        }
+
+        let switch_payload = ControlEffect::make_switch(env, builder).to_u64();
+
+        emit_debug_println!(
+            env,
+            builder,
+            "[switch] about to execute stack_switch, store_control_context_ptr is {:p}, load_control_context_ptr {:p}, tmp_control_context is {:p}",
+            switcher_last_ancestor_cc,
+            switchee_last_ancestor_cc,
+            tmp_control_context
+        );
+
+        let result = builder.ins().stack_switch(
+            switcher_last_ancestor_cc,
+            tmp_control_context,
+            switch_payload,
+        );
+
+        emit_debug_println!(
+            env,
+            builder,
+            "[switch] continuing after stack_switch in frame with stack chain ({}, {:p}), result is {:p}",
+            handler_stack_chain.to_raw_parts()[0],
+            handler_stack_chain.to_raw_parts()[1],
+            result
+        );
+
+        if cfg!(debug_assertions) {
+            // The only way to switch back to this point is by using resume or switch instructions.
+            let result_control_effect = ControlEffect::from_u64(result);
+            let result_discriminant = result_control_effect.signal(env, builder);
+            let is_resume = builder.ins().icmp_imm(
+                IntCC::Equal,
+                result_discriminant,
+                CONTROL_EFFECT_RESUME_DISCRIMINANT as i64,
+            );
+            let is_switch = builder.ins().icmp_imm(
+                IntCC::Equal,
+                result_discriminant,
+                CONTROL_EFFECT_SWITCH_DISCRIMINANT as i64,
+            );
+            let is_switch_or_resume = builder.ins().bor(is_switch, is_resume);
+            emit_debug_assert!(env, builder, is_switch_or_resume);
+        }
+    }
+
+    // After switching back to the original stack: Load return values, they are
+    // stored on the switcher continuation.
+    let return_values = {
+        if cfg!(debug_assertions) {
+            // The originally active continuation (before the switch) should be active again.
+            let active_stack_chain = vmctx.load_stack_chain(env, builder);
+            // This has a debug assertion that also checks that the `active_stack_chain` is indeed a continuation.
+            let active_contref = active_stack_chain.unchecked_get_continuation(env, builder);
+            emit_debug_assert_eq!(env, builder, switcher_contref.address, active_contref);
+        }
+
+        vmcontref_load_values(env, builder, switcher_contref.address, return_types)
+    };
+
+    Ok(return_values)
 }

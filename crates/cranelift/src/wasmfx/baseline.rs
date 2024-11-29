@@ -8,7 +8,7 @@ use cranelift_codegen::ir::types::*;
 use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::{FunctionBuilder, Switch};
 use wasmtime_environ::PtrSize;
-use wasmtime_environ::{WasmResult, WasmValType};
+use wasmtime_environ::{WasmError, WasmResult, WasmValType};
 
 #[cfg_attr(not(feature = "wasmfx_baseline"), allow(unused_imports))]
 #[cfg_attr(feature = "wasmfx_no_baseline", allow(unused_imports))]
@@ -179,8 +179,8 @@ pub(crate) fn translate_resume<'a>(
     type_index: u32,
     resumee_obj: ir::Value,
     resume_args: &[ir::Value],
-    resumetable: &[(u32, ir::Block)],
-) -> Vec<ir::Value> {
+    resumetable: &[(u32, Option<ir::Block>)],
+) -> WasmResult<Vec<ir::Value>> {
     // The resume instruction is by far the most involved
     // instruction to compile as it is responsible for both
     // continuation application and effect dispatch.
@@ -308,11 +308,16 @@ pub(crate) fn translate_resume<'a>(
     // Second, we consume the resume table entry-wise.
     let mut case_blocks = vec![];
     let mut tag_seen = std::collections::HashSet::new(); // Used to keep track of tags
-    for &(tag, label) in resumetable {
+    for &(tag, label_opt) in resumetable {
         // Skip if this `tag` has been seen previously.
         if !tag_seen.insert(tag) {
             continue;
         }
+        let label = label_opt.ok_or_else(|| {
+            WasmError::Unsupported(String::from(
+                "switch handlers not supported in the baseline implementation",
+            ))
+        })?;
         let case = builder.create_block();
         switch.set_entry(tag as u128, case);
         builder.switch_to_block(case);
@@ -398,7 +403,7 @@ pub(crate) fn translate_resume<'a>(
             tc_baseline_drop_continuation_reference(resumee_fiber)
         );
 
-        return values;
+        Ok(values)
     }
 }
 
@@ -449,4 +454,17 @@ pub(crate) fn translate_suspend<'a>(
         typed_continuations_load_tag_return_values(env, builder, contref, tag_return_types);
 
     return_values
+}
+
+pub(crate) fn translate_switch<'a>(
+    _env: &mut crate::func_environ::FuncEnvironment<'a>,
+    _builder: &mut FunctionBuilder,
+    _tag_index: u32,
+    _switchee_contobj: ir::Value,
+    _switch_args: &[ir::Value],
+    _return_types: &[WasmValType],
+) -> WasmResult<Vec<ir::Value>> {
+    WasmResult::Err(WasmError::Unsupported(String::from(
+        "switch instructions are unsuported",
+    )))
 }

@@ -143,6 +143,7 @@ pub mod optimized {
                 limits,
                 state,
                 handlers,
+                first_switch_handler_index: 0,
             };
             let parent_chain = StackChain::Absent;
             let last_ancestor = std::ptr::null_mut();

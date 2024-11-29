@@ -205,6 +205,19 @@ impl ControlEffect {
         Self(val)
     }
 
+    pub fn make_switch<'a>(
+        _env: &mut crate::func_environ::FuncEnvironment<'a>,
+        builder: &mut FunctionBuilder,
+    ) -> Self {
+        let discriminant = builder.ins().iconst(
+            I64,
+            wasmtime_continuations::CONTROL_EFFECT_SWITCH_DISCRIMINANT as i64,
+        );
+        let val = builder.ins().ishl_imm(discriminant, 32);
+
+        Self(val)
+    }
+
     pub fn make_suspend<'a>(
         _env: &mut crate::func_environ::FuncEnvironment<'a>,
         builder: &mut FunctionBuilder,
