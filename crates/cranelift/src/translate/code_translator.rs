@@ -2948,10 +2948,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let current_continuation_type = continuation_argument_types.last().unwrap();
             let current_continuation_type = current_continuation_type.unwrap_ref_type();
 
-            // Argument types of created_continuation_type. These will in turn
+            // Argument types of current_continuation_type. These will in turn
             // be the types of the arguments we receive when someone switches
             // back to this switch instruction
-            let created_continuation_arg_types = match created_continuation_type.heap_type {
+            let current_continuation_arg_types = match current_continuation_type.heap_type {
                 WasmHeapType::ConcreteCont(index) => {
                     // FIXME(frank-emrich) We need to handle the other cases.
                     let mti = index
@@ -2968,7 +2968,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 *tag_index,
                 *contobj,
                 switch_args,
-                &created_continuation_arg_types,
+                &current_continuation_arg_types,
             )?;
 
             state.popn(arity);
