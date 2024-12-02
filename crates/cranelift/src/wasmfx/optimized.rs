@@ -1667,7 +1667,7 @@ fn search_handler<'a>(
 
         let first_switch_handler_index = parent_csi.get_first_switch_handler_index(env, builder);
 
-        // Note that these indices are inclusive-exclusive.
+        // Note that these indices are inclusive-exclusive, i.e. [begin_range, end_range).
         let (begin_range, end_range) = if search_suspend_handlers {
             let zero = builder.ins().iconst(I32, 0);
             if cfg!(debug_assertions) {

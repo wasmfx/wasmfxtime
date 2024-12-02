@@ -2945,8 +2945,8 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
 
             // Type of the continuation we are going to create by suspending the
             // currently running stack
-            let created_continuation_type = continuation_argument_types.last().unwrap();
-            let created_continuation_type = created_continuation_type.unwrap_ref_type();
+            let current_continuation_type = continuation_argument_types.last().unwrap();
+            let current_continuation_type = current_continuation_type.unwrap_ref_type();
 
             // Argument types of created_continuation_type. These will in turn
             // be the types of the arguments we receive when someone switches
