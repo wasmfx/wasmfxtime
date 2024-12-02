@@ -13,12 +13,13 @@ mod test_utils {
     }
 
     impl Runner {
-        pub fn new(enable_gc: bool) -> Runner {
+        pub fn new() -> Runner {
             let mut config = Config::default();
             config.wasm_function_references(true);
             config.wasm_exceptions(true);
             config.wasm_stack_switching(true);
-            config.wasm_gc(enable_gc);
+            // Required in order to use recursive types.
+            config.wasm_gc(true);
 
             let engine = Engine::new(&config).unwrap();
 
@@ -389,7 +390,7 @@ mod host {
         )
     "#;
 
-        let mut runner = Runner::new(false);
+        let mut runner = Runner::new();
 
         let host_func_a = make_i32_inc_host_func(&mut runner);
 
@@ -430,7 +431,7 @@ mod host {
         )
     "#;
 
-        let mut runner = Runner::new(false);
+        let mut runner = Runner::new();
 
         let host_func_a = make_i32_inc_via_export_host_func(&mut runner, "b");
 
@@ -475,7 +476,7 @@ mod host {
         )
     "#;
 
-        let mut runner = Runner::new(false);
+        let mut runner = Runner::new();
 
         let host_func_a = make_i32_inc_via_export_host_func(&mut runner, "b");
 
@@ -516,7 +517,7 @@ mod host {
             )
         )
     "#;
-        let mut runner = Runner::new(false);
+        let mut runner = Runner::new();
 
         let host_func_a = make_i32_inc_via_export_host_func(&mut runner, "b");
 
@@ -574,7 +575,7 @@ mod host {
         )
     "#;
 
-        let mut runner = Runner::new(false);
+        let mut runner = Runner::new();
 
         let host_func_a = make_i32_inc_via_export_host_func(&mut runner, "b");
 
@@ -635,7 +636,7 @@ mod host {
         )
     "#;
 
-        let mut runner = Runner::new(false);
+        let mut runner = Runner::new();
 
         let host_func_a = make_i32_inc_via_export_host_func(&mut runner, "b");
 
@@ -655,13 +656,8 @@ mod traps {
     /// Runs the module given as `wat`. We expect execution to cause the
     /// `expected_trap` and a backtrace containing exactly the function names
     /// given by `expected_backtrace`.
-    fn run_test_expect_trap_backtrace(
-        wat: &str,
-        enable_gc: bool,
-        expected_trap: Trap,
-        expected_backtrace: &[&str],
-    ) {
-        let runner = Runner::new(enable_gc);
+    fn run_test_expect_trap_backtrace(wat: &str, expected_trap: Trap, expected_backtrace: &[&str]) {
+        let runner = Runner::new();
         let result = runner.run_test::<()>(wat, &[]);
 
         let err = result.expect_err("Was expecting wasm execution to yield error");
@@ -732,7 +728,6 @@ mod traps {
 
         run_test_expect_trap_backtrace(
             wat,
-            false,
             Trap::UnreachableCodeReached,
             &["entry", "a", "b", "c", "d", "e", "f"],
         );
@@ -777,7 +772,6 @@ mod traps {
 
         run_test_expect_trap_backtrace(
             wat,
-            false,
             Trap::UnreachableCodeReached,
             &["entry", "a", "b", "c"],
         );
@@ -820,7 +814,7 @@ mod traps {
         )
         "#;
 
-        run_test_expect_trap_backtrace(wat, false, Trap::UnreachableCodeReached, &["entry", "a"]);
+        run_test_expect_trap_backtrace(wat, Trap::UnreachableCodeReached, &["entry", "a"]);
 
         Ok(())
     }
@@ -869,7 +863,6 @@ mod traps {
 
         run_test_expect_trap_backtrace(
             wat,
-            false,
             Trap::UnreachableCodeReached,
             &["entry", "a", "b", "c"],
         );
@@ -932,7 +925,6 @@ mod traps {
         // suspended in $e, and traps in $d
         run_test_expect_trap_backtrace(
             wat,
-            false,
             Trap::UnreachableCodeReached,
             &["entry", "a", "b", "d"],
         );
@@ -985,7 +977,7 @@ mod traps {
         // Note that c does not appear in the stack trace:
         // In $b, we resume the suspended computation, which started in $d,
         // suspended in $e, and traps in $d
-        run_test_expect_trap_backtrace(wat, false, Trap::UnreachableCodeReached, &["entry", "a"]);
+        run_test_expect_trap_backtrace(wat, Trap::UnreachableCodeReached, &["entry", "a"]);
 
         Ok(())
     }
@@ -1043,7 +1035,6 @@ mod traps {
 
         run_test_expect_trap_backtrace(
             wat,
-            false,
             Trap::UnreachableCodeReached,
             &["entry", "a", "b", "f", "c", "d", "e"],
         );
@@ -1113,7 +1104,6 @@ mod traps {
 
         run_test_expect_trap_backtrace(
             wat,
-            true,
             Trap::UnreachableCodeReached,
             &["entry", "c", "d", "a", "b"],
         );
@@ -1159,7 +1149,7 @@ mod traps {
         )
         "#;
 
-        let mut runner = Runner::new(false);
+        let mut runner = Runner::new();
 
         let msg = "Host function f panics";
 
@@ -1203,7 +1193,7 @@ mod traps {
         )
     "#;
 
-        let runner = Runner::new(false);
+        let runner = Runner::new();
 
         let error = runner
             .run_test::<()>(wat, &[])
@@ -1256,7 +1246,7 @@ mod misc {
 )
 "#;
 
-        let runner = Runner::new(false);
+        let runner = Runner::new();
         let error = runner
             .run_test::<()>(wat, &[])
             .expect_err("expected an overflow");
