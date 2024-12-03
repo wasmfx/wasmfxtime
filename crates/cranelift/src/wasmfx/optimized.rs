@@ -2504,6 +2504,12 @@ pub(crate) fn translate_switch<'a>(
         // `stack_switch` instruction emitted later in this block, meaning that we
         // don't have to worry about its lifetime.
         //
+        // NOTE(frank-emrich) The implementation below results in one stack slot
+        // being created per switch instruction, even though multiple switch
+        // instructions in the same function could safely re-use the same stack
+        // slot. Thus, we could implement logic for sharing the stack slot by
+        // adding an appropriate field to `FuncEnvironment`.
+        //
         // NOTE(frank-emrich) We could avoid the copying to a temporary area by
         // making `stack_switch` do all of the necessary moving itself. However,
         // that would be a rather ad-hoc change to how the instruction uses the
