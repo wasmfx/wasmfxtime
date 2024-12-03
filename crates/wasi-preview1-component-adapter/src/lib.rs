@@ -3,14 +3,16 @@
 // proxy world.
 #![cfg_attr(
     feature = "proxy",
-    allow(
+    expect(
         unused_mut,
         unused_variables,
         dead_code,
         unused_imports,
-        unreachable_code
+        unreachable_code,
+        reason = "stripped down in proxy build",
     )
 )]
+#![expect(clippy::allow_attributes, reason = "crate not migrated yet")]
 
 use crate::bindings::wasi::clocks::{monotonic_clock, wall_clock};
 use crate::bindings::wasi::io::poll;
@@ -52,7 +54,6 @@ pub mod bindings {
     wit_bindgen_rust_macro::generate!({
         path: "../wasi/wit",
         world: "wasi:cli/command",
-        std_feature,
         raw_strings,
         runtime_path: "crate::bindings::wit_bindgen_rt_shim",
         // Automatically generated bindings for these functions will allocate
@@ -70,7 +71,6 @@ pub mod bindings {
     wit_bindgen_rust_macro::generate!({
         path: "../wasi/wit",
         world: "wasi:cli/imports",
-        std_feature,
         raw_strings,
         runtime_path: "crate::bindings::wit_bindgen_rt_shim",
         // Automatically generated bindings for these functions will allocate
@@ -100,7 +100,6 @@ pub mod bindings {
             }
         "#,
         world: "wasmtime:adapter/adapter",
-        std_feature,
         raw_strings,
         runtime_path: "crate::bindings::wit_bindgen_rt_shim",
         skip: ["poll"],
@@ -2157,7 +2156,6 @@ pub unsafe extern "C" fn poll_oneoff(
         }
 
         #[link(wasm_import_module = "wasi:io/poll@0.2.2")]
-        #[allow(improper_ctypes)] // FIXME(bytecodealliance/wit-bindgen#684)
         extern "C" {
             #[link_name = "poll"]
             fn poll_import(pollables: *const Pollable, len: usize, rval: *mut ReadyList);
@@ -2722,7 +2720,7 @@ const _: () = {
     let _size_assert: [(); PAGE_SIZE] = [(); size_of::<State>()];
 };
 
-#[allow(unused)]
+#[expect(unused, reason = "not used in all configurations")]
 #[repr(i32)]
 enum AllocationState {
     StackUnallocated,
@@ -2732,7 +2730,7 @@ enum AllocationState {
     StateAllocated,
 }
 
-#[allow(improper_ctypes)]
+#[expect(improper_ctypes, reason = "types behind pointers")]
 extern "C" {
     fn get_state_ptr() -> *mut State;
     fn set_state_ptr(state: *mut State);

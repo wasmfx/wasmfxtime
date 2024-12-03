@@ -405,7 +405,7 @@ impl EngineOrModuleTypeIndex {
 
 /// WebAssembly heap type -- equivalent of `wasmparser`'s HeapType
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[allow(missing_docs)]
+#[allow(missing_docs, reason = "self-describing variants")]
 pub enum WasmHeapType {
     // External types.
     Extern,
@@ -954,7 +954,7 @@ impl TypeTrace for WasmStructType {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[allow(missing_docs)]
+#[allow(missing_docs, reason = "self-describing type")]
 pub struct WasmCompositeType {
     /// The type defined inside the composite type.
     pub inner: WasmCompositeInnerType,
@@ -978,7 +978,7 @@ impl fmt::Display for WasmCompositeType {
 
 /// A function, array, or struct type.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[allow(missing_docs)]
+#[allow(missing_docs, reason = "self-describing variants")]
 pub enum WasmCompositeInnerType {
     Array(WasmArrayType),
     Func(WasmFuncType),
@@ -997,7 +997,7 @@ impl fmt::Display for WasmCompositeInnerType {
     }
 }
 
-#[allow(missing_docs)]
+#[allow(missing_docs, reason = "self-describing functions")]
 impl WasmCompositeInnerType {
     #[inline]
     pub fn is_array(&self) -> bool {
@@ -1132,7 +1132,7 @@ impl fmt::Display for WasmSubType {
 /// Implicitly define all of these helper functions to handle only unshared
 /// types; essentially, these act like `is_unshared_*` functions until shared
 /// support is implemented.
-#[allow(missing_docs)]
+#[allow(missing_docs, reason = "self-describing functions")]
 impl WasmSubType {
     #[inline]
     pub fn is_func(&self) -> bool {
@@ -1464,7 +1464,6 @@ impl From<TagIndex> for EntityIndex {
 
 /// A type of an item in a wasm module where an item is typically something that
 /// can be exported.
-#[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum EntityType {
     /// A global variable with the specified content type
@@ -1679,7 +1678,7 @@ impl ConstExpr {
 }
 
 /// The subset of Wasm opcodes that are constant.
-#[allow(missing_docs)]
+#[allow(missing_docs, reason = "self-describing variants")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum ConstOp {
     I32Const(i32),
@@ -1765,7 +1764,7 @@ impl ConstOp {
 
 /// The type that can be used to index into [Memory] and [Table].
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
-#[allow(missing_docs)]
+#[allow(missing_docs, reason = "self-describing variants")]
 pub enum IndexType {
     I32,
     I64,
@@ -1773,7 +1772,7 @@ pub enum IndexType {
 
 /// The size range of resizeable storage associated with [Memory] types and [Table] types.
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
-#[allow(missing_docs)]
+#[allow(missing_docs, reason = "self-describing fields")]
 pub struct Limits {
     pub min: u64,
     pub max: Option<u64>,
@@ -1998,7 +1997,7 @@ impl Memory {
 }
 
 #[derive(Copy, Clone, Debug)]
-#[allow(missing_docs)]
+#[allow(missing_docs, reason = "self-describing error struct")]
 pub struct SizeOverflow;
 
 impl fmt::Display for SizeOverflow {
@@ -2083,7 +2082,7 @@ impl From<wasmparser::TagType> for Tag {
 }
 
 /// Helpers used to convert a `wasmparser` type to a type in this crate.
-#[allow(missing_docs)]
+#[allow(missing_docs, reason = "self-describing functions")]
 pub trait TypeConvert {
     /// Converts a wasmparser table type into a wasmtime type
     fn convert_global_type(&self, ty: &wasmparser::GlobalType) -> Global {
