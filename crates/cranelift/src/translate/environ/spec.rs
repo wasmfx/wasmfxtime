@@ -849,7 +849,7 @@ pub trait FuncEnvironment: TargetEnvironment {
     ) -> Vec<ir::Value>;
 
     /// TODO(dhil): write documentation.
-    #[allow(unused)]
+    #[allow(unused, reason = "TODO")]
     fn translate_resume_throw(
         &mut self,
         pos: FuncCursor,

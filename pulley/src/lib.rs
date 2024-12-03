@@ -5,6 +5,7 @@
 #![cfg_attr(pulley_tail_calls, allow(incomplete_features, unstable_features))]
 #![deny(missing_docs)]
 #![no_std]
+#![expect(clippy::allow_attributes_without_reason, reason = "crate not migrated")]
 
 #[cfg(feature = "std")]
 #[macro_use]
@@ -63,6 +64,14 @@ macro_rules! for_each_op {
             br_if_xult64 = BrIfXult64 { a: XReg, b: XReg, offset: PcRelOffset };
             /// Branch if unsigned `a <= b`.
             br_if_xulteq64 = BrIfXulteq64 { a: XReg, b: XReg, offset: PcRelOffset };
+
+            /// Branch to the label indicated by `idx`.
+            ///
+            /// After this instruction are `amt` instances of `PcRelOffset`
+            /// and the `idx` selects which one will be branched to. The value
+            /// of `idx` is clamped to `amt - 1` (e.g. the last offset is the
+            /// "default" one.
+            br_table32 = BrTable32 { idx: XReg, amt: u32 };
 
             /// Move between `x` registers.
             xmov = Xmov { dst: XReg, src: XReg };
@@ -208,70 +217,6 @@ macro_rules! for_each_extended_op {
             /// register x0, is the function pointer that's being called and all
             /// further arguments follow after that in registers.
             call_indirect_host = CallIndirectHost { sig: u8 };
-        }
-    };
-}
-
-/// All known signatures that Wasmtime needs to invoke for host functions.
-///
-/// This is used in conjunction with the `call_indirect_host` opcode to jump
-/// from interpreter bytecode back into the host to peform tasks such as
-/// `memory.grow` or call imported host functions.
-///
-/// Each function signature here correspond to a "builtin" either for core wasm
-/// or for the component model. This also includes the "array call abi" for
-/// calling host functions.
-///
-/// TODO: this probably needs a "pointer type" to avoid doubling the size of
-/// this on 32-bit platforms. That's left for a future refactoring when it's
-/// easier to start compiling everything for 32-bit platforms. That'll require
-/// more of the pulley backend fleshed out and the integration with Wasmtime
-/// more fleshed out as well.
-#[macro_export]
-macro_rules! for_each_host_signature {
-    ($m:ident) => {
-        $m! {
-            fn(I64, I32, I32, I32) -> I32;
-            fn(I64, I32, I32) -> I32;
-            fn(I64, I32, I32) -> I64;
-            fn(I64, I64, I32, I64, I64, I64, I8, I64, I64) -> I8;
-            fn(I64, I64, I64, I64, I64) -> I64;
-            fn(I64, I64, I64, I64) -> I64;
-            fn(I64, I64, I64) -> I64;
-            fn(I64, I64, I64);
-            fn(I64);
-            fn(I64, I32, I32, I32, I32, I32);
-            fn(I64, I32) -> I32;
-            fn(I64, I32, I32, I32, I32, I32, I32);
-            fn(I64, I32, I32, I32, I32) -> I32;
-            fn(I64, I32, I32, I64, I32, I32);
-            fn(I64, I32, I32, I64, I64, I64);
-            fn(I64, I32, I32) -> I32;
-            fn(I64, I32, I32) -> I64;
-            fn(I64, I32, I64, I32, I64);
-            fn(I64, I32, I64, I32) -> I64;
-            fn(I64, I32, I64, I32, I64, I64);
-            fn(I64, I32, I64, I32, I64) -> I32;
-            fn(I64, I32, I64, I32, I64);
-            fn(I64, I32, I64, I32) -> I32;
-            fn(I64, I32, I64, I64, I64) -> I32;
-            fn(I64, I32, I64, I64, I64);
-            fn(I64, I32, I64, I64) -> I64;
-            fn(I64, I32, I64) -> I64;
-            fn(I64, I32) -> I64;
-            fn(I64, I32);
-            fn(I64, I64, I32) -> I64;
-            fn(I64, I64, I64, I64) -> I8;
-            fn(I64, I64) -> I32;
-            fn(I64, I8);
-            fn(I64) -> I64;
-            fn(I64);
-            fn(I64, I64); // NOTE(dhil): added by me; signature for stack switching libcall
-            fn(I64, I64) -> I64; // NOTE(dhil): added by me; signature for stack switching baseline libcall
-            fn(I64, I32, I64); // NOTE(dhil): added by me; signature for stack switching baseline libcall
-            fn(I64, I64, I32, I32) -> I64; // NOTE(dhil): added by me; signature for stack switching libcall
-            fn(I64, I32, I64, I64, I64) -> I64; // NOTE(dhil): added by me; signature for stack switching libcall
-            fn(I64, I32, I64, I64, I64, I64); // NOTE(dhil): added by me; signature for stack switching libcall
         }
     };
 }

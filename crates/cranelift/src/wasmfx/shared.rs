@@ -3,7 +3,7 @@ use cranelift_codegen::ir::InstBuilder;
 
 use cranelift_frontend::FunctionBuilder;
 
-#[allow(unused_macros)]
+#[allow(unused_macros, reason = "TODO")]
 macro_rules! call_builtin {
     ( $builder:ident, $env:ident, $f:ident( $($args:expr),* ) ) => (
         {
@@ -22,7 +22,7 @@ macro_rules! call_builtin {
     );
 }
 
-#[allow(unused_imports)]
+#[allow(unused_imports, reason = "TODO")]
 pub(crate) use call_builtin;
 use cranelift_codegen::ir::types::{I32, I64};
 
@@ -129,7 +129,7 @@ pub(crate) fn typed_continuations_drop_cont_ref<'a>(
 #[repr(transparent)]
 pub struct TaggedPointer(pub ir::Value);
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "TODO")]
 impl TaggedPointer {
     const LOW_TAG_BITS: i64 = 2;
     const LOW_TAG_MASK: i64 = (1 << Self::LOW_TAG_BITS) - 1;

@@ -168,7 +168,7 @@ authors = ["The Wasmtime Project Developers"]
 edition = "2021"
 # Wasmtime's current policy is that this number can be no larger than the
 # current stable release of Rust minus 2.
-rust-version = "1.80.0"
+rust-version = "1.81.0"
 
 [workspace.lints.rust]
 # Turn on some lints which are otherwise allow-by-default in rustc.
@@ -195,6 +195,7 @@ manual_strip = 'warn'
 unnecessary_mut_passed = 'warn'
 unnecessary_fallible_conversions = 'warn'
 unnecessary_cast = 'warn'
+allow_attributes_without_reason = 'warn'
 
 [workspace.dependencies]
 arbitrary = { version = "1.3.1" }
@@ -259,7 +260,7 @@ byte-array-literals = { path = "crates/wasi-preview1-component-adapter/byte-arra
 
 # Bytecode Alliance maintained dependencies:
 # ---------------------------
-regalloc2 = "0.11.0"
+regalloc2 = "0.11.1"
 
 # cap-std family:
 target-lexicon = "0.12.16"
@@ -279,16 +280,16 @@ wit-bindgen = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "v0.35.0"
 wit-bindgen-rust-macro = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "v0.35.0", default-features = false }
 
 # wasm-tools family:
-wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.220.0", default-features = false }
-wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.220.0" }
-wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.220.0" }
-wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.220.0" }
-wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.220.0" }
-wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.220.0" }
-wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.220.0" }
-wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.220.0" }
-wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.220.0" }
-wasm-wave     = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.220.0" }
+wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2", default-features = false, features = ['simd'] }
+wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
+wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
+wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
+wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
+wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
+wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
+wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
+wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
+wasm-wave     = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
 
 # Non-Bytecode Alliance maintained dependencies:
 # --------------------------
