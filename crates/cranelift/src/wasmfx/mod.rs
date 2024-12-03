@@ -9,9 +9,9 @@ mod shared;
 
 #[cfg_attr(
     any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline"),
-    allow(dead_code)
+    allow(dead_code, reason = "TODO")
 )]
 pub(crate) mod baseline;
 
-#[cfg_attr(feature = "wasmfx_baseline", allow(dead_code))]
+#[cfg_attr(feature = "wasmfx_baseline", allow(dead_code, reason = "TODO"))]
 pub(crate) mod optimized;
