@@ -10,7 +10,10 @@ use cranelift_frontend::{FunctionBuilder, Switch};
 use wasmtime_environ::PtrSize;
 use wasmtime_environ::{WasmResult, WasmValType};
 
-#[cfg_attr(not(feature = "wasmfx_baseline"), allow(unused_imports, reason = "TODO"))]
+#[cfg_attr(
+    not(feature = "wasmfx_baseline"),
+    allow(unused_imports, reason = "TODO")
+)]
 #[cfg_attr(feature = "wasmfx_no_baseline", allow(unused_imports, reason = "TODO"))]
 pub(crate) use shared::{assemble_contobj, disassemble_contobj, vm_contobj_type};
 

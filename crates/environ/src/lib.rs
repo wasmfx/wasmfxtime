@@ -4,7 +4,8 @@
 //! linear memories.
 
 #![deny(missing_docs, warnings)]
-#![allow(clippy::allow_attributes_without_reason)] // TODO(dhil): added by me to silence clippy. It complains about some macro-generated attribute, which I have yet to locate.
+#![allow(clippy::allow_attributes_without_reason)]
+// TODO(dhil): added by me to silence clippy. It complains about some macro-generated attribute, which I have yet to locate.
 #![warn(clippy::cast_sign_loss)]
 #![no_std]
 
