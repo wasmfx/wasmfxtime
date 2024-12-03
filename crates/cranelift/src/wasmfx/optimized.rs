@@ -1204,7 +1204,7 @@ pub(crate) mod typed_continuation_helpers {
             HandlerList::new(self.address, offset as i32)
         }
 
-        #[allow(clippy::cast_possible_truncation)]
+        #[allow(clippy::cast_possible_truncation, reason = "TODO")]
         pub fn get_first_switch_handler_index<'a>(
             &self,
             _env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -1218,7 +1218,7 @@ pub(crate) mod typed_continuation_helpers {
                 .load(I32, memflags, self.address, offset as i32)
         }
 
-        #[allow(clippy::cast_possible_truncation)]
+        #[allow(clippy::cast_possible_truncation, reason = "TODO")]
         pub fn set_first_switch_handler_index<'a>(
             &self,
             _env: &mut crate::func_environ::FuncEnvironment<'a>,
@@ -2312,7 +2312,7 @@ pub(crate) fn translate_suspend<'a>(
     return_values
 }
 
-#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_possible_truncation, reason = "TODO")]
 pub(crate) fn translate_switch<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
