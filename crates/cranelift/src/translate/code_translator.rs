@@ -2953,7 +2953,6 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             // back to this switch instruction
             let current_continuation_arg_types = match current_continuation_type.heap_type {
                 WasmHeapType::ConcreteCont(index) => {
-                    // FIXME(frank-emrich) We need to handle the other cases.
                     let mti = index
                         .as_module_type_index()
                         .expect("Only supporting module type indices on switch for now");
