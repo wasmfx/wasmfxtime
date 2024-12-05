@@ -319,9 +319,7 @@ unsafe fn table_fill_func_ref(
     match table.element_type() {
         TableElementType::Func => {
             let val = NonNull::new(val.cast::<VMFuncRef>());
-            table
-                .fill(store.optional_gc_store_mut()?, dst, val.into(), len)
-                .err2anyhow()?;
+            table.fill(store.optional_gc_store_mut()?, dst, val.into(), len)?;
             Ok(())
         }
         TableElementType::GcRef => unreachable!(),
@@ -346,9 +344,7 @@ unsafe fn table_fill_gc_ref(
             let gc_store = store.store_opaque_mut().unwrap_gc_store_mut();
             let gc_ref = VMGcRef::from_raw_u32(val);
             let gc_ref = gc_ref.map(|r| gc_store.clone_gc_ref(&r));
-            table
-                .fill(Some(gc_store), dst, gc_ref.into(), len)
-                .err2anyhow()?;
+            table.fill(Some(gc_store), dst, gc_ref.into(), len)?;
             Ok(())
         }
 
@@ -379,9 +375,7 @@ unsafe fn table_fill_cont_obj(
                 Some(contobj)
             };
 
-            table
-                .fill(store.optional_gc_store_mut()?, dst, contobj.into(), len)
-                .err2anyhow()?;
+            table.fill(store.optional_gc_store_mut()?, dst, contobj.into(), len)?;
             Ok(())
         }
         _ => panic!("Wrong table filling function"),
@@ -406,7 +400,7 @@ unsafe fn table_copy(
     let src_range = src..(src.checked_add(len).unwrap_or(u64::MAX));
     let src_table = instance.get_table_with_lazy_init(src_table_index, src_range);
     let gc_store = store.optional_gc_store_mut()?;
-    Table::copy(gc_store, dst_table, src_table, dst, src, len).err2anyhow()?;
+    Table::copy(gc_store, dst_table, src_table, dst, src, len)?;
     Ok(())
 }
 
@@ -613,8 +607,7 @@ unsafe fn gc_alloc_raw(
             store
                 .unwrap_gc_store_mut()
                 .alloc_raw(header, layout)?
-                .ok_or_else(|| GcHeapOutOfMemory::new(()))
-                .err2anyhow()?
+                .ok_or_else(|| GcHeapOutOfMemory::new(()))?
         }
     };
 
@@ -707,15 +700,15 @@ unsafe fn array_new_data(
     let byte_len = len
         .checked_mul(one_elem_size)
         .and_then(|x| usize::try_from(x).ok())
-        .ok_or_else(|| Trap::MemoryOutOfBounds.into_anyhow())?;
+        .ok_or_else(|| Trap::MemoryOutOfBounds)?;
 
     // Get the data from the segment, checking bounds.
-    let src = usize::try_from(src).map_err(|_| Trap::MemoryOutOfBounds.into_anyhow())?;
+    let src = usize::try_from(src).map_err(|_| Trap::MemoryOutOfBounds)?;
     let data = instance
         .wasm_data(data_range)
         .get(src..)
         .and_then(|d| d.get(..byte_len))
-        .ok_or_else(|| Trap::MemoryOutOfBounds.into_anyhow())?;
+        .ok_or_else(|| Trap::MemoryOutOfBounds)?;
 
     // Allocate the (uninitialized) array.
     let gc_layout = store
@@ -739,7 +732,7 @@ unsafe fn array_new_data(
                 .store_opaque_mut()
                 .unwrap_gc_store_mut()
                 .alloc_uninit_array(shared_ty, u32::try_from(byte_len).unwrap(), &array_layout)?
-                .ok_or_else(|| GcHeapOutOfMemory::new(()).into_anyhow())?
+                .ok_or_else(|| GcHeapOutOfMemory::new(()))?
         }
     };
 
@@ -782,24 +775,20 @@ unsafe fn array_init_data(
     );
 
     // Null check the array.
-    let gc_ref = VMGcRef::from_raw_u32(array).ok_or_else(|| Trap::NullReference.into_anyhow())?;
+    let gc_ref = VMGcRef::from_raw_u32(array).ok_or_else(|| Trap::NullReference)?;
     let array = gc_ref
         .into_arrayref(&*store.unwrap_gc_store().gc_heap)
         .expect("gc ref should be an array");
 
-    let dst = usize::try_from(dst).map_err(|_| Trap::MemoryOutOfBounds.into_anyhow())?;
-    let src = usize::try_from(src).map_err(|_| Trap::MemoryOutOfBounds.into_anyhow())?;
-    let len = usize::try_from(len).map_err(|_| Trap::MemoryOutOfBounds.into_anyhow())?;
+    let dst = usize::try_from(dst).map_err(|_| Trap::MemoryOutOfBounds)?;
+    let src = usize::try_from(src).map_err(|_| Trap::MemoryOutOfBounds)?;
+    let len = usize::try_from(len).map_err(|_| Trap::MemoryOutOfBounds)?;
 
     // Bounds check the array.
     let array_len = array.len(store.store_opaque());
-    let array_len = usize::try_from(array_len).map_err(|_| Trap::ArrayOutOfBounds.into_anyhow())?;
-    if dst
-        .checked_add(len)
-        .ok_or_else(|| Trap::ArrayOutOfBounds.into_anyhow())?
-        > array_len
-    {
-        return Err(Trap::ArrayOutOfBounds.into_anyhow());
+    let array_len = usize::try_from(array_len).map_err(|_| Trap::ArrayOutOfBounds)?;
+    if dst.checked_add(len).ok_or_else(|| Trap::ArrayOutOfBounds)? > array_len {
+        return Err(Trap::ArrayOutOfBounds.into());
     }
 
     // Calculate the byte length from the array length.
@@ -811,7 +800,7 @@ unsafe fn array_init_data(
         .expect("Wasm validation ensures that this type have a defined byte size");
     let data_len = len
         .checked_mul(usize::try_from(one_elem_size).unwrap())
-        .ok_or_else(|| Trap::MemoryOutOfBounds.into_anyhow())?;
+        .ok_or_else(|| Trap::MemoryOutOfBounds)?;
 
     // Get the data from the segment, checking its bounds.
     let data_range = instance.wasm_data_range(data_index);
@@ -819,7 +808,7 @@ unsafe fn array_init_data(
         .wasm_data(data_range)
         .get(src..)
         .and_then(|d| d.get(..data_len))
-        .ok_or_else(|| Trap::MemoryOutOfBounds.into_anyhow())?;
+        .ok_or_else(|| Trap::MemoryOutOfBounds)?;
 
     // Copy the data into the array.
 
@@ -868,8 +857,8 @@ unsafe fn array_new_elem(
     let mut storage = None;
     let elements = instance.passive_element_segment(&mut storage, elem_index);
 
-    let src = usize::try_from(src).map_err(|_| Trap::TableOutOfBounds.into_anyhow())?;
-    let len = usize::try_from(len).map_err(|_| Trap::TableOutOfBounds.into_anyhow())?;
+    let src = usize::try_from(src).map_err(|_| Trap::TableOutOfBounds)?;
+    let len = usize::try_from(len).map_err(|_| Trap::TableOutOfBounds)?;
 
     let shared_ty = instance.engine_type_index(array_type_index);
     let array_ty = ArrayType::from_shared_type_index(store.engine(), shared_ty);
@@ -884,7 +873,7 @@ unsafe fn array_new_elem(
                 vals.extend(
                     fs.get(src..)
                         .and_then(|s| s.get(..len))
-                        .ok_or_else(|| Trap::TableOutOfBounds.into_anyhow())?
+                        .ok_or_else(|| Trap::TableOutOfBounds)?
                         .iter()
                         .map(|f| {
                             let raw_func_ref = instance.get_func_ref(*f);
@@ -897,7 +886,7 @@ unsafe fn array_new_elem(
                 let xs = xs
                     .get(src..)
                     .and_then(|s| s.get(..len))
-                    .ok_or_else(|| Trap::TableOutOfBounds.into_anyhow())?;
+                    .ok_or_else(|| Trap::TableOutOfBounds)?;
 
                 let mut const_context = ConstEvalContext::new(instance);
                 let mut const_evaluator = ConstExprEvaluator::default();
@@ -960,7 +949,7 @@ unsafe fn array_init_elem(
         );
 
     // Convert the raw GC ref into a `Rooted<ArrayRef>`.
-    let array = VMGcRef::from_raw_u32(array).ok_or_else(|| Trap::NullReference.into_anyhow())?;
+    let array = VMGcRef::from_raw_u32(array).ok_or_else(|| Trap::NullReference)?;
     let array = store.unwrap_gc_store_mut().clone_gc_ref(&array);
     let array = {
         let mut no_gc = AutoAssertNoGc::new(&mut store);
@@ -970,12 +959,8 @@ unsafe fn array_init_elem(
     // Bounds check the destination within the array.
     let array_len = array._len(&store)?;
     log::trace!("array_len = {array_len}");
-    if dst
-        .checked_add(len)
-        .ok_or_else(|| Trap::ArrayOutOfBounds.into_anyhow())?
-        > array_len
-    {
-        return Err(Trap::ArrayOutOfBounds.into_anyhow());
+    if dst.checked_add(len).ok_or_else(|| Trap::ArrayOutOfBounds)? > array_len {
+        return Err(Trap::ArrayOutOfBounds.into());
     }
 
     // Get the passive element segment.
@@ -983,15 +968,15 @@ unsafe fn array_init_elem(
     let elements = instance.passive_element_segment(&mut storage, elem_index);
 
     // Convert array offsets into `usize`s.
-    let src = usize::try_from(src).map_err(|_| Trap::TableOutOfBounds.into_anyhow())?;
-    let len = usize::try_from(len).map_err(|_| Trap::TableOutOfBounds.into_anyhow())?;
+    let src = usize::try_from(src).map_err(|_| Trap::TableOutOfBounds)?;
+    let len = usize::try_from(len).map_err(|_| Trap::TableOutOfBounds)?;
 
     // Turn the elements into `Val`s.
     let vals = match elements {
         TableSegmentElements::Functions(fs) => fs
             .get(src..)
             .and_then(|s| s.get(..len))
-            .ok_or_else(|| Trap::TableOutOfBounds.into_anyhow())?
+            .ok_or_else(|| Trap::TableOutOfBounds)?
             .iter()
             .map(|f| {
                 let raw_func_ref = instance.get_func_ref(*f);
@@ -1008,7 +993,7 @@ unsafe fn array_init_elem(
 
             xs.get(src..)
                 .and_then(|s| s.get(..len))
-                .ok_or_else(|| Trap::TableOutOfBounds.into_anyhow())?
+                .ok_or_else(|| Trap::TableOutOfBounds)?
                 .iter()
                 .map(|x| unsafe {
                     let raw = const_evaluator
@@ -1055,33 +1040,23 @@ unsafe fn array_copy(
     let mut store = AutoAssertNoGc::new(&mut store);
 
     // Convert the raw GC refs into `Rooted<ArrayRef>`s.
-    let dst_array =
-        VMGcRef::from_raw_u32(dst_array).ok_or_else(|| Trap::NullReference.into_anyhow())?;
+    let dst_array = VMGcRef::from_raw_u32(dst_array).ok_or_else(|| Trap::NullReference)?;
     let dst_array = store.unwrap_gc_store_mut().clone_gc_ref(&dst_array);
     let dst_array = ArrayRef::from_cloned_gc_ref(&mut store, dst_array);
-    let src_array =
-        VMGcRef::from_raw_u32(src_array).ok_or_else(|| Trap::NullReference.into_anyhow())?;
+    let src_array = VMGcRef::from_raw_u32(src_array).ok_or_else(|| Trap::NullReference)?;
     let src_array = store.unwrap_gc_store_mut().clone_gc_ref(&src_array);
     let src_array = ArrayRef::from_cloned_gc_ref(&mut store, src_array);
 
     // Bounds check the destination array's elements.
     let dst_array_len = dst_array._len(&store)?;
-    if dst
-        .checked_add(len)
-        .ok_or_else(|| Trap::ArrayOutOfBounds.into_anyhow())?
-        > dst_array_len
-    {
-        return Err(Trap::ArrayOutOfBounds.into_anyhow());
+    if dst.checked_add(len).ok_or_else(|| Trap::ArrayOutOfBounds)? > dst_array_len {
+        return Err(Trap::ArrayOutOfBounds.into());
     }
 
     // Bounds check the source array's elements.
     let src_array_len = src_array._len(&store)?;
-    if src
-        .checked_add(len)
-        .ok_or_else(|| Trap::ArrayOutOfBounds.into_anyhow())?
-        > src_array_len
-    {
-        return Err(Trap::ArrayOutOfBounds.into_anyhow());
+    if src.checked_add(len).ok_or_else(|| Trap::ArrayOutOfBounds)? > src_array_len {
+        return Err(Trap::ArrayOutOfBounds.into());
     }
 
     let mut store = AutoAssertNoGc::new(&mut store);
