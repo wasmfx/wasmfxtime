@@ -845,8 +845,18 @@ pub trait FuncEnvironment: TargetEnvironment {
         type_index: u32,
         contobj: ir::Value,
         resume_args: &[ir::Value],
-        resumetable: &[(u32, ir::Block)],
-    ) -> Vec<ir::Value>;
+        resumetable: &[(u32, Option<ir::Block>)],
+    ) -> WasmResult<Vec<ir::Value>>;
+
+    /// Translates switch instructions.
+    fn translate_switch(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        tag_index: u32,
+        contobj: ir::Value,
+        switch_args: &[ir::Value],
+        return_types: &[WasmValType],
+    ) -> WasmResult<Vec<ir::Value>>;
 
     /// TODO(dhil): write documentation.
     #[allow(unused, reason = "TODO")]

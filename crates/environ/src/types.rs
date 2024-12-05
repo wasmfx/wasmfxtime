@@ -221,6 +221,14 @@ impl WasmValType {
             | WasmValType::V128 => *self,
         }
     }
+
+    /// TODO
+    pub fn unwrap_ref_type(&self) -> WasmRefType {
+        match self {
+            WasmValType::Ref(ref_type) => *ref_type,
+            _ => panic!("Called WasmValType::unwrap_ref_type on non-reference type"),
+        }
+    }
 }
 
 /// WebAssembly reference type -- equivalent of `wasmparser`'s RefType
