@@ -811,9 +811,6 @@
        ;; this program point.
        (Unwind (inst UnwindInst))
 
-       ;; Writes the current PC into dst
-       (GetRip (dst WritableGpr))
-
        ;; A pseudoinstruction that just keeps a value alive.
        (DummyUse (reg Reg))))
 
