@@ -369,12 +369,25 @@ impl WastTest {
     /// Returns whether this test should fail under the specified extra
     /// configuration.
     pub fn should_fail(&self, config: &WastConfig) -> bool {
-        // The stack-switching baseline does not support proper linking of tags yet.
-        if cfg!(feature = "wasmfx_baseline")
-            && cfg!(not(feature = "wasmfx_no_baseline"))
-            && self.path.ends_with("linking_tags2.wast")
-        {
-            return true;
+        if cfg!(feature = "wasmfx_baseline") && cfg!(not(feature = "wasmfx_no_baseline")) {
+            // The stack-switching baseline does not support proper linking of tags yet.
+            if self.path.ends_with("linking_tags2.wast") {
+                return true;
+            }
+
+            // The stack-switching baseline does not support switch instructions
+            // and switch handlers yet.
+            if self.path.parent().unwrap().ends_with("stack-switching")
+                && self
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .starts_with("switch")
+            {
+                return true;
+            }
         }
 
         if !config.compiler.supports_host() {

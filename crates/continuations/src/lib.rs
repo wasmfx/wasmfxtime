@@ -77,13 +77,30 @@ pub struct CommonStackInformation {
     /// Otherwise, the list may remain allocated, but its `length` must be 0.
     ///
     /// Represents the handlers that this stack installed when resume-ing a
-    /// continuation with
-    /// (resume $ct handler_clause_1 ... handler_clause_n)
-    /// The actual entries are tag identifiers (i.e., *mut VMTagDefinition). The
-    /// order of entries is relevant: The tag in the i-th entry in the list is
-    /// handled by the block mentioned in the i-th handler clause in the resume
-    /// instruction above.
+    /// continuation.
+    ///
+    /// Note that for any resume instruction, we can re-order the handler
+    /// clauses without changing behavior such that all the suspend handlers
+    /// come first, followed by all the switch handler (while maintaining the
+    /// original ordering within the two groups).
+    /// Thus, we assume that the given resume instruction has the following
+    /// shape:
+    ///
+    /// (resume $ct
+    ///   (on $tag_0 $block_0) ... (on $tag_{n-1} $block_{n-1})
+    ///   (on $tag_n switch) ... (on $tag_m switch)
+    /// )
+    ///
+    /// On resume, the handler list is then filled with m + 1 (i.e., one per
+    /// handler clause) entries such that the i-th entry, using 0-based
+    /// indexing, is the identifier of $tag_i (represented as *mut
+    /// VMTagDefinition).
+    /// Further, `first_switch_handler_index` (see below) is set to n (i.e., the
+    /// 0-based index of the first switch handler).
     pub handlers: HandlerList,
+
+    /// Only used when state is `Parent`. See documentation of `handlers` above.
+    pub first_switch_handler_index: u32,
 }
 
 impl CommonStackInformation {
@@ -92,6 +109,7 @@ impl CommonStackInformation {
             limits: StackLimits::default(),
             state: State::Running,
             handlers: HandlerList::new(INITIAL_HANDLER_LIST_CAPACITY as u32),
+            first_switch_handler_index: 0,
         }
     }
 }
@@ -208,7 +226,7 @@ pub const STACK_CHAIN_CONTINUATION_DISCRIMINANT: usize = 2;
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(i32)]
 pub enum State {
-    /// The `VMContRef` has been created, but `resume` has never been
+    /// The `VMContRef` has been created, but neither `resume` or `switch` has ever been
     /// called on it. During this stage, we may add arguments using `cont.bind`.
     Fresh,
     /// The continuation is running, meaning that it is the one currently
@@ -219,7 +237,7 @@ pub enum State {
     /// another continuation (which may itself be `Running`, a `Parent`, or
     /// `Suspended`).
     Parent,
-    /// The continuation was suspended by a `suspend` instruction.
+    /// The continuation was suspended by a `suspend` or `switch` instruction.
     Suspended,
     /// The function originally passed to `cont.new` has returned normally.
     /// Note that there is no guarantee that a VMContRef will ever
@@ -295,6 +313,8 @@ pub mod offsets {
         pub const LIMITS: usize = offset_of!(CommonStackInformation, limits);
         pub const STATE: usize = offset_of!(CommonStackInformation, state);
         pub const HANDLERS: usize = offset_of!(CommonStackInformation, handlers);
+        pub const FIRST_SWITCH_HANDLER_INDEX: usize =
+            offset_of!(CommonStackInformation, first_switch_handler_index);
     }
 
     /// Size of wasmtime_runtime::continuation::FiberStack.
@@ -354,6 +374,9 @@ pub const CONTROL_EFFECT_RESUME_DISCRIMINANT: u32 = 1;
 /// Discriminant of variant `Suspend` in
 /// `ControlEffect`.
 pub const CONTROL_EFFECT_SUSPEND_DISCRIMINANT: u32 = 2;
+/// Discriminant of variant `Switch` in
+/// `ControlEffect`.
+pub const CONTROL_EFFECT_SWITCH_DISCRIMINANT: u32 = 3;
 
 /// Universal control effect. This structure encodes return signal,
 /// resume signal, suspension signal, and the handler to suspend to in a single variant type.
@@ -365,6 +388,7 @@ pub enum ControlEffect {
     Return = CONTROL_EFFECT_RETURN_DISCRIMINANT,
     Resume = CONTROL_EFFECT_RESUME_DISCRIMINANT,
     Suspend { handler_index: u32 } = CONTROL_EFFECT_SUSPEND_DISCRIMINANT,
+    Switch = CONTROL_EFFECT_SWITCH_DISCRIMINANT,
 }
 
 // TODO(frank-emrich) This conversion assumes little-endian data layout.
