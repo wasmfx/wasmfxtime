@@ -1322,32 +1322,6 @@ pub(crate) fn define(
         .operands_out(vec![Operand::new("addr", iAddr)]),
     );
 
-    // NOTE(frank-emrich)
-    // This is only used as part of a temporary workaround while our
-    // cross-continuation implementation of backtraces is built around the
-    // assumption that we "exit" Wasm on resume.
-    // The returned instruction pointer is never used for actual control flow
-    // (i.e., we never branch to it), but only for the construction of
-    // backtraces.
-    //
-    // We conservatively give it all kinds of side-effects to avoid it being
-    // moved around too much, but all that matters anyway is that during the
-    // Wasm -> CLIF translation, this CLIF instruction is associated with the
-    // current Wasm instruction.
-    ig.push(
-        Inst::new(
-            "get_instruction_pointer",
-            r#"
-        Get the instruction pointer at this instruction.
-        "#,
-            &formats.nullary,
-        )
-        .operands_out(vec![Operand::new("addr", iAddr)])
-        .other_side_effects()
-        .can_load()
-        .can_store(),
-    );
-
     ig.push(
         Inst::new(
             "iconst",
