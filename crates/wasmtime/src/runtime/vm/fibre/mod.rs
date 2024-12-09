@@ -82,6 +82,16 @@ cfg_if::cfg_if! {
                 self.0.range()
             }
 
+            /// Returns the instruction pointer stored in the Fiber's ControlContext.
+            pub fn control_context_instruction_pointer(&self) -> usize {
+                self.0.control_context_instruction_pointer()
+            }
+
+            /// Returns the frame pointer stored in the Fiber's ControlContext.
+            pub fn control_context_frame_pointer(&self) -> usize {
+                self.0.control_context_frame_pointer()
+            }
+
             pub fn initialize(
                 &self,
                 func_ref: *const VMFuncRef,

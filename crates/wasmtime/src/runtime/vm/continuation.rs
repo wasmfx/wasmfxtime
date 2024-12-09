@@ -779,7 +779,7 @@ pub mod stack_chain {
             matches!(self, StackChain::MainStack(_))
         }
 
-        /// Returns an iterator over the stacks in this chain.
+        /// Returns an iterator over the continuations in this chain.
         /// We don't implement `IntoIterator` because our iterator is unsafe, so at
         /// least this gives us some way of indicating this, even though the actual
         /// unsafety lies in the `next` function.
@@ -788,20 +788,55 @@ pub mod stack_chain {
         ///
         /// This function is not unsafe per see, but it returns an object
         /// whose usage is unsafe.
-        pub unsafe fn into_iter(self) -> ContinuationChainIterator {
-            ContinuationChainIterator(self)
+        pub unsafe fn into_continuation_iter(self) -> ContinuationIterator {
+            ContinuationIterator(self)
+        }
+
+        /// Returns an iterator over the stack limits in this chain.
+        /// We don't implement `IntoIterator` because our iterator is unsafe, so at
+        /// least this gives us some way of indicating this, even though the actual
+        /// unsafety lies in the `next` function.
+        ///
+        /// # Safety
+        ///
+        /// This function is not unsafe per see, but it returns an object
+        /// whose usage is unsafe.
+        pub unsafe fn into_stack_limits_iter(self) -> StackLimitsIterator {
+            StackLimitsIterator(self)
         }
     }
 
-    /// Iterator for stacks in a stack chain.
-    /// Each stack is represented by a tuple `(co_opt, sl)`, where sl is a pointer
-    /// to the stack's `StackLimits` object and `co_opt` is a pointer to the
-    /// corresponding `VMContRef`, or None for the main stack.
+    /// Iterator for Continuations in a stack chain.
     #[cfg_attr(feature = "wasmfx_baseline", allow(dead_code))]
-    pub struct ContinuationChainIterator(StackChain);
+    pub struct ContinuationIterator(StackChain);
 
-    impl Iterator for ContinuationChainIterator {
-        type Item = (Option<*mut VMContRef>, *mut StackLimits);
+    /// Iterator for StackLimits in a stack chain.
+    #[cfg_attr(feature = "wasmfx_baseline", allow(dead_code))]
+    pub struct StackLimitsIterator(StackChain);
+
+    impl Iterator for ContinuationIterator {
+        type Item = *mut VMContRef;
+
+        #[cfg(any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline"))]
+        fn next(&mut self) -> Option<Self::Item> {
+            match self.0 {
+                StackChain::Absent | StackChain::MainStack(_) => None,
+                StackChain::Continuation(ptr) => {
+                    let continuation = unsafe { ptr.as_mut().unwrap() };
+                    self.0 = continuation.parent_chain.clone();
+                    Some(ptr)
+                }
+            }
+        }
+
+        #[cfg(all(feature = "wasmfx_baseline", not(feature = "wasmfx_no_baseline")))]
+        fn next(&mut self) -> Option<Self::Item> {
+            unimplemented!()
+        }
+    }
+
+    impl Iterator for StackLimitsIterator {
+        type Item = *mut StackLimits;
 
         #[cfg(any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline"))]
         fn next(&mut self) -> Option<Self::Item> {
@@ -809,19 +844,15 @@ pub mod stack_chain {
                 StackChain::Absent => None,
                 StackChain::MainStack(csi) => {
                     let stack_limits = unsafe { &mut (*csi).limits } as *mut StackLimits;
-
-                    let next = (None, stack_limits);
                     self.0 = StackChain::Absent;
-                    Some(next)
+                    Some(stack_limits)
                 }
                 StackChain::Continuation(ptr) => {
                     let continuation = unsafe { ptr.as_mut().unwrap() };
-                    let next = (
-                        Some(ptr),
-                        (&mut continuation.common_stack_information.limits) as *mut StackLimits,
-                    );
+                    let stack_limits =
+                        (&mut continuation.common_stack_information.limits) as *mut StackLimits;
                     self.0 = continuation.parent_chain.clone();
-                    Some(next)
+                    Some(stack_limits)
                 }
             }
         }
