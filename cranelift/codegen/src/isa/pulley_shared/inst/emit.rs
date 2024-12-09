@@ -4,7 +4,6 @@ use super::*;
 use crate::ir;
 use crate::isa::pulley_shared::abi::PulleyMachineDeps;
 use crate::isa::pulley_shared::PointerWidth;
-use crate::trace;
 use core::marker::PhantomData;
 use cranelift_control::ControlPlane;
 use pulley_interpreter::encode as enc;
@@ -40,7 +39,6 @@ where
     _phantom: PhantomData<P>,
     ctrl_plane: ControlPlane,
     user_stack_map: Option<ir::UserStackMap>,
-    pub virtual_sp_offset: i64,
     frame_layout: FrameLayout,
 }
 
@@ -50,13 +48,6 @@ where
 {
     fn take_stack_map(&mut self) -> Option<ir::UserStackMap> {
         self.user_stack_map.take()
-    }
-
-    pub(crate) fn adjust_virtual_sp_offset(&mut self, amount: i64) {
-        let old = self.virtual_sp_offset;
-        let new = self.virtual_sp_offset + amount;
-        trace!("adjust virtual sp offset by {amount:#x}: {old:#x} -> {new:#x}",);
-        self.virtual_sp_offset = new;
     }
 }
 
@@ -69,7 +60,6 @@ where
             _phantom: PhantomData,
             ctrl_plane,
             user_stack_map: None,
-            virtual_sp_offset: 0,
             frame_layout: abi.frame_layout().clone(),
         }
     }
@@ -188,7 +178,7 @@ fn pulley_emit<P>(
 
         Inst::Nop => todo!(),
 
-        Inst::GetSp { dst } => enc::get_sp(sink, dst),
+        Inst::GetSpecial { dst, reg } => enc::xmov(sink, dst, reg),
 
         Inst::Ret => enc::ret(sink),
 
@@ -211,8 +201,10 @@ fn pulley_emit<P>(
             }
             sink.add_call_site();
 
-            let callee_pop_size = i64::from(info.callee_pop_size);
-            state.adjust_virtual_sp_offset(-callee_pop_size);
+            let adjust = -i32::try_from(info.callee_pop_size).unwrap();
+            for i in PulleyMachineDeps::<P>::gen_sp_reg_adjust(adjust) {
+                <InstAndKind<P>>::from(i).emit(sink, emit_info, state);
+            }
         }
 
         Inst::IndirectCall { info } => {
@@ -225,8 +217,10 @@ fn pulley_emit<P>(
 
             sink.add_call_site();
 
-            let callee_pop_size = i64::from(info.callee_pop_size);
-            state.adjust_virtual_sp_offset(-callee_pop_size);
+            let adjust = -i32::try_from(info.callee_pop_size).unwrap();
+            for i in PulleyMachineDeps::<P>::gen_sp_reg_adjust(adjust) {
+                <InstAndKind<P>>::from(i).emit(sink, emit_info, state);
+            }
         }
 
         Inst::IndirectCallHost { info } => {
@@ -554,6 +548,11 @@ fn pulley_emit<P>(
             // the assertion that we're always under worst-case-size.
             *start_offset = sink.cur_offset();
         }
+
+        Inst::PushFrame => enc::push_frame(sink),
+        Inst::PopFrame => enc::pop_frame(sink),
+        Inst::StackAlloc32 { amt } => enc::stack_alloc32(sink, *amt),
+        Inst::StackFree32 { amt } => enc::stack_free32(sink, *amt),
     }
 }
 

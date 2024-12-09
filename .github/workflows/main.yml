@@ -80,7 +80,7 @@ jobs:
   # Note that `wasmtime-platform.h` is excluded here as it's auto-generated.
   clangformat:
     name: Clang format
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
       with:
@@ -89,7 +89,7 @@ jobs:
         git ls-files '*.h' '*.c' '*.cpp' | \
           grep -v wasmtime-platform.h | \
           grep -v wasm.h | \
-          xargs clang-format-15 --dry-run --Werror --verbose
+          xargs clang-format-18 --dry-run --Werror --verbose
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
@@ -358,11 +358,12 @@ jobs:
               -p wasmtime --no-default-features --features profiling
               -p wasmtime --no-default-features --features cache
               -p wasmtime --no-default-features --features async
+              -p wasmtime --no-default-features --features std
               -p wasmtime --no-default-features --features pooling-allocator
               -p wasmtime --no-default-features --features cranelift
               -p wasmtime --no-default-features --features component-model
               -p wasmtime --no-default-features --features runtime,component-model
-              -p wasmtime --no-default-features --features cranelift,wat,async,cache
+              -p wasmtime --no-default-features --features cranelift,wat,async,std,cache
               -p wasmtime --no-default-features --features winch
               -p wasmtime --no-default-features --features wmemcheck
               -p wasmtime --no-default-features --features wmemcheck,cranelift,runtime
@@ -385,6 +386,12 @@ jobs:
               -p wasmtime --no-default-features --features runtime,gc,component-model,signals-based-traps
               -p wasmtime --features incremental-cache
               -p wasmtime --all-features
+
+          - name: wasmtime-fiber
+            checks: |
+              -p wasmtime-fiber --no-default-features
+              -p wasmtime-fiber --no-default-features --features std
+              -p wasmtime-fiber --all-features
 
           - name: wasmtime-cli
             checks: |
@@ -433,6 +440,18 @@ jobs:
       if: failure() && github.event_name != 'pull_request'
       env:
         GH_TOKEN: ${{ github.token }}
+
+  fiber_tests:
+    name: wasmtime-fiber tests
+    runs-on: ubuntu-latest
+    env:
+      CARGO_NDK_VERSION: 2.12.2
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - uses: ./.github/actions/install-rust
+    - run: cargo test -p wasmtime-fiber --no-default-features
 
   # Checks for no_std support, ensure that crates can build on a no_std target
   no_std_checks:
@@ -654,12 +673,8 @@ jobs:
     - run: cmake -Sexamples -Bexamples/build -DBUILD_SHARED_LIBS=OFF
     - run: cmake --build examples/build --config Debug
     - run: cmake -E env CTEST_OUTPUT_ON_FAILURE=1 cmake --build examples/build --config Debug --target RUN_TESTS
-      env:
-        RUST_BACKTRACE: 1
       if: matrix.os == 'windows-latest'
     - run: cmake -E env CTEST_OUTPUT_ON_FAILURE=1 cmake --build examples/build --config Debug --target test
-      env:
-        RUST_BACKTRACE: 1
       if: matrix.os != 'windows-latest'
 
   # Perform all tests (debug mode) for `wasmtime`.
@@ -672,7 +687,7 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     env:
-      QEMU_BUILD_VERSION: 8.1.5
+      QEMU_BUILD_VERSION: 9.1.2
     strategy:
       fail-fast: ${{ github.event_name != 'pull_request' }}
       matrix: ${{ fromJson(needs.determine.outputs.test-matrix) }}
@@ -707,7 +722,7 @@ jobs:
         set -ex
 
         sudo apt-get update
-        sudo apt-get install -y ${{ matrix.gcc_package }} ninja-build
+        sudo apt-get install -y ${{ matrix.gcc_package }}
 
         # Configure Cargo for cross compilation and tell it how it can run
         # cross executables
@@ -739,6 +754,9 @@ jobs:
         if [ -f ${{ runner.tool_cache }}/qemu/built ]; then
           exit 0
         fi
+
+        # Install build dependencies of QEMU itself.
+        sudo apt-get install -y libglib2.0-dev ninja-build
 
         # Download and build qemu from source since the most recent release is
         # way faster at arm emulation than the current version github actions'
@@ -784,8 +802,6 @@ jobs:
 
     # Build and test all features
     - run: ./ci/run-tests.sh --locked ${{ matrix.bucket }}
-      env:
-        RUST_BACKTRACE: 1
 
     # NB: the test job here is explicitly lacking in cancellation of this run if
     # something goes wrong. These take the longest anyway and otherwise if
@@ -832,8 +848,6 @@ jobs:
 
     # Run the tests!
     - run: cargo test -p wasmtime-wasi-nn --features ${{ matrix.feature }}
-      env:
-        RUST_BACKTRACE: 1
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
@@ -858,8 +872,6 @@ jobs:
     # Run the tests
     - run: |
         cargo test -p wasmtime-fuzzing -p wasm-spec-interpreter
-      env:
-        RUST_BACKTRACE: 1
 
     # common logic to cancel the entire run if this job fails
     - run: gh run cancel ${{ github.run_id }}
@@ -872,7 +884,7 @@ jobs:
     needs: determine
     if: needs.determine.outputs.run-dwarf
     name: Test DWARF debugging
-    runs-on: 'ubuntu-latest'
+    runs-on: ubuntu-22.04 # FIXME: fails on `ubuntu-24.04` right now
     steps:
     - uses: actions/checkout@v4
       with:
@@ -886,7 +898,6 @@ jobs:
         sudo ln -s /usr/lib/llvm-15/lib/python3.10/dist-packages/lldb/* /usr/lib/python3/dist-packages/lldb/
         cargo test --test all -- --ignored --test-threads 1 debug::
       env:
-        RUST_BACKTRACE: 1
         LLDB: lldb-15 # override default version, 14
 
     # Test baseline implementation
@@ -1235,6 +1246,7 @@ jobs:
       - cargo_vet
       - doc
       - micro_checks
+      - fiber_tests
       - no_std_checks
       - clippy
       - monolith_checks

@@ -79,8 +79,12 @@ fn pulley_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_use(src2);
         }
 
-        Inst::GetSp { dst } => {
+        Inst::GetSpecial { dst, reg } => {
             collector.reg_def(dst);
+            // Note that this is explicitly ignored as this is only used for
+            // special registers that don't participate in register allocation
+            // such as the stack pointer, frame pointer, etc.
+            assert!(reg.is_special());
         }
 
         Inst::LoadExtName {
@@ -247,6 +251,9 @@ fn pulley_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
 
         Inst::BrTable { idx, .. } => {
             collector.reg_use(idx);
+        }
+
+        Inst::StackAlloc32 { .. } | Inst::StackFree32 { .. } | Inst::PushFrame | Inst::PopFrame => {
         }
     }
 }
@@ -568,9 +575,10 @@ impl Inst {
 
             Inst::Ret => format!("ret"),
 
-            Inst::GetSp { dst } => {
+            Inst::GetSpecial { dst, reg } => {
                 let dst = format_reg(*dst.to_reg());
-                format!("{dst} = get_sp")
+                let reg = format_reg(**reg);
+                format!("xmov {dst}, {reg}")
             }
 
             Inst::LoadExtName { dst, name, offset } => {
@@ -857,6 +865,15 @@ impl Inst {
                 let idx = format_reg(**idx);
                 format!("br_table {idx} {default:?} {targets:?}")
             }
+
+            Inst::StackAlloc32 { amt } => {
+                format!("stack_alloc32 {amt:#x}")
+            }
+            Inst::StackFree32 { amt } => {
+                format!("stack_free32 {amt:#x}")
+            }
+            Inst::PushFrame => format!("push_frame"),
+            Inst::PopFrame => format!("pop_frame"),
         }
     }
 }
