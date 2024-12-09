@@ -1274,13 +1274,11 @@ pub(crate) mod typed_continuation_helpers {
             );
         }
 
-        /// Overwrites the `last_wasm_entry_sp` field of the `StackLimits`
+        /// Overwrites the `last_wasm_entry_fp` field of the `StackLimits`
         /// object in the `StackLimits` of this object by loading the corresponding
         /// field from the `VMRuntimeLimits`.
         /// If `load_stack_limit` is true, we do the same for the `stack_limit`
         /// field.
-        /// If `wasm_exit_fp`/`wasm_exit_pc` values are provided, we use them to
-        /// overwrite the respective fields in the `StackLimits`.
         #[allow(clippy::cast_possible_truncation, reason = "TODO")]
         pub fn load_limits_from_vmcontext<'a>(
             &self,
@@ -1288,8 +1286,6 @@ pub(crate) mod typed_continuation_helpers {
             builder: &mut FunctionBuilder,
             vmruntime_limits_ptr: ir::Value,
             load_stack_limit: bool,
-            wasm_exit_fp: Option<ir::Value>,
-            wasm_exit_pc: Option<ir::Value>,
         ) {
             use wasmtime_continuations::offsets as o;
 
@@ -1323,24 +1319,6 @@ pub(crate) mod typed_continuation_helpers {
                     o::stack_limits::STACK_LIMIT,
                 );
             }
-
-            wasm_exit_fp.inspect(|wasm_exit_fp| {
-                builder.ins().store(
-                    memflags,
-                    *wasm_exit_fp,
-                    stack_limits_ptr,
-                    o::stack_limits::LAST_WASM_EXIT_FP as i32,
-                );
-            });
-
-            wasm_exit_pc.inspect(|wasm_exit_pc| {
-                builder.ins().store(
-                    memflags,
-                    *wasm_exit_pc,
-                    stack_limits_ptr,
-                    o::stack_limits::LAST_WASM_EXIT_PC as i32,
-                );
-            });
         }
     }
 
@@ -1966,29 +1944,8 @@ pub(crate) fn translate_resume<'a>(
         // as well as the `VMRuntimeLimits`.
         // See the comment on `wasmtime_continuations::StackChain` for a description
         // of the invariants that we maintain for the various stack limits.
-        // NOTE(frank-emrich) The `last_wasm_exit_pc` field in the `StackLimits`
-        // of the active continuation is only used for the purposes of backtrace
-        // creation, it does not affect control flow at all.
-        // All that matters is that it must contain an arbitrary PC that
-        // Wasmtime has associated with the current Wasm `resume` instruction
-        // being translated. Previously, the value for this field was obtained
-        // inside the `tc_resume` libcall: The `tc_libcall` would automaticall
-        // set libcall `lasm_wasm_exit_pc` in the `VMRuntimeLimits` to the
-        // return address of the libcall, which would indeed be a PC within the
-        // translation of `resume`. We now set the value of `last_wasm_exit_pc`
-        // directly in generated code by using the get_instruction_pointer CLIF
-        // instruction.
         let vm_runtime_limits_ptr = vmctx.load_vm_runtime_limits_ptr(env, builder);
-        let last_wasm_exit_fp = builder.ins().get_frame_pointer(env.pointer_type());
-        let last_wasm_exit_pc = builder.ins().get_instruction_pointer(env.pointer_type());
-        parent_csi.load_limits_from_vmcontext(
-            env,
-            builder,
-            vm_runtime_limits_ptr,
-            true,
-            Some(last_wasm_exit_fp),
-            Some(last_wasm_exit_pc),
-        );
+        parent_csi.load_limits_from_vmcontext(env, builder, vm_runtime_limits_ptr, true);
         resume_csi.write_limits_to_vmcontext(env, builder, vm_runtime_limits_ptr);
 
         // Install handlers in (soon to be) parent's HandlerList:
@@ -2110,14 +2067,7 @@ pub(crate) fn translate_resume<'a>(
         // 3. Broke the continuation chain at suspended_continuation.last_ancestor
 
         // We store parts of the VMRuntimeLimits into the continuation that just suspended.
-        suspended_csi.load_limits_from_vmcontext(
-            env,
-            builder,
-            vm_runtime_limits_ptr,
-            false,
-            None,
-            None,
-        );
+        suspended_csi.load_limits_from_vmcontext(env, builder, vm_runtime_limits_ptr, false);
 
         // Afterwards (!), restore parts of the VMRuntimeLimits from the
         // parent of the suspended continuation (which is now active).
@@ -2390,14 +2340,7 @@ pub(crate) fn translate_switch<'a>(
         // Load current runtime limits from `VMContext` and store in the
         // switcher continuation.
         let vm_runtime_limits_ptr = vmctx.load_vm_runtime_limits_ptr(env, builder);
-        switcher_contref_csi.load_limits_from_vmcontext(
-            env,
-            builder,
-            vm_runtime_limits_ptr,
-            false,
-            None,
-            None,
-        );
+        switcher_contref_csi.load_limits_from_vmcontext(env, builder, vm_runtime_limits_ptr, false);
 
         let revision = switcher_contref.get_revision(env, builder);
         let new_contobj =

@@ -283,8 +283,6 @@ impl Backtrace {
                     debug_assert!(parent_stack_range.contains(&parent_limits.stack_limit));
                 });
 
-                debug_assert_eq!(resume_fp, parent_limits.last_wasm_exit_fp);
-
                 Self::trace_through_wasm(
                     unwind,
                     resume_pc,
