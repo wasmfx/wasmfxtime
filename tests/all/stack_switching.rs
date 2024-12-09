@@ -18,6 +18,8 @@ mod test_utils {
             config.wasm_function_references(true);
             config.wasm_exceptions(true);
             config.wasm_stack_switching(true);
+            // Required in order to use recursive types.
+            config.wasm_gc(true);
 
             let engine = Engine::new(&config).unwrap();
 
@@ -1035,6 +1037,75 @@ mod traps {
             wat,
             Trap::UnreachableCodeReached,
             &["entry", "a", "b", "f", "c", "d", "e"],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    /// Tests that we get correct backtraces after switch.
+    /// We first create the a stack with the following shape:
+    /// entry -> a -> b, then switch, leading to
+    /// entry -> c -> d, at which point we resume the a -> b continuation:
+    /// entry -> c -> d -> a -> b
+    /// We trap at that point.
+    #[cfg_attr(feature = "wasmfx_baseline", ignore)]
+    fn trap_switch_and_resume() -> Result<()> {
+        let wat = r#"
+        (module
+            (rec
+                (type $ft0 (func (param (ref null $ct0))))
+                (type $ct0 (cont $ft0)))
+
+            (type $ft1 (func))
+            (type $ct1 (cont $ft1))
+
+            (tag $t)
+
+            (func $a (type $ft1)
+                (cont.new $ct1 (ref.func $b))
+                (resume $ct1)
+            )
+            (elem declare func $a)
+
+            (func $b (type $ft1)
+                (cont.new $ct0 (ref.func $c))
+                (switch $ct0 $t)
+
+                ;; we want a backtrace here
+                (unreachable)
+            )
+            (elem declare func $b)
+
+            (func $c (type $ft0)
+                (local.get 0)
+                (cont.new $ct0 (ref.func $d))
+                (resume $ct0)
+            )
+            (elem declare func $c)
+
+            (func $d (type $ft0)
+                (block $handler (result (ref $ct1))
+                    (ref.null $ct0) ;; passed as payload
+                    (local.get 0) ;; resumed
+                    (resume $ct0 (on $t $handler))
+                    (unreachable) ;; f1 will suspend after the switch
+                 )
+                (resume $ct1)
+            )
+            (elem declare func $d)
+
+            (func $entry (export "entry")
+                (cont.new $ct1 (ref.func $a))
+                (resume $ct1 (on $t switch))
+            )
+        )
+        "#;
+
+        run_test_expect_trap_backtrace(
+            wat,
+            Trap::UnreachableCodeReached,
+            &["entry", "c", "d", "a", "b"],
         );
 
         Ok(())

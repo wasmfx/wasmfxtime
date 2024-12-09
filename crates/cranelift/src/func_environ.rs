@@ -3261,8 +3261,8 @@ impl<'module_environment> crate::translate::FuncEnvironment
         type_index: u32,
         contobj: ir::Value,
         resume_args: &[ir::Value],
-        resumetable: &[(u32, ir::Block)],
-    ) -> Vec<ir::Value> {
+        resumetable: &[(u32, Option<ir::Block>)],
+    ) -> WasmResult<Vec<ir::Value>> {
         wasmfx_impl::translate_resume(self, builder, type_index, contobj, resume_args, resumetable)
     }
 
@@ -3284,6 +3284,18 @@ impl<'module_environment> crate::translate::FuncEnvironment
         tag_return_types: &[WasmValType],
     ) -> Vec<ir::Value> {
         wasmfx_impl::translate_suspend(self, builder, tag_index, suspend_args, tag_return_types)
+    }
+
+    /// Translates switch instructions.
+    fn translate_switch(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        tag_index: u32,
+        contobj: ir::Value,
+        switch_args: &[ir::Value],
+        return_types: &[WasmValType],
+    ) -> WasmResult<Vec<ir::Value>> {
+        wasmfx_impl::translate_switch(self, builder, tag_index, contobj, switch_args, return_types)
     }
 
     fn continuation_arguments(&self, index: u32) -> &[WasmValType] {

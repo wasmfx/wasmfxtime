@@ -93,7 +93,7 @@ use std::vec::Vec;
 use wasmparser::{FuncValidator, MemArg, Operator, WasmModuleResources};
 use wasmtime_environ::{
     wasm_unsupported, DataIndex, ElemIndex, FuncIndex, GlobalIndex, MemoryIndex, Signed,
-    TableIndex, TypeIndex, Unsigned, WasmRefType, WasmResult,
+    TableIndex, TypeIndex, Unsigned, WasmHeapType, WasmRefType, WasmResult,
 };
 
 /// Given a `Reachability<T>`, unwrap the inner `T` or, when unreachable, set
@@ -2905,9 +2905,11 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                         let frame = &mut state.control_stack[i];
                         // This is side-effecting!
                         frame.set_branched_to_exit();
-                        resumetable.push((*tag, frame.br_destination()));
+                        resumetable.push((*tag, Some(frame.br_destination())));
                     }
-                    wasmparser::Handle::OnSwitch { tag: _ } => unimplemented!(),
+                    wasmparser::Handle::OnSwitch { tag } => {
+                        resumetable.push((*tag, None));
+                    }
                 }
             }
 
@@ -2920,7 +2922,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 *contobj,
                 call_args,
                 resumetable.as_slice(),
-            );
+            )?;
 
             state.popn(arity + 1); // arguments + continuation
             state.pushn(&cont_return_vals);
@@ -2929,11 +2931,48 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             cont_type_index: _,
             tag_index: _,
             resume_table: _,
+        } => todo!("unimplemented stack switching instruction"),
+        Operator::Switch {
+            cont_type_index,
+            tag_index,
+        } => {
+            // Arguments of the continuation we are going to switch to
+            let continuation_argument_types =
+                environ.continuation_arguments(*cont_type_index).to_vec();
+            // Arity includes the continuation argument
+            let arity = continuation_argument_types.len();
+            let (contobj, switch_args) = state.peekn(arity).split_last().unwrap();
+
+            // Type of the continuation we are going to create by suspending the
+            // currently running stack
+            let current_continuation_type = continuation_argument_types.last().unwrap();
+            let current_continuation_type = current_continuation_type.unwrap_ref_type();
+
+            // Argument types of current_continuation_type. These will in turn
+            // be the types of the arguments we receive when someone switches
+            // back to this switch instruction
+            let current_continuation_arg_types = match current_continuation_type.heap_type {
+                WasmHeapType::ConcreteCont(index) => {
+                    let mti = index
+                        .as_module_type_index()
+                        .expect("Only supporting module type indices on switch for now");
+
+                    environ.continuation_arguments(mti.as_u32()).to_vec()
+                }
+                _ => panic!("Invalid type on switch"),
+            };
+
+            let switch_return_values = environ.translate_switch(
+                builder,
+                *tag_index,
+                *contobj,
+                switch_args,
+                &current_continuation_arg_types,
+            )?;
+
+            state.popn(arity);
+            state.pushn(&switch_return_values)
         }
-        | Operator::Switch {
-            cont_type_index: _,
-            tag_index: _,
-        } => todo!("unimplemented stack switching instructions"),
 
         Operator::GlobalAtomicGet { .. }
         | Operator::GlobalAtomicSet { .. }
