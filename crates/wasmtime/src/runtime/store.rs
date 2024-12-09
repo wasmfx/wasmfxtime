@@ -85,8 +85,9 @@ use crate::runtime::vm::continuation::stack_chain::{StackChain, StackChainCell};
 use crate::runtime::vm::mpk::{self, ProtectionKey, ProtectionMask};
 use crate::runtime::vm::{
     Backtrace, ExportGlobal, GcRootsList, GcStore, InstanceAllocationRequest, InstanceAllocator,
-    InstanceHandle, ModuleRuntimeInfo, OnDemandInstanceAllocator, SignalHandler, StoreBox,
-    StorePtr, VMContext, VMFuncRef, VMGcRef, VMRuntimeLimits,
+    InstanceHandle, Interpreter, InterpreterRef, ModuleRuntimeInfo, OnDemandInstanceAllocator,
+    SignalHandler, StoreBox, StorePtr, Unwind, UnwindHost, UnwindPulley, VMContext, VMFuncRef,
+    VMGcRef, VMRuntimeLimits,
 };
 use crate::trampoline::VMHostGlobalContext;
 use crate::type_registry::RegisteredType;
@@ -105,6 +106,7 @@ use core::pin::Pin;
 use core::ptr;
 use core::task::{Context, Poll};
 use wasmtime_continuations::{CommonStackInformation, WasmFXConfig};
+use wasmtime_environ::TripleExt;
 
 mod context;
 pub use self::context::*;
@@ -404,6 +406,11 @@ pub struct StoreOpaque {
     component_calls: crate::runtime::vm::component::CallContexts,
     #[cfg(feature = "component-model")]
     host_resource_data: crate::component::HostResourceData,
+
+    /// State related to the Pulley interpreter if that's enabled and configured
+    /// for this store's `Engine`. This is `None` if pulley was disabled at
+    /// compile time or if it's not being used by the `Engine`.
+    interpreter: Option<Interpreter>,
 }
 
 #[cfg(feature = "async")]
@@ -594,6 +601,11 @@ impl<T> Store<T> {
                 component_calls: Default::default(),
                 #[cfg(feature = "component-model")]
                 host_resource_data: Default::default(),
+                interpreter: if cfg!(feature = "pulley") && engine.target().is_pulley() {
+                    Some(Interpreter::new())
+                } else {
+                    None
+                },
             },
             limiter: None,
             call_hook: None,
@@ -1756,7 +1768,7 @@ impl StoreOpaque {
 
         log::trace!("Begin trace GC roots :: Wasm stack");
 
-        Backtrace::trace(self.vmruntime_limits().cast_const(), |frame| {
+        Backtrace::trace(self, |frame| {
             let pc = frame.pc();
             debug_assert!(pc != 0, "we should always get a valid PC for Wasm frames");
 
@@ -2014,7 +2026,6 @@ impl StoreOpaque {
     /// with spectre mitigations enabled since the hardware fault address is
     /// always zero in these situations which means that the trapping context
     /// doesn't have enough information to report the fault address.
-    #[cfg(all(feature = "signals-based-traps", not(miri)))]
     pub(crate) fn wasm_fault(
         &self,
         pc: usize,
@@ -2173,6 +2184,19 @@ at https://bytecodealliance.org/security.
             unsafe {
                 self.engine.allocator().deallocate_fiber_stack(stack);
             }
+        }
+    }
+
+    pub(crate) fn interpreter(&mut self) -> Option<InterpreterRef<'_>> {
+        let i = self.interpreter.as_mut()?;
+        Some(i.as_interpreter_ref())
+    }
+
+    pub(crate) fn unwinder(&self) -> &'static dyn Unwind {
+        if self.interpreter.is_some() {
+            &UnwindPulley
+        } else {
+            &UnwindHost
         }
     }
 }

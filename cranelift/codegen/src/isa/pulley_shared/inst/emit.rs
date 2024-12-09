@@ -549,10 +549,25 @@ fn pulley_emit<P>(
             *start_offset = sink.cur_offset();
         }
 
-        Inst::PushFrame => enc::push_frame(sink),
+        Inst::PushFrame => {
+            sink.add_trap(ir::TrapCode::STACK_OVERFLOW);
+            enc::push_frame(sink);
+        }
         Inst::PopFrame => enc::pop_frame(sink),
-        Inst::StackAlloc32 { amt } => enc::stack_alloc32(sink, *amt),
+        Inst::StackAlloc32 { amt } => {
+            sink.add_trap(ir::TrapCode::STACK_OVERFLOW);
+            enc::stack_alloc32(sink, *amt);
+        }
         Inst::StackFree32 { amt } => enc::stack_free32(sink, *amt),
+
+        Inst::Zext8 { dst, src } => enc::zext8(sink, dst, src),
+        Inst::Zext16 { dst, src } => enc::zext16(sink, dst, src),
+        Inst::Zext32 { dst, src } => enc::zext32(sink, dst, src),
+        Inst::Sext8 { dst, src } => enc::sext8(sink, dst, src),
+        Inst::Sext16 { dst, src } => enc::sext16(sink, dst, src),
+        Inst::Sext32 { dst, src } => enc::sext32(sink, dst, src),
+        Inst::Bswap32 { dst, src } => enc::bswap32(sink, dst, src),
+        Inst::Bswap64 { dst, src } => enc::bswap64(sink, dst, src),
     }
 }
 

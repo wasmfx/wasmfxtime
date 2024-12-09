@@ -255,6 +255,18 @@ fn pulley_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
 
         Inst::StackAlloc32 { .. } | Inst::StackFree32 { .. } | Inst::PushFrame | Inst::PopFrame => {
         }
+
+        Inst::Zext8 { dst, src }
+        | Inst::Zext16 { dst, src }
+        | Inst::Zext32 { dst, src }
+        | Inst::Sext8 { dst, src }
+        | Inst::Sext16 { dst, src }
+        | Inst::Sext32 { dst, src }
+        | Inst::Bswap32 { dst, src }
+        | Inst::Bswap64 { dst, src } => {
+            collector.reg_use(src);
+            collector.reg_def(dst);
+        }
     }
 }
 
@@ -449,8 +461,8 @@ where
         }
     }
 
-    fn gen_jump(target: MachLabel) -> Self {
-        Inst::Jump { label: target }.into()
+    fn gen_jump(label: MachLabel) -> Self {
+        Inst::Jump { label }.into()
     }
 
     fn worst_case_size() -> CodeOffset {
@@ -874,6 +886,47 @@ impl Inst {
             }
             Inst::PushFrame => format!("push_frame"),
             Inst::PopFrame => format!("pop_frame"),
+
+            Inst::Zext8 { dst, src } => {
+                let dst = format_reg(*dst.to_reg());
+                let src = format_reg(**src);
+                format!("zext8 {dst}, {src}")
+            }
+            Inst::Zext16 { dst, src } => {
+                let dst = format_reg(*dst.to_reg());
+                let src = format_reg(**src);
+                format!("zext16 {dst}, {src}")
+            }
+            Inst::Zext32 { dst, src } => {
+                let dst = format_reg(*dst.to_reg());
+                let src = format_reg(**src);
+                format!("zext32 {dst}, {src}")
+            }
+            Inst::Sext8 { dst, src } => {
+                let dst = format_reg(*dst.to_reg());
+                let src = format_reg(**src);
+                format!("sext8 {dst}, {src}")
+            }
+            Inst::Sext16 { dst, src } => {
+                let dst = format_reg(*dst.to_reg());
+                let src = format_reg(**src);
+                format!("sext16 {dst}, {src}")
+            }
+            Inst::Sext32 { dst, src } => {
+                let dst = format_reg(*dst.to_reg());
+                let src = format_reg(**src);
+                format!("sext32 {dst}, {src}")
+            }
+            Inst::Bswap32 { dst, src } => {
+                let dst = format_reg(*dst.to_reg());
+                let src = format_reg(**src);
+                format!("bswap32 {dst}, {src}")
+            }
+            Inst::Bswap64 { dst, src } => {
+                let dst = format_reg(*dst.to_reg());
+                let src = format_reg(**src);
+                format!("bswap64 {dst}, {src}")
+            }
         }
     }
 }

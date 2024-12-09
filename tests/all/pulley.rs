@@ -1,17 +1,14 @@
 use anyhow::Result;
 use wasmtime::{Config, Engine, Module};
+use wasmtime_environ::TripleExt;
 
-fn pulley_target() -> &'static str {
-    if cfg!(target_pointer_width = "64") {
-        "pulley64"
-    } else {
-        "pulley32"
-    }
+fn pulley_target() -> String {
+    target_lexicon::Triple::pulley_host().to_string()
 }
 
 fn pulley_config() -> Config {
     let mut config = Config::new();
-    config.target(pulley_target()).unwrap();
+    config.target(&pulley_target()).unwrap();
     config
 }
 
@@ -19,6 +16,7 @@ fn pulley_config() -> Config {
 fn can_compile_pulley_module() -> Result<()> {
     let engine = Engine::new(&pulley_config())?;
     Module::new(&engine, "(module)")?;
+
     Ok(())
 }
 
@@ -63,13 +61,13 @@ fn can_run_on_cli() -> Result<()> {
     use crate::cli_tests::run_wasmtime;
     run_wasmtime(&[
         "--target",
-        pulley_target(),
+        &pulley_target(),
         "tests/all/cli_tests/empty-module.wat",
     ])?;
     run_wasmtime(&[
         "run",
         "--target",
-        pulley_target(),
+        &pulley_target(),
         "tests/all/cli_tests/empty-module.wat",
     ])?;
     Ok(())

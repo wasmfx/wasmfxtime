@@ -214,7 +214,7 @@ where
 
         let result = invoke_wasm_and_catch_traps(
             store,
-            |caller| {
+            |caller, vm| {
                 let (func_ref, storage) = &mut captures;
                 let storage_len =
                     mem::size_of_val::<Storage<_, _>>(storage) / mem::size_of::<ValRaw>();
@@ -223,7 +223,7 @@ where
                 let storage = core::ptr::slice_from_raw_parts_mut(storage, storage_len);
                 func_ref
                     .as_ref()
-                    .array_call(VMOpaqueContext::from_vmcontext(caller), storage)
+                    .array_call(vm, VMOpaqueContext::from_vmcontext(caller), storage)
             },
             vmctx,
         );

@@ -5,7 +5,7 @@ mod vm_host_func_context;
 
 pub use self::vm_host_func_context::VMArrayCallHostFuncContext;
 use crate::prelude::*;
-use crate::runtime::vm::{GcStore, VMGcRef};
+use crate::runtime::vm::{GcStore, InterpreterRef, VMGcRef};
 use crate::store::StoreOpaque;
 use core::cell::UnsafeCell;
 use core::ffi::c_void;
@@ -798,8 +798,35 @@ impl VMFuncRef {
     /// # Unsafety
     ///
     /// This method is unsafe because it can be called with any pointers. They
-    /// must all be valid for this wasm function call to proceed.
+    /// must all be valid for this wasm function call to proceed. For example
+    /// the `caller` must be valid machine code if `pulley` is `None` or it must
+    /// be valid bytecode if `pulley` is `Some`. Additionally `args_and_results`
+    /// must be large enough to handle all the arguments/results for this call.
+    ///
+    /// Note that the unsafety invariants to maintain here are not currently
+    /// exhaustively documented.
     pub unsafe fn array_call(
+        &self,
+        pulley: Option<InterpreterRef<'_>>,
+        caller: *mut VMOpaqueContext,
+        args_and_results: *mut [ValRaw],
+    ) -> bool {
+        match pulley {
+            Some(vm) => self.array_call_interpreted(vm, caller, args_and_results),
+            None => self.array_call_native(caller, args_and_results),
+        }
+    }
+
+    unsafe fn array_call_interpreted(
+        &self,
+        vm: InterpreterRef<'_>,
+        caller: *mut VMOpaqueContext,
+        args_and_results: *mut [ValRaw],
+    ) -> bool {
+        vm.call(self.array_call.cast(), self.vmctx, caller, args_and_results)
+    }
+
+    unsafe fn array_call_native(
         &self,
         caller: *mut VMOpaqueContext,
         args_and_results: *mut [ValRaw],
@@ -886,7 +913,7 @@ macro_rules! define_builtin_array {
     (@ty i32) => (u32);
     (@ty i64) => (u64);
     (@ty u8) => (u8);
-    (@ty reference) => (u32);
+    (@ty bool) => (bool);
     (@ty pointer) => (*mut u8);
     (@ty vmctx) => (*mut VMContext);
 }
@@ -896,8 +923,7 @@ wasmtime_environ::foreach_builtin_function!(define_builtin_array);
 const _: () = {
     assert!(
         mem::size_of::<VMBuiltinFunctionsArray>()
-            == mem::size_of::<usize>()
-                * (BuiltinFunctionIndex::builtin_functions_total_number() as usize)
+            == mem::size_of::<usize>() * (BuiltinFunctionIndex::len() as usize)
     )
 };
 
@@ -905,11 +931,11 @@ const _: () = {
 #[derive(Debug)]
 #[repr(C)]
 pub struct VMRuntimeLimits {
-    /// Current stack limit of the wasm module.
-    ///
-    /// For more information see `crates/cranelift/src/lib.rs`.
-    pub stack_limit: UnsafeCell<usize>,
-
+    // NB: 64-bit integer fields are located first with pointer-sized fields
+    // trailing afterwards. That makes the offsets in this structure easier to
+    // calculate on 32-bit platforms as we don't have to worry about the
+    // alignment of 64-bit integers.
+    //
     /// Indicator of how much fuel has been consumed and is remaining to
     /// WebAssembly.
     ///
@@ -923,6 +949,11 @@ pub struct VMRuntimeLimits {
     /// observed to reach or exceed this value, the guest code will
     /// yield if running asynchronously.
     pub epoch_deadline: UnsafeCell<u64>,
+
+    /// Current stack limit of the wasm module.
+    ///
+    /// For more information see `crates/cranelift/src/lib.rs`.
+    pub stack_limit: UnsafeCell<usize>,
 
     /// The value of the frame pointer register when we last called from Wasm to
     /// the host.

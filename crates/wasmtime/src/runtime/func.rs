@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use crate::runtime::vm::{
-    ExportFunction, SendSyncPtr, StoreBox, VMArrayCallHostFuncContext, VMContext, VMFuncRef,
-    VMFunctionImport, VMOpaqueContext,
+    ExportFunction, InterpreterRef, SendSyncPtr, StoreBox, VMArrayCallHostFuncContext, VMContext,
+    VMFuncRef, VMFunctionImport, VMOpaqueContext,
 };
 use crate::runtime::Uninhabited;
 use crate::store::{AutoAssertNoGc, StoreData, StoreOpaque, Stored};
@@ -1070,10 +1070,12 @@ impl Func {
     ) -> Result<()> {
         invoke_wasm_and_catch_traps(
             store,
-            |caller| {
-                func_ref
-                    .as_ref()
-                    .array_call(caller.cast::<VMOpaqueContext>(), params_and_returns)
+            |caller, vm| {
+                func_ref.as_ref().array_call(
+                    vm,
+                    VMOpaqueContext::from_vmcontext(caller),
+                    params_and_returns,
+                )
             },
             func_ref.as_ref().vmctx,
         )
@@ -1597,7 +1599,7 @@ impl Func {
 /// can pass to the called wasm function, if desired.
 pub(crate) fn invoke_wasm_and_catch_traps<T>(
     store: &mut StoreContextMut<'_, T>,
-    closure: impl FnMut(*mut VMContext) -> bool,
+    closure: impl FnMut(*mut VMContext, Option<InterpreterRef<'_>>) -> bool,
     callee: *mut VMOpaqueContext,
 ) -> Result<()> {
     unsafe {

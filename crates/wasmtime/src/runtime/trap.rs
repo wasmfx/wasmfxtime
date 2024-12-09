@@ -93,7 +93,6 @@ pub(crate) fn from_runtime_box(
         // otherwise the information about what the wasm was doing when the
         // error was generated would be lost.
         crate::runtime::vm::TrapReason::User(error) => (error, None),
-        #[cfg(all(feature = "signals-based-traps", not(miri)))]
         crate::runtime::vm::TrapReason::Jit {
             pc,
             faulting_addr,
@@ -258,11 +257,7 @@ impl WasmBacktrace {
     /// always captures a backtrace.
     pub fn force_capture(store: impl AsContext) -> WasmBacktrace {
         let store = store.as_context();
-        Self::from_captured(
-            store.0,
-            crate::runtime::vm::Backtrace::new(store.0.runtime_limits()),
-            None,
-        )
+        Self::from_captured(store.0, crate::runtime::vm::Backtrace::new(store.0), None)
     }
 
     fn from_captured(

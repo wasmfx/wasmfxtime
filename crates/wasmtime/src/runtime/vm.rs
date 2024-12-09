@@ -37,6 +37,7 @@ mod store_box;
 mod sys;
 mod table;
 mod traphandlers;
+mod unwind;
 mod vmcontext;
 
 pub mod continuation;
@@ -48,6 +49,13 @@ pub mod debug_builtins;
 pub mod fibre;
 pub mod libcalls;
 pub mod mpk;
+
+#[cfg(feature = "pulley")]
+pub(crate) mod interpreter;
+#[cfg(not(feature = "pulley"))]
+pub(crate) mod interpreter_disabled;
+#[cfg(not(feature = "pulley"))]
+pub(crate) use interpreter_disabled as interpreter;
 
 #[cfg(feature = "debug-builtins")]
 pub use wasmtime_jit_debug::gdb_jit_int::GdbJitImageRegistration;
@@ -67,8 +75,9 @@ pub use crate::runtime::vm::instance::{
     InstanceLimits, PoolConcurrencyLimitError, PoolingInstanceAllocator,
     PoolingInstanceAllocatorConfig,
 };
+pub use crate::runtime::vm::interpreter::*;
 pub use crate::runtime::vm::memory::{
-    Memory, RuntimeLinearMemory, RuntimeMemoryCreator, SharedMemory,
+    Memory, MemoryBase, RuntimeLinearMemory, RuntimeMemoryCreator, SharedMemory,
 };
 pub use crate::runtime::vm::mmap_vec::MmapVec;
 pub use crate::runtime::vm::mpk::MpkEnabled;
@@ -78,6 +87,7 @@ pub use crate::runtime::vm::sys::mmap::open_file_for_mmap;
 pub use crate::runtime::vm::sys::unwind::UnwindRegistration;
 pub use crate::runtime::vm::table::{Table, TableElement};
 pub use crate::runtime::vm::traphandlers::*;
+pub use crate::runtime::vm::unwind::*;
 pub use crate::runtime::vm::vmcontext::{
     VMArrayCallFunction, VMArrayCallHostFuncContext, VMContext, VMFuncRef, VMFunctionBody,
     VMFunctionImport, VMGlobalDefinition, VMGlobalImport, VMMemoryDefinition, VMMemoryImport,
@@ -102,7 +112,7 @@ mod mmap;
 cfg_if::cfg_if! {
     if #[cfg(feature = "signals-based-traps")] {
         pub use crate::runtime::vm::byte_count::*;
-        pub use crate::runtime::vm::mmap::Mmap;
+        pub use crate::runtime::vm::mmap::{Mmap, MmapOffset};
         pub use self::cow::{MemoryImage, MemoryImageSlot, ModuleMemoryImages};
     } else {
         pub use self::cow_disabled::{MemoryImage, MemoryImageSlot, ModuleMemoryImages};

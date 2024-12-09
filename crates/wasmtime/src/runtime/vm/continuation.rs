@@ -250,7 +250,7 @@ pub mod optimized {
         let red_zone_size = wasmfx_config.red_zone_size;
 
         let (contref, mut stack) = instance.wasmfx_allocate_continuation().map_err(|_error| {
-            TrapReason::user(anyhow::anyhow!("Fiber stack allocation failed!"))
+            TrapReason::User(anyhow::anyhow!("Fiber stack allocation failed!"))
         })?;
 
         let tsp = stack.top().unwrap();
@@ -430,7 +430,7 @@ pub mod baseline {
         let (contref, fiber) = {
             let (contref, stack) = instance
                 .wasmfx_allocate_continuation()
-                .map_err(|error| TrapReason::user(error.into()))?;
+                .map_err(|error| TrapReason::User(error.into()))?;
 
             let fiber = match unsafe { func.cast::<VMFuncRef>().as_ref() } {
                 None => Fiber::new(stack, |_instance: &mut Instance, _suspend: &mut Yield| {
@@ -449,6 +449,7 @@ pub mod baseline {
                             // embedded in.
                             (*get_current_continuation()).suspend = suspend as *mut Yield;
                             let _result = func_ref.array_call(
+                                None,
                                 caller_ctx,
                                 std::slice::from_raw_parts_mut(vals_ptr, capacity),
                             );
@@ -464,7 +465,7 @@ pub mod baseline {
                     )
                 }
             };
-            let fiber = fiber.map_err(|error| TrapReason::user(error.into()))?;
+            let fiber = fiber.map_err(|error| TrapReason::User(error.into()))?;
             (contref, fiber)
         };
 

@@ -255,7 +255,8 @@ impl Engine {
     fn _check_compatible_with_native_host(&self) -> Result<(), String> {
         #[cfg(any(feature = "cranelift", feature = "winch"))]
         {
-            use target_lexicon::{Architecture, PointerWidth, Triple};
+            use target_lexicon::Triple;
+            use wasmtime_environ::TripleExt;
 
             let compiler = self.compiler();
 
@@ -268,16 +269,18 @@ impl Engine {
                     return true;
                 }
 
-                // Otherwise if there's a mismatch the only allowed
-                // configuration at this time is that any target can run Pulley,
-                // Wasmtime's interpreter. This only works though if the
-                // pointer-width of pulley matches the pointer-width of the
-                // host, so check that here.
-                match host.pointer_width() {
-                    Ok(PointerWidth::U32) => target.architecture == Architecture::Pulley32,
-                    Ok(PointerWidth::U64) => target.architecture == Architecture::Pulley64,
-                    _ => false,
+                // If there's a mismatch and the target is a compatible pulley
+                // target, then that's also ok to run.
+                if cfg!(feature = "pulley")
+                    && target.is_pulley()
+                    && target.pointer_width() == host.pointer_width()
+                    && target.endianness() == host.endianness()
+                {
+                    return true;
                 }
+
+                // ... otherwise everything else is considered not a match.
+                false
             };
 
             if !target_matches_host() {
@@ -496,6 +499,12 @@ impl Engine {
             "has_avx512vl" => "avx512vl",
             "has_avx512vbmi" => "avx512vbmi",
             "has_lzcnt" => "lzcnt",
+
+            // pulley features
+            "big_endian" if cfg!(target_endian = "big") => return Ok(()),
+            "big_endian" if cfg!(target_endian = "little") => {
+                return Err("wrong host endianness".to_string())
+            }
 
             _ => {
                 // FIXME: should enumerate risc-v features and plumb them

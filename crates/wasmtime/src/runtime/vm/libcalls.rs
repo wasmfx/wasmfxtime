@@ -59,7 +59,8 @@ use super::continuation::VMContObj;
 use crate::prelude::*;
 use crate::runtime::vm::table::{Table, TableElementType};
 use crate::runtime::vm::vmcontext::VMFuncRef;
-use crate::runtime::vm::{Instance, TrapReason, VMGcRef, VMStore};
+use crate::runtime::vm::{HostResultHasUnwindSentinel, Instance, TrapReason, VMGcRef, VMStore};
+use core::convert::Infallible;
 use core::ptr::NonNull;
 #[cfg(feature = "threads")]
 use core::time::Duration;
@@ -83,19 +84,21 @@ use wasmtime_wmemcheck::AccessError::{
 ///   such.
 /// * This module delegates to the outer module (this file) which has the actual
 ///   implementation.
+///
+/// For more information on converting from host-defined values to Cranelift ABI
+/// values see the `catch_unwind_and_record_trap` function.
 pub mod raw {
     // Allow these things because of the macro and how we can't differentiate
     // between doc comments and `cfg`s.
     #![allow(unused_doc_comments, unused_attributes)]
 
-    use crate::runtime::vm::{InstanceAndStore, TrapReason, VMContext};
-    use core::ptr::NonNull;
+    use crate::runtime::vm::{InstanceAndStore, VMContext};
 
     macro_rules! libcall {
         (
             $(
                 $( #[cfg($attr:meta)] )?
-                $name:ident( vmctx: vmctx $(, $pname:ident: $param:ident )* ) $( -> $result:ident )?;
+                $name:ident( vmctx: vmctx $(, $pname:ident: $param:ident )* ) $(-> $result:ident)?;
             )*
         ) => {
             $(
@@ -109,19 +112,15 @@ pub mod raw {
                 pub unsafe extern "C" fn $name(
                     vmctx: *mut VMContext,
                     $( $pname : libcall!(@ty $param), )*
-                ) $( -> libcall!(@ty $result))? {
+                ) $(-> libcall!(@ty $result))? {
                     $(#[cfg($attr)])?
                     {
-                        #[allow(deprecated)] // FIXME: need to update this
-                        let ret = crate::runtime::vm::traphandlers::catch_unwind_and_longjmp(|| {
+                        crate::runtime::vm::traphandlers::catch_unwind_and_record_trap(|| {
                             InstanceAndStore::from_vmctx(vmctx, |pair| {
-                                {
-                                    let (instance, store) = pair.unpack_mut();
-                                    super::$name(store, instance, $($pname),*)
-                                }
+                                let (instance, store) = pair.unpack_mut();
+                                super::$name(store, instance, $($pname),*)
                             })
-                        });
-                        LibcallResult::convert(ret)
+                        })
                     }
                     $(
                         #[cfg(not($attr))]
@@ -146,61 +145,11 @@ pub mod raw {
         (@ty i32) => (u32);
         (@ty i64) => (u64);
         (@ty u8) => (u8);
-        (@ty reference) => (u32);
+        (@ty bool) => (bool);
         (@ty pointer) => (*mut u8);
     }
 
     wasmtime_environ::foreach_builtin_function!(libcall);
-
-    // Helper trait to convert results of libcalls below into the ABI of what
-    // the libcall expects.
-    //
-    // This basically entirely exists for the `Result` implementation which
-    // "unwraps" via a throwing of a trap.
-    trait LibcallResult {
-        type Abi;
-        unsafe fn convert(self) -> Self::Abi;
-    }
-
-    impl LibcallResult for () {
-        type Abi = ();
-        unsafe fn convert(self) {}
-    }
-
-    impl<T, E> LibcallResult for Result<T, E>
-    where
-        E: Into<TrapReason>,
-    {
-        type Abi = T;
-        unsafe fn convert(self) -> T {
-            match self {
-                Ok(t) => t,
-                #[allow(deprecated)] // FIXME: need to update this
-                Err(e) => crate::runtime::vm::traphandlers::raise_trap(e.into()),
-            }
-        }
-    }
-
-    impl LibcallResult for *mut u8 {
-        type Abi = *mut u8;
-        unsafe fn convert(self) -> *mut u8 {
-            self
-        }
-    }
-
-    impl LibcallResult for NonNull<u8> {
-        type Abi = *mut u8;
-        unsafe fn convert(self) -> *mut u8 {
-            self.as_ptr()
-        }
-    }
-
-    impl LibcallResult for bool {
-        type Abi = u32;
-        unsafe fn convert(self) -> u32 {
-            self as u32
-        }
-    }
 }
 
 fn memory32_grow(
@@ -208,13 +157,52 @@ fn memory32_grow(
     instance: &mut Instance,
     delta: u64,
     memory_index: u32,
-) -> Result<*mut u8, TrapReason> {
+) -> Result<Option<AllocationSize>, TrapReason> {
     let memory_index = MemoryIndex::from_u32(memory_index);
-    let result = match instance.memory_grow(store, memory_index, delta)? {
-        Some(size_in_bytes) => size_in_bytes / instance.memory_page_size(memory_index),
-        None => usize::max_value(),
-    };
-    Ok(result as *mut _)
+    let result = instance
+        .memory_grow(store, memory_index, delta)?
+        .map(|size_in_bytes| {
+            AllocationSize(size_in_bytes / instance.memory_page_size(memory_index))
+        });
+
+    Ok(result)
+}
+
+/// A helper structure to represent the return value of a memory or table growth
+/// call.
+///
+/// This represents a byte or element-based count of the size of an item on the
+/// host. For example a memory is how many bytes large the memory is, or a table
+/// is how many elements large it is. It's assumed that the value here is never
+/// -1 or -2 as that would mean the entire host address space is allocated which
+/// is not possible.
+struct AllocationSize(usize);
+
+/// Special implementation for growth-related libcalls.
+///
+/// Here the optional return value means:
+///
+/// * `Some(val)` - the growth succeeded and the previous size of the item was
+///   `val`.
+/// * `None` - the growth failed.
+///
+/// The failure case returns -1 (or `usize::MAX` as an unsigned integer) and the
+/// successful case returns the `val` itself. Note that -2 (`usize::MAX - 1`
+/// when unsigned) is unwind as a sentinel to indicate an unwind as no valid
+/// allocation can be that large.
+unsafe impl HostResultHasUnwindSentinel for Option<AllocationSize> {
+    type Abi = *mut u8;
+    const SENTINEL: *mut u8 = (usize::MAX - 1) as *mut u8;
+
+    fn into_abi(self) -> *mut u8 {
+        match self {
+            Some(size) => {
+                debug_assert!(size.0 < (usize::MAX - 1));
+                size.0 as *mut u8
+            }
+            None => usize::MAX as *mut u8,
+        }
+    }
 }
 
 /// Implementation of `table.grow` for `funcref` tables.
@@ -224,7 +212,7 @@ unsafe fn table_grow_func_ref(
     table_index: u32,
     delta: u64,
     init_value: *mut u8,
-) -> Result<*mut u8> {
+) -> Result<Option<AllocationSize>> {
     let table_index = TableIndex::from_u32(table_index);
 
     let element = match instance.table_element_type(table_index) {
@@ -233,11 +221,10 @@ unsafe fn table_grow_func_ref(
         TableElementType::Cont => unreachable!(),
     };
 
-    let result = match instance.table_grow(store, table_index, delta, element)? {
-        Some(r) => r,
-        None => usize::MAX,
-    };
-    Ok(result as *mut _)
+    let result = instance
+        .table_grow(store, table_index, delta, element)?
+        .map(AllocationSize);
+    Ok(result)
 }
 
 /// Implementation of `table.grow` for GC-reference tables.
@@ -248,7 +235,7 @@ unsafe fn table_grow_gc_ref(
     table_index: u32,
     delta: u64,
     init_value: u32,
-) -> Result<*mut u8> {
+) -> Result<Option<AllocationSize>> {
     let table_index = TableIndex::from_u32(table_index);
 
     let element = match instance.table_element_type(table_index) {
@@ -264,11 +251,10 @@ unsafe fn table_grow_gc_ref(
         TableElementType::Cont => unreachable!(),
     };
 
-    let result = match instance.table_grow(store, table_index, delta, element)? {
-        Some(r) => r,
-        None => usize::MAX,
-    };
-    Ok(result as *mut _)
+    let result = instance
+        .table_grow(store, table_index, delta, element)?
+        .map(AllocationSize);
+    Ok(result)
 }
 
 unsafe fn table_grow_cont_obj(
@@ -280,7 +266,7 @@ unsafe fn table_grow_cont_obj(
     // A None value is indicated by the pointer being null.
     init_value_contref: *mut u8,
     init_value_revision: u64,
-) -> Result<*mut u8> {
+) -> Result<Option<AllocationSize>> {
     use core::ptr::NonNull;
     let init_value = if init_value_contref.is_null() {
         None
@@ -298,11 +284,10 @@ unsafe fn table_grow_cont_obj(
         _ => panic!("Wrong table growing function"),
     };
 
-    let result = match instance.table_grow(store, table_index, delta, element)? {
-        Some(r) => r,
-        None => usize::MAX,
-    };
-    Ok(result as *mut _)
+    let result = instance
+        .table_grow(store, table_index, delta, element)?
+        .map(AllocationSize);
+    Ok(result)
 }
 
 /// Implementation of `table.fill` for `funcref`s.
@@ -1087,7 +1072,7 @@ unsafe fn is_subtype(
     _instance: &mut Instance,
     actual_engine_type: u32,
     expected_engine_type: u32,
-) -> bool {
+) -> u32 {
     use wasmtime_environ::VMSharedTypeIndex;
 
     let actual = VMSharedTypeIndex::from_u32(actual_engine_type);
@@ -1100,7 +1085,7 @@ unsafe fn is_subtype(
         .into();
 
     log::trace!("is_subtype(actual={actual:?}, expected={expected:?}) -> {is_subtype}",);
-    is_subtype
+    is_subtype as u32
 }
 
 // Implementation of `memory.atomic.notify` for locally defined memories.
@@ -1158,8 +1143,18 @@ fn out_of_gas(store: &mut dyn VMStore, _instance: &mut Instance) -> Result<()> {
 }
 
 // Hook for when an instance observes that the epoch has changed.
-fn new_epoch(store: &mut dyn VMStore, _instance: &mut Instance) -> Result<u64> {
-    store.new_epoch()
+fn new_epoch(store: &mut dyn VMStore, _instance: &mut Instance) -> Result<NextEpoch> {
+    store.new_epoch().map(NextEpoch)
+}
+
+struct NextEpoch(u64);
+
+unsafe impl HostResultHasUnwindSentinel for NextEpoch {
+    type Abi = u64;
+    const SENTINEL: u64 = u64::MAX;
+    fn into_abi(self) -> u64 {
+        self.0
+    }
 }
 
 // Hook for validating malloc using wmemcheck_state.
@@ -1299,13 +1294,22 @@ fn update_mem_size(_store: &mut dyn VMStore, instance: &mut Instance, num_pages:
     }
 }
 
-fn trap(_store: &mut dyn VMStore, _instance: &mut Instance, code: u8) -> Result<(), TrapReason> {
+/// This intrinsic is just used to record trap information.
+///
+/// The `Infallible` "ok" type here means that this never returns success, it
+/// only ever returns an error, and this hooks into the machinery to handle
+/// `Result` values to record such trap information.
+fn trap(
+    _store: &mut dyn VMStore,
+    _instance: &mut Instance,
+    code: u8,
+) -> Result<Infallible, TrapReason> {
     Err(TrapReason::Wasm(
         wasmtime_environ::Trap::from_u8(code).unwrap(),
     ))
 }
 
-fn raise(_store: &mut dyn VMStore, _instance: &mut Instance) -> Result<(), TrapReason> {
+fn raise(_store: &mut dyn VMStore, _instance: &mut Instance) {
     // SAFETY: this is only called from compiled wasm so we know that wasm has
     // already been entered. It's a dynamic safety precondition that the trap
     // information has already been arranged to be present.
@@ -1517,7 +1521,7 @@ fn tc_cont_new(
     func: *mut u8,
     param_count: u32,
     result_count: u32,
-) -> Result<*mut u8, TrapReason> {
+) -> Result<Option<AllocationSize>, TrapReason> {
     let ans = crate::vm::continuation::optimized::cont_new(
         store,
         instance,
@@ -1525,14 +1529,14 @@ fn tc_cont_new(
         param_count,
         result_count,
     )?;
-    Ok(ans.cast::<u8>())
+    Ok(Some(AllocationSize(ans.cast::<u8>() as usize)))
 }
 
 fn tc_drop_cont_ref(_store: &mut dyn VMStore, instance: &mut Instance, contref: *mut u8) {
     crate::vm::continuation::optimized::drop_cont_ref(
         instance,
         contref.cast::<crate::vm::continuation::optimized::VMContRef>(),
-    )
+    );
 }
 
 fn tc_allocate(
@@ -1540,24 +1544,24 @@ fn tc_allocate(
     _instance: &mut Instance,
     size: u64,
     align: u64,
-) -> Result<*mut u8, TrapReason> {
+) -> Result<Option<AllocationSize>, TrapReason> {
     debug_assert!(size > 0);
     let size = usize::try_from(size)
-        .map_err(|_error| TrapReason::user(anyhow::anyhow!("size too large!")))?;
+        .map_err(|_error| TrapReason::User(anyhow::anyhow!("size too large!")))?;
     let align = usize::try_from(align)
-        .map_err(|_error| TrapReason::user(anyhow::anyhow!("align too large!")))?;
+        .map_err(|_error| TrapReason::User(anyhow::anyhow!("align too large!")))?;
     let layout = std::alloc::Layout::from_size_align(size, align).map_err(|_error| {
-        TrapReason::user(anyhow::anyhow!("Continuation layout construction failed!"))
+        TrapReason::User(anyhow::anyhow!("Continuation layout construction failed!"))
     })?;
     let ptr = unsafe { alloc::alloc::alloc(layout) };
     // TODO(dhil): We can consider making this a debug-build only
     // check.
     if ptr.is_null() {
-        Err(TrapReason::user(anyhow::anyhow!(
+        Err(TrapReason::User(anyhow::anyhow!(
             "Memory allocation failed!"
         )))
     } else {
-        Ok(ptr)
+        Ok(Some(AllocationSize(ptr as usize)))
     }
 }
 
@@ -1567,15 +1571,11 @@ fn tc_deallocate(
     ptr: *mut u8,
     size: u64,
     align: u64,
-) -> Result<(), TrapReason> {
+) -> Result<()> {
     debug_assert!(size > 0);
-    let size = usize::try_from(size)
-        .map_err(|_error| TrapReason::user(anyhow::anyhow!("size too large!")))?;
-    let align = usize::try_from(align)
-        .map_err(|_error| TrapReason::user(anyhow::anyhow!("align too large!")))?;
-    let layout = std::alloc::Layout::from_size_align(size, align).map_err(|_error| {
-        TrapReason::user(anyhow::anyhow!("Continuation layout construction failed!"))
-    })?;
+    let size = usize::try_from(size)?;
+    let align = usize::try_from(align)?;
+    let layout = std::alloc::Layout::from_size_align(size, align)?;
     Ok(unsafe { std::alloc::dealloc(ptr, layout) })
 }
 
@@ -1586,7 +1586,7 @@ fn tc_reallocate(
     old_size: u64,
     new_size: u64,
     align: u64,
-) -> Result<*mut u8, TrapReason> {
+) -> Result<Option<AllocationSize>, TrapReason> {
     debug_assert!(old_size < new_size);
 
     if old_size > 0 {
@@ -1598,18 +1598,18 @@ fn tc_reallocate(
 
 fn tc_print_str(_store: &mut dyn VMStore, _instance: &mut Instance, s: *const u8, len: u64) {
     let len =
-        usize::try_from(len).map_err(|_error| TrapReason::user(anyhow::anyhow!("len too large!")));
+        usize::try_from(len).map_err(|_error| TrapReason::User(anyhow::anyhow!("len too large!")));
     let str = unsafe { std::slice::from_raw_parts(s, len.unwrap()) };
     let s = std::str::from_utf8(str).unwrap();
-    print!("{s}");
+    print!("{s}")
 }
 
 fn tc_print_int(_store: &mut dyn VMStore, _instance: &mut Instance, arg: u64) {
-    print!("{arg}");
+    print!("{arg}")
 }
 
 fn tc_print_pointer(_store: &mut dyn VMStore, _instance: &mut Instance, arg: *const u8) {
-    print!("{arg:p}");
+    print!("{arg:p}")
 }
 
 //
@@ -1621,11 +1621,11 @@ fn tc_baseline_cont_new(
     func: *mut u8,
     param_count: u64,
     result_count: u64,
-) -> Result<*mut u8, TrapReason> {
+) -> Result<Option<AllocationSize>, TrapReason> {
     let param_count = usize::try_from(param_count)
-        .map_err(|_error| TrapReason::user(anyhow::anyhow!("param_count too large!")))?;
+        .map_err(|_error| TrapReason::User(anyhow::anyhow!("param_count too large!")))?;
     let result_count = usize::try_from(result_count)
-        .map_err(|_error| TrapReason::user(anyhow::anyhow!("result_count too large!")))?;
+        .map_err(|_error| TrapReason::User(anyhow::anyhow!("result_count too large!")))?;
     let ans = crate::runtime::vm::continuation::baseline::cont_new(
         store,
         instance,
@@ -1635,19 +1635,18 @@ fn tc_baseline_cont_new(
     )?;
     let ans_ptr = ans.cast::<u8>();
     assert!(ans as usize == ans_ptr as usize);
-    Ok(ans_ptr)
+    Ok(Some(AllocationSize(ans_ptr as usize)))
 }
 
-fn tc_baseline_resume(
-    store: &mut dyn VMStore,
-    instance: &mut Instance,
-    contref: *mut u8,
-) -> Result<u32, TrapReason> {
+fn tc_baseline_resume(store: &mut dyn VMStore, instance: &mut Instance, contref: *mut u8) -> u32 {
     let contref_ptr = contref.cast::<crate::runtime::vm::continuation::baseline::VMContRef>();
     assert!(contref_ptr as usize == contref as usize);
-    crate::runtime::vm::continuation::baseline::resume(store, instance, unsafe {
+    match crate::runtime::vm::continuation::baseline::resume(store, instance, unsafe {
         &mut *(contref_ptr)
-    })
+    }) {
+        Err(_) => panic!("resume failed"),
+        Ok(x) => x,
+    }
 }
 
 fn tc_baseline_suspend(
@@ -1685,9 +1684,9 @@ fn tc_baseline_continuation_arguments_ptr(
     instance: &mut Instance,
     contref: *mut u8,
     nargs: u64,
-) -> *mut u8 {
+) -> Result<Option<AllocationSize>> {
     let nargs = usize::try_from(nargs)
-        .map_err(|_error| TrapReason::user(anyhow::anyhow!("nargs too large!")));
+        .map_err(|_error| TrapReason::User(anyhow::anyhow!("nargs too large!")));
     let contref_ptr = contref.cast::<crate::runtime::vm::continuation::baseline::VMContRef>();
     assert!(contref_ptr as usize == contref as usize);
     let ans = crate::runtime::vm::continuation::baseline::get_arguments_ptr(
@@ -1695,14 +1694,14 @@ fn tc_baseline_continuation_arguments_ptr(
         unsafe { &mut *(contref_ptr) },
         nargs.unwrap(),
     );
-    return ans.cast::<u8>();
+    Ok(Some(AllocationSize(ans.cast::<u8>() as usize)))
 }
 
 fn tc_baseline_continuation_values_ptr(
     _store: &mut dyn VMStore,
     instance: &mut Instance,
     contref: *mut u8,
-) -> *mut u8 {
+) -> Result<Option<AllocationSize>> {
     let contref_ptr = contref.cast::<crate::runtime::vm::continuation::baseline::VMContRef>();
     assert!(contref_ptr as usize == contref as usize);
     let ans = crate::runtime::vm::continuation::baseline::get_values_ptr(instance, unsafe {
@@ -1710,7 +1709,7 @@ fn tc_baseline_continuation_values_ptr(
     });
     let ans_ptr = ans.cast::<u8>();
     assert!(ans as usize == ans_ptr as usize);
-    return ans_ptr;
+    Ok(Some(AllocationSize(ans_ptr as usize)))
 }
 
 fn tc_baseline_clear_arguments(
@@ -1729,23 +1728,26 @@ fn tc_baseline_get_payloads_ptr(
     _store: &mut dyn VMStore,
     instance: &mut Instance,
     nargs: u64,
-) -> *mut u8 {
+) -> Result<Option<AllocationSize>> {
     let nargs = usize::try_from(nargs)
-        .map_err(|_error| TrapReason::user(anyhow::anyhow!("nargs too large!")));
+        .map_err(|_error| TrapReason::User(anyhow::anyhow!("nargs too large!")));
     let ans =
         crate::runtime::vm::continuation::baseline::get_payloads_ptr(instance, nargs.unwrap());
     let ans_ptr = ans.cast::<u8>();
     assert!(ans as usize == ans_ptr as usize);
-    return ans_ptr;
+    Ok(Some(AllocationSize(ans_ptr as usize)))
 }
 
-fn tc_baseline_clear_payloads(_store: &mut dyn VMStore, instance: &mut Instance) {
+fn tc_baseline_clear_payloads(_store: &mut dyn VMStore, instance: &mut Instance) -> Result<()> {
     crate::runtime::vm::continuation::baseline::clear_payloads(instance);
+    Ok(())
 }
 
 fn tc_baseline_get_current_continuation(
     _store: &mut dyn VMStore,
     _instance: &mut Instance,
-) -> *mut u8 {
-    crate::runtime::vm::continuation::baseline::get_current_continuation().cast::<u8>()
+) -> Result<Option<AllocationSize>> {
+    let ans_ptr =
+        crate::runtime::vm::continuation::baseline::get_current_continuation().cast::<u8>();
+    Ok(Some(AllocationSize(ans_ptr as usize)))
 }

@@ -22,11 +22,11 @@
 //! frame is a host frame).
 
 use crate::prelude::*;
-use crate::runtime::vm::arch;
+use crate::runtime::store::StoreOpaque;
 use crate::runtime::vm::continuation::stack_chain::StackChain;
 use crate::runtime::vm::{
     traphandlers::{tls, CallThreadState},
-    VMRuntimeLimits,
+    Unwind, VMRuntimeLimits,
 };
 use core::ops::ControlFlow;
 
@@ -60,9 +60,11 @@ impl Backtrace {
     }
 
     /// Capture the current Wasm stack in a backtrace.
-    pub fn new(limits: *const VMRuntimeLimits) -> Backtrace {
+    pub fn new(store: &StoreOpaque) -> Backtrace {
+        let limits = store.runtime_limits();
+        let unwind = store.unwinder();
         tls::with(|state| match state {
-            Some(state) => unsafe { Self::new_with_trap_state(limits, state, None) },
+            Some(state) => unsafe { Self::new_with_trap_state(limits, unwind, state, None) },
             None => Backtrace(vec![]),
         })
     }
@@ -74,11 +76,12 @@ impl Backtrace {
     /// instead of looking them up in `VMRuntimeLimits`.
     pub(crate) unsafe fn new_with_trap_state(
         limits: *const VMRuntimeLimits,
+        unwind: &dyn Unwind,
         state: &CallThreadState,
         trap_pc_and_fp: Option<(usize, usize)>,
     ) -> Backtrace {
         let mut frames = vec![];
-        Self::trace_with_trap_state(limits, state, trap_pc_and_fp, |frame| {
+        Self::trace_with_trap_state(limits, unwind, state, trap_pc_and_fp, |frame| {
             frames.push(frame);
             ControlFlow::Continue(())
         });
@@ -86,9 +89,11 @@ impl Backtrace {
     }
 
     /// Walk the current Wasm stack, calling `f` for each frame we walk.
-    pub fn trace(limits: *const VMRuntimeLimits, f: impl FnMut(Frame) -> ControlFlow<()>) {
+    pub fn trace(store: &StoreOpaque, f: impl FnMut(Frame) -> ControlFlow<()>) {
+        let limits = store.runtime_limits();
+        let unwind = store.unwinder();
         tls::with(|state| match state {
-            Some(state) => unsafe { Self::trace_with_trap_state(limits, state, None, f) },
+            Some(state) => unsafe { Self::trace_with_trap_state(limits, unwind, state, None, f) },
             None => {}
         });
     }
@@ -100,6 +105,7 @@ impl Backtrace {
     /// instead of looking them up in `VMRuntimeLimits`.
     pub(crate) unsafe fn trace_with_trap_state(
         limits: *const VMRuntimeLimits,
+        unwind: &dyn Unwind,
         state: &CallThreadState,
         trap_pc_and_fp: Option<(usize, usize)>,
         mut f: impl FnMut(Frame) -> ControlFlow<()>,
@@ -187,13 +193,14 @@ impl Backtrace {
 
         for (_chain, pc, fp, sp) in activations {
             if cfg!(feature = "wasmfx_baseline") && cfg!(not(feature = "wasmfx_no_baseline")) {
-                if let ControlFlow::Break(()) = Self::trace_through_wasm(pc, fp, sp, &mut f) {
+                if let ControlFlow::Break(()) = Self::trace_through_wasm(unwind, pc, fp, sp, &mut f)
+                {
                     log::trace!("====== Done Capturing Backtrace (closure break) ======");
                     return;
                 }
             } else {
                 if let ControlFlow::Break(()) =
-                    Self::trace_through_continuations(_chain, pc, fp, sp, &mut f)
+                    Self::trace_through_continuations(unwind, _chain, pc, fp, sp, &mut f)
                 {
                     log::trace!("====== Done Capturing Backtrace (closure break) ======");
                     return;
@@ -205,6 +212,7 @@ impl Backtrace {
     }
 
     unsafe fn trace_through_continuations(
+        unwind: &dyn Unwind,
         chain: Option<&StackChain>,
         pc: usize,
         fp: usize,
@@ -213,7 +221,7 @@ impl Backtrace {
     ) -> ControlFlow<()> {
         // Handle the stack that is currently running (which may be a
         // continuation or the main stack).
-        Self::trace_through_wasm(pc, fp, trampoline_sp, &mut f)?;
+        Self::trace_through_wasm(unwind, pc, fp, trampoline_sp, &mut f)?;
 
         chain.map_or(ControlFlow::Continue(()), |chain| {
             debug_assert_ne!(*chain, StackChain::Absent);
@@ -247,6 +255,7 @@ impl Backtrace {
                 }
 
                 Self::trace_through_wasm(
+                    unwind,
                     limits.last_wasm_exit_pc,
                     limits.last_wasm_exit_fp,
                     limits.last_wasm_entry_fp,
@@ -261,6 +270,7 @@ impl Backtrace {
     /// frame at the given PC and FP and ending at `trampoline_sp`.
     // TODO(frank-emrich) Implement tracing across continuations.
     unsafe fn trace_through_wasm(
+        unwind: &dyn Unwind,
         mut pc: usize,
         mut fp: usize,
         trampoline_fp: usize,
@@ -329,7 +339,7 @@ impl Backtrace {
             // Wasm. Finally also assert that it's aligned correctly as an
             // additional sanity check.
             assert!(trampoline_fp > fp, "{trampoline_fp:#x} > {fp:#x}");
-            arch::assert_fp_is_aligned(fp);
+            unwind.assert_fp_is_aligned(fp);
 
             log::trace!("--- Tracing through one Wasm frame ---");
             log::trace!("pc = {:p}", pc as *const ());
@@ -337,17 +347,17 @@ impl Backtrace {
 
             f(Frame { pc, fp })?;
 
-            pc = arch::get_next_older_pc_from_fp(fp);
+            pc = unwind.get_next_older_pc_from_fp(fp);
 
             // We rely on this offset being zero for all supported architectures
             // in `crates/cranelift/src/component/compiler.rs` when we set the
             // Wasm exit FP. If this ever changes, we will need to update that
             // code as well!
-            assert_eq!(arch::NEXT_OLDER_FP_FROM_FP_OFFSET, 0);
+            assert_eq!(unwind.next_older_fp_from_fp_offset(), 0);
 
             // Get the next older frame pointer from the current Wasm frame
             // pointer.
-            let next_older_fp = *(fp as *mut usize).add(arch::NEXT_OLDER_FP_FROM_FP_OFFSET);
+            let next_older_fp = *(fp as *mut usize).add(unwind.next_older_fp_from_fp_offset());
 
             // Because the stack always grows down, the older FP must be greater
             // than the current FP.

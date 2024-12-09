@@ -1,7 +1,6 @@
 use super::shared;
 use itertools::{Either, Itertools};
 
-use crate::translate::{FuncEnvironment, FuncTranslationState};
 use crate::wasmfx::shared::call_builtin;
 use cranelift_codegen::ir::condcodes::*;
 use cranelift_codegen::ir::types::*;
@@ -1794,7 +1793,6 @@ pub(crate) fn translate_cont_bind<'a>(
 pub(crate) fn translate_cont_new<'a>(
     env: &mut crate::func_environ::FuncEnvironment<'a>,
     builder: &mut FunctionBuilder,
-    _state: &FuncTranslationState,
     func: ir::Value,
     arg_types: &[WasmValType],
     return_types: &[WasmValType],

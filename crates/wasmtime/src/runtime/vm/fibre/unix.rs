@@ -278,8 +278,8 @@ extern "C" fn fiber_start(
         // since the caller vmctx is only really used to access stuff in the
         // underlying `Store`, it's fine to be slightly sloppy about the exact
         // value we set.
-        func_ref.array_call(caller_vmxtx, params_and_returns);  // TODO(dhil): we are ignoring the boolean return value
-                                                                // here... we probably shouldn't.
+        func_ref.array_call(None, caller_vmxtx, params_and_returns);  // TODO(dhil): we are ignoring the boolean return value
+                                                                      // here... we probably shouldn't.
 
         // Switch back to parent, indicating that the continuation returned.
         switch_to_parent(top_of_stack);
