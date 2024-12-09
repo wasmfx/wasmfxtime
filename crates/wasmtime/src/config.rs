@@ -12,7 +12,7 @@ use wasmparser::WasmFeatures;
 #[cfg(feature = "cache")]
 use wasmtime_cache::CacheConfig;
 use wasmtime_continuations::WasmFXConfig;
-use wasmtime_environ::{ConfigTunables, Tunables};
+use wasmtime_environ::{ConfigTunables, TripleExt, Tunables};
 
 #[cfg(feature = "runtime")]
 use crate::memory::MemoryCreator;
@@ -1977,42 +1977,24 @@ impl Config {
     fn compiler_panicking_wasm_features(&self) -> WasmFeatures {
         #[cfg(any(feature = "cranelift", feature = "winch"))]
         match self.compiler_config.strategy {
-            None | Some(Strategy::Cranelift) => match self.compiler_target().architecture {
-                // Pulley doesn't support most of wasm at this time and there's
-                // lots of panicking bits and pieces within the backend. This
-                // doesn't fully cover all panicking cases but it's at least a
-                // starting place to have a ratchet. As the pulley backend is
-                // developed this'll get filtered down over time.
-                target_lexicon::Architecture::Pulley32 | target_lexicon::Architecture::Pulley64 => {
-                    WasmFeatures::SATURATING_FLOAT_TO_INT
-                        | WasmFeatures::SIGN_EXTENSION
-                        | WasmFeatures::REFERENCE_TYPES
-                        | WasmFeatures::MULTI_VALUE
-                        | WasmFeatures::BULK_MEMORY
-                        | WasmFeatures::SIMD
+            None | Some(Strategy::Cranelift) => {
+                // Pulley is just starting and most errors are because of
+                // unsupported lowerings which is a first-class error. Some
+                // errors are panics though due to unimplemented bits in ABI
+                // code and those causes are listed here.
+                if self.compiler_target().is_pulley() {
+                    return WasmFeatures::SIMD
                         | WasmFeatures::RELAXED_SIMD
-                        | WasmFeatures::THREADS
-                        | WasmFeatures::SHARED_EVERYTHING_THREADS
                         | WasmFeatures::TAIL_CALL
                         | WasmFeatures::FLOATS
-                        | WasmFeatures::MULTI_MEMORY
-                        | WasmFeatures::EXCEPTIONS
                         | WasmFeatures::MEMORY64
-                        | WasmFeatures::EXTENDED_CONST
-                        | WasmFeatures::FUNCTION_REFERENCES
-                        | WasmFeatures::MEMORY_CONTROL
-                        | WasmFeatures::GC
-                        | WasmFeatures::CUSTOM_PAGE_SIZES
-                        | WasmFeatures::LEGACY_EXCEPTIONS
-                        | WasmFeatures::GC_TYPES
-                        | WasmFeatures::STACK_SWITCHING
-                        | WasmFeatures::WIDE_ARITHMETIC
+                        | WasmFeatures::GC_TYPES;
                 }
 
                 // Other Cranelift backends are either 100% missing or complete
                 // at this time, so no need to further filter.
-                _ => WasmFeatures::empty(),
-            },
+                WasmFeatures::empty()
+            }
             Some(Strategy::Winch) => {
                 let mut unsupported = WasmFeatures::GC
                     | WasmFeatures::FUNCTION_REFERENCES
@@ -2095,21 +2077,30 @@ impl Config {
         features
     }
 
+    /// Returns the configured compiler target for this `Config`.
     fn compiler_target(&self) -> target_lexicon::Triple {
+        // If a target is explicitly configured, always use that.
         #[cfg(any(feature = "cranelift", feature = "winch"))]
-        {
-            let host = target_lexicon::Triple::host();
+        if let Some(target) = self.compiler_config.target.clone() {
+            return target;
+        }
 
-            self.compiler_config
-                .target
-                .as_ref()
-                .unwrap_or(&host)
-                .clone()
+        // Without an explicitly configured target the goal is then to select
+        // some default which can reasonably run code on this host. If pulley is
+        // enabled and the host has no support at all in the cranelift/winch
+        // backends then pulley becomes the default target. This means, for
+        // example, that 32-bit platforms will default to running pulley at this
+        // time.
+        let any_compiler_support = cfg!(target_arch = "x86_64")
+            || cfg!(target_arch = "aarch64")
+            || cfg!(target_arch = "riscv64")
+            || cfg!(target_arch = "s390x");
+        if !any_compiler_support && cfg!(feature = "pulley") {
+            return target_lexicon::Triple::pulley_host();
         }
-        #[cfg(not(any(feature = "cranelift", feature = "winch")))]
-        {
-            target_lexicon::Triple::host()
-        }
+
+        // And at this point the target is for sure the host.
+        target_lexicon::Triple::host()
     }
 
     pub(crate) fn validate(&self) -> Result<(Tunables, WasmFeatures)> {
@@ -2146,13 +2137,7 @@ impl Config {
             bail!("wmemcheck (memory checker) was requested but is not enabled in this build");
         }
 
-        #[cfg(not(any(feature = "cranelift", feature = "winch")))]
-        let mut tunables = Tunables::default_host();
-        #[cfg(any(feature = "cranelift", feature = "winch"))]
-        let mut tunables = match &self.compiler_config.target.as_ref() {
-            Some(target) => Tunables::default_for_target(target)?,
-            None => Tunables::default_host(),
-        };
+        let mut tunables = Tunables::default_for_target(&self.compiler_target())?;
 
         // When signals-based traps are disabled use slightly different defaults
         // for tunables to be more amenable to `MallocMemory`. Note that these
@@ -2287,15 +2272,28 @@ impl Config {
         tunables: &Tunables,
         features: WasmFeatures,
     ) -> Result<(Self, Box<dyn wasmtime_environ::Compiler>)> {
-        let target = self.compiler_config.target.clone();
+        let target = self.compiler_target();
+
+        // The target passed to the builders below is an `Option<Triple>` where
+        // `None` represents the current host with CPU features inferred from
+        // the host's CPU itself. The `target` above is not an `Option`, so
+        // switch it to `None` in the case that a target wasn't explicitly
+        // specified (which indicates no feature inference) and the target
+        // matches the host.
+        let target_for_builder =
+            if self.compiler_config.target.is_none() && target == target_lexicon::Triple::host() {
+                None
+            } else {
+                Some(target.clone())
+            };
 
         let mut compiler = match self.compiler_config.strategy {
             #[cfg(feature = "cranelift")]
-            Some(Strategy::Cranelift) => wasmtime_cranelift::builder(target)?,
+            Some(Strategy::Cranelift) => wasmtime_cranelift::builder(target_for_builder)?,
             #[cfg(not(feature = "cranelift"))]
             Some(Strategy::Cranelift) => bail!("cranelift support not compiled in"),
             #[cfg(feature = "winch")]
-            Some(Strategy::Winch) => wasmtime_winch::builder(target)?,
+            Some(Strategy::Winch) => wasmtime_winch::builder(target_for_builder)?,
             #[cfg(not(feature = "winch"))]
             Some(Strategy::Winch) => bail!("winch support not compiled in"),
 
@@ -2312,8 +2310,6 @@ impl Config {
         self.compiler_config
             .settings
             .insert("probestack_strategy".into(), "inline".into());
-
-        let target = self.compiler_target();
 
         // We enable stack probing by default on all targets.
         // This is required on Windows because of the way Windows

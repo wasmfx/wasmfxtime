@@ -1,5 +1,5 @@
 use pulley_interpreter::{
-    interp::Vm,
+    interp::{DoneReason, Vm},
     op::{self, ExtendedOp, Op},
     *,
 };
@@ -30,8 +30,8 @@ pub fn interp(ops: Vec<Op>) {
         let args = &[];
         let rets = &[];
         match vm.call(NonNull::from(&encoded[0]), args, rets.into_iter().copied()) {
-            Ok(rets) => assert_eq!(rets.count(), 0),
-            Err(pc) => {
+            DoneReason::ReturnToHost(rets) => assert_eq!(rets.count(), 0),
+            DoneReason::Trap(pc) => {
                 let pc = pc.as_ptr() as usize;
 
                 let start = &encoded[0] as *const u8 as usize;
@@ -47,6 +47,7 @@ pub fn interp(ops: Vec<Op>) {
                 assert_eq!(encoded[index + 1], a);
                 assert_eq!(encoded[index + 2], b);
             }
+            DoneReason::CallIndirectHost { .. } => unreachable!(),
         };
     }
 }
@@ -120,6 +121,12 @@ fn op_is_safe_for_fuzzing(op: &Op) -> bool {
         Op::BrTable32(_) => false,
         Op::StackAlloc32(_) => false,
         Op::StackFree32(_) => false,
+        Op::Zext8(Zext8 { dst, .. })
+        | Op::Zext16(Zext16 { dst, .. })
+        | Op::Zext32(Zext32 { dst, .. })
+        | Op::Sext8(Sext8 { dst, .. })
+        | Op::Sext32(Sext32 { dst, .. })
+        | Op::Sext16(Sext16 { dst, .. }) => !dst.is_special(),
     }
 }
 
@@ -128,5 +135,8 @@ fn extended_op_is_safe_for_fuzzing(op: &ExtendedOp) -> bool {
         ExtendedOp::Trap(_) => true,
         ExtendedOp::Nop(_) => true,
         ExtendedOp::CallIndirectHost(_) => false,
+        ExtendedOp::Bswap32(Bswap32 { dst, .. }) | ExtendedOp::Bswap64(Bswap64 { dst, .. }) => {
+            !dst.is_special()
+        }
     }
 }

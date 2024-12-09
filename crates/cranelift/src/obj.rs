@@ -22,11 +22,11 @@ use cranelift_control::ControlPlane;
 use gimli::write::{Address, EhFrame, EndianVec, FrameTable, Writer};
 use gimli::RunTimeEndian;
 use object::write::{Object, SectionId, StandardSegment, Symbol, SymbolId, SymbolSection};
-use object::{Architecture, SectionKind, SymbolFlags, SymbolKind, SymbolScope};
+use object::{Architecture, SectionFlags, SectionKind, SymbolFlags, SymbolKind, SymbolScope};
 use std::collections::HashMap;
 use std::ops::Range;
-use wasmtime_environ::obj::LibCall;
-use wasmtime_environ::{Compiler, Unsigned};
+use wasmtime_environ::obj::{self, LibCall};
+use wasmtime_environ::{Compiler, TripleExt, Unsigned};
 
 const TEXT_SECTION_NAME: &[u8] = b".text";
 
@@ -82,6 +82,18 @@ impl<'a> ModuleTextBuilder<'a> {
             TEXT_SECTION_NAME.to_vec(),
             SectionKind::Text,
         );
+
+        // If this target is Pulley then flag the text section as not needing the
+        // executable bit in virtual memory which means that the runtime won't
+        // try to call `Mmap::make_exectuable`, which makes Pulley more
+        // portable.
+        if compiler.triple().is_pulley() {
+            let section = obj.section_mut(text_section);
+            assert!(matches!(section.flags, SectionFlags::None));
+            section.flags = SectionFlags::Elf {
+                sh_flags: obj::SH_WASMTIME_NOT_EXECUTED,
+            };
+        }
 
         Self {
             compiler,
@@ -206,8 +218,8 @@ impl<'a> ModuleTextBuilder<'a> {
                         .unwrap();
                 }
 
-                // This relocation is used to fill in which hostcall signature
-                // is desired within the `call_indirect_host` opcode of Pulley
+                // This relocation is used to fill in which hostcall id is
+                // desired within the `call_indirect_host` opcode of Pulley
                 // itself. The relocation target is the start of the instruction
                 // and the goal is to insert the static signature number, `n`,
                 // into the instruction.
@@ -225,10 +237,17 @@ impl<'a> ModuleTextBuilder<'a> {
                 //
                 // See the `test_call_indirect_host_width` in
                 // `pulley/tests/all.rs` for this guarantee as well.
+                #[cfg(feature = "pulley")]
                 RelocationTarget::PulleyHostcall(n) => {
+                    use pulley_interpreter::encode::Encode;
+
+                    assert_eq!(pulley_interpreter::CallIndirectHost::WIDTH, 4);
                     let byte = u8::try_from(n).unwrap();
                     self.text.write(reloc_offset + 3, &[byte]);
                 }
+
+                #[cfg(not(feature = "pulley"))]
+                RelocationTarget::PulleyHostcall(_) => unreachable!(),
             };
         }
         (symbol_id, off..off + body_len)

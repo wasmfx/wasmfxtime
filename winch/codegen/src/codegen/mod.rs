@@ -272,9 +272,9 @@ where
         body: &mut BinaryReader<'a>,
         validator: &mut FuncValidator<ValidatorResources>,
     ) -> Result<()> {
-        if self.tunables.consume_fuel {
-            self.emit_fuel_check();
-        }
+        self.maybe_emit_fuel_check();
+
+        self.maybe_emit_epoch_check();
 
         // Once we have emitted the epilogue and reserved stack space for the locals, we push the
         // base control flow block.
@@ -966,18 +966,24 @@ where
         self.context.stack.push(dst.into());
     }
 
-    /// Emit a series of instructions that check the current fuel usage by
-    /// performing a zero-comparison with the number of units stored in
-    /// `VMRuntimeLimits`.
-    pub fn emit_fuel_check(&mut self) {
+    /// Checks if fuel consumption is enabled and emits a series of instructions
+    /// that check the current fuel usage by performing a zero-comparison with
+    /// the number of units stored in `VMRuntimeLimits`.
+    pub fn maybe_emit_fuel_check(&mut self) {
+        if !self.tunables.consume_fuel {
+            return;
+        }
+
         let out_of_fuel = self.env.builtins.out_of_gas::<M::ABI, M::Ptr>();
-        let fuel_var =
+        let fuel_reg =
             self.context
                 .without::<Reg, M, _>(&out_of_fuel.sig().regs, self.masm, |cx, masm| {
                     cx.any_gpr(masm)
                 });
 
-        self.emit_load_fuel_consumed(fuel_var);
+        self.emit_load_fuel_consumed(fuel_reg);
+
+        // The  continuation label if the current fuel is under the limit.
         let continuation = self.masm.get_label();
 
         // Spill locals and registers to avoid conflicts at the out-of-fuel
@@ -987,7 +993,7 @@ where
         // we're still under the fuel limits.
         self.masm.branch(
             IntCmpKind::LtS,
-            fuel_var,
+            fuel_reg,
             RegImm::i64(0),
             continuation,
             OperandSize::S64,
@@ -999,25 +1005,120 @@ where
             &mut self.context,
             Callee::Builtin(out_of_fuel.clone()),
         );
+        self.context.pop_and_free(self.masm);
+
         // Under fuel limits branch.
         self.masm.bind(continuation);
-        self.context.free_reg(fuel_var);
+        self.context.free_reg(fuel_reg);
     }
 
     /// Emits a series of instructions that load the `fuel_consumed` field from
     /// `VMRuntimeLimits`.
-    fn emit_load_fuel_consumed(&mut self, fuel_var: Reg) {
+    fn emit_load_fuel_consumed(&mut self, fuel_reg: Reg) {
         let limits_offset = self.env.vmoffsets.ptr.vmctx_runtime_limits();
         let fuel_offset = self.env.vmoffsets.ptr.vmruntime_limits_fuel_consumed();
         self.masm.load_ptr(
             self.masm.address_at_vmctx(u32::from(limits_offset)),
-            writable!(fuel_var),
+            writable!(fuel_reg),
         );
 
         self.masm.load(
-            self.masm.address_at_reg(fuel_var, u32::from(fuel_offset)),
-            writable!(fuel_var),
+            self.masm.address_at_reg(fuel_reg, u32::from(fuel_offset)),
+            writable!(fuel_reg),
             // Fuel is an i64.
+            OperandSize::S64,
+        );
+    }
+
+    /// Checks if epoch interruption is configured and emits a series of
+    /// instructions that check the current epoch against its deadline.
+    pub fn maybe_emit_epoch_check(&mut self) {
+        if !self.tunables.epoch_interruption {
+            return;
+        }
+
+        // The continuation branch if the current epoch hasn't reached the
+        // configured deadline.
+        let cont = self.masm.get_label();
+        let new_epoch = self.env.builtins.new_epoch::<M::ABI, M::Ptr>();
+
+        // Checks for runtime limits (e.g., fuel, epoch) are special since they
+        // require inserting abritrary function calls and control flow.
+        // Special care must be taken to ensure that all invariants are met. In
+        // this case, since `new_epoch` takes an argument and returns a value,
+        // we must ensure that any registers used to hold the current epoch
+        // value and deadline are not going to be needed later on by the
+        // function call.
+        let (epoch_deadline_reg, epoch_counter_reg) = self.context.without::<(Reg, Reg), M, _>(
+            &new_epoch.sig().regs,
+            self.masm,
+            |cx, masm| (cx.any_gpr(masm), cx.any_gpr(masm)),
+        );
+
+        self.emit_load_epoch_deadline_and_counter(epoch_deadline_reg, epoch_counter_reg);
+
+        // Spill locals and registers to avoid conflicts at the control flow
+        // merge below.
+        self.context.spill(self.masm);
+        self.masm.branch(
+            IntCmpKind::LtU,
+            epoch_counter_reg,
+            RegImm::reg(epoch_deadline_reg),
+            cont,
+            OperandSize::S64,
+        );
+        // Epoch deadline reached branch.
+        FnCall::emit::<M>(
+            &mut self.env,
+            self.masm,
+            &mut self.context,
+            Callee::Builtin(new_epoch.clone()),
+        );
+        // `new_epoch` returns the new deadline. However we don't
+        // perform any caching, so we simply drop this value.
+        self.visit_drop();
+
+        // Under epoch deadline branch.
+        self.masm.bind(cont);
+
+        self.context.free_reg(epoch_deadline_reg);
+        self.context.free_reg(epoch_counter_reg);
+    }
+
+    fn emit_load_epoch_deadline_and_counter(
+        &mut self,
+        epoch_deadline_reg: Reg,
+        epoch_counter_reg: Reg,
+    ) {
+        let epoch_ptr_offset = self.env.vmoffsets.ptr.vmctx_epoch_ptr();
+        let runtime_limits_offset = self.env.vmoffsets.ptr.vmctx_runtime_limits();
+        let epoch_deadline_offset = self.env.vmoffsets.ptr.vmruntime_limits_epoch_deadline();
+
+        // Load the current epoch value into `epoch_counter_var`.
+        self.masm.load_ptr(
+            self.masm.address_at_vmctx(u32::from(epoch_ptr_offset)),
+            writable!(epoch_counter_reg),
+        );
+
+        // `epoch_deadline_var` contains the address of the value, so we need
+        // to extract it.
+        self.masm.load(
+            self.masm.address_at_reg(epoch_counter_reg, 0),
+            writable!(epoch_counter_reg),
+            OperandSize::S64,
+        );
+
+        // Load the `VMRuntimeLimits`.
+        self.masm.load_ptr(
+            self.masm.address_at_vmctx(u32::from(runtime_limits_offset)),
+            writable!(epoch_deadline_reg),
+        );
+
+        self.masm.load(
+            self.masm
+                .address_at_reg(epoch_deadline_reg, u32::from(epoch_deadline_offset)),
+            writable!(epoch_deadline_reg),
+            // The deadline value is a u64.
             OperandSize::S64,
         );
     }
@@ -1032,17 +1133,17 @@ where
 
         let limits_offset = self.env.vmoffsets.ptr.vmctx_runtime_limits();
         let fuel_offset = self.env.vmoffsets.ptr.vmruntime_limits_fuel_consumed();
-        let limits_var = self.context.any_gpr(self.masm);
+        let limits_reg = self.context.any_gpr(self.masm);
 
-        // Load `VMRuntimeLimits` into the `limits_var` reg.
+        // Load `VMRuntimeLimits` into the `limits_reg` reg.
         self.masm.load_ptr(
             self.masm.address_at_vmctx(u32::from(limits_offset)),
-            writable!(limits_var),
+            writable!(limits_reg),
         );
 
         // Load the fuel consumed at point into the scratch register.
         self.masm.load(
-            self.masm.address_at_reg(limits_var, u32::from(fuel_offset)),
+            self.masm.address_at_reg(limits_reg, u32::from(fuel_offset)),
             writable!(scratch!(M)),
             OperandSize::S64,
         );
@@ -1059,11 +1160,11 @@ where
         // Store the updated fuel consumed to `VMRuntimeLimits`.
         self.masm.store(
             scratch!(M).into(),
-            self.masm.address_at_reg(limits_var, u32::from(fuel_offset)),
+            self.masm.address_at_reg(limits_reg, u32::from(fuel_offset)),
             OperandSize::S64,
         );
 
-        self.context.free_reg(limits_var);
+        self.context.free_reg(limits_reg);
     }
 
     /// Hook to handle fuel before visiting an operator.

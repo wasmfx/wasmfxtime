@@ -73,7 +73,8 @@
 
 mod bounds_checks;
 
-use crate::translate::environ::{FuncEnvironment, GlobalVariable, StructFieldsVec};
+use crate::func_environ::FuncEnvironment;
+use crate::translate::environ::{GlobalVariable, StructFieldsVec};
 use crate::translate::state::{ControlStackFrame, ElseData, FuncTranslationState};
 use crate::translate::translation_utils::{
     block_with_params, blocktype_params_results, f32_translation, f64_translation,
@@ -93,7 +94,7 @@ use std::vec::Vec;
 use wasmparser::{FuncValidator, MemArg, Operator, WasmModuleResources};
 use wasmtime_environ::{
     wasm_unsupported, DataIndex, ElemIndex, FuncIndex, GlobalIndex, MemoryIndex, Signed,
-    TableIndex, TypeIndex, Unsigned, WasmRefType, WasmResult,
+    TableIndex, TypeConvert, TypeIndex, Unsigned, WasmRefType, WasmResult,
 };
 
 /// Given a `Reachability<T>`, unwrap the inner `T` or, when unreachable, set
@@ -115,12 +116,12 @@ macro_rules! unwrap_or_return_unreachable_state {
 }
 
 /// Translates wasm operators into Cranelift IR instructions.
-pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
+pub fn translate_operator(
     validator: &mut FuncValidator<impl WasmModuleResources>,
     op: &Operator,
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    environ: &mut FE,
+    environ: &mut FuncEnvironment<'_>,
 ) -> WasmResult<()> {
     if !state.reachable {
         translate_unreachable_operator(validator, &op, builder, state, environ)?;
@@ -581,7 +582,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             {
                 let return_args = state.peekn_mut(return_count);
                 environ.handle_before_return(&return_args, builder);
-                bitcast_wasm_returns(environ, return_args, builder);
+                bitcast_wasm_returns(return_args, builder);
                 builder.ins().return_(return_args);
             }
             state.popn(return_count);
@@ -755,7 +756,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let heap = state.get_heap(builder.func, *mem, environ)?;
             let val = state.pop1();
             environ.before_memory_grow(builder, val, heap_index);
-            state.push1(environ.translate_memory_grow(builder.cursor(), heap_index, heap, val)?)
+            state.push1(environ.translate_memory_grow(builder, heap_index, heap, val)?)
         }
         Operator::MemorySize { mem } => {
             let heap_index = MemoryIndex::from_u32(*mem);
@@ -1261,7 +1262,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             // `fn translate_atomic_wait` can inspect the type of `expected` to figure out what
             // code it needs to generate, if it wants.
             let res = environ.translate_atomic_wait(
-                builder.cursor(),
+                builder,
                 heap_index,
                 heap,
                 effective_addr,
@@ -1283,7 +1284,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 environ.uadd_overflow_trap(builder, addr, offset, ir::TrapCode::HEAP_OUT_OF_BOUNDS)
             };
             let res = environ.translate_atomic_notify(
-                builder.cursor(),
+                builder,
                 heap_index,
                 heap,
                 effective_addr,
@@ -1501,14 +1502,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let src_pos = state.pop1();
             let dst_pos = state.pop1();
             environ.translate_memory_copy(
-                builder.cursor(),
-                src_index,
-                src_heap,
-                dst_index,
-                dst_heap,
-                dst_pos,
-                src_pos,
-                len,
+                builder, src_index, src_heap, dst_index, dst_heap, dst_pos, src_pos, len,
             )?;
         }
         Operator::MemoryFill { mem } => {
@@ -1517,7 +1511,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let len = state.pop1();
             let val = state.pop1();
             let dest = state.pop1();
-            environ.translate_memory_fill(builder.cursor(), heap_index, heap, dest, val, len)?;
+            environ.translate_memory_fill(builder, heap_index, heap, dest, val, len)?;
         }
         Operator::MemoryInit { data_index, mem } => {
             let heap_index = MemoryIndex::from_u32(*mem);
@@ -1526,7 +1520,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let src = state.pop1();
             let dest = state.pop1();
             environ.translate_memory_init(
-                builder.cursor(),
+                builder,
                 heap_index,
                 heap,
                 *data_index,
@@ -1568,7 +1562,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let src = state.pop1();
             let dest = state.pop1();
             environ.translate_table_copy(
-                builder.cursor(),
+                builder,
                 TableIndex::from_u32(*dst_table_index),
                 TableIndex::from_u32(*src_table_index),
                 dest,
@@ -1591,7 +1585,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let src = state.pop1();
             let dest = state.pop1();
             environ.translate_table_init(
-                builder.cursor(),
+                builder,
                 *elem_index,
                 TableIndex::from_u32(*table_index),
                 dest,
@@ -3018,12 +3012,12 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
 /// Deals with a Wasm instruction located in an unreachable portion of the code. Most of them
 /// are dropped but special ones like `End` or `Else` signal the potential end of the unreachable
 /// portion so the translation state must be updated accordingly.
-fn translate_unreachable_operator<FE: FuncEnvironment + ?Sized>(
+fn translate_unreachable_operator(
     validator: &FuncValidator<impl WasmModuleResources>,
     op: &Operator,
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    environ: &mut FE,
+    environ: &mut FuncEnvironment<'_>,
 ) -> WasmResult<()> {
     debug_assert!(!state.reachable);
     match *op {
@@ -3166,16 +3160,13 @@ fn translate_unreachable_operator<FE: FuncEnvironment + ?Sized>(
 /// Returns `None` when the Wasm access will unconditionally trap.
 ///
 /// Returns `(flags, wasm_addr, native_addr)`.
-fn prepare_addr<FE>(
+fn prepare_addr(
     memarg: &MemArg,
     access_size: u8,
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    environ: &mut FE,
-) -> WasmResult<Reachability<(MemFlags, Value, Value)>>
-where
-    FE: FuncEnvironment + ?Sized,
-{
+    environ: &mut FuncEnvironment<'_>,
+) -> WasmResult<Reachability<(MemFlags, Value, Value)>> {
     let index = state.pop1();
     let heap = state.get_heap(builder.func, memarg.memory, environ)?;
 
@@ -3334,12 +3325,12 @@ where
     Ok(Reachability::Reachable((flags, index, addr)))
 }
 
-fn align_atomic_addr<FE: FuncEnvironment + ?Sized>(
+fn align_atomic_addr(
     memarg: &MemArg,
     loaded_bytes: u8,
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    environ: &mut FE,
+    environ: &mut FuncEnvironment<'_>,
 ) {
     // Atomic addresses must all be aligned correctly, and for now we check
     // alignment before we check out-of-bounds-ness. The order of this check may
@@ -3371,12 +3362,12 @@ fn align_atomic_addr<FE: FuncEnvironment + ?Sized>(
 /// Like `prepare_addr` but for atomic accesses.
 ///
 /// Returns `None` when the Wasm access will unconditionally trap.
-fn prepare_atomic_addr<FE: FuncEnvironment + ?Sized>(
+fn prepare_atomic_addr(
     memarg: &MemArg,
     loaded_bytes: u8,
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    environ: &mut FE,
+    environ: &mut FuncEnvironment<'_>,
 ) -> WasmResult<Reachability<(MemFlags, Value, Value)>> {
     align_atomic_addr(memarg, loaded_bytes, builder, state, environ);
     prepare_addr(memarg, loaded_bytes, builder, state, environ)
@@ -3401,13 +3392,13 @@ pub enum Reachability<T> {
 /// Translate a load instruction.
 ///
 /// Returns the execution state's reachability after the load is translated.
-fn translate_load<FE: FuncEnvironment + ?Sized>(
+fn translate_load(
     memarg: &MemArg,
     opcode: ir::Opcode,
     result_ty: Type,
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    environ: &mut FE,
+    environ: &mut FuncEnvironment<'_>,
 ) -> WasmResult<Reachability<()>> {
     let mem_op_size = mem_op_size(opcode, result_ty);
     let (flags, wasm_index, base) =
@@ -3426,12 +3417,12 @@ fn translate_load<FE: FuncEnvironment + ?Sized>(
 }
 
 /// Translate a store instruction.
-fn translate_store<FE: FuncEnvironment + ?Sized>(
+fn translate_store(
     memarg: &MemArg,
     opcode: ir::Opcode,
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    environ: &mut FE,
+    environ: &mut FuncEnvironment<'_>,
 ) -> WasmResult<()> {
     let val = state.pop1();
     let val_ty = builder.func.dfg.value_type(val);
@@ -3466,14 +3457,14 @@ fn translate_icmp(cc: IntCC, builder: &mut FunctionBuilder, state: &mut FuncTran
     state.push1(builder.ins().uextend(I32, val));
 }
 
-fn translate_atomic_rmw<FE: FuncEnvironment + ?Sized>(
+fn translate_atomic_rmw(
     widened_ty: Type,
     access_ty: Type,
     op: AtomicRmwOp,
     memarg: &MemArg,
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    environ: &mut FE,
+    environ: &mut FuncEnvironment<'_>,
 ) -> WasmResult<()> {
     let mut arg2 = state.pop1();
     let arg2_ty = builder.func.dfg.value_type(arg2);
@@ -3519,13 +3510,13 @@ fn translate_atomic_rmw<FE: FuncEnvironment + ?Sized>(
     Ok(())
 }
 
-fn translate_atomic_cas<FE: FuncEnvironment + ?Sized>(
+fn translate_atomic_cas(
     widened_ty: Type,
     access_ty: Type,
     memarg: &MemArg,
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    environ: &mut FE,
+    environ: &mut FuncEnvironment<'_>,
 ) -> WasmResult<()> {
     let (mut expected, mut replacement) = state.pop2();
     let expected_ty = builder.func.dfg.value_type(expected);
@@ -3575,13 +3566,13 @@ fn translate_atomic_cas<FE: FuncEnvironment + ?Sized>(
     Ok(())
 }
 
-fn translate_atomic_load<FE: FuncEnvironment + ?Sized>(
+fn translate_atomic_load(
     widened_ty: Type,
     access_ty: Type,
     memarg: &MemArg,
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    environ: &mut FE,
+    environ: &mut FuncEnvironment<'_>,
 ) -> WasmResult<()> {
     // The load is performed at type `access_ty`, and the loaded value is zero extended
     // to `widened_ty`.
@@ -3618,12 +3609,12 @@ fn translate_atomic_load<FE: FuncEnvironment + ?Sized>(
     Ok(())
 }
 
-fn translate_atomic_store<FE: FuncEnvironment + ?Sized>(
+fn translate_atomic_store(
     access_ty: Type,
     memarg: &MemArg,
     builder: &mut FunctionBuilder,
     state: &mut FuncTranslationState,
-    environ: &mut FE,
+    environ: &mut FuncEnvironment<'_>,
 ) -> WasmResult<()> {
     let mut data = state.pop1();
     let data_ty = builder.func.dfg.value_type(data);
@@ -4120,13 +4111,9 @@ fn bitcast_arguments<'a>(
 /// place to point to the result of a `bitcast`. This conversion is necessary to translate Wasm
 /// code that uses `V128` as function parameters (or implicitly in block parameters) and still use
 /// specific CLIF types (e.g. `I32X4`) in the function body.
-pub fn bitcast_wasm_returns<FE: FuncEnvironment + ?Sized>(
-    environ: &mut FE,
-    arguments: &mut [Value],
-    builder: &mut FunctionBuilder,
-) {
+pub fn bitcast_wasm_returns(arguments: &mut [Value], builder: &mut FunctionBuilder) {
     let changes = bitcast_arguments(builder, arguments, &builder.func.signature.returns, |i| {
-        environ.is_wasm_return(&builder.func.signature, i)
+        builder.func.signature.returns[i].purpose == ir::ArgumentPurpose::Normal
     });
     for (t, arg) in changes {
         let mut flags = MemFlags::new();
@@ -4136,8 +4123,8 @@ pub fn bitcast_wasm_returns<FE: FuncEnvironment + ?Sized>(
 }
 
 /// Like `bitcast_wasm_returns`, but for the parameters being passed to a specified callee.
-fn bitcast_wasm_params<FE: FuncEnvironment + ?Sized>(
-    environ: &mut FE,
+fn bitcast_wasm_params(
+    environ: &mut FuncEnvironment<'_>,
     callee_signature: ir::SigRef,
     arguments: &mut [Value],
     builder: &mut FunctionBuilder,

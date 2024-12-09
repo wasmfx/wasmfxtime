@@ -365,10 +365,12 @@ impl Instance {
         unsafe {
             super::func::invoke_wasm_and_catch_traps(
                 store,
-                |_default_caller| {
-                    f.func_ref
-                        .as_ref()
-                        .array_call(VMOpaqueContext::from_vmcontext(caller_vmctx), &mut [])
+                |_default_caller, vm| {
+                    f.func_ref.as_ref().array_call(
+                        vm,
+                        VMOpaqueContext::from_vmcontext(caller_vmctx),
+                        &mut [],
+                    )
                 },
                 callee_vmctx,
             )?;

@@ -132,16 +132,22 @@ forward_impls! {
 
 /// Helper method to apply `wast_config` to `config`.
 pub fn apply_wast_config(config: &mut Config, wast_config: &wasmtime_wast_util::WastConfig) {
+    use wasmtime_environ::TripleExt;
+    use wasmtime_wast_util::{Collector, Compiler};
+
     config.strategy(match wast_config.compiler {
-        wasmtime_wast_util::Compiler::Cranelift => wasmtime::Strategy::Cranelift,
-        wasmtime_wast_util::Compiler::Winch => wasmtime::Strategy::Winch,
+        Compiler::CraneliftNative | Compiler::CraneliftPulley => wasmtime::Strategy::Cranelift,
+        Compiler::Winch => wasmtime::Strategy::Winch,
     });
+    if let Compiler::CraneliftPulley = wast_config.compiler {
+        config
+            .target(&target_lexicon::Triple::pulley_host().to_string())
+            .unwrap();
+    }
     config.collector(match wast_config.collector {
-        wasmtime_wast_util::Collector::Auto => wasmtime::Collector::Auto,
-        wasmtime_wast_util::Collector::Null => wasmtime::Collector::Null,
-        wasmtime_wast_util::Collector::DeferredReferenceCounting => {
-            wasmtime::Collector::DeferredReferenceCounting
-        }
+        Collector::Auto => wasmtime::Collector::Auto,
+        Collector::Null => wasmtime::Collector::Null,
+        Collector::DeferredReferenceCounting => wasmtime::Collector::DeferredReferenceCounting,
     });
 }
 

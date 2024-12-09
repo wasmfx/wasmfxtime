@@ -122,40 +122,40 @@ macro_rules! for_each_op {
             /// 32-bit unsigned less-than-equal.
             xulteq32 = Xulteq32 { operands: BinaryOperands<XReg> };
 
-            /// `dst = zero_extend(load32(ptr))`
+            /// `dst = zero_extend(load32_le(ptr))`
             load32_u = Load32U { dst: XReg, ptr: XReg };
-            /// `dst = sign_extend(load32(ptr))`
+            /// `dst = sign_extend(load32_le(ptr))`
             load32_s = Load32S { dst: XReg, ptr: XReg };
-            /// `dst = load64(ptr)`
+            /// `dst = load64_le(ptr)`
             load64 = Load64 { dst: XReg, ptr: XReg };
 
-            /// `dst = zero_extend(load32(ptr + offset8))`
+            /// `dst = zero_extend(load32_le(ptr + offset8))`
             load32_u_offset8 = Load32UOffset8 { dst: XReg, ptr: XReg, offset: i8 };
-            /// `dst = sign_extend(load32(ptr + offset8))`
+            /// `dst = sign_extend(load32_le(ptr + offset8))`
             load32_s_offset8 = Load32SOffset8 { dst: XReg, ptr: XReg, offset: i8 };
-            /// `dst = load64(ptr + offset8)`
+            /// `dst = load64_le(ptr + offset8)`
             load64_offset8 = Load64Offset8 { dst: XReg, ptr: XReg, offset: i8 };
 
-            /// `dst = zero_extend(load32(ptr + offset64))`
+            /// `dst = zero_extend(load32_le(ptr + offset64))`
             load32_u_offset64 = Load32UOffset64 { dst: XReg, ptr: XReg, offset: i64 };
-            /// `dst = sign_extend(load32(ptr + offset64))`
+            /// `dst = sign_extend(load32_le(ptr + offset64))`
             load32_s_offset64 = Load32SOffset64 { dst: XReg, ptr: XReg, offset: i64 };
-            /// `dst = load64(ptr + offset64)`
+            /// `dst = load64_le(ptr + offset64)`
             load64_offset64 = Load64Offset64 { dst: XReg, ptr: XReg, offset: i64 };
 
-            /// `*ptr = low32(src)`
+            /// `*ptr = low32(src.to_le())`
             store32 = Store32 { ptr: XReg, src: XReg };
-            /// `*ptr = src`
+            /// `*ptr = src.to_le()`
             store64 = Store64 { ptr: XReg, src: XReg };
 
-            /// `*(ptr + sign_extend(offset8)) = low32(src)`
+            /// `*(ptr + sign_extend(offset8)) = low32(src).to_le()`
             store32_offset8 = Store32SOffset8 { ptr: XReg, offset: i8, src: XReg };
-            /// `*(ptr + sign_extend(offset8)) = src`
+            /// `*(ptr + sign_extend(offset8)) = src.to_le()`
             store64_offset8 = Store64Offset8 { ptr: XReg, offset: i8, src: XReg };
 
-            /// `*(ptr + sign_extend(offset64)) = low32(src)`
+            /// `*(ptr + sign_extend(offset64)) = low32(src).to_le()`
             store32_offset64 = Store32SOffset64 { ptr: XReg, offset: i64, src: XReg };
-            /// `*(ptr + sign_extend(offset64)) = src`
+            /// `*(ptr + sign_extend(offset64)) = src.to_le()`
             store64_offset64 = Store64Offset64 { ptr: XReg, offset: i64, src: XReg };
 
             /// `push lr; push fp; fp = sp`
@@ -195,6 +195,19 @@ macro_rules! for_each_op {
 
             /// `sp = sp + amt`
             stack_free32 = StackFree32 { amt: u32 };
+
+            /// `dst = zext(low8(src))`
+            zext8 = Zext8 { dst: XReg, src: XReg };
+            /// `dst = zext(low16(src))`
+            zext16 = Zext16 { dst: XReg, src: XReg };
+            /// `dst = zext(low32(src))`
+            zext32 = Zext32 { dst: XReg, src: XReg };
+            /// `dst = sext(low8(src))`
+            sext8 = Sext8 { dst: XReg, src: XReg };
+            /// `dst = sext(low16(src))`
+            sext16 = Sext16 { dst: XReg, src: XReg };
+            /// `dst = sext(low32(src))`
+            sext32 = Sext32 { dst: XReg, src: XReg };
         }
     };
 }
@@ -209,18 +222,30 @@ macro_rules! for_each_extended_op {
             /// Do nothing.
             nop = Nop;
 
-            /// A special opcode to use an indirect function call to reenter the
-            /// host from the interpreter.
+            /// A special opcode to halt interpreter execution and yield control
+            /// back to the host.
             ///
-            /// This is used to implement host intrinsics such as `memory.grow`
-            /// for example where that needs to reenter the host from the
-            /// interpreter.
+            /// This opcode results in `DoneReason::CallIndirectHost` where the
+            /// `id` here is shepherded along to the embedder. It's up to the
+            /// embedder to determine what to do with the `id` and the current
+            /// state of registers and the stack.
             ///
-            /// The `sig` immediate here is the Nth signature in the
-            /// `for_each_host_signature!` macro below. The 0th "argument", in
-            /// register x0, is the function pointer that's being called and all
-            /// further arguments follow after that in registers.
-            call_indirect_host = CallIndirectHost { sig: u8 };
+            /// In Wasmtime this is used to implement interpreter-to-host calls.
+            /// This is modeled as a `call` instruction where the first
+            /// parameter is the native function pointer to invoke and all
+            /// remaining parameters for the native function are in following
+            /// parameter positions (e.g. `x1`, `x2`, ...). The results of the
+            /// host call are then store in `x0`.
+            ///
+            /// Handling this in Wasmtime is done through a "relocation" which
+            /// is resolved at link-time when raw bytecode from Cranelift is
+            /// assembled into the final object that Wasmtime will interpret.
+            call_indirect_host = CallIndirectHost { id: u8 };
+
+            /// `dst = byteswap(low32(src))`
+            bswap32 = Bswap32 { dst: XReg, src: XReg };
+            /// `dst = byteswap(src)`
+            bswap64 = Bswap64 { dst: XReg, src: XReg };
         }
     };
 }

@@ -63,16 +63,32 @@ pub use self::translate::*;
 #[cfg(feature = "compile")]
 pub use self::types_builder::*;
 
-/// Helper macro to iterate over the transcoders that the host will provide
-/// adapter modules through libcalls.
+/// Helper macro, like `foreach_transcoder`, to iterate over builtins for
+/// components unrelated to transcoding.
 #[macro_export]
-macro_rules! foreach_transcoder {
+macro_rules! foreach_builtin_component_function {
     ($mac:ident) => {
         $mac! {
-            utf8_to_utf8(src: ptr_u8, len: size, dst: ptr_u8);
-            utf16_to_utf16(src: ptr_u16, len: size, dst: ptr_u16);
-            latin1_to_latin1(src: ptr_u8, len: size, dst: ptr_u8);
-            latin1_to_utf16(src: ptr_u8, len: size, dst: ptr_u16);
+            resource_new32(vmctx: vmctx, resource: u32, rep: u32) -> u64;
+            resource_rep32(vmctx: vmctx, resource: u32, idx: u32) -> u64;
+
+            // Returns an `Option<u32>` where `None` is "no destructor needed"
+            // and `Some(val)` is "run the destructor on this rep". The option
+            // is encoded as a 64-bit integer where the low bit is Some/None
+            // and bits 1-33 are the payload.
+            resource_drop(vmctx: vmctx, resource: u32, idx: u32) -> u64;
+
+            resource_transfer_own(vmctx: vmctx, src_idx: u32, src_table: u32, dst_table: u32) -> u64;
+            resource_transfer_borrow(vmctx: vmctx, src_idx: u32, src_table: u32, dst_table: u32) -> u64;
+            resource_enter_call(vmctx: vmctx);
+            resource_exit_call(vmctx: vmctx) -> bool;
+
+            trap(vmctx: vmctx, code: u8);
+
+            utf8_to_utf8(src: ptr_u8, len: size, dst: ptr_u8) -> bool;
+            utf16_to_utf16(src: ptr_u16, len: size, dst: ptr_u16) -> bool;
+            latin1_to_latin1(src: ptr_u8, len: size, dst: ptr_u8) -> bool;
+            latin1_to_utf16(src: ptr_u8, len: size, dst: ptr_u16) -> bool;
             utf8_to_utf16(src: ptr_u8, len: size, dst: ptr_u16) -> size;
             utf16_to_utf8(src: ptr_u16, src_len: size, dst: ptr_u8, dst_len: size, ret2: ptr_size) -> size;
             latin1_to_utf8(src: ptr_u8, src_len: size, dst: ptr_u8, dst_len: size, ret2: ptr_size) -> size;
@@ -85,27 +101,8 @@ macro_rules! foreach_transcoder {
     };
 }
 
-/// Helper macro, like `foreach_transcoder`, to iterate over builtins for
-/// components unrelated to transcoding.
-#[macro_export]
-macro_rules! foreach_builtin_component_function {
-    ($mac:ident) => {
-        $mac! {
-            resource_new32(vmctx: vmctx, resource: u32, rep: u32) -> u32;
-            resource_rep32(vmctx: vmctx, resource: u32, idx: u32) -> u32;
-
-            // Returns an `Option<u32>` where `None` is "no destructor needed"
-            // and `Some(val)` is "run the destructor on this rep". The option
-            // is encoded as a 64-bit integer where the low bit is Some/None
-            // and bits 1-33 are the payload.
-            resource_drop(vmctx: vmctx, resource: u32, idx: u32) -> u64;
-
-            resource_transfer_own(vmctx: vmctx, src_idx: u32, src_table: u32, dst_table: u32) -> u32;
-            resource_transfer_borrow(vmctx: vmctx, src_idx: u32, src_table: u32, dst_table: u32) -> u32;
-            resource_enter_call(vmctx: vmctx);
-            resource_exit_call(vmctx: vmctx);
-
-            trap(vmctx: vmctx, code: u8);
-        }
-    };
-}
+// Define `struct ComponentBuiltinFunctionIndex`
+declare_builtin_index!(
+    ComponentBuiltinFunctionIndex,
+    foreach_builtin_component_function
+);

@@ -22,7 +22,16 @@ fn main() {
     // run this test in.
     for test in tests {
         let test_uses_gc_types = test.test_uses_gc_types();
-        for compiler in [Compiler::Cranelift, Compiler::Winch] {
+        for compiler in [
+            Compiler::CraneliftNative,
+            Compiler::Winch,
+            Compiler::CraneliftPulley,
+        ] {
+            // Skip compilers that have no support for this host.
+            if !compiler.supports_host() {
+                continue;
+            }
+
             for pooling in [true, false] {
                 let collectors: &[_] = if !pooling && test_uses_gc_types {
                     &[Collector::DeferredReferenceCounting, Collector::Null]
@@ -104,12 +113,12 @@ fn run_wast(test: &WastTest, config: WastConfig) -> anyhow::Result<()> {
     // `crates/wast-util/src/lib.rs` file.
     let should_fail = test.should_fail(&config);
 
-    let multi_memory = test_config.multi_memory.unwrap_or(false);
-    let test_hogs_memory = test_config.hogs_memory.unwrap_or(false);
-    let relaxed_simd = test_config.relaxed_simd.unwrap_or(false);
+    let multi_memory = test_config.multi_memory();
+    let test_hogs_memory = test_config.hogs_memory();
+    let relaxed_simd = test_config.relaxed_simd();
 
     let is_cranelift = match config.compiler {
-        Compiler::Cranelift => true,
+        Compiler::CraneliftNative | Compiler::CraneliftPulley => true,
         _ => false,
     };
 
@@ -130,7 +139,11 @@ fn run_wast(test: &WastTest, config: WastConfig) -> anyhow::Result<()> {
     // Locally testing this out this drops QEMU's memory usage running this
     // tests suite from 10GiB to 600MiB. Previously we saw that crossing the
     // 10GiB threshold caused our processes to get OOM killed on CI.
-    if std::env::var("WASMTIME_TEST_NO_HOG_MEMORY").is_ok() {
+    //
+    // Note that this branch is also taken for 32-bit platforms which generally
+    // can't test much of the pooling allocator as the virtual address space is
+    // so limited.
+    if cfg!(target_pointer_width = "32") || std::env::var("WASMTIME_TEST_NO_HOG_MEMORY").is_ok() {
         // The pooling allocator hogs ~6TB of virtual address space for each
         // store, so if we don't to hog memory then ignore pooling tests.
         if config.pooling {

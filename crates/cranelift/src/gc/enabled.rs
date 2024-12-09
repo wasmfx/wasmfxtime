@@ -1,7 +1,7 @@
 use super::GcCompiler;
 use crate::func_environ::FuncEnvironment;
 use crate::gc::ArrayInit;
-use crate::translate::{FuncEnvironment as _, StructFieldsVec, TargetEnvironment};
+use crate::translate::{StructFieldsVec, TargetEnvironment};
 use crate::TRAP_INTERNAL_ASSERT;
 use cranelift_codegen::{
     cursor::FuncCursor,
@@ -203,6 +203,7 @@ fn write_func_ref_at_addr(
         .ins()
         .call(intern_func_ref_for_gc_heap, &[vmctx, func_ref]);
     let func_ref_id = builder.func.dfg.first_result(call_inst);
+    let func_ref_id = builder.ins().ireduce(ir::types::I32, func_ref_id);
 
     // Store the id in the field.
     builder.ins().store(flags, func_ref_id, field_addr, 0);
@@ -903,8 +904,6 @@ pub fn translate_ref_test(
     ref_ty: WasmRefType,
     val: ir::Value,
 ) -> WasmResult<ir::Value> {
-    use crate::translate::FuncEnvironment as _;
-
     // First special case: testing for references to bottom types.
     if ref_ty.heap_type.is_bottom() {
         let result = if ref_ty.nullable {
