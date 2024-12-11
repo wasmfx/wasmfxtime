@@ -29,7 +29,6 @@ use crate::runtime::vm::{
     Unwind, VMRuntimeLimits,
 };
 use core::ops::ControlFlow;
-use wasmtime_continuations::StackLimits;
 
 /// A WebAssembly stack trace.
 #[derive(Debug)]
@@ -234,6 +233,7 @@ impl Backtrace {
         mut f: impl FnMut(Frame) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
         use crate::runtime::vm::continuation::imp::VMContRef;
+        use wasmtime_continuations::StackLimits;
 
         // Handle the stack that is currently running (which may be a
         // continuation or the main stack).
