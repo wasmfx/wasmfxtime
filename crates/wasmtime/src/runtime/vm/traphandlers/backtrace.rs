@@ -23,7 +23,6 @@
 
 use crate::prelude::*;
 use crate::runtime::store::StoreOpaque;
-use crate::runtime::vm::continuation::imp::VMContRef;
 use crate::runtime::vm::continuation::stack_chain::StackChain;
 use crate::runtime::vm::{
     traphandlers::{tls, CallThreadState},
@@ -234,6 +233,8 @@ impl Backtrace {
         trampoline_sp: usize,
         mut f: impl FnMut(Frame) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
+        use crate::runtime::vm::continuation::imp::VMContRef;
+
         // Handle the stack that is currently running (which may be a
         // continuation or the main stack).
         Self::trace_through_wasm(unwind, pc, fp, trampoline_sp, &mut f)?;
