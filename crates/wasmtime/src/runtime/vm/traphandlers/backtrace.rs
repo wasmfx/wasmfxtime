@@ -213,6 +213,19 @@ impl Backtrace {
         log::trace!("====== Done Capturing Backtrace (reached end of activations) ======");
     }
 
+    #[cfg(all(feature = "wasmfx_baseline", not(feature = "wasmfx_no_baseline")))]
+    unsafe fn trace_through_continuations(
+        _unwind: &dyn Unwind,
+        _chain: Option<&StackChain>,
+        _pc: usize,
+        _fp: usize,
+        _trampoline_sp: usize,
+        _f: impl FnMut(Frame) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        unimplemented!()
+    }
+
+    #[cfg(any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline"))]
     unsafe fn trace_through_continuations(
         unwind: &dyn Unwind,
         chain: Option<&StackChain>,
