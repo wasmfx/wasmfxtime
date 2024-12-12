@@ -16,16 +16,18 @@ block2:
 
 ; VCode:
 ; block0:
-;   br_if x0, label2; jump label1
+;   zext8 x4, x0
+;   br_if32 x4, label2; jump label1
 ; block1:
-;   x0 = xconst8 0
+;   xconst8 x0, 0
 ;   ret
 ; block2:
-;   x0 = xconst8 1
+;   xconst8 x0, 1
 ;   ret
 ;
 ; Disassembled:
-; br_if x0, 0xa    // target = 0xa
+; zext8 x4, x0
+; br_if32 x4, 0xa    // target = 0xd
 ; xconst8 x0, 0
 ; ret
 ; xconst8 x0, 1
@@ -46,16 +48,18 @@ block2:
 
 ; VCode:
 ; block0:
-;   br_if x0, label2; jump label1
+;   zext16 x4, x0
+;   br_if32 x4, label2; jump label1
 ; block1:
-;   x0 = xconst8 0
+;   xconst8 x0, 0
 ;   ret
 ; block2:
-;   x0 = xconst8 1
+;   xconst8 x0, 1
 ;   ret
 ;
 ; Disassembled:
-; br_if x0, 0xa    // target = 0xa
+; zext16 x4, x0
+; br_if32 x4, 0xa    // target = 0xd
 ; xconst8 x0, 0
 ; ret
 ; xconst8 x0, 1
@@ -76,16 +80,16 @@ block2:
 
 ; VCode:
 ; block0:
-;   br_if x0, label2; jump label1
+;   br_if32 x0, label2; jump label1
 ; block1:
-;   x0 = xconst8 0
+;   xconst8 x0, 0
 ;   ret
 ; block2:
-;   x0 = xconst8 1
+;   xconst8 x0, 1
 ;   ret
 ;
 ; Disassembled:
-; br_if x0, 0xa    // target = 0xa
+; br_if32 x0, 0xa    // target = 0xa
 ; xconst8 x0, 0
 ; ret
 ; xconst8 x0, 1
@@ -106,16 +110,20 @@ block2:
 
 ; VCode:
 ; block0:
-;   br_if x0, label2; jump label1
+;   xconst8 x4, 0
+;   xneq64 x6, x0, x4
+;   br_if32 x6, label2; jump label1
 ; block1:
-;   x0 = xconst8 0
+;   xconst8 x0, 0
 ;   ret
 ; block2:
-;   x0 = xconst8 1
+;   xconst8 x0, 1
 ;   ret
 ;
 ; Disassembled:
-; br_if x0, 0xa    // target = 0xa
+; xconst8 x4, 0
+; xneq64 x6, x0, x4
+; br_if32 x6, 0xa    // target = 0x10
 ; xconst8 x0, 0
 ; ret
 ; xconst8 x0, 1
@@ -137,18 +145,20 @@ block2:
 
 ; VCode:
 ; block0:
-;   x5 = xeq32 x0, x1
-;   br_if x5, label2; jump label1
+;   xeq32 x6, x0, x1
+;   zext8 x6, x6
+;   br_if32 x6, label2; jump label1
 ; block1:
-;   x0 = xconst8 0
+;   xconst8 x0, 0
 ;   ret
 ; block2:
-;   x0 = xconst8 1
+;   xconst8 x0, 1
 ;   ret
 ;
 ; Disassembled:
-; xeq32 x5, x0, x1
-; br_if x5, 0xa    // target = 0xd
+; xeq32 x6, x0, x1
+; zext8 x6, x6
+; br_if32 x6, 0xa    // target = 0x10
 ; xconst8 x0, 0
 ; ret
 ; xconst8 x0, 1
@@ -170,18 +180,20 @@ block2:
 
 ; VCode:
 ; block0:
-;   x5 = xneq32 x0, x1
-;   br_if x5, label2; jump label1
+;   xneq32 x6, x0, x1
+;   zext8 x6, x6
+;   br_if32 x6, label2; jump label1
 ; block1:
-;   x0 = xconst8 0
+;   xconst8 x0, 0
 ;   ret
 ; block2:
-;   x0 = xconst8 1
+;   xconst8 x0, 1
 ;   ret
 ;
 ; Disassembled:
-; xneq32 x5, x0, x1
-; br_if x5, 0xa    // target = 0xd
+; xneq32 x6, x0, x1
+; zext8 x6, x6
+; br_if32 x6, 0xa    // target = 0x10
 ; xconst8 x0, 0
 ; ret
 ; xconst8 x0, 1
@@ -205,10 +217,10 @@ block2:
 ; block0:
 ;   br_if_xslt32 x0, x1, label2; jump label1
 ; block1:
-;   x0 = xconst8 0
+;   xconst8 x0, 0
 ;   ret
 ; block2:
-;   x0 = xconst8 1
+;   xconst8 x0, 1
 ;   ret
 ;
 ; Disassembled:
@@ -234,18 +246,20 @@ block2:
 
 ; VCode:
 ; block0:
-;   x5 = xulteq64 x1, x0
-;   br_if x5, label2; jump label1
+;   xulteq64 x6, x1, x0
+;   zext8 x6, x6
+;   br_if32 x6, label2; jump label1
 ; block1:
-;   x0 = xconst8 0
+;   xconst8 x0, 0
 ;   ret
 ; block2:
-;   x0 = xconst8 1
+;   xconst8 x0, 1
 ;   ret
 ;
 ; Disassembled:
-; xulteq64 x5, x1, x0
-; br_if x5, 0xa    // target = 0xd
+; xulteq64 x6, x1, x0
+; zext8 x6, x6
+; br_if32 x6, 0xa    // target = 0x10
 ; xconst8 x0, 0
 ; ret
 ; xconst8 x0, 1

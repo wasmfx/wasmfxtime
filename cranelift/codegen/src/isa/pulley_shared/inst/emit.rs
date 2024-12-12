@@ -1,14 +1,13 @@
 //! Pulley binary code emission.
 
 use super::*;
-use crate::ir;
+use crate::ir::{self, Endianness};
 use crate::isa::pulley_shared::abi::PulleyMachineDeps;
 use crate::isa::pulley_shared::PointerWidth;
 use core::marker::PhantomData;
 use cranelift_control::ControlPlane;
 use pulley_interpreter::encode as enc;
 use pulley_interpreter::regs::BinaryOperands;
-use pulley_interpreter::regs::Reg as _;
 
 pub struct EmitInfo {
     #[allow(dead_code)] // Will get used as we fill out this backend.
@@ -27,6 +26,15 @@ impl EmitInfo {
             shared_flags,
             isa_flags,
         }
+    }
+
+    fn endianness(&self, flags: MemFlags) -> Endianness {
+        let target_endianness = if self.isa_flags.big_endian() {
+            Endianness::Big
+        } else {
+            Endianness::Little
+        };
+        flags.endianness(target_endianness)
     }
 }
 
@@ -124,11 +132,6 @@ fn pulley_emit<P>(
         // Pseduo-instructions that don't actually encode to anything.
         Inst::Args { .. } | Inst::Rets { .. } | Inst::Unwind { .. } => {}
 
-        Inst::Trap { code } => {
-            sink.add_trap(*code);
-            enc::trap(sink);
-        }
-
         Inst::TrapIf {
             cond,
             size,
@@ -179,8 +182,6 @@ fn pulley_emit<P>(
         Inst::Nop => todo!(),
 
         Inst::GetSpecial { dst, reg } => enc::xmov(sink, dst, reg),
-
-        Inst::Ret => enc::ret(sink),
 
         Inst::LoadExtName { .. } => todo!(),
 
@@ -246,7 +247,7 @@ fn pulley_emit<P>(
             enc::jump(sink, 0x00000000);
         }
 
-        Inst::BrIf {
+        Inst::BrIf32 {
             c,
             taken,
             not_taken,
@@ -257,14 +258,14 @@ fn pulley_emit<P>(
 
             sink.use_label_at_offset(taken_start, *taken, LabelUse::Jump(2));
             let mut inverted = SmallVec::<[u8; 16]>::new();
-            enc::br_if_not(&mut inverted, c, 0x00000000);
+            enc::br_if_not32(&mut inverted, c, 0x00000000);
             debug_assert_eq!(
                 inverted.len(),
                 usize::try_from(taken_end - *start_offset).unwrap()
             );
 
             sink.add_cond_branch(*start_offset, taken_end, *taken, &inverted);
-            enc::br_if(sink, c, 0x00000000);
+            enc::br_if32(sink, c, 0x00000000);
             debug_assert_eq!(sink.cur_offset(), taken_end);
 
             // If not taken.
@@ -384,46 +385,11 @@ fn pulley_emit<P>(
             );
         }
 
-        Inst::Xmov { dst, src } => enc::xmov(sink, dst, src),
-        Inst::Fmov { dst, src } => enc::fmov(sink, dst, src),
-        Inst::Vmov { dst, src } => enc::vmov(sink, dst, src),
-
-        Inst::Xconst8 { dst, imm } => enc::xconst8(sink, dst, *imm),
-        Inst::Xconst16 { dst, imm } => enc::xconst16(sink, dst, *imm),
-        Inst::Xconst32 { dst, imm } => enc::xconst32(sink, dst, *imm),
-        Inst::Xconst64 { dst, imm } => enc::xconst64(sink, dst, *imm),
-
-        Inst::Xadd32 { dst, src1, src2 } => enc::xadd32(sink, BinaryOperands::new(dst, src1, src2)),
-        Inst::Xadd64 { dst, src1, src2 } => enc::xadd64(sink, BinaryOperands::new(dst, src1, src2)),
-        Inst::Xeq64 { dst, src1, src2 } => enc::xeq64(sink, BinaryOperands::new(dst, src1, src2)),
-        Inst::Xneq64 { dst, src1, src2 } => enc::xneq64(sink, BinaryOperands::new(dst, src1, src2)),
-        Inst::Xslt64 { dst, src1, src2 } => enc::xslt64(sink, BinaryOperands::new(dst, src1, src2)),
-        Inst::Xslteq64 { dst, src1, src2 } => {
-            enc::xslteq64(sink, BinaryOperands::new(dst, src1, src2))
-        }
-        Inst::Xult64 { dst, src1, src2 } => enc::xult64(sink, BinaryOperands::new(dst, src1, src2)),
-        Inst::Xulteq64 { dst, src1, src2 } => {
-            enc::xulteq64(sink, BinaryOperands::new(dst, src1, src2))
-        }
-
-        Inst::Xeq32 { dst, src1, src2 } => enc::xeq32(sink, BinaryOperands::new(dst, src1, src2)),
-        Inst::Xneq32 { dst, src1, src2 } => enc::xneq32(sink, BinaryOperands::new(dst, src1, src2)),
-        Inst::Xslt32 { dst, src1, src2 } => enc::xslt32(sink, BinaryOperands::new(dst, src1, src2)),
-        Inst::Xslteq32 { dst, src1, src2 } => {
-            enc::xslteq32(sink, BinaryOperands::new(dst, src1, src2))
-        }
-        Inst::Xult32 { dst, src1, src2 } => enc::xult32(sink, BinaryOperands::new(dst, src1, src2)),
-        Inst::Xulteq32 { dst, src1, src2 } => {
-            enc::xulteq32(sink, BinaryOperands::new(dst, src1, src2))
-        }
-
         Inst::LoadAddr { dst, mem } => {
             let base = mem.get_base_register();
             let offset = mem.get_offset_with_state(state);
 
             if let Some(base) = base {
-                let base = XReg::new(base).unwrap();
-
                 if offset == 0 {
                     enc::xmov(sink, dst, base);
                 } else {
@@ -431,10 +397,8 @@ fn pulley_emit<P>(
                         enc::xconst8(sink, dst, offset);
                     } else if let Ok(offset) = i16::try_from(offset) {
                         enc::xconst16(sink, dst, offset);
-                    } else if let Ok(offset) = i32::try_from(offset) {
-                        enc::xconst32(sink, dst, offset);
                     } else {
-                        enc::xconst64(sink, dst, offset);
+                        enc::xconst32(sink, dst, offset);
                     }
 
                     match P::pointer_width() {
@@ -451,62 +415,171 @@ fn pulley_emit<P>(
             }
         }
 
-        Inst::Load {
+        Inst::XLoad {
             dst,
             mem,
             ty,
-            flags: _,
+            flags,
             ext,
         } => {
+            use Endianness as E;
             use ExtKind as X;
             let r = mem.get_base_register().unwrap();
-            let r = reg_to_pulley_xreg(r);
-            let dst = reg_to_pulley_xreg(dst.to_reg());
             let x = mem.get_offset_with_state(state);
-            match (*ext, *ty, i8::try_from(x)) {
-                (X::Sign, types::I32, Ok(0)) => enc::load32_s(sink, dst, r),
-                (X::Sign, types::I32, Ok(x)) => enc::load32_s_offset8(sink, dst, r, x),
-                (X::Sign, types::I32, Err(_)) => enc::load32_s_offset64(sink, dst, r, x),
-
-                (X::Zero, types::I32, Ok(0)) => enc::load32_u(sink, dst, r),
-                (X::Zero, types::I32, Ok(x)) => enc::load32_u_offset8(sink, dst, r, x),
-                (X::Zero, types::I32, Err(_)) => enc::load32_u_offset64(sink, dst, r, x),
-
-                (_, types::I64, Ok(0)) => enc::load64(sink, dst, r),
-                (_, types::I64, Ok(x)) => enc::load64_offset8(sink, dst, r, x),
-                (_, types::I64, Err(_)) => enc::load64_offset64(sink, dst, r, x),
-
-                (..) => unimplemented!("load ext={ext:?} ty={ty}"),
+            let endian = emit_info.endianness(*flags);
+            match *ty {
+                I8 => match ext {
+                    X::None | X::Zero32 => enc::xload8_u32_offset32(sink, dst, r, x),
+                    X::Zero64 => enc::xload8_u64_offset32(sink, dst, r, x),
+                    X::Sign32 => enc::xload8_s32_offset32(sink, dst, r, x),
+                    X::Sign64 => enc::xload8_s64_offset32(sink, dst, r, x),
+                },
+                I16 => match (ext, endian) {
+                    (X::None | X::Zero32, E::Little) => {
+                        enc::xload16le_u32_offset32(sink, dst, r, x);
+                    }
+                    (X::Sign32, E::Little) => {
+                        enc::xload16le_s32_offset32(sink, dst, r, x);
+                    }
+                    (X::Zero64, E::Little) => {
+                        enc::xload16le_u64_offset32(sink, dst, r, x);
+                    }
+                    (X::Sign64, E::Little) => {
+                        enc::xload16le_s64_offset32(sink, dst, r, x);
+                    }
+                    (X::None | X::Zero32 | X::Zero64, E::Big) => {
+                        enc::xload16be_u64_offset32(sink, dst, r, x);
+                    }
+                    (X::Sign32 | X::Sign64, E::Big) => {
+                        enc::xload16be_s64_offset32(sink, dst, r, x);
+                    }
+                },
+                I32 => match (ext, endian) {
+                    (X::None | X::Zero32 | X::Sign32, E::Little) => {
+                        enc::xload32le_offset32(sink, dst, r, x);
+                    }
+                    (X::Zero64, E::Little) => {
+                        enc::xload32le_u64_offset32(sink, dst, r, x);
+                    }
+                    (X::Sign64, E::Little) => {
+                        enc::xload32le_s64_offset32(sink, dst, r, x);
+                    }
+                    (X::None | X::Zero32 | X::Zero64, E::Big) => {
+                        enc::xload32be_u64_offset32(sink, dst, r, x);
+                    }
+                    (X::Sign32 | X::Sign64, E::Big) => {
+                        enc::xload32be_s64_offset32(sink, dst, r, x);
+                    }
+                },
+                I64 => match endian {
+                    E::Little => enc::xload64le_offset32(sink, dst, r, x),
+                    E::Big => enc::xload64be_offset32(sink, dst, r, x),
+                },
+                _ => unimplemented!("xload ty={ty:?}"),
             }
         }
 
-        Inst::Store {
+        Inst::FLoad {
+            dst,
+            mem,
+            ty,
+            flags,
+        } => {
+            use Endianness as E;
+            let r = mem.get_base_register().unwrap();
+            let x = mem.get_offset_with_state(state);
+            let endian = emit_info.endianness(*flags);
+            match *ty {
+                F32 => match endian {
+                    E::Little => enc::fload32le_offset32(sink, dst, r, x),
+                    E::Big => enc::fload32be_offset32(sink, dst, r, x),
+                },
+                F64 => match endian {
+                    E::Little => enc::fload64le_offset32(sink, dst, r, x),
+                    E::Big => enc::fload64be_offset32(sink, dst, r, x),
+                },
+                _ => unimplemented!("fload ty={ty:?}"),
+            }
+        }
+
+        Inst::VLoad {
+            dst,
+            mem,
+            ty,
+            flags,
+        } => {
+            let r = mem.get_base_register().unwrap();
+            let x = mem.get_offset_with_state(state);
+            let endian = emit_info.endianness(*flags);
+            assert_eq!(endian, Endianness::Little);
+            assert_eq!(ty.bytes(), 16);
+            enc::vload128le_offset32(sink, dst, r, x);
+        }
+
+        Inst::XStore {
             mem,
             src,
             ty,
-            flags: _,
+            flags,
         } => {
+            use Endianness as E;
             let r = mem.get_base_register().unwrap();
-            let r = reg_to_pulley_xreg(r);
-            let src = reg_to_pulley_xreg(*src);
             let x = mem.get_offset_with_state(state);
-            match (*ty, i8::try_from(x)) {
-                (types::I32, Ok(0)) => enc::store32(sink, r, src),
-                (types::I32, Ok(x)) => enc::store32_offset8(sink, r, x, src),
-                (types::I32, Err(_)) => enc::store32_offset64(sink, r, x, src),
-
-                (types::I64, Ok(0)) => enc::store64(sink, r, src),
-                (types::I64, Ok(x)) => enc::store64_offset8(sink, r, x, src),
-                (types::I64, Err(_)) => enc::store64_offset64(sink, r, x, src),
-
-                (..) => todo!(),
+            let endian = emit_info.endianness(*flags);
+            match *ty {
+                I8 => enc::xstore8_offset32(sink, r, x, src),
+                I16 => match endian {
+                    E::Little => enc::xstore16le_offset32(sink, r, x, src),
+                    E::Big => enc::xstore16be_offset32(sink, r, x, src),
+                },
+                I32 => match endian {
+                    E::Little => enc::xstore32le_offset32(sink, r, x, src),
+                    E::Big => enc::xstore32be_offset32(sink, r, x, src),
+                },
+                I64 => match endian {
+                    E::Little => enc::xstore64le_offset32(sink, r, x, src),
+                    E::Big => enc::xstore64be_offset32(sink, r, x, src),
+                },
+                _ => unimplemented!("xstore ty={ty:?}"),
             }
         }
 
-        Inst::BitcastIntFromFloat32 { dst, src } => enc::bitcast_int_from_float_32(sink, dst, src),
-        Inst::BitcastIntFromFloat64 { dst, src } => enc::bitcast_int_from_float_64(sink, dst, src),
-        Inst::BitcastFloatFromInt32 { dst, src } => enc::bitcast_float_from_int_32(sink, dst, src),
-        Inst::BitcastFloatFromInt64 { dst, src } => enc::bitcast_float_from_int_64(sink, dst, src),
+        Inst::FStore {
+            mem,
+            src,
+            ty,
+            flags,
+        } => {
+            use Endianness as E;
+            let r = mem.get_base_register().unwrap();
+            let x = mem.get_offset_with_state(state);
+            let endian = emit_info.endianness(*flags);
+            match *ty {
+                F32 => match endian {
+                    E::Little => enc::fstore32le_offset32(sink, r, x, src),
+                    E::Big => enc::fstore32be_offset32(sink, r, x, src),
+                },
+                F64 => match endian {
+                    E::Little => enc::fstore64le_offset32(sink, r, x, src),
+                    E::Big => enc::fstore64be_offset32(sink, r, x, src),
+                },
+                _ => unimplemented!("fstore ty={ty:?}"),
+            }
+        }
+
+        Inst::VStore {
+            mem,
+            src,
+            ty,
+            flags,
+        } => {
+            let r = mem.get_base_register().unwrap();
+            let x = mem.get_offset_with_state(state);
+            let endian = emit_info.endianness(*flags);
+            assert_eq!(endian, Endianness::Little);
+            assert_eq!(ty.bytes(), 16);
+            enc::vstore128le_offset32(sink, r, x, src);
+        }
 
         Inst::BrTable {
             idx,
@@ -549,25 +622,27 @@ fn pulley_emit<P>(
             *start_offset = sink.cur_offset();
         }
 
-        Inst::PushFrame => {
-            sink.add_trap(ir::TrapCode::STACK_OVERFLOW);
-            enc::push_frame(sink);
+        Inst::Raw { raw } => {
+            match raw {
+                RawInst::PushFrame | RawInst::StackAlloc32 { .. } => {
+                    sink.add_trap(ir::TrapCode::STACK_OVERFLOW);
+                }
+                RawInst::XDiv32U { .. }
+                | RawInst::XDiv64U { .. }
+                | RawInst::XRem32U { .. }
+                | RawInst::XRem64U { .. } => {
+                    sink.add_trap(ir::TrapCode::INTEGER_DIVISION_BY_ZERO);
+                }
+                RawInst::XDiv32S { .. }
+                | RawInst::XDiv64S { .. }
+                | RawInst::XRem32S { .. }
+                | RawInst::XRem64S { .. } => {
+                    sink.add_trap(ir::TrapCode::INTEGER_OVERFLOW);
+                }
+                _ => {}
+            }
+            super::generated::emit(raw, sink)
         }
-        Inst::PopFrame => enc::pop_frame(sink),
-        Inst::StackAlloc32 { amt } => {
-            sink.add_trap(ir::TrapCode::STACK_OVERFLOW);
-            enc::stack_alloc32(sink, *amt);
-        }
-        Inst::StackFree32 { amt } => enc::stack_free32(sink, *amt),
-
-        Inst::Zext8 { dst, src } => enc::zext8(sink, dst, src),
-        Inst::Zext16 { dst, src } => enc::zext16(sink, dst, src),
-        Inst::Zext32 { dst, src } => enc::zext32(sink, dst, src),
-        Inst::Sext8 { dst, src } => enc::sext8(sink, dst, src),
-        Inst::Sext16 { dst, src } => enc::sext16(sink, dst, src),
-        Inst::Sext32 { dst, src } => enc::sext32(sink, dst, src),
-        Inst::Bswap32 { dst, src } => enc::bswap32(sink, dst, src),
-        Inst::Bswap64 { dst, src } => enc::bswap64(sink, dst, src),
     }
 }
 
@@ -606,8 +681,4 @@ fn br_if_cond_helper<P>(
     sink.use_label_at_offset(not_taken_start, *not_taken, LabelUse::Jump(1));
     sink.add_uncond_branch(taken_end, not_taken_end, *not_taken);
     enc::jump(sink, 0x00000000);
-}
-
-fn reg_to_pulley_xreg(r: Reg) -> pulley_interpreter::XReg {
-    pulley_interpreter::XReg::new(r.to_real_reg().unwrap().hw_enc()).unwrap()
 }
