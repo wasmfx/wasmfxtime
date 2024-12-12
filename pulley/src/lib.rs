@@ -15,6 +15,75 @@ extern crate std;
 extern crate alloc;
 
 /// Calls the given macro with each opcode.
+///
+/// # Instruction Guidelines
+///
+/// We're inventing an instruction set here which naturally brings a whole set
+/// of design questions. Note that this is explicitly intended to be only ever
+/// used for Pulley where there are a different set of design constraints than
+/// other instruction sets (e.g. general-purpose CPU ISAs). Some examples of
+/// constraints for Pulley are:
+///
+/// * Instructions must be portable to many architectures.
+/// * The Pulley ISA is mostly target-independent as the compilation target is
+///   currently only parameterized on pointer width and endianness.
+/// * Pulley instructions should be balance of time-to-decode and code size. For
+///   example super fancy bit-packing tricks might be tough to decode in
+///   software but might be worthwhile if it's quite common and greatly reduces
+///   the size of bytecode. There's not a hard-and-fast answer here, but a
+///   balance to be made.
+/// * Many "macro ops" are present to reduce the size of compiled bytecode so
+///   there is a wide set of duplicate functionality between opcodes (and this
+///   is expected).
+///
+/// Given all this it's also useful to have a set of guidelines used to name and
+/// develop Pulley instructions. As of the time of this writing it's still
+/// pretty early days for Pulley so some of these guidelines may change over
+/// time. Additionally instructions don't necessarily all follow these
+/// conventions and that may also change over time. With that in mind, here's a
+/// rough set of guidelines:
+///
+/// * Most instructions are prefixed with `x`, `f`, or `v`, indicating which
+///   type of register they're operating on. (e.g. `xadd32` operates on the `x`
+///   integer registers and `fadd32` operates on the `f` float registers).
+///
+/// * Most instructions are suffixed or otherwise contain the bit width they're
+///   operating on. For example `xadd32` is a 32-bit addition.
+///
+/// * If an instruction operates on signed or unsigned data (such as division
+///   and remainder), then the instruction is suffixed with `_s` or `_u`.
+///
+/// * Instructions operate on either 32 or 64-bit parts of a register.
+///   Instructions modifying only 32-bits of a register always modify the "low"
+///   part of a register and leave the upper part unmodified. This is intended
+///   to help 32-bit platforms where if most operations are 32-bit there's no
+///   need for extra instructions to sign or zero extend and modify the upper
+///   half of the register.
+///
+/// * Binops use `BinaryOperands<T>` for the destination and argument registers.
+///
+/// * Instructions operating on memory contain a few pieces of information:
+///
+///   ```text
+///   xload16le_u32_offset32
+///   │└─┬┘└┤└┤ └┬┘ └──┬───┘
+///   │  │  │ │  │     ▼
+///   │  │  │ │  │     addressing mode
+///   │  │  │ │  ▼
+///   │  │  │ │  width of register modified + sign-extension (optional)
+///   │  │  │ ▼
+///   │  │  │ endianness of the operation (le/be)
+///   │  │  ▼
+///   │  │  bit-width of the operation
+///   │  ▼
+///   │  what's happening (load/store)
+///   ▼
+///   register being operated on (x/f/z)
+///   ```
+///
+/// More guidelines might get added here over time, and if you have any
+/// questions feel free to raise them and we can try to add them here as well!
+#[macro_export]
 macro_rules! for_each_op {
     ( $macro:ident ) => {
         $macro! {
@@ -32,13 +101,13 @@ macro_rules! for_each_op {
             /// Unconditionally transfer control to the PC at the given offset.
             jump = Jump { offset: PcRelOffset };
 
-            /// Conditionally transfer control to the given PC offset if `cond`
-            /// contains a non-zero value.
-            br_if = BrIf { cond: XReg, offset: PcRelOffset };
+            /// Conditionally transfer control to the given PC offset if
+            /// `low32(cond)` contains a non-zero value.
+            br_if32 = BrIf { cond: XReg, offset: PcRelOffset };
 
-            /// Conditionally transfer control to the given PC offset if `cond`
-            /// contains a zero value.
-            br_if_not = BrIfNot { cond: XReg, offset: PcRelOffset };
+            /// Conditionally transfer control to the given PC offset if
+            /// `low32(cond)` contains a zero value.
+            br_if_not32 = BrIfNot { cond: XReg, offset: PcRelOffset };
 
             /// Branch if `a == b`.
             br_if_xeq32 = BrIfXeq32 { a: XReg, b: XReg, offset: PcRelOffset };
@@ -65,7 +134,7 @@ macro_rules! for_each_op {
             /// Branch if unsigned `a <= b`.
             br_if_xulteq64 = BrIfXulteq64 { a: XReg, b: XReg, offset: PcRelOffset };
 
-            /// Branch to the label indicated by `idx`.
+            /// Branch to the label indicated by `low32(idx)`.
             ///
             /// After this instruction are `amt` instances of `PcRelOffset`
             /// and the `idx` selects which one will be branched to. The value
@@ -97,66 +166,120 @@ macro_rules! for_each_op {
             /// 64-bit wrapping addition: `dst = src1 + src2`.
             xadd64 = Xadd64 { operands: BinaryOperands<XReg> };
 
-            /// 64-bit equality.
+            /// 32-bit checked unsigned addition: `low32(dst) = low32(src1) +
+            /// low32(src2)`.
+            ///
+            /// The upper 32-bits of `dst` are unmodified. Traps if the addition
+            /// overflows.
+            xadd32_uoverflow_trap = Xadd32UoverflowTrap { operands: BinaryOperands<XReg> };
+
+            /// 64-bit checked unsigned addition: `dst = src1 + src2`.
+            xadd64_uoverflow_trap = Xadd64UoverflowTrap { operands: BinaryOperands<XReg> };
+
+            /// 32-bit wrapping subtraction: `low32(dst) = low32(src1) - low32(src2)`.
+            ///
+            /// The upper 32-bits of `dst` are unmodified.
+            xsub32 = Xsub32 { operands: BinaryOperands<XReg> };
+
+            /// 64-bit wrapping subtraction: `dst = src1 - src2`.
+            xsub64 = Xsub64 { operands: BinaryOperands<XReg> };
+
+            /// `low32(dst) = trailing_zeros(low32(src))`
+            xctz32 = Xctz32 { dst: XReg, src: XReg };
+            /// `dst = trailing_zeros(src)`
+            xctz64 = Xctz64 { dst: XReg, src: XReg };
+
+            /// `low32(dst) = leading_zeros(low32(src))`
+            xclz32 = Xclz32 { dst: XReg, src: XReg };
+            /// `dst = leading_zeros(src)`
+            xclz64 = Xclz64 { dst: XReg, src: XReg };
+
+            /// `low32(dst) = low32(src1) << low5(src2)`
+            xshl32 = Xshl32 { operands: BinaryOperands<XReg> };
+            /// `low32(dst) = low32(src1) >> low5(src2)`
+            xshr32_s = Xshr32S { operands: BinaryOperands<XReg> };
+            /// `low32(dst) = low32(src1) >> low5(src2)`
+            xshr32_u = Xshr32U { operands: BinaryOperands<XReg> };
+            /// `dst = src1 << low5(src2)`
+            xshl64 = Xshl64 { operands: BinaryOperands<XReg> };
+            /// `dst = src1 >> low6(src2)`
+            xshr64_s = Xshr64S { operands: BinaryOperands<XReg> };
+            /// `dst = src1 >> low6(src2)`
+            xshr64_u = Xshr64U { operands: BinaryOperands<XReg> };
+
+            /// `low32(dst) = src1 == src2`
             xeq64 = Xeq64 { operands: BinaryOperands<XReg> };
-            /// 64-bit inequality.
+            /// `low32(dst) = src1 != src2`
             xneq64 = Xneq64 { operands: BinaryOperands<XReg> };
-            /// 64-bit signed less-than.
+            /// `low32(dst) = src1 < src2` (signed)
             xslt64 = Xslt64 { operands: BinaryOperands<XReg> };
-            /// 64-bit signed less-than-equal.
+            /// `low32(dst) = src1 <= src2` (signed)
             xslteq64 = Xslteq64 { operands: BinaryOperands<XReg> };
-            /// 64-bit unsigned less-than.
+            /// `low32(dst) = src1 < src2` (unsigned)
             xult64 = Xult64 { operands: BinaryOperands<XReg> };
-            /// 64-bit unsigned less-than-equal.
+            /// `low32(dst) = src1 <= src2` (unsigned)
             xulteq64 = Xulteq64 { operands: BinaryOperands<XReg> };
-            /// 32-bit equality.
+            /// `low32(dst) = low32(src1) == low32(src2)`
             xeq32 = Xeq32 { operands: BinaryOperands<XReg> };
-            /// 32-bit inequality.
+            /// `low32(dst) = low32(src1) != low32(src2)`
             xneq32 = Xneq32 { operands: BinaryOperands<XReg> };
-            /// 32-bit signed less-than.
+            /// `low32(dst) = low32(src1) < low32(src2)` (signed)
             xslt32 = Xslt32 { operands: BinaryOperands<XReg> };
-            /// 32-bit signed less-than-equal.
+            /// `low32(dst) = low32(src1) <= low32(src2)` (signed)
             xslteq32 = Xslteq32 { operands: BinaryOperands<XReg> };
-            /// 32-bit unsigned less-than.
+            /// `low32(dst) = low32(src1) < low32(src2)` (unsigned)
             xult32 = Xult32 { operands: BinaryOperands<XReg> };
-            /// 32-bit unsigned less-than-equal.
+            /// `low32(dst) = low32(src1) <= low32(src2)` (unsigned)
             xulteq32 = Xulteq32 { operands: BinaryOperands<XReg> };
 
-            /// `dst = zero_extend(load32_le(ptr))`
-            load32_u = Load32U { dst: XReg, ptr: XReg };
-            /// `dst = sign_extend(load32_le(ptr))`
-            load32_s = Load32S { dst: XReg, ptr: XReg };
-            /// `dst = load64_le(ptr)`
-            load64 = Load64 { dst: XReg, ptr: XReg };
+            /// `low32(dst) = zext(*(ptr + offset))`
+            xload8_u32_offset32 = XLoad8U32Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `low32(dst) = sext(*(ptr + offset))`
+            xload8_s32_offset32 = XLoad8S32Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `low32(dst) = zext(*(ptr + offset))`
+            xload16le_u32_offset32 = XLoad16LeU32Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `low32(dst) = sext(*(ptr + offset))`
+            xload16le_s32_offset32 = XLoad16LeS32Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `low32(dst) = *(ptr + offset)`
+            xload32le_offset32 = XLoad32LeOffset32 { dst: XReg, ptr: XReg, offset: i32 };
 
-            /// `dst = zero_extend(load32_le(ptr + offset8))`
-            load32_u_offset8 = Load32UOffset8 { dst: XReg, ptr: XReg, offset: i8 };
-            /// `dst = sign_extend(load32_le(ptr + offset8))`
-            load32_s_offset8 = Load32SOffset8 { dst: XReg, ptr: XReg, offset: i8 };
-            /// `dst = load64_le(ptr + offset8)`
-            load64_offset8 = Load64Offset8 { dst: XReg, ptr: XReg, offset: i8 };
+            /// `dst = zext(*(ptr + offset))`
+            xload8_u64_offset32 = XLoad8U64Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `dst = sext(*(ptr + offset))`
+            xload8_s64_offset32 = XLoad8S64Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `dst = zext(*(ptr + offset))`
+            xload16le_u64_offset32 = XLoad16LeU64Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `dst = sext(*(ptr + offset))`
+            xload16le_s64_offset32 = XLoad16LeS64Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `dst = zext(*(ptr + offset))`
+            xload32le_u64_offset32 = XLoad32LeU64Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `dst = sext(*(ptr + offset))`
+            xload32le_s64_offset32 = XLoad32LeS64Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `dst = *(ptr + offset)`
+            xload64le_offset32 = XLoad64LeOffset32 { dst: XReg, ptr: XReg, offset: i32 };
 
-            /// `dst = zero_extend(load32_le(ptr + offset64))`
-            load32_u_offset64 = Load32UOffset64 { dst: XReg, ptr: XReg, offset: i64 };
-            /// `dst = sign_extend(load32_le(ptr + offset64))`
-            load32_s_offset64 = Load32SOffset64 { dst: XReg, ptr: XReg, offset: i64 };
-            /// `dst = load64_le(ptr + offset64)`
-            load64_offset64 = Load64Offset64 { dst: XReg, ptr: XReg, offset: i64 };
+            /// `*(ptr + offset) = low8(src)`
+            xstore8_offset32 = XStore8Offset32 { ptr: XReg, offset: i32, src: XReg };
+            /// `*(ptr + offset) = low16(src)`
+            xstore16le_offset32 = XStore16LeOffset32 { ptr: XReg, offset: i32, src: XReg };
+            /// `*(ptr + offset) = low32(src)`
+            xstore32le_offset32 = XStore32LeOffset32 { ptr: XReg, offset: i32, src: XReg };
+            /// `*(ptr + offset) = low64(src)`
+            xstore64le_offset32 = XStore64LeOffset32 { ptr: XReg, offset: i32, src: XReg };
 
-            /// `*ptr = low32(src.to_le())`
-            store32 = Store32 { ptr: XReg, src: XReg };
-            /// `*ptr = src.to_le()`
-            store64 = Store64 { ptr: XReg, src: XReg };
+            /// `low32(dst) = zext(*(ptr + offset))`
+            fload32le_offset32 = Fload32LeOffset32 { dst: FReg, ptr: XReg, offset: i32 };
+            /// `dst = *(ptr + offset)`
+            fload64le_offset32 = Fload64LeOffset32 { dst: FReg, ptr: XReg, offset: i32 };
+            /// `*(ptr + offset) = low32(src)`
+            fstore32le_offset32 = Fstore32LeOffset32 { ptr: XReg, offset: i32, src: FReg };
+            /// `*(ptr + offset) = src`
+            fstore64le_offset32 = Fstore64LeOffset32 { ptr: XReg, offset: i32, src: FReg };
 
-            /// `*(ptr + sign_extend(offset8)) = low32(src).to_le()`
-            store32_offset8 = Store32SOffset8 { ptr: XReg, offset: i8, src: XReg };
-            /// `*(ptr + sign_extend(offset8)) = src.to_le()`
-            store64_offset8 = Store64Offset8 { ptr: XReg, offset: i8, src: XReg };
-
-            /// `*(ptr + sign_extend(offset64)) = low32(src).to_le()`
-            store32_offset64 = Store32SOffset64 { ptr: XReg, offset: i64, src: XReg };
-            /// `*(ptr + sign_extend(offset64)) = src.to_le()`
-            store64_offset64 = Store64Offset64 { ptr: XReg, offset: i64, src: XReg };
+            /// `dst = *(ptr + offset)`
+            vload128le_offset32 = VLoad128Offset32 { dst: VReg, ptr: XReg, offset: i32 };
+            /// `*(ptr + offset) = src`
+            vstore128le_offset32 = Vstore128LeOffset32 { ptr: XReg, offset: i32, src: VReg };
 
             /// `push lr; push fp; fp = sp`
             push_frame = PushFrame ;
@@ -208,11 +331,76 @@ macro_rules! for_each_op {
             sext16 = Sext16 { dst: XReg, src: XReg };
             /// `dst = sext(low32(src))`
             sext32 = Sext32 { dst: XReg, src: XReg };
+
+            /// `low32(dst) = low32(src1) / low32(src2)` (signed)
+            xdiv32_s = XDiv32S { operands: BinaryOperands<XReg> };
+
+            /// `dst = src1 / src2` (signed)
+            xdiv64_s = XDiv64S { operands: BinaryOperands<XReg> };
+
+            /// `low32(dst) = low32(src1) / low32(src2)` (unsigned)
+            xdiv32_u = XDiv32U { operands: BinaryOperands<XReg> };
+
+            /// `dst = src1 / src2` (unsigned)
+            xdiv64_u = XDiv64U { operands: BinaryOperands<XReg> };
+
+            /// `low32(dst) = low32(src1) % low32(src2)` (signed)
+            xrem32_s = XRem32S { operands: BinaryOperands<XReg> };
+
+            /// `dst = src1 / src2` (signed)
+            xrem64_s = XRem64S { operands: BinaryOperands<XReg> };
+
+            /// `low32(dst) = low32(src1) % low32(src2)` (unsigned)
+            xrem32_u = XRem32U { operands: BinaryOperands<XReg> };
+
+            /// `dst = src1 / src2` (unsigned)
+            xrem64_u = XRem64U { operands: BinaryOperands<XReg> };
+
+            /// `low32(dst) = low32(src1) & low32(src2)`
+            xand32 = XAnd32 { operands: BinaryOperands<XReg> };
+            /// `dst = src1 & src2`
+            xand64 = XAnd64 { operands: BinaryOperands<XReg> };
+            /// `low32(dst) = low32(src1) | low32(src2)`
+            xor32 = XOr32 { operands: BinaryOperands<XReg> };
+            /// `dst = src1 | src2`
+            xor64 = XOr64 { operands: BinaryOperands<XReg> };
+
+            /// `low32(dst) = bits`
+            fconst32 = FConst32 { dst: FReg, bits: u32 };
+            /// `dst = bits`
+            fconst64 = FConst64 { dst: FReg, bits: u64 };
+
+            /// `low32(dst) = zext(src1 == src2)`
+            feq32 = Feq32 { dst: XReg, src1: FReg, src2: FReg };
+            /// `low32(dst) = zext(src1 != src2)`
+            fneq32 = Fneq32 { dst: XReg, src1: FReg, src2: FReg };
+            /// `low32(dst) = zext(src1 < src2)`
+            flt32 = Flt32 { dst: XReg, src1: FReg, src2: FReg };
+            /// `low32(dst) = zext(src1 <= src2)`
+            flteq32 = Flteq32 { dst: XReg, src1: FReg, src2: FReg };
+            /// `low32(dst) = zext(src1 == src2)`
+            feq64 = Feq64 { dst: XReg, src1: FReg, src2: FReg };
+            /// `low32(dst) = zext(src1 != src2)`
+            fneq64 = Fneq64 { dst: XReg, src1: FReg, src2: FReg };
+            /// `low32(dst) = zext(src1 < src2)`
+            flt64 = Flt64 { dst: XReg, src1: FReg, src2: FReg };
+            /// `low32(dst) = zext(src1 <= src2)`
+            flteq64 = Flteq64 { dst: XReg, src1: FReg, src2: FReg };
+
+            /// `low32(dst) = low32(cond) ? low32(if_nonzero) : low32(if_zero)`
+            xselect32 = XSelect32 { dst: XReg, cond: XReg, if_nonzero: XReg, if_zero: XReg };
+            /// `dst = low32(cond) ? if_nonzero : if_zero`
+            xselect64 = XSelect64 { dst: XReg, cond: XReg, if_nonzero: XReg, if_zero: XReg };
+            /// `low32(dst) = low32(cond) ? low32(if_nonzero) : low32(if_zero)`
+            fselect32 = FSelect32 { dst: FReg, cond: XReg, if_nonzero: FReg, if_zero: FReg };
+            /// `dst = low32(cond) ? if_nonzero : if_zero`
+            fselect64 = FSelect64 { dst: FReg, cond: XReg, if_nonzero: FReg, if_zero: FReg };
         }
     };
 }
 
 /// Calls the given macro with each extended opcode.
+#[macro_export]
 macro_rules! for_each_extended_op {
     ( $macro:ident ) => {
         $macro! {
@@ -246,6 +434,34 @@ macro_rules! for_each_extended_op {
             bswap32 = Bswap32 { dst: XReg, src: XReg };
             /// `dst = byteswap(src)`
             bswap64 = Bswap64 { dst: XReg, src: XReg };
+
+
+            /// `dst = zext(*(ptr + offset))`
+            xload16be_u64_offset32 = XLoad16BeU64Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `dst = sext(*(ptr + offset))`
+            xload16be_s64_offset32 = XLoad16BeS64Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `dst = zext(*(ptr + offset))`
+            xload32be_u64_offset32 = XLoad32BeU64Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `dst = sext(*(ptr + offset))`
+            xload32be_s64_offset32 = XLoad32BeS64Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+            /// `dst = *(ptr + offset)`
+            xload64be_offset32 = XLoad64BeOffset32 { dst: XReg, ptr: XReg, offset: i32 };
+
+            /// `*(ptr + offset) = low16(src)`
+            xstore16be_offset32 = XStore16BeOffset32 { ptr: XReg, offset: i32, src: XReg };
+            /// `*(ptr + offset) = low32(src)`
+            xstore32be_offset32 = XStore32BeOffset32 { ptr: XReg, offset: i32, src: XReg };
+            /// `*(ptr + offset) = low64(src)`
+            xstore64be_offset32 = XStore64BeOffset32 { ptr: XReg, offset: i32, src: XReg };
+
+            /// `low32(dst) = zext(*(ptr + offset))`
+            fload32be_offset32 = Fload32BeOffset32 { dst: FReg, ptr: XReg, offset: i32 };
+            /// `dst = *(ptr + offset)`
+            fload64be_offset32 = Fload64BeOffset32 { dst: FReg, ptr: XReg, offset: i32 };
+            /// `*(ptr + offset) = low32(src)`
+            fstore32be_offset32 = Fstore32BeOffset32 { ptr: XReg, offset: i32, src: FReg };
+            /// `*(ptr + offset) = src`
+            fstore64be_offset32 = Fstore64BeOffset32 { ptr: XReg, offset: i32, src: FReg };
         }
     };
 }
