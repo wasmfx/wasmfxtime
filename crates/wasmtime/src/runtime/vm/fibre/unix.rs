@@ -158,6 +158,24 @@ impl FiberStack {
         Some(base..base + self.len)
     }
 
+    pub fn control_context_instruction_pointer(&self) -> usize {
+        // See picture at top of this file:
+        // RIP is stored 8 bytes below top of stack.
+        unsafe {
+            let ptr = self.top.sub(8) as *mut usize;
+            *ptr
+        }
+    }
+
+    pub fn control_context_frame_pointer(&self) -> usize {
+        // See picture at top of this file:
+        // RBP is stored 16 bytes below top of stack.
+        unsafe {
+            let ptr = self.top.sub(16) as *mut usize;
+            *ptr
+        }
+    }
+
     /// This function installs the launchpad for the computation to run on the
     /// fiber, such that executing a `stack_switch` instruction on the stack
     /// actually runs the desired computation.
