@@ -2497,6 +2497,7 @@ dependencies = [
  "log",
  "object",
  "sptr",
+ "wasmtime-math",
 ]
 
 [[package]]
@@ -3964,7 +3965,6 @@ dependencies = [
  "indexmap 2.2.6",
  "ittapi",
  "libc",
- "libm",
  "log",
  "mach2",
  "memfd",
@@ -4000,6 +4000,7 @@ dependencies = [
  "wasmtime-fiber",
  "wasmtime-jit-debug",
  "wasmtime-jit-icache-coherence",
+ "wasmtime-math",
  "wasmtime-slab",
  "wasmtime-versioned-export-macros",
  "wasmtime-winch",
@@ -4372,6 +4373,13 @@ dependencies = [
  "cfg-if",
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "wasmtime-math"
+version = "29.0.0"
+dependencies = [
+ "libm",
 ]
 
 [[package]]
