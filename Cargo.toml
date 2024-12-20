@@ -237,6 +237,7 @@ wasi-common = { path = "crates/wasi-common", version = "=29.0.0", default-featur
 wasmtime-fuzzing = { path = "crates/fuzzing" }
 wasmtime-jit-icache-coherence = { path = "crates/jit-icache-coherence", version = "=29.0.0" }
 wasmtime-wit-bindgen = { path = "crates/wit-bindgen", version = "=29.0.0" }
+wasmtime-math = { path = "crates/math", version = "=29.0.0" }
 test-programs-artifacts = { path = 'crates/test-programs/artifacts' }
 
 pulley-interpreter = { path = 'pulley', version = "=29.0.0" }
@@ -356,6 +357,7 @@ rustc-hash = "2.0.0"
 libtest-mimic = "0.7.0"
 semver = { version = "1.0.17", default-features = false }
 ittapi = "0.4.0"
+libm = "0.2.7"
 
 # =============================================================================
 #

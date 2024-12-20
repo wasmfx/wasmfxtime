@@ -9,8 +9,10 @@ use inst::InstAndKind;
 use crate::ir::{condcodes::*, immediates::*, types::*, *};
 use crate::isa::pulley_shared::{
     abi::*,
-    inst::{FReg, OperandSize, VReg, WritableFReg, WritableVReg, WritableXReg, XReg},
-    lower::regs,
+    inst::{
+        FReg, OperandSize, ReturnCallInfo, VReg, WritableFReg, WritableVReg, WritableXReg, XReg,
+    },
+    lower::{regs, Cond},
     *,
 };
 use crate::machinst::{
@@ -19,13 +21,23 @@ use crate::machinst::{
     CallInfo, IsTailCall, MachInst, Reg, VCodeConstant, VCodeConstantData,
 };
 use alloc::boxed::Box;
+use pulley_interpreter::U6;
 use regalloc2::PReg;
 type Unit = ();
 type VecArgPair = Vec<ArgPair>;
 type VecRetPair = Vec<RetPair>;
 type BoxCallInfo = Box<CallInfo<ExternalName>>;
 type BoxCallIndInfo = Box<CallInfo<XReg>>;
+type BoxReturnCallInfo = Box<ReturnCallInfo<ExternalName>>;
+type BoxReturnCallIndInfo = Box<ReturnCallInfo<XReg>>;
 type BoxExternalName = Box<ExternalName>;
+type XRegSet = pulley_interpreter::RegSet<pulley_interpreter::XReg>;
+
+#[expect(
+    unused_imports,
+    reason = "used on other backends, used here to suppress warning elsewhere"
+)]
+use crate::machinst::isle::UnwindInst as _;
 
 pub(crate) struct PulleyIsleContext<'a, 'b, I, B>
 where
@@ -107,12 +119,12 @@ where
         XReg::new(regs::stack_reg()).unwrap()
     }
 
-    fn fp_reg(&mut self) -> XReg {
-        XReg::new(regs::fp_reg()).unwrap()
+    fn cond_invert(&mut self, cond: &Cond) -> Cond {
+        cond.invert()
     }
 
-    fn lr_reg(&mut self) -> XReg {
-        XReg::new(regs::lr_reg()).unwrap()
+    fn u6_from_u8(&mut self, imm: u8) -> Option<U6> {
+        U6::new(imm)
     }
 }
 
