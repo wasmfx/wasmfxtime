@@ -22,6 +22,7 @@ const FEATURES: &[&str] = &[
     "WASMFX_BASELINE",
     "WASMFX_POOLING_ALLOCATOR",
     "UNSAFE_WASMFX_STACKS",
+    "DEBUG_BUILTINS",
 ];
 // ... if you add a line above this be sure to change the other locations
 // marked WASMTIME_FEATURE_LIST

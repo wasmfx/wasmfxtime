@@ -192,8 +192,8 @@ pub mod foo {
         #[allow(clippy::all)]
         pub mod chars {
             #[allow(unused_imports)]
-            use wasmtime::component::__internal::anyhow;
-            #[wasmtime::component::__internal::async_trait]
+            use wasmtime::component::__internal::{anyhow, Box};
+            #[wasmtime::component::__internal::trait_variant_make(::core::marker::Send)]
             pub trait Host: Send {
                 /// A function that accepts a character
                 async fn take_char(&mut self, x: char) -> ();
@@ -255,7 +255,6 @@ pub mod foo {
             {
                 add_to_linker_get_host(linker, get)
             }
-            #[wasmtime::component::__internal::async_trait]
             impl<_T: Host + ?Sized + Send> Host for &mut _T {
                 /// A function that accepts a character
                 async fn take_char(&mut self, x: char) -> () {
@@ -275,7 +274,7 @@ pub mod exports {
             #[allow(clippy::all)]
             pub mod chars {
                 #[allow(unused_imports)]
-                use wasmtime::component::__internal::anyhow;
+                use wasmtime::component::__internal::{anyhow, Box};
                 pub struct Guest {
                     take_char: wasmtime::component::Func,
                     return_char: wasmtime::component::Func,

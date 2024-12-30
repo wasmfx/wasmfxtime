@@ -183,7 +183,7 @@ pub mod foo {
         #[allow(clippy::all)]
         pub mod a {
             #[allow(unused_imports)]
-            use wasmtime::component::__internal::anyhow;
+            use wasmtime::component::__internal::{anyhow, Box};
             #[derive(wasmtime::component::ComponentType)]
             #[derive(wasmtime::component::Lift)]
             #[derive(wasmtime::component::Lower)]
@@ -199,7 +199,7 @@ pub mod foo {
                 assert!(0 == < Foo as wasmtime::component::ComponentType >::SIZE32);
                 assert!(1 == < Foo as wasmtime::component::ComponentType >::ALIGN32);
             };
-            #[wasmtime::component::__internal::async_trait]
+            #[wasmtime::component::__internal::trait_variant_make(::core::marker::Send)]
             pub trait Host: Send {
                 async fn a(&mut self) -> Foo;
             }
@@ -245,7 +245,6 @@ pub mod foo {
             {
                 add_to_linker_get_host(linker, get)
             }
-            #[wasmtime::component::__internal::async_trait]
             impl<_T: Host + ?Sized + Send> Host for &mut _T {
                 async fn a(&mut self) -> Foo {
                     Host::a(*self).await
@@ -255,13 +254,13 @@ pub mod foo {
         #[allow(clippy::all)]
         pub mod b {
             #[allow(unused_imports)]
-            use wasmtime::component::__internal::anyhow;
+            use wasmtime::component::__internal::{anyhow, Box};
             pub type Foo = super::super::super::foo::foo::a::Foo;
             const _: () = {
                 assert!(0 == < Foo as wasmtime::component::ComponentType >::SIZE32);
                 assert!(1 == < Foo as wasmtime::component::ComponentType >::ALIGN32);
             };
-            #[wasmtime::component::__internal::async_trait]
+            #[wasmtime::component::__internal::trait_variant_make(::core::marker::Send)]
             pub trait Host: Send {
                 async fn a(&mut self) -> Foo;
             }
@@ -307,7 +306,6 @@ pub mod foo {
             {
                 add_to_linker_get_host(linker, get)
             }
-            #[wasmtime::component::__internal::async_trait]
             impl<_T: Host + ?Sized + Send> Host for &mut _T {
                 async fn a(&mut self) -> Foo {
                     Host::a(*self).await
@@ -317,13 +315,13 @@ pub mod foo {
         #[allow(clippy::all)]
         pub mod c {
             #[allow(unused_imports)]
-            use wasmtime::component::__internal::anyhow;
+            use wasmtime::component::__internal::{anyhow, Box};
             pub type Foo = super::super::super::foo::foo::b::Foo;
             const _: () = {
                 assert!(0 == < Foo as wasmtime::component::ComponentType >::SIZE32);
                 assert!(1 == < Foo as wasmtime::component::ComponentType >::ALIGN32);
             };
-            #[wasmtime::component::__internal::async_trait]
+            #[wasmtime::component::__internal::trait_variant_make(::core::marker::Send)]
             pub trait Host: Send {
                 async fn a(&mut self) -> Foo;
             }
@@ -369,7 +367,6 @@ pub mod foo {
             {
                 add_to_linker_get_host(linker, get)
             }
-            #[wasmtime::component::__internal::async_trait]
             impl<_T: Host + ?Sized + Send> Host for &mut _T {
                 async fn a(&mut self) -> Foo {
                     Host::a(*self).await
@@ -381,13 +378,13 @@ pub mod foo {
 #[allow(clippy::all)]
 pub mod d {
     #[allow(unused_imports)]
-    use wasmtime::component::__internal::anyhow;
+    use wasmtime::component::__internal::{anyhow, Box};
     pub type Foo = super::foo::foo::c::Foo;
     const _: () = {
         assert!(0 == < Foo as wasmtime::component::ComponentType >::SIZE32);
         assert!(1 == < Foo as wasmtime::component::ComponentType >::ALIGN32);
     };
-    #[wasmtime::component::__internal::async_trait]
+    #[wasmtime::component::__internal::trait_variant_make(::core::marker::Send)]
     pub trait Host: Send {
         async fn b(&mut self) -> Foo;
     }
@@ -433,7 +430,6 @@ pub mod d {
     {
         add_to_linker_get_host(linker, get)
     }
-    #[wasmtime::component::__internal::async_trait]
     impl<_T: Host + ?Sized + Send> Host for &mut _T {
         async fn b(&mut self) -> Foo {
             Host::b(*self).await

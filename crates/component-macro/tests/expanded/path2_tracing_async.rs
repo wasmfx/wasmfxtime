@@ -179,8 +179,8 @@ pub mod paths {
         #[allow(clippy::all)]
         pub mod test {
             #[allow(unused_imports)]
-            use wasmtime::component::__internal::anyhow;
-            #[wasmtime::component::__internal::async_trait]
+            use wasmtime::component::__internal::{anyhow, Box};
+            #[wasmtime::component::__internal::trait_variant_make(::core::marker::Send)]
             pub trait Host: Send {}
             pub trait GetHost<
                 T,
@@ -214,7 +214,6 @@ pub mod paths {
             {
                 add_to_linker_get_host(linker, get)
             }
-            #[wasmtime::component::__internal::async_trait]
             impl<_T: Host + ?Sized + Send> Host for &mut _T {}
         }
     }

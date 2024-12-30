@@ -46,5 +46,6 @@ feature(winch ON)
 feature(wasmfx_baseline OFF)
 feature(wasmfx_pooling_allocator OFF)
 feature(unsafe_wasmfx_stacks OFF)
+feature(debug-builtins ON)
 # ... if you add a line above this be sure to change the other locations
 # marked WASMTIME_FEATURE_LIST

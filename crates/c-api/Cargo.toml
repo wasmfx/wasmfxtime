@@ -71,5 +71,6 @@ wasmfx_pooling_allocator = [
 # Enable the old-style unsafe malloc'd stacks
 unsafe_wasmfx_stacks = ["wasmtime/unsafe_wasmfx_stacks"]
 
+debug-builtins = ['wasmtime/debug-builtins']
 # ... if you add a line above this be sure to change the other locations
 # marked WASMTIME_FEATURE_LIST
