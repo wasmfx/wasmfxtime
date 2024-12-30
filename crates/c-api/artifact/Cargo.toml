@@ -38,6 +38,7 @@ default = [
   'gc-null',
   'cranelift',
   'winch',
+  'debug-builtins',
   # ... if you add a line above this be sure to change the other locations
   # marked WASMTIME_FEATURE_LIST
 ]
@@ -68,6 +69,6 @@ wasmfx_pooling_allocator = ["wasmtime-c-api/wasmfx_pooling_allocator"]
 # Enable the old-style unsafe malloc'd stacks
 unsafe_wasmfx_stacks = ["wasmtime-c-api/unsafe_wasmfx_stacks"]
 
-
+debug-builtins = ["wasmtime-c-api/debug-builtins"]
 # ... if you add a line above this be sure to read the comment at the end of
 # `default`

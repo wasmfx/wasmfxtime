@@ -83,9 +83,10 @@ const FULL_MATRIX = [
   // TODO(dhil): Disabled as long as we don't support other platforms
   // than x86_64 Linux.
   // {
-  //   "os": "macos-13",
+  //   "os": macos,
   //   "name": "Test macOS x86_64",
   //   "filter": "macos-x64",
+  //   "target": "x86_64-apple-darwin",
   // },
   // {
   //   "os": macos,

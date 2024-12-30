@@ -192,8 +192,8 @@ pub mod foo {
         #[allow(clippy::all)]
         pub mod simple {
             #[allow(unused_imports)]
-            use wasmtime::component::__internal::anyhow;
-            #[wasmtime::component::__internal::async_trait]
+            use wasmtime::component::__internal::{anyhow, Box};
+            #[wasmtime::component::__internal::trait_variant_make(::core::marker::Send)]
             pub trait Host: Send {
                 async fn f1(&mut self) -> ();
                 async fn f2(&mut self, a: u32) -> ();
@@ -300,7 +300,6 @@ pub mod foo {
             {
                 add_to_linker_get_host(linker, get)
             }
-            #[wasmtime::component::__internal::async_trait]
             impl<_T: Host + ?Sized + Send> Host for &mut _T {
                 async fn f1(&mut self) -> () {
                     Host::f1(*self).await
@@ -330,7 +329,7 @@ pub mod exports {
             #[allow(clippy::all)]
             pub mod simple {
                 #[allow(unused_imports)]
-                use wasmtime::component::__internal::anyhow;
+                use wasmtime::component::__internal::{anyhow, Box};
                 pub struct Guest {
                     f1: wasmtime::component::Func,
                     f2: wasmtime::component::Func,
