@@ -520,7 +520,8 @@ jobs:
   # features here and there, see the `include` matrix for more details.
   platform_checks:
     needs: determine
-    if: needs.determine.outputs.platform-checks
+    # NOTE(dhil): Disabled as the platforms are currently unsupported.
+    if: false && needs.determine.outputs.platform-checks
     name: "Platform: ${{ matrix.target }}"
     runs-on: ${{ matrix.os }}
     strategy:
