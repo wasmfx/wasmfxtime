@@ -406,8 +406,6 @@ wasmtime_config_cache_config_load(wasm_config_t *, const char *);
 
 #endif // WASMTIME_FEATURE_CACHE
 
-#ifdef WASMTIME_FEATURE_COMPILER
-
 /**
  * \brief Configures the target triple that this configuration will produce
  * machine code for.
@@ -421,6 +419,8 @@ wasmtime_config_cache_config_load(wasm_config_t *, const char *);
  * https://docs.wasmtime.dev/api/wasmtime/struct.Config.html#method.config
  */
 WASMTIME_CONFIG_PROP(wasmtime_error_t *, target, const char *)
+
+#ifdef WASMTIME_FEATURE_COMPILER
 
 /**
  * \brief Enables a target-specific flag in Cranelift.
