@@ -127,6 +127,7 @@ impl core::hash::Hash for ModuleVersionStrategy {
 pub struct Config {
     #[cfg(any(feature = "cranelift", feature = "winch"))]
     compiler_config: CompilerConfig,
+    target: Option<target_lexicon::Triple>,
     #[cfg(feature = "gc")]
     collector: Collector,
     profiling_strategy: ProfilingStrategy,
@@ -179,7 +180,6 @@ pub struct Config {
 #[derive(Debug, Clone)]
 struct CompilerConfig {
     strategy: Option<Strategy>,
-    target: Option<target_lexicon::Triple>,
     settings: HashMap<String, String>,
     flags: HashSet<String>,
     #[cfg(all(feature = "incremental-cache", feature = "cranelift"))]
@@ -193,7 +193,6 @@ impl CompilerConfig {
     fn new() -> Self {
         Self {
             strategy: Strategy::Auto.not_auto(),
-            target: None,
             settings: HashMap::new(),
             flags: HashSet::new(),
             #[cfg(all(feature = "incremental-cache", feature = "cranelift"))]
@@ -242,6 +241,7 @@ impl Config {
                 stack_size: wasmtime_continuations::DEFAULT_FIBER_SIZE,
                 red_zone_size: wasmtime_continuations::DEFAULT_RED_ZONE_SIZE,
             },
+            target: None,
             #[cfg(feature = "gc")]
             collector: Collector::default(),
             #[cfg(feature = "cache")]
@@ -317,9 +317,8 @@ impl Config {
     /// # Errors
     ///
     /// This method will error if the given target triple is not supported.
-    #[cfg(any(feature = "cranelift", feature = "winch"))]
     pub fn target(&mut self, target: &str) -> Result<&mut Self> {
-        self.compiler_config.target =
+        self.target =
             Some(target_lexicon::Triple::from_str(target).map_err(|e| anyhow::anyhow!(e))?);
 
         Ok(self)
@@ -2105,10 +2104,10 @@ impl Config {
     }
 
     /// Returns the configured compiler target for this `Config`.
-    fn compiler_target(&self) -> target_lexicon::Triple {
+    pub(crate) fn compiler_target(&self) -> target_lexicon::Triple {
         // If a target is explicitly configured, always use that.
         #[cfg(any(feature = "cranelift", feature = "winch"))]
-        if let Some(target) = self.compiler_config.target.clone() {
+        if let Some(target) = self.target.clone() {
             return target;
         }
 
@@ -2308,7 +2307,7 @@ impl Config {
         // specified (which indicates no feature inference) and the target
         // matches the host.
         let target_for_builder =
-            if self.compiler_config.target.is_none() && target == target_lexicon::Triple::host() {
+            if self.target.is_none() && target == target_lexicon::Triple::host() {
                 None
             } else {
                 Some(target.clone())
