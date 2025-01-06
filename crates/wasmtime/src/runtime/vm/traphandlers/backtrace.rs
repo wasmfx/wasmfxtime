@@ -211,6 +211,19 @@ impl Backtrace {
         log::trace!("====== Done Capturing Backtrace (reached end of activations) ======");
     }
 
+    #[cfg(all(feature = "wasmfx_baseline", not(feature = "wasmfx_no_baseline")))]
+    unsafe fn trace_through_continuations(
+        _unwind: &dyn Unwind,
+        _chain: Option<&StackChain>,
+        _pc: usize,
+        _fp: usize,
+        _trampoline_sp: usize,
+        _f: impl FnMut(Frame) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        unimplemented!()
+    }
+
+    #[cfg(any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline"))]
     unsafe fn trace_through_continuations(
         unwind: &dyn Unwind,
         chain: Option<&StackChain>,
@@ -219,6 +232,9 @@ impl Backtrace {
         trampoline_sp: usize,
         mut f: impl FnMut(Frame) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
+        use crate::runtime::vm::continuation::imp::VMContRef;
+        use wasmtime_continuations::StackLimits;
+
         // Handle the stack that is currently running (which may be a
         // continuation or the main stack).
         Self::trace_through_wasm(unwind, pc, fp, trampoline_sp, &mut f)?;
@@ -226,39 +242,66 @@ impl Backtrace {
         chain.map_or(ControlFlow::Continue(()), |chain| {
             debug_assert_ne!(*chain, StackChain::Absent);
 
-            let stack_limits_iter = chain.clone().into_iter();
+            let stack_limits_vec: Vec<*mut StackLimits> =
+                chain.clone().into_stack_limits_iter().collect();
+            let continuations_vec: Vec<*mut VMContRef> =
+                chain.clone().into_continuation_iter().collect();
 
-            // The very first entry in the stack chain is for what is currently
-            // running (which may be a continuation or main stack). However, for
-            // the currently running stack, the data in its associated
-            // `StackLimits` object is stale (see comment on
-            // `wasmtime_continuations::StackChain` for a description of the
-            // invariants).
-            // That's why we already handled the currently running stack at the
-            // beginning of the function, using data directly from the
-            // VMRuntimeLimits.
-            let remainder = stack_limits_iter.skip(1);
+            // The StackLimits of the currently running stack (whether that's a
+            // continuation or the main stack) contains undefined data, the
+            // information about that stack is saved in the Store's
+            // `VMRuntimeLimits` and handled at the top of this function already.
+            // That's why we ignore `stack_limits_vec[0]`.
+            //
+            // Note that a continuation stack's ControlContext stores
+            // information about how to resume execution *in its parent*. Thus,
+            // we combine the information from continuations_vec[i] with
+            // stack_limits_vec[i + 1] below to get information about a
+            // particular stack.
+            //
+            // There must be exactly one more `StackLimits` object than there
+            // are continuations, due to the main stack having one, too.
+            assert_eq!(stack_limits_vec.len(), continuations_vec.len() + 1);
 
-            for (continuation_opt, limits) in remainder {
-                let limits = limits.as_ref().unwrap();
-                match continuation_opt {
-                    Some(continuation) => unsafe {
-                        let cont = &*continuation;
-                        let stack_range = cont.fiber_stack().range().unwrap();
-                        debug_assert!(stack_range.contains(&limits.last_wasm_exit_fp));
-                        debug_assert!(stack_range.contains(&limits.last_wasm_entry_fp));
-                        debug_assert!(stack_range.contains(&limits.stack_limit));
-                    },
-                    None => {
-                        // reached stack information for main stack
-                    }
-                }
+            for i in 0..continuations_vec.len() {
+                let (continuation, parent_continuation, parent_limits) = unsafe {
+                    // The continuation whose control context we want to
+                    // access, to get information about how to continue
+                    // execution in its parent.
+                    let continuation = &*continuations_vec[i];
+
+                    // The stack limits describing the parent of `continuation`.
+                    let parent_limits = &*stack_limits_vec[i + 1];
+
+                    // The parent of `continuation`, if the parent is itself a
+                    // continuation. Otherwise, if `continuation` is the last
+                    // continuation (i.e., its parent is the main stack), this is
+                    // None.
+                    let parent_continuation = if i + 1 < continuations_vec.len() {
+                        Some(&*continuations_vec[i + 1])
+                    } else {
+                        None
+                    };
+                    (continuation, parent_continuation, parent_limits)
+                };
+                let fiber_stack = continuation.fiber_stack();
+                let resume_pc = fiber_stack.control_context_instruction_pointer();
+                let resume_fp = fiber_stack.control_context_frame_pointer();
+
+                // If the parent is indeed a continuation, we know the
+                // boundaries of its stack and can perform some extra checks.
+                let parent_stack_range = parent_continuation.and_then(|p| p.fiber_stack().range());
+                parent_stack_range.inspect(|parent_stack_range| {
+                    debug_assert!(parent_stack_range.contains(&resume_fp));
+                    debug_assert!(parent_stack_range.contains(&parent_limits.last_wasm_entry_fp));
+                    debug_assert!(parent_stack_range.contains(&parent_limits.stack_limit));
+                });
 
                 Self::trace_through_wasm(
                     unwind,
-                    limits.last_wasm_exit_pc,
-                    limits.last_wasm_exit_fp,
-                    limits.last_wasm_entry_fp,
+                    resume_pc,
+                    resume_fp,
+                    parent_limits.last_wasm_entry_fp,
                     &mut f,
                 )?
             }

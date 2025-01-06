@@ -4626,15 +4626,6 @@ pub(crate) fn emit(
         Inst::DummyUse { .. } => {
             // Nothing.
         }
-
-        Inst::GetRip { dst } => {
-            let here = sink.get_label();
-            sink.bind_label(here, state.ctrl_plane_mut());
-            let amode = Amode::RipRelative { target: here };
-            let dst = dst.map(|gpr| Reg::from(gpr));
-            let inst = Inst::lea(amode, dst);
-            inst.emit(sink, info, state);
-        }
     }
 
     state.clear_post_insn();
