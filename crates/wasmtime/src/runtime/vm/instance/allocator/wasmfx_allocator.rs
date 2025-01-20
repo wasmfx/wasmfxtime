@@ -33,7 +33,7 @@ pub mod wasmfx_on_demand {
                     if #[cfg(all(feature = "unsafe_wasmfx_stacks", any(not(feature = "wasmfx_baseline"), feature = "wasmfx_no_baseline")))] {
                         super::FiberStack::malloc(self.stack_size)
                     } else {
-                        super::FiberStack::new(self.stack_size)
+                        super::FiberStack::new(self.stack_size, false /* whether zeroed */)
                     }
                 }
             };

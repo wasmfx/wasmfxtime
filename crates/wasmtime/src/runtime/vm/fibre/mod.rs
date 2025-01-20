@@ -27,7 +27,7 @@ cfg_if::cfg_if! {
 
         impl FiberStack {
             /// Creates a new fiber stack of the given size.
-            pub fn new(size: usize) -> io::Result<Self> {
+            pub fn new(size: usize, _zeroed: bool /* TODO(dhil): unimplemented */) -> io::Result<Self> {
                 Ok(Self(imp::FiberStack::new(size)?))
             }
 
