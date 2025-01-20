@@ -2090,6 +2090,7 @@ fn profile_with_vtune() -> Result<()> {
         println!("> `vtune` is not available on the system path; skipping test");
         return Ok(());
     }
+    // println!("should not be here"); -> this prints
 
     let mut bin = Command::new("vtune");
     bin.args(&[
@@ -2120,7 +2121,12 @@ fn profile_with_vtune() -> Result<()> {
 
 #[cfg(target_arch = "x86_64")]
 fn is_vtune_available() -> bool {
-    Command::new("vtune").arg("-version").output().is_ok()
+    // Command::new("vtune").arg("-version").output().is_ok()
+    Command::new("vtune")
+        .arg("-version")
+        .status()
+        .expect("vtune not found")
+        .success()
 }
 
 #[test]

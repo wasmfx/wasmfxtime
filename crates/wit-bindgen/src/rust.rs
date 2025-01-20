@@ -123,6 +123,8 @@ pub trait RustGenerator<'a> {
                     TypeDefKind::Type(Type::String) => true,
                     TypeDefKind::Type(_) => false,
                     TypeDefKind::Unknown => unreachable!(),
+                    // ishmis: compatability 
+                    TypeDefKind::ErrorContext => todo!(),
                 }
             }
         }
@@ -177,6 +179,8 @@ pub trait RustGenerator<'a> {
 
             TypeDefKind::Type(t) => self.print_ty(t, mode),
             TypeDefKind::Unknown => unreachable!(),
+            // ishmis: compatability 
+            TypeDefKind::ErrorContext => todo!(),
         }
     }
 

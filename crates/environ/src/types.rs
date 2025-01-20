@@ -424,6 +424,8 @@ pub enum WasmHeapType {
     ConcreteCont(EngineOrModuleTypeIndex),
     NoCont,
 
+    // TODO(ishmis): add handlers!!
+
     // Function types.
     Func,
     ConcreteFunc(EngineOrModuleTypeIndex),

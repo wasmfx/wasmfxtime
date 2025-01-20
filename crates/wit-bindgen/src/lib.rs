@@ -1679,6 +1679,8 @@ impl<'a> InterfaceGenerator<'a> {
             TypeDefKind::Handle(handle) => self.type_handle(id, name, handle, &ty.docs),
             TypeDefKind::Resource => self.type_resource(id, name, ty, &ty.docs),
             TypeDefKind::Unknown => unreachable!(),
+            // TODO(ishmis): compatibility
+            TypeDefKind::ErrorContext => todo!(),
         }
     }
 
@@ -3275,6 +3277,7 @@ fn type_contains_lists(ty: Type, resolve: &Resolve) -> bool {
             TypeDefKind::Future(_) => todo!(),
             TypeDefKind::Stream(_) => todo!(),
             TypeDefKind::List(_) => true,
+            TypeDefKind::ErrorContext => todo!(),
         },
 
         // Technically strings are lists too, but we ignore that here because

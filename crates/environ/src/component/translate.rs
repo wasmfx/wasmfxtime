@@ -362,6 +362,7 @@ impl<'a, 'data> Translator<'a, 'data> {
         Ok((translation, self.static_modules))
     }
 
+    #[allow(unused)]
     fn translate_payload(
         &mut self,
         payload: Payload<'data>,
@@ -916,6 +917,7 @@ impl<'a, 'data> Translator<'a, 'data> {
         }
     }
 
+    #[allow(unused)]
     fn canonical_options(&self, opts: &[wasmparser::CanonicalOption]) -> LocalCanonicalOptions {
         let mut ret = LocalCanonicalOptions {
             string_encoding: StringEncoding::Utf8,

@@ -2896,6 +2896,7 @@ pub fn translate_operator(
             state.popn(param_count);
             state.pushn(&return_values);
         }
+        // TODO(ishmis): add stuff here!!
         Operator::Resume {
             cont_type_index,
             resume_table,
