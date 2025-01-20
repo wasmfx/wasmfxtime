@@ -38,10 +38,28 @@ impl RemKind {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub(crate) enum MemOpKind {
+    /// An atomic memory operation with SeqCst memory ordering.
+    Atomic,
+    /// A memory operation with no memory ordering constraint.
+    Normal,
+}
+
 #[derive(Eq, PartialEq)]
 pub(crate) enum MulWideKind {
     Signed,
     Unsigned,
+}
+
+/// Type of operation for a read-modify-write instruction.
+pub(crate) enum RmwOp {
+    Add,
+    Sub,
+    Xchg,
+    And,
+    Or,
+    Xor,
 }
 
 /// The direction to perform the memory move.
@@ -181,47 +199,179 @@ pub(crate) enum ShiftKind {
 /// lowering to machine code.
 #[derive(Copy, Clone)]
 pub(crate) enum ExtendKind {
-    /// Sign extends i32 to i64.
-    I64ExtendI32S,
-    /// Zero extends i32 to i64.
-    I64ExtendI32U,
-    // Sign extends the 8 least significant bits to 32 bits.
+    /// 8 to 32 bit signed extend.
     I32Extend8S,
-    // Sign extends the 16 least significant bits to 32 bits.
+    /// 8 to 32 bit unsigned extend.
+    I32Extend8U,
+
+    /// 16 to 32 bit signed extend.
     I32Extend16S,
-    /// Sign extends the 8 least significant bits to 64 bits.
+    /// 16 to 32 bit unsigned extend.
+    I32Extend16U,
+
+    /// 8 to 64 bit signed extend.
     I64Extend8S,
-    /// Sign extends the 16 least significant bits to 64 bits.
+    /// 8 to 64 bit unsigned extend.
+    I64Extend8U,
+
+    /// 16 to 64 bit signed extend.
     I64Extend16S,
-    /// Sign extends the 32 least significant bits to 64 bits.
+    /// 16 to 64 bit unsigned extend.
+    I64Extend16U,
+
+    /// 32 to 64 bit signed extend.
     I64Extend32S,
+    /// 32 to 64 bit unsigned extend.
+    I64Extend32U,
 }
 
 impl ExtendKind {
     pub fn signed(&self) -> bool {
-        if let Self::I64ExtendI32U = self {
-            false
-        } else {
-            true
+        match self {
+            Self::I32Extend8S
+            | Self::I32Extend16S
+            | Self::I64Extend8S
+            | Self::I64Extend16S
+            | Self::I64Extend32S => true,
+            _ => false,
         }
     }
 
     pub fn from_bits(&self) -> u8 {
         match self {
-            Self::I64ExtendI32S | Self::I64ExtendI32U | Self::I64Extend32S => 32,
-            Self::I32Extend8S | Self::I64Extend8S => 8,
-            Self::I32Extend16S | Self::I64Extend16S => 16,
+            Self::I64Extend32S | Self::I64Extend32U => 32,
+            Self::I32Extend8S | Self::I32Extend8U | Self::I64Extend8S | Self::I64Extend8U => 8,
+            Self::I32Extend16S | Self::I64Extend16S | Self::I32Extend16U | Self::I64Extend16U => 16,
         }
     }
 
     pub fn to_bits(&self) -> u8 {
         match self {
-            Self::I64ExtendI32S
-            | Self::I64ExtendI32U
+            Self::I64Extend32S
+            | Self::I64Extend32U
             | Self::I64Extend8S
+            | Self::I64Extend8U
             | Self::I64Extend16S
-            | Self::I64Extend32S => 64,
-            Self::I32Extend8S | Self::I32Extend16S => 32,
+            | Self::I64Extend16U => 64,
+            Self::I32Extend8S | Self::I32Extend8U | Self::I32Extend16U | Self::I32Extend16S => 32,
+        }
+    }
+}
+
+/// Kinds of vector extends in WebAssembly. Each MacroAssembler implementation
+/// is responsible for emitting the correct sequence of instructions when
+/// lowering to machine code.
+pub(crate) enum VectorExtendKind {
+    /// Sign extends eight 8 bit integers to eight 16 bit lanes.
+    V128Extend8x8S,
+    /// Zero extends eight 8 bit integers to eight 16 bit lanes.
+    V128Extend8x8U,
+    /// Sign extends four 16 bit integers to four 32 bit lanes.
+    V128Extend16x4S,
+    /// Zero extends four 16 bit integers to four 32 bit lanes.
+    V128Extend16x4U,
+    /// Sign extends two 32 bit integers to two 64 bit lanes.
+    V128Extend32x2S,
+    /// Zero extends two 32 bit integers to two 64 bit lanes.
+    V128Extend32x2U,
+}
+
+/// Kinds of splat loads supported by WebAssembly.
+pub(crate) enum SplatLoadKind {
+    /// 8 bits.
+    S8,
+    /// 16 bits.
+    S16,
+    /// 32 bits.
+    S32,
+    /// 64 bits.
+    S64,
+}
+
+/// Kinds of splat supported by WebAssembly.
+#[derive(Copy, Debug, Clone, Eq, PartialEq)]
+pub(crate) enum SplatKind {
+    /// 8 bit integer.
+    I8x16,
+    /// 16 bit integer.
+    I16x8,
+    /// 32 bit integer.
+    I32x4,
+    /// 64 bit integer.
+    I64x2,
+    /// 32 bit float.
+    F32x4,
+    /// 64 bit float.
+    F64x2,
+}
+
+impl SplatKind {
+    /// The lane size to use for different kinds of splats.
+    pub(crate) fn lane_size(&self) -> OperandSize {
+        match self {
+            SplatKind::I8x16 => OperandSize::S8,
+            SplatKind::I16x8 => OperandSize::S16,
+            SplatKind::I32x4 | SplatKind::F32x4 => OperandSize::S32,
+            SplatKind::I64x2 | SplatKind::F64x2 => OperandSize::S64,
+        }
+    }
+}
+
+/// Kinds of behavior supported by Wasm loads.
+pub(crate) enum LoadKind {
+    /// Load the entire bytes of the operand size without any modifications.
+    Operand(OperandSize),
+    /// Duplicate value into vector lanes.
+    Splat(SplatLoadKind),
+    /// Scalar (non-vector) extend.
+    ScalarExtend(ExtendKind),
+    /// Vector extend.
+    VectorExtend(VectorExtendKind),
+}
+
+impl LoadKind {
+    /// Returns the [`OperandSize`] used in the load operation.
+    pub(crate) fn derive_operand_size(&self) -> OperandSize {
+        match self {
+            Self::ScalarExtend(scalar) => Self::operand_size_for_scalar(scalar),
+            Self::VectorExtend(vector) => Self::operand_size_for_vector(vector),
+            Self::Splat(kind) => Self::operand_size_for_splat(kind),
+            Self::Operand(op) => *op,
+        }
+    }
+
+    fn operand_size_for_vector(vector: &VectorExtendKind) -> OperandSize {
+        match vector {
+            VectorExtendKind::V128Extend8x8S | VectorExtendKind::V128Extend8x8U => OperandSize::S8,
+            VectorExtendKind::V128Extend16x4S | VectorExtendKind::V128Extend16x4U => {
+                OperandSize::S16
+            }
+            VectorExtendKind::V128Extend32x2S | VectorExtendKind::V128Extend32x2U => {
+                OperandSize::S32
+            }
+        }
+    }
+
+    fn operand_size_for_scalar(extend_kind: &ExtendKind) -> OperandSize {
+        match extend_kind {
+            ExtendKind::I32Extend8S
+            | ExtendKind::I32Extend8U
+            | ExtendKind::I64Extend8S
+            | ExtendKind::I64Extend8U => OperandSize::S8,
+            ExtendKind::I32Extend16S
+            | ExtendKind::I32Extend16U
+            | ExtendKind::I64Extend16U
+            | ExtendKind::I64Extend16S => OperandSize::S16,
+            ExtendKind::I64Extend32U | ExtendKind::I64Extend32S => OperandSize::S32,
+        }
+    }
+
+    fn operand_size_for_splat(kind: &SplatLoadKind) -> OperandSize {
+        match kind {
+            SplatLoadKind::S8 => OperandSize::S8,
+            SplatLoadKind::S16 => OperandSize::S16,
+            SplatLoadKind::S32 => OperandSize::S32,
+            SplatLoadKind::S64 => OperandSize::S64,
         }
     }
 }
@@ -360,6 +510,20 @@ impl Imm {
             Self::I32(_) | Self::F32(_) => OperandSize::S32,
             Self::I64(_) | Self::F64(_) => OperandSize::S64,
             Self::V128(_) => OperandSize::S128,
+        }
+    }
+
+    /// Get a little endian representation of the immediate.
+    ///
+    /// This method heap allocates and is intended to be used when adding
+    /// values to the constant pool.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            Imm::I32(n) => n.to_le_bytes().to_vec(),
+            Imm::I64(n) => n.to_le_bytes().to_vec(),
+            Imm::F32(n) => n.to_le_bytes().to_vec(),
+            Imm::F64(n) => n.to_le_bytes().to_vec(),
+            Imm::V128(n) => n.to_le_bytes().to_vec(),
         }
     }
 }
@@ -628,7 +792,13 @@ pub(crate) trait MacroAssembler {
     /// regards to the endianness depending on the target ISA. For this reason,
     /// [Self::wasm_store], should be explicitly used when emitting WebAssembly
     /// stores.
-    fn wasm_store(&mut self, src: Reg, dst: Self::Address, size: OperandSize) -> Result<()>;
+    fn wasm_store(
+        &mut self,
+        src: Reg,
+        dst: Self::Address,
+        size: OperandSize,
+        op_kind: MemOpKind,
+    ) -> Result<()>;
 
     /// Perform a zero-extended stack load.
     fn load(&mut self, src: Self::Address, dst: WritableReg, size: OperandSize) -> Result<()>;
@@ -645,8 +815,8 @@ pub(crate) trait MacroAssembler {
         &mut self,
         src: Self::Address,
         dst: WritableReg,
-        size: OperandSize,
-        kind: Option<ExtendKind>,
+        kind: LoadKind,
+        op_kind: MemOpKind,
     ) -> Result<()>;
 
     /// Alias for `MacroAssembler::load` with the operand size corresponding
@@ -1134,4 +1304,25 @@ pub(crate) trait MacroAssembler {
     /// instruction (e.g. x64) so full access to `CodeGenContext` is provided.
     fn mul_wide(&mut self, context: &mut CodeGenContext<Emission>, kind: MulWideKind)
         -> Result<()>;
+
+    /// Takes the value in a src operand and replicates it across lanes of
+    /// `size` in a destination result.
+    fn splat(&mut self, context: &mut CodeGenContext<Emission>, size: SplatKind) -> Result<()>;
+
+    /// Performs a shuffle between two 128-bit vectors into a 128-bit result
+    /// using lanes as a mask to select which indexes to copy.
+    fn shuffle(&mut self, dst: WritableReg, lhs: Reg, rhs: Reg, lanes: [u8; 16]) -> Result<()>;
+
+    /// Performs the RMW `op` operation on the passed `addr`.
+    ///
+    /// The value *before* the operation was performed is written back to the `operand` register.
+    fn atomic_rmw(
+        &mut self,
+        addr: Self::Address,
+        operand: WritableReg,
+        size: OperandSize,
+        op: RmwOp,
+        flags: MemFlags,
+        extend: Option<ExtendKind>,
+    ) -> Result<()>;
 }

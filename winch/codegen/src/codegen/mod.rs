@@ -3,7 +3,8 @@ use crate::{
     codegen::BlockSig,
     isa::reg::{writable, Reg},
     masm::{
-        ExtendKind, IntCmpKind, MacroAssembler, OperandSize, RegImm, SPOffset, ShiftKind, TrapCode,
+        ExtendKind, Imm, IntCmpKind, LoadKind, MacroAssembler, MemOpKind, OperandSize, RegImm,
+        RmwOp, SPOffset, ShiftKind, TrapCode, UNTRUSTED_FLAGS,
     },
     stack::TypedReg,
 };
@@ -18,7 +19,7 @@ use wasmparser::{
     BinaryReader, FuncValidator, MemArg, Operator, ValidatorResources, VisitOperator,
     VisitSimdOperator,
 };
-use wasmtime_cranelift::{TRAP_BAD_SIGNATURE, TRAP_TABLE_OUT_OF_BOUNDS};
+use wasmtime_cranelift::{TRAP_BAD_SIGNATURE, TRAP_HEAP_MISALIGNED, TRAP_TABLE_OUT_OF_BOUNDS};
 use wasmtime_environ::{
     GlobalIndex, MemoryIndex, PtrSize, TableIndex, Tunables, TypeIndex, WasmHeapType, WasmValType,
     FUNCREF_MASK,
@@ -548,7 +549,7 @@ where
         let builtin = self
             .env
             .builtins
-            .table_get_lazy_init_func_ref::<M::ABI, M::Ptr>();
+            .table_get_lazy_init_func_ref::<M::ABI, M::Ptr>()?;
 
         // Request the builtin's  result register and use it to hold the table
         // element value. We preemptively spill and request this register to
@@ -614,8 +615,12 @@ where
         // In the defined case, mask the funcref address in place, by peeking into the
         // last element of the value stack, which was pushed by the `indirect` function
         // call above.
+        //
+        // Note that `FUNCREF_MASK` as type `usize` but here we want a 64-bit
+        // value so assert its actual value and then use a `-2` literal.
         self.masm.bind(defined)?;
-        let imm = RegImm::i64(FUNCREF_MASK as i64);
+        assert_eq!(FUNCREF_MASK as isize, -2);
+        let imm = RegImm::i64(-2);
         let dst = top.into();
         self.masm
             .and(writable!(dst), dst, imm, top.ty.try_into()?)?;
@@ -839,26 +844,81 @@ where
         Ok(addr)
     }
 
+    /// Emit checks to ensure that the address at `memarg` is correctly aligned for `size`.
+    fn emit_check_align(&mut self, memarg: &MemArg, size: OperandSize) -> Result<()> {
+        if size.bytes() > 1 {
+            // Peek addr from top of the stack by popping and pushing.
+            let addr = *self
+                .context
+                .stack
+                .peek()
+                .ok_or_else(|| CodeGenError::missing_values_in_stack())?;
+            let tmp = self.context.any_gpr(self.masm)?;
+            self.context.move_val_to_reg(&addr, tmp, self.masm)?;
+
+            if memarg.offset != 0 {
+                self.masm.add(
+                    writable!(tmp),
+                    tmp,
+                    RegImm::Imm(Imm::I64(memarg.offset)),
+                    size,
+                )?;
+            }
+
+            self.masm.and(
+                writable!(tmp),
+                tmp,
+                RegImm::Imm(Imm::I32(size.bytes() - 1)),
+                size,
+            )?;
+
+            self.masm.cmp(tmp, RegImm::Imm(Imm::i64(0)), size)?;
+            self.masm.trapif(IntCmpKind::Ne, TRAP_HEAP_MISALIGNED)?;
+            self.context.free_reg(tmp);
+        }
+
+        Ok(())
+    }
+
+    pub fn emit_compute_heap_address_align_checked(
+        &mut self,
+        memarg: &MemArg,
+        access_size: OperandSize,
+    ) -> Result<Option<Reg>> {
+        self.emit_check_align(memarg, access_size)?;
+        self.emit_compute_heap_address(memarg, access_size)
+    }
+
     /// Emit a WebAssembly load.
     pub fn emit_wasm_load(
         &mut self,
         arg: &MemArg,
-        ty: WasmValType,
-        size: OperandSize,
-        sextend: Option<ExtendKind>,
+        target_type: WasmValType,
+        kind: LoadKind,
+        op_kind: MemOpKind,
     ) -> Result<()> {
-        let addr = self.emit_compute_heap_address(&arg, size)?;
-        if let Some(addr) = addr {
-            let dst = match ty {
+        let maybe_addr = match op_kind {
+            MemOpKind::Atomic => {
+                self.emit_compute_heap_address_align_checked(&arg, kind.derive_operand_size())?
+            }
+            MemOpKind::Normal => {
+                self.emit_compute_heap_address(&arg, kind.derive_operand_size())?
+            }
+        };
+
+        if let Some(addr) = maybe_addr {
+            let dst = match target_type {
                 WasmValType::I32 | WasmValType::I64 => self.context.any_gpr(self.masm)?,
                 WasmValType::F32 | WasmValType::F64 => self.context.any_fpr(self.masm)?,
-                WasmValType::V128 => self.context.reg_for_type(ty, self.masm)?,
+                WasmValType::V128 => self.context.reg_for_type(target_type, self.masm)?,
                 _ => bail!(CodeGenError::unsupported_wasm_type()),
             };
 
             let src = self.masm.address_at_reg(addr, 0)?;
-            self.masm.wasm_load(src, writable!(dst), size, sextend)?;
-            self.context.stack.push(TypedReg::new(ty, dst).into());
+            self.masm.wasm_load(src, writable!(dst), kind, op_kind)?;
+            self.context
+                .stack
+                .push(TypedReg::new(target_type, dst).into());
             self.context.free_reg(addr);
         }
 
@@ -866,12 +926,26 @@ where
     }
 
     /// Emit a WebAssembly store.
-    pub fn emit_wasm_store(&mut self, arg: &MemArg, size: OperandSize) -> Result<()> {
+    pub fn emit_wasm_store(
+        &mut self,
+        arg: &MemArg,
+        size: OperandSize,
+        op_kind: MemOpKind,
+    ) -> Result<()> {
         let src = self.context.pop_to_reg(self.masm, None)?;
-        let addr = self.emit_compute_heap_address(&arg, size)?;
-        if let Some(addr) = addr {
-            self.masm
-                .wasm_store(src.reg.into(), self.masm.address_at_reg(addr, 0)?, size)?;
+
+        let maybe_addr = match op_kind {
+            MemOpKind::Atomic => self.emit_compute_heap_address_align_checked(&arg, size)?,
+            MemOpKind::Normal => self.emit_compute_heap_address(&arg, size)?,
+        };
+
+        if let Some(addr) = maybe_addr {
+            self.masm.wasm_store(
+                src.reg.into(),
+                self.masm.address_at_reg(addr, 0)?,
+                size,
+                op_kind,
+            )?;
 
             self.context.free_reg(addr);
         }
@@ -1016,7 +1090,7 @@ where
             return Ok(());
         }
 
-        let out_of_fuel = self.env.builtins.out_of_gas::<M::ABI, M::Ptr>();
+        let out_of_fuel = self.env.builtins.out_of_gas::<M::ABI, M::Ptr>()?;
         let fuel_reg = self.context.without::<Result<Reg>, M, _>(
             &out_of_fuel.sig().regs,
             self.masm,
@@ -1084,7 +1158,7 @@ where
         // The continuation branch if the current epoch hasn't reached the
         // configured deadline.
         let cont = self.masm.get_label()?;
-        let new_epoch = self.env.builtins.new_epoch::<M::ABI, M::Ptr>();
+        let new_epoch = self.env.builtins.new_epoch::<M::ABI, M::Ptr>()?;
 
         // Checks for runtime limits (e.g., fuel, epoch) are special since they
         // require inserting arbitrary function calls and control flow.
@@ -1289,6 +1363,37 @@ where
         // or greater than the start [CodeOffset].
         if self.masm.current_code_offset()? >= self.source_location.current.0 {
             self.masm.end_source_loc()?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn emit_atomic_rmw(
+        &mut self,
+        arg: &MemArg,
+        op: RmwOp,
+        size: OperandSize,
+        extend: Option<ExtendKind>,
+    ) -> Result<()> {
+        // Only unsigned extends are supported for atomic operations.
+        match extend {
+            Some(kind) if kind.signed() => bail!(CodeGenError::unsupported_extend_kind()),
+            _ => (),
+        }
+
+        let operand = self.context.pop_to_reg(self.masm, None).unwrap();
+        if let Some(addr) = self.emit_compute_heap_address_align_checked(arg, size)? {
+            let src = self.masm.address_at_reg(addr, 0)?;
+            self.masm.atomic_rmw(
+                src,
+                writable!(operand.reg),
+                size,
+                op,
+                UNTRUSTED_FLAGS,
+                extend,
+            )?;
+            self.context.stack.push(operand.into());
+            self.context.free_reg(addr);
         }
 
         Ok(())

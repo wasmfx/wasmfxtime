@@ -15,7 +15,7 @@ mod panic;
 /// This takes a number of parameters which are the precompiled module AOT
 /// images that are run for each of the various tests below. The first parameter
 /// is also where to put an error string, if any, if anything fails.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn run(
     error_buf: *mut u8,
     error_size: usize,
@@ -94,12 +94,12 @@ fn deserialize(engine: &Engine, module: &[u8]) -> Result<Option<Module>> {
     match unsafe { Module::deserialize(engine, module) } {
         Ok(module) => Ok(Some(module)),
         Err(e) => {
-            // Currently if signals-based-traps are disabled then this example
-            // is expected to fail to load since loading native code requires
-            // virtual memory. In the future this will go away as when
+            // Currently if custom signals/virtual memory are disabled then this
+            // example is expected to fail to load since loading native code
+            // requires virtual memory. In the future this will go away as when
             // signals-based-traps is disabled then that means that the
             // interpreter should be used which should work here.
-            if !cfg!(feature = "signals-based-traps")
+            if !cfg!(feature = "custom")
                 && e.to_string()
                     .contains("requires virtual memory to be enabled")
             {

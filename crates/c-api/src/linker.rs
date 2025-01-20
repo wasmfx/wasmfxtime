@@ -15,21 +15,21 @@ pub struct wasmtime_linker_t {
 
 wasmtime_c_api_macros::declare_own!(wasmtime_linker_t);
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn wasmtime_linker_new(engine: &wasm_engine_t) -> Box<wasmtime_linker_t> {
     Box::new(wasmtime_linker_t {
         linker: Linker::new(&engine.engine),
     })
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn wasmtime_linker_clone(linker: &wasmtime_linker_t) -> Box<wasmtime_linker_t> {
     Box::new(wasmtime_linker_t {
         linker: linker.linker.clone(),
     })
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn wasmtime_linker_allow_shadowing(
     linker: &mut wasmtime_linker_t,
     allow_shadowing: bool,
@@ -56,7 +56,7 @@ macro_rules! to_str {
 
 pub(crate) use to_str;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasmtime_linker_define(
     linker: &mut wasmtime_linker_t,
     store: WasmtimeStoreContext<'_>,
@@ -73,7 +73,7 @@ pub unsafe extern "C" fn wasmtime_linker_define(
     handle_result(linker.define(&store, module, name, item), |_linker| ())
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasmtime_linker_define_func(
     linker: &mut wasmtime_linker_t,
     module: *const u8,
@@ -92,7 +92,7 @@ pub unsafe extern "C" fn wasmtime_linker_define_func(
     handle_result(linker.linker.func_new(module, name, ty, cb), |_linker| ())
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasmtime_linker_define_func_unchecked(
     linker: &mut wasmtime_linker_t,
     module: *const u8,
@@ -115,7 +115,7 @@ pub unsafe extern "C" fn wasmtime_linker_define_func_unchecked(
 }
 
 #[cfg(feature = "wasi")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn wasmtime_linker_define_wasi(
     linker: &mut wasmtime_linker_t,
 ) -> Option<Box<wasmtime_error_t>> {
@@ -127,7 +127,7 @@ pub extern "C" fn wasmtime_linker_define_wasi(
     )
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasmtime_linker_define_instance(
     linker: &mut wasmtime_linker_t,
     store: WasmtimeStoreContextMut<'_>,
@@ -140,7 +140,7 @@ pub unsafe extern "C" fn wasmtime_linker_define_instance(
     handle_result(linker.instance(store, name, *instance), |_linker| ())
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn wasmtime_linker_instantiate(
     linker: &wasmtime_linker_t,
     store: WasmtimeStoreContextMut<'_>,
@@ -152,7 +152,7 @@ pub extern "C" fn wasmtime_linker_instantiate(
     super::instance::handle_instantiate(result, instance_ptr, trap_ptr)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasmtime_linker_instantiate_pre(
     linker: &wasmtime_linker_t,
     module: &wasmtime_module_t,
@@ -165,7 +165,7 @@ pub unsafe extern "C" fn wasmtime_linker_instantiate_pre(
     })
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasmtime_linker_module(
     linker: &mut wasmtime_linker_t,
     store: WasmtimeStoreContextMut<'_>,
@@ -178,7 +178,7 @@ pub unsafe extern "C" fn wasmtime_linker_module(
     handle_result(linker.module(store, name, &module.module), |_linker| ())
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasmtime_linker_get_default(
     linker: &wasmtime_linker_t,
     store: WasmtimeStoreContextMut<'_>,
@@ -191,7 +191,7 @@ pub unsafe extern "C" fn wasmtime_linker_get_default(
     handle_result(linker.get_default(store, name), |f| *func = f)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasmtime_linker_get(
     linker: &wasmtime_linker_t,
     store: WasmtimeStoreContextMut<'_>,

@@ -1,7 +1,7 @@
 use crate::vm::VMContext;
 
 #[link(name = "wasmtime-helpers")]
-extern "C" {
+unsafe extern "C" {
     #[wasmtime_versioned_export_macros::versioned_link]
     #[allow(improper_ctypes)]
     pub fn wasmtime_setjmp(
@@ -16,7 +16,7 @@ extern "C" {
 }
 
 cfg_if::cfg_if! {
-    if #[cfg(not(feature = "signals-based-traps"))] {
+    if #[cfg(not(has_native_signals))] {
         // If signals-based traps are disabled statically then there's no
         // platform signal handler and no per-thread init, so stub these both
         // out.

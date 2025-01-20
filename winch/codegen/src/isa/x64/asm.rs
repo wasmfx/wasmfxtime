@@ -3,25 +3,28 @@
 use crate::{
     isa::{reg::Reg, CallingConvention},
     masm::{
-        DivKind, ExtendKind, IntCmpKind, MulWideKind, OperandSize, RemKind, RoundingMode, ShiftKind,
+        DivKind, ExtendKind, IntCmpKind, MulWideKind, OperandSize, RemKind, RoundingMode,
+        ShiftKind, VectorExtendKind,
     },
+    reg::writable,
+    x64::regs::scratch,
 };
 use cranelift_codegen::{
     ir::{
-        types, ConstantPool, ExternalName, LibCall, MemFlags, SourceLoc, TrapCode,
+        types, ConstantPool, ExternalName, LibCall, MemFlags, SourceLoc, TrapCode, Type,
         UserExternalNameRef,
     },
     isa::{
         unwind::UnwindInst,
         x64::{
             args::{
-                self, AluRmiROpcode, Amode, CmpOpcode, DivSignedness, ExtMode, FromWritableReg,
-                Gpr, GprMem, GprMemImm, Imm8Gpr, Imm8Reg, RegMem, RegMemImm,
-                ShiftKind as CraneliftShiftKind, SseOpcode, SyntheticAmode, WritableGpr,
-                WritableXmm, Xmm, XmmMem, XmmMemAligned, CC,
+                self, AluRmiROpcode, Amode, AvxOpcode, CmpOpcode, DivSignedness, ExtMode,
+                FenceKind, FromWritableReg, Gpr, GprMem, GprMemImm, Imm8Gpr, Imm8Reg, RegMem,
+                RegMemImm, ShiftKind as CraneliftShiftKind, SseOpcode, SyntheticAmode, WritableGpr,
+                WritableXmm, Xmm, XmmMem, XmmMemAligned, XmmMemImm, CC,
             },
             encoding::rex::{encode_modrm, RexFlags},
-            settings as x64_settings, EmitInfo, EmitState, Inst,
+            settings as x64_settings, AtomicRmwSeqOp, EmitInfo, EmitState, Inst,
         },
     },
     settings, CallInfo, Final, MachBuffer, MachBufferFinalized, MachInstEmit, MachInstEmitState,
@@ -144,13 +147,11 @@ impl From<ShiftKind> for CraneliftShiftKind {
 impl From<ExtendKind> for ExtMode {
     fn from(value: ExtendKind) -> Self {
         match value {
-            ExtendKind::I64ExtendI32S | ExtendKind::I64ExtendI32U | ExtendKind::I64Extend32S => {
-                ExtMode::LQ
-            }
-            ExtendKind::I32Extend8S => ExtMode::BL,
-            ExtendKind::I32Extend16S => ExtMode::WL,
-            ExtendKind::I64Extend8S => ExtMode::BQ,
-            ExtendKind::I64Extend16S => ExtMode::WQ,
+            ExtendKind::I64Extend32U | ExtendKind::I64Extend32S => ExtMode::LQ,
+            ExtendKind::I32Extend8S | ExtendKind::I32Extend8U => ExtMode::BL,
+            ExtendKind::I32Extend16S | ExtendKind::I32Extend16U => ExtMode::WL,
+            ExtendKind::I64Extend8S | ExtendKind::I64Extend8U => ExtMode::BQ,
+            ExtendKind::I64Extend16S | ExtendKind::I64Extend16U => ExtMode::WQ,
         }
     }
 }
@@ -468,6 +469,139 @@ impl Assembler {
             op,
             src: XmmMem::unwrap_new(RegMem::mem(src)),
             dst: dst.map(Into::into),
+        });
+    }
+
+    /// Vector load and extend.
+    pub fn xmm_vpmov_mr(
+        &mut self,
+        src: &Address,
+        dst: WritableReg,
+        ext: VectorExtendKind,
+        flags: MemFlags,
+    ) {
+        assert!(dst.to_reg().is_float());
+
+        let op = match ext {
+            VectorExtendKind::V128Extend8x8S => AvxOpcode::Vpmovsxbw,
+            VectorExtendKind::V128Extend8x8U => AvxOpcode::Vpmovzxbw,
+            VectorExtendKind::V128Extend16x4S => AvxOpcode::Vpmovsxwd,
+            VectorExtendKind::V128Extend16x4U => AvxOpcode::Vpmovzxwd,
+            VectorExtendKind::V128Extend32x2S => AvxOpcode::Vpmovsxdq,
+            VectorExtendKind::V128Extend32x2U => AvxOpcode::Vpmovzxdq,
+        };
+
+        let src = Self::to_synthetic_amode(
+            src,
+            &mut self.pool,
+            &mut self.constants,
+            &mut self.buffer,
+            flags,
+        );
+
+        self.emit(Inst::XmmUnaryRmRVex {
+            op,
+            src: XmmMem::unwrap_new(RegMem::mem(src)),
+            dst: dst.to_reg().into(),
+        });
+    }
+
+    /// Vector load and broadcast.
+    pub fn xmm_vpbroadcast_mr(
+        &mut self,
+        src: &Address,
+        dst: WritableReg,
+        size: OperandSize,
+        flags: MemFlags,
+    ) {
+        assert!(dst.to_reg().is_float());
+
+        let src = Self::to_synthetic_amode(
+            src,
+            &mut self.pool,
+            &mut self.constants,
+            &mut self.buffer,
+            flags,
+        );
+
+        let op = match size {
+            OperandSize::S8 => AvxOpcode::Vpbroadcastb,
+            OperandSize::S16 => AvxOpcode::Vpbroadcastw,
+            OperandSize::S32 => AvxOpcode::Vpbroadcastd,
+            _ => unimplemented!(),
+        };
+
+        self.emit(Inst::XmmUnaryRmRVex {
+            op,
+            src: XmmMem::unwrap_new(RegMem::mem(src)),
+            dst: dst.to_reg().into(),
+        });
+    }
+
+    /// Value in `src` is broadcast into lanes of `size` in `dst`.
+    pub fn xmm_vpbroadcast_rr(&mut self, src: Reg, dst: WritableReg, size: OperandSize) {
+        assert!(src.is_float() && dst.to_reg().is_float());
+
+        let op = match size {
+            OperandSize::S8 => AvxOpcode::Vpbroadcastb,
+            OperandSize::S16 => AvxOpcode::Vpbroadcastw,
+            OperandSize::S32 => AvxOpcode::Vpbroadcastd,
+            _ => unimplemented!(),
+        };
+
+        self.emit(Inst::XmmUnaryRmRVex {
+            op,
+            src: XmmMem::unwrap_new(src.into()),
+            dst: dst.to_reg().into(),
+        });
+    }
+
+    /// Memory to register shuffle of bytes in vector.
+    pub fn xmm_vpshuf_mr(
+        &mut self,
+        src: &Address,
+        dst: WritableReg,
+        mask: u8,
+        size: OperandSize,
+        flags: MemFlags,
+    ) {
+        assert!(dst.to_reg().is_float());
+
+        let op = match size {
+            OperandSize::S32 => AvxOpcode::Vpshufd,
+            _ => unimplemented!(),
+        };
+
+        let src = Self::to_synthetic_amode(
+            src,
+            &mut self.pool,
+            &mut self.constants,
+            &mut self.buffer,
+            flags,
+        );
+        self.emit(Inst::XmmUnaryRmRImmVex {
+            op,
+            src: XmmMem::unwrap_new(RegMem::Mem { addr: src }),
+            dst: dst.to_reg().into(),
+            imm: mask,
+        });
+    }
+
+    /// Register to register shuffle of bytes in vector.
+    pub fn xmm_vpshuf_rr(&mut self, src: Reg, dst: WritableReg, mask: u8, size: OperandSize) {
+        assert!(src.is_float() && dst.to_reg().is_float());
+
+        let op = match size {
+            OperandSize::S16 => AvxOpcode::Vpshuflw,
+            OperandSize::S32 => AvxOpcode::Vpshufd,
+            _ => unimplemented!(),
+        };
+
+        self.emit(Inst::XmmUnaryRmRImmVex {
+            op,
+            src: XmmMem::from(Xmm::from(src)),
+            imm: mask,
+            dst: dst.to_reg().into(),
         });
     }
 
@@ -990,6 +1124,83 @@ impl Assembler {
         });
     }
 
+    pub fn lock_xadd(
+        &mut self,
+        addr: Address,
+        operand: Reg,
+        dst: WritableReg,
+        size: OperandSize,
+        flags: MemFlags,
+    ) {
+        assert!(addr.is_offset());
+        let mem = Self::to_synthetic_amode(
+            &addr,
+            &mut self.pool,
+            &mut self.constants,
+            &mut self.buffer,
+            flags,
+        );
+
+        self.emit(Inst::LockXadd {
+            size: size.into(),
+            operand: operand.into(),
+            mem,
+            dst_old: dst.map(Into::into),
+        });
+    }
+
+    pub fn atomic_rmw_seq(
+        &mut self,
+        addr: Address,
+        operand: Reg,
+        dst: WritableReg,
+        size: OperandSize,
+        flags: MemFlags,
+        op: AtomicRmwSeqOp,
+    ) {
+        assert!(addr.is_offset());
+        let mem = Self::to_synthetic_amode(
+            &addr,
+            &mut self.pool,
+            &mut self.constants,
+            &mut self.buffer,
+            flags,
+        );
+        self.emit(Inst::AtomicRmwSeq {
+            ty: Type::int_with_byte_size(size.bytes() as _).unwrap(),
+            mem,
+            operand: operand.into(),
+            temp: writable!(scratch().into()),
+            dst_old: dst.map(Into::into),
+            op,
+        });
+    }
+
+    pub fn xchg(
+        &mut self,
+        addr: Address,
+        operand: Reg,
+        dst: WritableReg,
+        size: OperandSize,
+        flags: MemFlags,
+    ) {
+        assert!(addr.is_offset());
+        let mem = Self::to_synthetic_amode(
+            &addr,
+            &mut self.pool,
+            &mut self.constants,
+            &mut self.buffer,
+            flags,
+        );
+
+        self.emit(Inst::Xchg {
+            size: size.into(),
+            operand: operand.into(),
+            mem,
+            dst_old: dst.map(Into::into),
+        });
+    }
+
     pub fn cmp_ir(&mut self, src1: Reg, imm: i32, size: OperandSize) {
         let imm = RegMemImm::imm(imm as u32);
 
@@ -1399,6 +1610,39 @@ impl Assembler {
             dst_lo: dst_lo.to_reg().into(),
             dst_hi: dst_hi.to_reg().into(),
         });
+    }
+
+    /// Shuffles bytes in `src` according to contents of `mask` and puts
+    /// result in `dst`.
+    pub fn xmm_vpshufb_rrm(&mut self, dst: WritableReg, src: Reg, mask: &Address) {
+        let mask = Self::to_synthetic_amode(
+            mask,
+            &mut self.pool,
+            &mut self.constants,
+            &mut self.buffer,
+            MemFlags::trusted(),
+        );
+
+        self.emit(Inst::XmmRmiRVex {
+            op: args::AvxOpcode::Vpshufb,
+            src1: src.into(),
+            src2: XmmMemImm::unwrap_new(RegMemImm::Mem { addr: mask }),
+            dst: dst.to_reg().into(),
+        });
+    }
+
+    /// Bitwise OR of `src1` and `src2`.
+    pub fn vpor(&mut self, dst: WritableReg, src1: Reg, src2: Reg) {
+        self.emit(Inst::XmmRmiRVex {
+            op: args::AvxOpcode::Vpor,
+            src1: src1.into(),
+            src2: XmmMemImm::unwrap_new(src2.into()),
+            dst: dst.to_reg().into(),
+        })
+    }
+
+    pub fn fence(&mut self, kind: FenceKind) {
+        self.emit(Inst::Fence { kind });
     }
 }
 

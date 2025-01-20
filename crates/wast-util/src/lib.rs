@@ -288,7 +288,6 @@ impl Compiler {
             // Cranelift has quite yet.
             Compiler::Winch => {
                 if config.gc()
-                    || config.threads()
                     || config.tail_call()
                     || config.function_references()
                     || config.gc()
@@ -312,7 +311,7 @@ impl Compiler {
                 // support at this time (pulley is a work-in-progress) and so
                 // individual tests are listed below as "should fail" even if
                 // they're not covered in this list.
-                if config.wide_arithmetic() || config.exceptions() || config.stack_switching() {
+                if config.exceptions() || config.stack_switching() {
                     return true;
                 }
             }
@@ -417,29 +416,6 @@ impl WastTest {
             return true;
         }
 
-        // Pulley supports a mishmash of proposals at this time as it's in an
-        // interim state. It doesn't support all of the MVP but it supports
-        // enough to pass some GC tests for example. This means that
-        // `Compiler::should_fail` is pretty liberal (the check above). To
-        // handle this there's an extra check here for an exhaustive list of
-        // unsupported tests on Pulley. This list will get burned down as
-        // features in Pulley are implemented.
-        if config.compiler == Compiler::CraneliftPulley {
-            let unsupported = [
-                "misc_testsuite/simd/v128-select.wast",
-                "spec_testsuite/proposals/relaxed-simd/i32x4_relaxed_trunc.wast",
-                "spec_testsuite/proposals/memory64/i32x4_relaxed_trunc.wast",
-                "spec_testsuite/simd_i32x4_trunc_sat_f32x4.wast",
-                "spec_testsuite/simd_i32x4_trunc_sat_f64x2.wast",
-                "spec_testsuite/simd_load.wast",
-                "spec_testsuite/simd_splat.wast",
-            ];
-
-            if unsupported.iter().any(|part| self.path.ends_with(part)) {
-                return true;
-            }
-        }
-
         // Disable spec tests for proposals that Winch does not implement yet.
         if config.compiler == Compiler::Winch {
             let unsupported = [
@@ -489,7 +465,6 @@ impl WastTest {
                 "misc_testsuite/simd/spillslot-size-fuzzbug.wast",
                 "misc_testsuite/simd/unaligned-load.wast",
                 "multi-memory/simd_memory-multi.wast",
-                "spec_testsuite/simd_align.wast",
                 "spec_testsuite/simd_bit_shift.wast",
                 "spec_testsuite/simd_bitwise.wast",
                 "spec_testsuite/simd_boolean.wast",
@@ -543,10 +518,29 @@ impl WastTest {
                 "spec_testsuite/simd_store32_lane.wast",
                 "spec_testsuite/simd_store64_lane.wast",
                 "spec_testsuite/simd_store8_lane.wast",
+                // thread related failures
+                "proposals/threads/atomic.wast",
+                "misc_testsuite/threads/wait_notify.wast",
+                "misc_testsuite/threads/atomics_wait_address.wast",
+                "misc_testsuite/threads/atomics_notify.wast",
             ];
 
             if unsupported.iter().any(|part| self.path.ends_with(part)) {
                 return true;
+            }
+
+            // SIMD on Winch requires AVX instructions.
+            #[cfg(target_arch = "x86_64")]
+            if !(std::is_x86_feature_detected!("avx") && std::is_x86_feature_detected!("avx2")) {
+                let unsupported = [
+                    "misc_testsuite/winch/_simd_lane.wast",
+                    "misc_testsuite/winch/_simd_splat.wast",
+                    "spec_testsuite/simd_align.wast",
+                ];
+
+                if unsupported.iter().any(|part| self.path.ends_with(part)) {
+                    return true;
+                }
             }
         }
 

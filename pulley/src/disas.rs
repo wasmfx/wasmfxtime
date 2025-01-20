@@ -22,6 +22,7 @@ pub struct Disassembler<'a> {
     temp: String,
     offsets: bool,
     hexdump: bool,
+    br_tables: bool,
 }
 
 impl<'a> Disassembler<'a> {
@@ -44,6 +45,7 @@ impl<'a> Disassembler<'a> {
             temp: String::new(),
             offsets: true,
             hexdump: true,
+            br_tables: true,
         }
     }
 
@@ -60,6 +62,14 @@ impl<'a> Disassembler<'a> {
     /// True by default.
     pub fn hexdump(&mut self, hexdump: bool) -> &mut Self {
         self.hexdump = hexdump;
+        self
+    }
+
+    /// Whether to include branche tables in the disassembly.
+    ///
+    /// True by default.
+    pub fn br_tables(&mut self, enable: bool) -> &mut Self {
+        self.br_tables = enable;
         self
     }
 
@@ -95,7 +105,9 @@ impl<'a> Disassembler<'a> {
             self.after_visit();
             self.start = self.bytecode.position();
             if let Ok(offset) = PcRelOffset::decode(self.bytecode()) {
-                offset.disas(self.start + self.start_offset, &mut self.temp);
+                if self.br_tables {
+                    offset.disas(self.start + self.start_offset, &mut self.temp);
+                }
             }
         }
     }
@@ -187,9 +199,14 @@ impl Disas for u128 {
 
 impl Disas for PcRelOffset {
     fn disas(&self, position: usize, disas: &mut String) {
-        let offset = isize::try_from(i32::from(*self)).unwrap();
-        let target = position.wrapping_add(offset as usize);
-        write!(disas, "{offset:#x}    // target = {target:#x}").unwrap()
+        let offset = i64::from(i32::from(*self));
+        let target = (position as u64).wrapping_add(offset as u64);
+        let (prefix, offset) = if offset < 0 {
+            ("-", -offset)
+        } else {
+            ("", offset)
+        };
+        write!(disas, "{prefix}{offset:#x}    // target = {target:#x}").unwrap()
     }
 }
 
@@ -239,7 +256,7 @@ where
     }
 }
 
-impl<R: Reg + Disas> Disas for RegSet<R> {
+impl<R: Reg + Disas> Disas for UpperRegSet<R> {
     fn disas(&self, position: usize, disas: &mut String) {
         disas_list(position, disas, *self)
     }

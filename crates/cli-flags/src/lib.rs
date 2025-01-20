@@ -131,10 +131,6 @@ wasmtime_option_group! {
         /// pooling allocator. (default: 100)
         pub pooling_max_unused_warm_slots: Option<u32>,
 
-        /// Configures whether or not stacks used for async futures are reset to
-        /// zero after usage. (default: false)
-        pub pooling_async_stack_zeroing: Option<bool>,
-
         /// How much memory, in bytes, to keep resident for async stacks allocated
         /// with the pooling allocator. (default: 0)
         pub pooling_async_stack_keep_resident: Option<usize>,
@@ -276,6 +272,9 @@ wasmtime_option_group! {
         /// difference between the two is how much stack the host has to execute
         /// on.
         pub async_stack_size: Option<usize>,
+        /// Configures whether or not stacks used for async futures are zeroed
+        /// before (re)use as a defense-in-depth mechanism. (default: false)
+        pub async_stack_zeroing: Option<bool>,
         /// Allow unknown exports when running commands.
         pub unknown_exports_allow: Option<bool>,
         /// Allow the main module to import unknown functions, using an
@@ -671,21 +670,15 @@ impl CommonOptions {
             .opts
             .memory_reservation
             .or(self.opts.static_memory_maximum_size);
-        match_feature! {
-            ["signals-based-traps" : memory_reservation]
-            size => config.memory_reservation(size),
-            _ => err,
+        if let Some(size) = memory_reservation {
+            config.memory_reservation(size);
         }
 
-        match_feature! {
-            ["signals-based-traps" : self.opts.static_memory_forced]
-            enable => config.memory_may_move(!enable),
-            _ => err,
+        if let Some(enable) = self.opts.static_memory_forced {
+            config.memory_may_move(!enable);
         }
-        match_feature! {
-            ["signals-based-traps" : self.opts.memory_may_move]
-            enable => config.memory_may_move(enable),
-            _ => err,
+        if let Some(enable) = self.opts.memory_may_move {
+            config.memory_may_move(enable);
         }
 
         let memory_guard_size = self
@@ -693,25 +686,19 @@ impl CommonOptions {
             .static_memory_guard_size
             .or(self.opts.dynamic_memory_guard_size)
             .or(self.opts.memory_guard_size);
-        match_feature! {
-            ["signals-based-traps" : memory_guard_size]
-            size => config.memory_guard_size(size),
-            _ => err,
+        if let Some(size) = memory_guard_size {
+            config.memory_guard_size(size);
         }
 
         let mem_for_growth = self
             .opts
             .memory_reservation_for_growth
             .or(self.opts.dynamic_memory_reserved_for_growth);
-        match_feature! {
-            ["signals-based-traps" : mem_for_growth]
-            size => config.memory_reservation_for_growth(size),
-            _ => err,
+        if let Some(size) = mem_for_growth {
+            config.memory_reservation_for_growth(size);
         }
-        match_feature! {
-            ["signals-based-traps" : self.opts.guard_before_linear_memory]
-            enable => config.guard_before_linear_memory(enable),
-            _ => err,
+        if let Some(enable) = self.opts.guard_before_linear_memory {
+            config.guard_before_linear_memory(enable);
         }
         if let Some(enable) = self.opts.table_lazy_init {
             config.table_lazy_init(enable);
@@ -728,15 +715,11 @@ impl CommonOptions {
         if let Some(enable) = self.debug.address_map {
             config.generate_address_map(enable);
         }
-        match_feature! {
-            ["signals-based-traps" : self.opts.memory_init_cow]
-            enable => config.memory_init_cow(enable),
-            _ => err,
+        if let Some(enable) = self.opts.memory_init_cow {
+            config.memory_init_cow(enable);
         }
-        match_feature! {
-            ["signals-based-traps" : self.opts.signals_based_traps]
-            enable => config.signals_based_traps(enable),
-            _ => err,
+        if let Some(enable) = self.opts.signals_based_traps {
+            config.signals_based_traps(enable);
         }
         if let Some(enable) = self.codegen.native_unwind_info {
             config.native_unwind_info(enable);
@@ -791,11 +774,6 @@ impl CommonOptions {
                     }
                     if let Some(max) = self.opts.pooling_max_unused_warm_slots {
                         cfg.max_unused_warm_slots(max);
-                    }
-                    match_feature! {
-                        ["async" : self.opts.pooling_async_stack_zeroing]
-                        enable => cfg.async_stack_zeroing(enable),
-                        _ => err,
                     }
                     match_feature! {
                         ["async" : self.opts.pooling_async_stack_keep_resident]
@@ -862,6 +840,11 @@ impl CommonOptions {
         match_feature! {
             ["async" : self.wasm.async_stack_size]
             size => config.async_stack_size(size),
+            _ => err,
+        }
+        match_feature! {
+            ["async" : self.wasm.async_stack_zeroing]
+            enable => config.async_stack_zeroing(enable),
             _ => err,
         }
 

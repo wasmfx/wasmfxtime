@@ -70,43 +70,57 @@ pub struct StoreLimits(Arc<LimitsState>);
 struct LimitsState {
     /// Remaining memory, in bytes, left to allocate
     remaining_memory: AtomicUsize,
-    /// Remaining times memories/tables can be grown
-    remaining_growths: AtomicUsize,
+    /// Remaining amount of memory that's allowed to be copied via a growth.
+    remaining_copy_allowance: AtomicUsize,
     /// Whether or not an allocation request has been denied
     oom: AtomicBool,
 }
+
+/// Allow up to 1G which is well below the 2G limit on OSS-Fuzz and should allow
+/// most interesting behavior.
+const MAX_MEMORY: usize = 1 << 30;
+
+/// Allow up to 4G of bytes to be copied (conservatively) which should enable
+/// growth up to `MAX_MEMORY` or at least up to a relatively large amount.
+const MAX_MEMORY_MOVED: usize = 4 << 30;
 
 impl StoreLimits {
     /// Creates the default set of limits for all fuzzing stores.
     pub fn new() -> StoreLimits {
         StoreLimits(Arc::new(LimitsState {
-            // Limits tables/memories within a store to at most 1gb for now to
-            // exercise some larger address but not overflow various limits.
-            remaining_memory: AtomicUsize::new(1 << 30),
-            // Also limit the number of times a memory or table may be grown.
-            // Otherwise infinite growths can exhibit quadratic behavior. For
-            // example Wasmtime could be configured with dynamic memories and no
-            // guard regions to grow into, meaning each memory growth could be a
-            // `memcpy`. As more data is added over time growths get more and
-            // more expensive meaning that fuel may not be effective at limiting
-            // execution time.
-            remaining_growths: AtomicUsize::new(1000),
+            remaining_memory: AtomicUsize::new(MAX_MEMORY),
+            remaining_copy_allowance: AtomicUsize::new(MAX_MEMORY_MOVED),
             oom: AtomicBool::new(false),
         }))
     }
 
     fn alloc(&mut self, amt: usize) -> bool {
         log::trace!("alloc {amt:#x} bytes");
+
+        // Assume that on each allocation of memory that all previous
+        // allocations of memory are moved. This is pretty coarse but is used to
+        // help prevent against fuzz test cases that just move tons of bytes
+        // around continuously. This assumes that all previous memory was
+        // allocated in a single linear memory and growing by `amt` will require
+        // moving all the bytes to a new location. This isn't actually required
+        // all the time nor does it accurately reflect what happens all the
+        // time, but it's a coarse approximation that should be "good enough"
+        // for allowing interesting fuzz behaviors to happen while not timing
+        // out just copying bytes around.
+        let prev_size = MAX_MEMORY - self.0.remaining_memory.load(SeqCst);
         if self
             .0
-            .remaining_growths
-            .fetch_update(SeqCst, SeqCst, |remaining| remaining.checked_sub(1))
+            .remaining_copy_allowance
+            .fetch_update(SeqCst, SeqCst, |remaining| remaining.checked_sub(prev_size))
             .is_err()
         {
             self.0.oom.store(true, SeqCst);
-            log::debug!("too many growths, rejecting allocation");
+            log::debug!("-> too many bytes moved, rejecting allocation");
             return false;
         }
+
+        // If we're allowed to move the bytes, then also check if we're allowed
+        // to actually have this much residence at once.
         match self
             .0
             .remaining_memory
@@ -115,7 +129,7 @@ impl StoreLimits {
             Ok(_) => true,
             Err(_) => {
                 self.0.oom.store(true, SeqCst);
-                log::debug!("OOM hit");
+                log::debug!("-> OOM hit");
                 false
             }
         }
@@ -429,13 +443,13 @@ pub fn differential(
         // execution by returning success.
         Ok(None) => return Ok(true),
     };
-    log::debug!(" -> results on {}: {:?}", lhs.name(), &lhs_results);
+    log::debug!(" -> lhs results on {}: {:?}", lhs.name(), &lhs_results);
 
     let rhs_results = rhs
         .evaluate(name, args, result_tys)
         // wasmtime should be able to invoke any signature, so unwrap this result
         .map(|results| results.unwrap());
-    log::debug!(" -> results on {}: {:?}", rhs.name(), &rhs_results);
+    log::debug!(" -> rhs results on {}: {:?}", rhs.name(), &rhs_results);
 
     // If Wasmtime hit its OOM condition, which is possible since it's set
     // somewhat low while fuzzing, then don't return an error but return
@@ -507,7 +521,7 @@ impl<T, U> DiffEqResult<T, U> {
             // Both sides failed. Check that the trap and state at the time of
             // failure is the same, when possible.
             (Err(lhs), Err(rhs)) => {
-                let err = match rhs.downcast::<Trap>() {
+                let rhs = match rhs.downcast::<Trap>() {
                     Ok(trap) => trap,
 
                     // For general, unknown errors, we can't rely on this being
@@ -527,16 +541,16 @@ impl<T, U> DiffEqResult<T, U> {
                 let poisoned =
                     // Allocations being too large for the GC are
                     // implementation-defined.
-                    err == Trap::AllocationTooLarge
+                    rhs == Trap::AllocationTooLarge
                     // Stack size, and therefore when overflow happens, is
                     // implementation-defined.
-                    || err == Trap::StackOverflow
+                    || rhs == Trap::StackOverflow
                     || lhs_engine.is_stack_overflow(&lhs);
                 if poisoned {
                     return DiffEqResult::Poisoned;
                 }
 
-                lhs_engine.assert_error_match(&err, &lhs);
+                lhs_engine.assert_error_match(&lhs, &rhs);
                 DiffEqResult::Failed
             }
             // A real bug is found if only one side fails.
@@ -1222,7 +1236,7 @@ mod tests {
     ) -> bool {
         let mut rng = SmallRng::seed_from_u64(0);
         let mut buf = vec![0; 2048];
-        let n = 2000;
+        let n = 3000;
         for _ in 0..n {
             rng.fill_bytes(&mut buf);
             let mut u = Unstructured::new(&buf);

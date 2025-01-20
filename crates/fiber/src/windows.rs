@@ -14,7 +14,10 @@ pub type Error = io::Error;
 pub struct FiberStack(usize);
 
 impl FiberStack {
-    pub fn new(size: usize) -> io::Result<Self> {
+    pub fn new(size: usize, zeroed: bool) -> io::Result<Self> {
+        // We don't support fiber stack zeroing on windows.
+        let _ = zeroed;
+
         Ok(Self(size))
     }
 
@@ -64,7 +67,7 @@ struct StartState {
 
 const FIBER_FLAG_FLOAT_SWITCH: u32 = 1;
 
-extern "C" {
+unsafe extern "C" {
     #[wasmtime_versioned_export_macros::versioned_link]
     fn wasmtime_fiber_get_current() -> *mut c_void;
 }

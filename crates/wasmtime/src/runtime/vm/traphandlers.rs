@@ -10,9 +10,9 @@ mod coredump;
 #[path = "traphandlers/coredump_disabled.rs"]
 mod coredump;
 
-#[cfg(all(feature = "signals-based-traps", not(miri)))]
+#[cfg(all(has_native_signals))]
 mod signals;
-#[cfg(all(feature = "signals-based-traps", not(miri)))]
+#[cfg(all(has_native_signals))]
 pub use self::signals::*;
 
 use crate::prelude::*;
@@ -446,7 +446,7 @@ mod call_thread_state {
     pub struct CallThreadState {
         pub(super) unwind: Cell<Option<(UnwindReason, Option<Backtrace>, Option<CoreDumpStack>)>>,
         pub(super) jmp_buf: Cell<*const u8>,
-        #[cfg(all(feature = "signals-based-traps", not(miri)))]
+        #[cfg(all(has_native_signals))]
         pub(super) signal_handler: Option<*const SignalHandler>,
         pub(super) capture_backtrace: bool,
         #[cfg(feature = "coredump")]
@@ -460,7 +460,7 @@ mod call_thread_state {
         pub(crate) callee_stack_chain: Option<*const StackChainCell>,
 
         pub(super) prev: Cell<tls::Ptr>,
-        #[cfg(all(feature = "signals-based-traps", unix, not(miri)))]
+        #[cfg(all(has_native_signals, unix))]
         pub(crate) async_guard_range: Range<*mut u8>,
 
         // The values of `VMRuntimeLimits::last_wasm_{exit_{pc,fp},entry_sp}`
@@ -509,14 +509,14 @@ mod call_thread_state {
                 unwind: Cell::new(None),
                 unwinder: store.unwinder(),
                 jmp_buf: Cell::new(ptr::null()),
-                #[cfg(all(feature = "signals-based-traps", not(miri)))]
+                #[cfg(all(has_native_signals))]
                 signal_handler: store.signal_handler(),
                 capture_backtrace: store.engine().config().wasm_backtrace,
                 #[cfg(feature = "coredump")]
                 capture_coredump: store.engine().config().coredump_on_trap,
                 limits,
                 callee_stack_chain,
-                #[cfg(all(feature = "signals-based-traps", unix, not(miri)))]
+                #[cfg(all(has_native_signals, unix))]
                 async_guard_range: store.async_guard_range(),
                 prev: Cell::new(ptr::null()),
                 old_last_wasm_exit_fp: Cell::new(unsafe { *(*limits).last_wasm_exit_fp.get() }),
@@ -699,7 +699,7 @@ impl CallThreadState {
         // in which case run them all. If anything handles the trap then we
         // return that the trap was handled.
         let _ = &call_handler;
-        #[cfg(all(feature = "signals-based-traps", not(miri)))]
+        #[cfg(all(has_native_signals, not(miri)))]
         if let Some(handler) = self.signal_handler {
             if unsafe { call_handler(&*handler) } {
                 return TrapTest::HandledByEmbedder;
