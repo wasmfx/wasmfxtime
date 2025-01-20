@@ -37,7 +37,7 @@ pub extern "C" fn wasmtime_linker_allow_shadowing(
     linker.linker.allow_shadowing(allow_shadowing);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn wasmtime_linker_allow_unknown_exports(
     linker: &mut wasmtime_linker_t,
     allow_unknown_exports: bool,
