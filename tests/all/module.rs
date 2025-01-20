@@ -6,20 +6,40 @@ use wasmtime_test_macros::wasmtime_test;
 
 #[test]
 fn checks_incompatible_target() -> Result<()> {
-    let mut target = target_lexicon::Triple::host();
-    target.operating_system = target_lexicon::OperatingSystem::Unknown;
-    match Module::new(
-        &Engine::new(Config::new().target(&target.to_string())?)?,
-        "(module)",
-    ) {
-        Ok(_) => unreachable!(),
-        Err(e) => assert!(
-            format!("{e:?}").contains("configuration does not match the host"),
-            "bad error: {e:?}"
-        ),
+    // For platforms that Cranelift supports make sure a mismatch generates an
+    // error
+    if cfg!(target_arch = "x86_64")
+        || cfg!(target_arch = "aarch64")
+        || cfg!(target_arch = "s390x")
+        || cfg!(target_arch = "riscv64")
+    {
+        let mut target = target_lexicon::Triple::host();
+        target.operating_system = target_lexicon::OperatingSystem::Unknown;
+        assert_invalid_target(&target.to_string())?;
     }
 
-    Ok(())
+    // Otherwise make sure that the wrong pulley target is rejected on all
+    // platforms.
+    let wrong_pulley = if cfg!(target_pointer_width = "32") {
+        "pulley64"
+    } else {
+        "pulley32"
+    };
+    assert_invalid_target(wrong_pulley)?;
+
+    return Ok(());
+
+    fn assert_invalid_target(target: &str) -> Result<()> {
+        match Module::new(&Engine::new(Config::new().target(target)?)?, "(module)") {
+            Ok(_) => unreachable!(),
+            Err(e) => assert!(
+                format!("{e:?}").contains("configuration does not match the host"),
+                "bad error: {e:?}"
+            ),
+        }
+
+        Ok(())
+    }
 }
 
 #[test]
@@ -45,7 +65,7 @@ fn caches_across_engines() {
         // differ in wasm features enabled (which can affect
         // runtime/compilation settings)
         let res = Module::deserialize(
-            &Engine::new(Config::new().wasm_threads(false)).unwrap(),
+            &Engine::new(Config::new().wasm_relaxed_simd(false)).unwrap(),
             &bytes,
         );
         assert!(res.is_err());
@@ -255,6 +275,7 @@ fn compile_a_component() -> Result<()> {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn tail_call_defaults() -> Result<()> {
     let wasm_with_tail_calls = "(module (func $a return_call $a))";
 
@@ -279,6 +300,7 @@ fn tail_call_defaults() -> Result<()> {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn cross_engine_module_exports() -> Result<()> {
     let a_engine = Engine::default();
     let b_engine = Engine::default();
@@ -533,4 +555,28 @@ fn concurrent_type_modifications_and_checks(config: &mut Config) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn validate_deterministic() {
+    let mut faulty_wat = "(module ".to_string();
+    for i in 0..100 {
+        faulty_wat.push_str(&format!(
+            "(func (export \"foo_{i}\") (result i64) (i64.add (i32.const 0) (i64.const 1)))"
+        ));
+    }
+    faulty_wat.push_str(")");
+    let binary = wat::parse_str(faulty_wat).unwrap();
+
+    let engine_parallel = Engine::new(&Config::new().parallel_compilation(true)).unwrap();
+    let result_parallel = Module::validate(&engine_parallel, &binary)
+        .unwrap_err()
+        .to_string();
+
+    let engine_sequential = Engine::new(&Config::new().parallel_compilation(false)).unwrap();
+    let result_sequential = Module::validate(&engine_sequential, &binary)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(result_parallel, result_sequential);
 }

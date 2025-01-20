@@ -11,7 +11,7 @@ use std::{
 };
 use wasmtime::component::Linker;
 use wasmtime::{Engine, Store, StoreLimits};
-use wasmtime_wasi::{StreamError, StreamResult, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::{IoView, StreamError, StreamResult, WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::io::TokioIo;
@@ -46,21 +46,18 @@ struct Host {
     wasi_keyvalue: Option<WasiKeyValueCtx>,
 }
 
-impl WasiView for Host {
+impl IoView for Host {
     fn table(&mut self) -> &mut wasmtime::component::ResourceTable {
         &mut self.table
     }
-
+}
+impl WasiView for Host {
     fn ctx(&mut self) -> &mut WasiCtx {
         &mut self.ctx
     }
 }
 
 impl WasiHttpView for Host {
-    fn table(&mut self) -> &mut wasmtime::component::ResourceTable {
-        &mut self.table
-    }
-
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
     }
@@ -663,24 +660,19 @@ impl wasmtime_wasi::Subscribe for LogStream {
 /// if it fails then the pooling allocator is not used and the normal mmap-based
 /// implementation is used instead.
 fn use_pooling_allocator_by_default() -> Result<Option<bool>> {
-    #[cfg(feature = "signals-based-traps")]
-    {
-        use wasmtime::{Config, Memory, MemoryType};
-        const BITS_TO_TEST: u32 = 42;
-        let mut config = Config::new();
-        config.wasm_memory64(true);
-        config.memory_reservation(1 << BITS_TO_TEST);
-        let engine = Engine::new(&config)?;
-        let mut store = Store::new(&engine, ());
-        // NB: the maximum size is in wasm pages to take out the 16-bits of wasm
-        // page size here from the maximum size.
-        let ty = MemoryType::new64(0, Some(1 << (BITS_TO_TEST - 16)));
-        if Memory::new(&mut store, ty).is_ok() {
-            Ok(Some(true))
-        } else {
-            Ok(None)
-        }
+    use wasmtime::{Config, Memory, MemoryType};
+    const BITS_TO_TEST: u32 = 42;
+    let mut config = Config::new();
+    config.wasm_memory64(true);
+    config.memory_reservation(1 << BITS_TO_TEST);
+    let engine = Engine::new(&config)?;
+    let mut store = Store::new(&engine, ());
+    // NB: the maximum size is in wasm pages to take out the 16-bits of wasm
+    // page size here from the maximum size.
+    let ty = MemoryType::new64(0, Some(1 << (BITS_TO_TEST - 16)));
+    if Memory::new(&mut store, ty).is_ok() {
+        Ok(Some(true))
+    } else {
+        Ok(None)
     }
-    #[cfg(not(feature = "signals-based-traps"))]
-    return Ok(Some(false));
 }

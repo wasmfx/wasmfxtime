@@ -12,16 +12,16 @@ use crate::{
         CallingConvention,
     },
     masm::{
-        CalleeKind, DivKind, ExtendKind, FloatCmpKind, Imm as I, IntCmpKind,
-        MacroAssembler as Masm, MulWideKind, OperandSize, RegImm, RemKind, RoundingMode, SPOffset,
-        ShiftKind, StackSlot, TrapCode, TruncKind,
+        CalleeKind, DivKind, ExtendKind, FloatCmpKind, Imm as I, IntCmpKind, LoadKind,
+        MacroAssembler as Masm, MemOpKind, MulWideKind, OperandSize, RegImm, RemKind, RmwOp,
+        RoundingMode, SPOffset, ShiftKind, SplatKind, StackSlot, TrapCode, TruncKind,
     },
     stack::TypedReg,
 };
 use anyhow::{anyhow, bail, Result};
 use cranelift_codegen::{
     binemit::CodeOffset,
-    ir::{RelSourceLoc, SourceLoc},
+    ir::{MemFlags, RelSourceLoc, SourceLoc},
     isa::aarch64::inst::{Cond, VectorSize},
     settings, Final, MachBufferFinalized, MachLabel,
 };
@@ -175,9 +175,20 @@ impl Masm for MacroAssembler {
         Ok(())
     }
 
-    fn wasm_store(&mut self, src: Reg, dst: Self::Address, size: OperandSize) -> Result<()> {
-        self.asm.str(src, dst, size);
-        Ok(())
+    fn wasm_store(
+        &mut self,
+        src: Reg,
+        dst: Self::Address,
+        size: OperandSize,
+        op_kind: MemOpKind,
+    ) -> Result<()> {
+        match op_kind {
+            MemOpKind::Atomic => Err(anyhow!(CodeGenError::unimplemented_masm_instruction())),
+            MemOpKind::Normal => {
+                self.asm.str(src, dst, size);
+                Ok(())
+            }
+        }
     }
 
     fn call(
@@ -214,15 +225,27 @@ impl Masm for MacroAssembler {
         &mut self,
         src: Self::Address,
         dst: WritableReg,
-        size: OperandSize,
-        kind: Option<ExtendKind>,
+        kind: LoadKind,
+        op_kind: MemOpKind,
     ) -> Result<()> {
-        // kind is some if the value is signed
-        // unlike x64, unused bits are set to zero so we don't need to extend
-        if kind.is_some() {
-            self.asm.sload(src, dst, size);
-        } else {
-            self.asm.uload(src, dst, size);
+        let size = kind.derive_operand_size();
+        match op_kind {
+            MemOpKind::Normal => match kind {
+                LoadKind::Operand(_) => self.asm.uload(src, dst, size),
+                LoadKind::Splat(_) => bail!(CodeGenError::UnimplementedWasmLoadKind),
+                LoadKind::ScalarExtend(extend_kind) => {
+                    if extend_kind.signed() {
+                        self.asm.sload(src, dst, size)
+                    } else {
+                        // unlike x64, unused bits are set to zero so we don't need to extend
+                        self.asm.uload(src, dst, size)
+                    }
+                }
+                LoadKind::VectorExtend(_vector_extend_kind) => {
+                    bail!(CodeGenError::UnimplementedWasmLoadKind)
+                }
+            },
+            MemOpKind::Atomic => bail!(CodeGenError::unimplemented_masm_instruction()),
         }
         Ok(())
     }
@@ -868,6 +891,26 @@ impl Masm for MacroAssembler {
         kind: MulWideKind,
     ) -> Result<()> {
         let _ = (context, kind);
+        Err(anyhow!(CodeGenError::unimplemented_masm_instruction()))
+    }
+
+    fn splat(&mut self, _context: &mut CodeGenContext<Emission>, _size: SplatKind) -> Result<()> {
+        bail!(CodeGenError::unimplemented_masm_instruction())
+    }
+
+    fn shuffle(&mut self, _dst: WritableReg, _lhs: Reg, _rhs: Reg, _lanes: [u8; 16]) -> Result<()> {
+        bail!(CodeGenError::unimplemented_masm_instruction())
+    }
+
+    fn atomic_rmw(
+        &mut self,
+        _addr: Self::Address,
+        _operand: WritableReg,
+        _size: OperandSize,
+        _op: RmwOp,
+        _flags: MemFlags,
+        _extend: Option<ExtendKind>,
+    ) -> Result<()> {
         Err(anyhow!(CodeGenError::unimplemented_masm_instruction()))
     }
 }

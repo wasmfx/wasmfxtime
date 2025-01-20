@@ -373,9 +373,8 @@ jobs:
               -p wasmtime --no-default-features --features threads
               -p wasmtime --no-default-features --features runtime,threads
               -p wasmtime --no-default-features --features cranelift,threads
-              -p wasmtime --no-default-features --features runtime,signals-based-traps
-              -p wasmtime --no-default-features --features runtime,gc,component-model,signals-based-traps
               -p wasmtime --features incremental-cache
+              -p wasmtime --features profile-pulley
               -p wasmtime --all-features
 
           - name: wasmtime-fiber
@@ -549,8 +548,6 @@ jobs:
           test: >
             cargo check -p wasmtime --no-default-features --features runtime,component-model &&
             cargo check -p wasmtime --no-default-features --features runtime,gc,component-model &&
-            cargo check -p wasmtime --no-default-features --features runtime,gc,component-model,signals-based-traps &&
-            cargo check -p wasmtime --no-default-features --features runtime,gc,component-model,signals-based-traps &&
             cargo check -p cranelift-control --no-default-features &&
             cargo check -p pulley-interpreter --features encode,decode,disas,interp
         # Use `cross` for illumos to have a C compiler/linker available.
@@ -970,7 +967,7 @@ jobs:
       with:
         submodules: true
     - uses: ./.github/actions/install-rust
-    - run: cargo install cbindgen --vers "^0.26" --locked
+    - run: cargo install cbindgen --vers "^0.27" --locked
     - run: rustup target add x86_64-unknown-none
     - run: ./build.sh x86_64-unknown-none
       working-directory: ./examples/min-platform

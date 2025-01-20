@@ -163,6 +163,8 @@ pub struct Config {
     #[cfg(feature = "async")]
     pub(crate) async_stack_size: usize,
     #[cfg(feature = "async")]
+    pub(crate) async_stack_zeroing: bool,
+    #[cfg(feature = "async")]
     pub(crate) stack_creator: Option<Arc<dyn RuntimeFiberStackCreator>>,
     pub(crate) async_support: bool,
     pub(crate) module_version: ModuleVersionStrategy,
@@ -269,6 +271,8 @@ impl Config {
             #[cfg(feature = "async")]
             async_stack_size: 2 << 20,
             #[cfg(feature = "async")]
+            async_stack_zeroing: false,
+            #[cfg(feature = "async")]
             stack_creator: None,
             async_support: false,
             module_version: ModuleVersionStrategy::default(),
@@ -287,6 +291,14 @@ impl Config {
         {
             ret.cranelift_debug_verifier(false);
             ret.cranelift_opt_level(OptLevel::Speed);
+
+            // When running under MIRI try to optimize for compile time of wasm
+            // code itself as much as possible. Disable optimizations by
+            // default and use the fastest regalloc available to us.
+            if cfg!(miri) {
+                ret.cranelift_opt_level(OptLevel::None);
+                ret.cranelift_regalloc_algorithm(RegallocAlgorithm::SinglePass);
+            }
         }
 
         ret.wasm_backtrace_details(WasmBacktraceDetails::Environment);
@@ -753,6 +765,40 @@ impl Config {
         self
     }
 
+    /// Configures whether or not stacks used for async futures are zeroed
+    /// before (re)use.
+    ///
+    /// When the [`async_support`](Config::async_support) method is enabled for
+    /// Wasmtime and the [`call_async`] variant of calling WebAssembly is used
+    /// then Wasmtime will create a separate runtime execution stack for each
+    /// future produced by [`call_async`]. By default upon allocation, depending
+    /// on the platform, these stacks might be filled with uninitialized
+    /// memory. This is safe and correct because, modulo bugs in Wasmtime,
+    /// compiled Wasm code will never read from a stack slot before it
+    /// initializes the stack slot.
+    ///
+    /// However, as a defense-in-depth mechanism, you may configure Wasmtime to
+    /// ensure that these stacks are zeroed before they are used. Notably, if
+    /// you are using the pooling allocator, stacks can be pooled and reused
+    /// across different Wasm guests; ensuring that stacks are zeroed can
+    /// prevent data leakage between Wasm guests even in the face of potential
+    /// read-of-stack-slot-before-initialization bugs in Wasmtime's compiler.
+    ///
+    /// Stack zeroing can be a costly operation in highly concurrent
+    /// environments due to modifications of the virtual address space requiring
+    /// process-wide synchronization. It can also be costly in `no-std`
+    /// environments that must manually zero memory, and cannot rely on an OS
+    /// and virtual memory to provide zeroed pages.
+    ///
+    /// This option defaults to `false`.
+    ///
+    /// [`call_async`]: crate::TypedFunc::call_async
+    #[cfg(feature = "async")]
+    pub fn async_stack_zeroing(&mut self, enable: bool) -> &mut Self {
+        self.async_stack_zeroing = enable;
+        self
+    }
+
     fn wasm_feature(&mut self, flag: WasmFeatures, enable: bool) -> &mut Self {
         self.enabled_features.set(flag, enable);
         self.disabled_features.set(flag, !enable);
@@ -905,9 +951,8 @@ impl Config {
     /// as the `v128` type and all of its operators being in a module. Note that
     /// this does not enable the [relaxed simd proposal].
     ///
-    /// On x86_64 platforms note that enabling this feature requires SSE 4.2 and
-    /// below to be available on the target platform. Compilation will fail if
-    /// the compile target does not include SSE 4.2.
+    /// **Note**: On x86_64 platforms the base CPU feature requirement for SIMD
+    /// is SSE2.
     ///
     /// This is `true` by default.
     ///
@@ -1605,7 +1650,6 @@ impl Config {
     ///
     /// For 32-bit platforms this value defaults to 10MiB. This means that
     /// bounds checks will be required on 32-bit platforms.
-    #[cfg(feature = "signals-based-traps")]
     pub fn memory_reservation(&mut self, bytes: u64) -> &mut Self {
         self.tunables.memory_reservation = Some(bytes);
         self
@@ -1641,7 +1685,6 @@ impl Config {
     ///   the memory configuration works at runtime.
     ///
     /// The default value for this option is `true`.
-    #[cfg(feature = "signals-based-traps")]
     pub fn memory_may_move(&mut self, enable: bool) -> &mut Self {
         self.tunables.memory_may_move = Some(enable);
         self
@@ -1690,7 +1733,6 @@ impl Config {
     /// allows eliminating almost all bounds checks on loads/stores with an
     /// immediate offset of less than 32MiB. On 32-bit platforms this defaults
     /// to 64KiB.
-    #[cfg(feature = "signals-based-traps")]
     pub fn memory_guard_size(&mut self, bytes: u64) -> &mut Self {
         self.tunables.memory_guard_size = Some(bytes);
         self
@@ -1780,7 +1822,6 @@ impl Config {
     /// ## Default
     ///
     /// This value defaults to `true`.
-    #[cfg(feature = "signals-based-traps")]
     pub fn guard_before_linear_memory(&mut self, enable: bool) -> &mut Self {
         self.tunables.guard_before_linear_memory = Some(enable);
         self
@@ -1896,7 +1937,6 @@ impl Config {
     /// [`Module::deserialize_file`]: crate::Module::deserialize_file
     /// [`Module`]: crate::Module
     /// [IPI]: https://en.wikipedia.org/wiki/Inter-processor_interrupt
-    #[cfg(feature = "signals-based-traps")]
     pub fn memory_init_cow(&mut self, enable: bool) -> &mut Self {
         self.tunables.memory_init_cow = Some(enable);
         self
@@ -2024,7 +2064,6 @@ impl Config {
             Some(Strategy::Winch) => {
                 let mut unsupported = WasmFeatures::GC
                     | WasmFeatures::FUNCTION_REFERENCES
-                    | WasmFeatures::THREADS
                     | WasmFeatures::RELAXED_SIMD
                     | WasmFeatures::TAIL_CALL
                     | WasmFeatures::STACK_SWITCHING
@@ -2038,6 +2077,7 @@ impl Config {
                         // winch on aarch64 but this helps gate most spec tests
                         // by default which otherwise currently cause panics.
                         unsupported |= WasmFeatures::REFERENCE_TYPES;
+                        unsupported |= WasmFeatures::THREADS
                     }
 
                     // Winch doesn't support other non-x64 architectures at this
@@ -2075,6 +2115,7 @@ impl Config {
         features |= WasmFeatures::RELAXED_SIMD;
         features |= WasmFeatures::TAIL_CALL;
         features |= WasmFeatures::EXTENDED_CONST;
+        features |= WasmFeatures::MEMORY64;
         // NB: if you add a feature above this line please double-check
         // https://docs.wasmtime.dev/stability-wasm-proposals.html
         // to ensure all requirements are met and/or update the documentation
@@ -2111,17 +2152,9 @@ impl Config {
             return target;
         }
 
-        // Without an explicitly configured target the goal is then to select
-        // some default which can reasonably run code on this host. If pulley is
-        // enabled and the host has no support at all in the cranelift/winch
-        // backends then pulley becomes the default target. This means, for
-        // example, that 32-bit platforms will default to running pulley at this
-        // time.
-        let any_compiler_support = cfg!(target_arch = "x86_64")
-            || cfg!(target_arch = "aarch64")
-            || cfg!(target_arch = "riscv64")
-            || cfg!(target_arch = "s390x");
-        if !any_compiler_support && cfg!(feature = "pulley") {
+        // If the `build.rs` script determined that this platform uses pulley by
+        // default, then use Pulley.
+        if cfg!(default_target_pulley) {
             return target_lexicon::Triple::pulley_host();
         }
 
@@ -2165,13 +2198,19 @@ impl Config {
 
         let mut tunables = Tunables::default_for_target(&self.compiler_target())?;
 
-        // When signals-based traps are disabled use slightly different defaults
+        // If this platform doesn't have native signals then change some
+        // defaults to account for that. Note that VM guards are turned off here
+        // because that's primarily a feature of eliding bounds-checks.
+        if !cfg!(has_native_signals) {
+            tunables.signals_based_traps = cfg!(has_native_signals);
+            tunables.memory_guard_size = 0;
+        }
+
+        // When virtual memory is not available use slightly different defaults
         // for tunables to be more amenable to `MallocMemory`. Note that these
         // can still be overridden by config options.
-        if !cfg!(feature = "signals-based-traps") {
-            tunables.signals_based_traps = false;
+        if !cfg!(has_virtual_memory) {
             tunables.memory_reservation = 0;
-            tunables.memory_guard_size = 0;
             tunables.memory_reservation_for_growth = 1 << 20; // 1MB
             tunables.memory_init_cow = false;
         }
@@ -2200,11 +2239,13 @@ impl Config {
             None
         };
 
-        // These `Config` accessors are disabled at compile time so double-check
-        // the defaults here.
-        if !cfg!(feature = "signals-based-traps") {
-            assert!(!tunables.signals_based_traps);
-            assert!(!tunables.memory_init_cow);
+        // Double-check that this configuration isn't requesting capabilities
+        // that this build of Wasmtime doesn't support.
+        if !cfg!(has_native_signals) && tunables.signals_based_traps {
+            bail!("signals-based-traps disabled at compile time -- cannot be enabled");
+        }
+        if !cfg!(has_virtual_memory) && tunables.memory_init_cow {
+            bail!("virtual memory disabled at compile time -- cannot enable CoW");
         }
 
         Ok((tunables, features))
@@ -2216,10 +2257,10 @@ impl Config {
         tunables: &Tunables,
     ) -> Result<Box<dyn InstanceAllocator + Send + Sync>> {
         #[cfg(feature = "async")]
-        let stack_size = self.async_stack_size;
+        let (stack_size, stack_zeroing) = (self.async_stack_size, self.async_stack_zeroing);
 
         #[cfg(not(feature = "async"))]
-        let stack_size = 0;
+        let (stack_size, stack_zeroing) = (0, false);
 
         let _ = tunables;
 
@@ -2229,6 +2270,7 @@ impl Config {
                 let mut allocator = Box::new(OnDemandInstanceAllocator::new(
                     self.mem_creator.clone(),
                     stack_size,
+                    stack_zeroing,
                 ));
                 #[cfg(feature = "async")]
                 if let Some(stack_creator) = &self.stack_creator {
@@ -2240,6 +2282,7 @@ impl Config {
             InstanceAllocationStrategy::Pooling(config) => {
                 let mut config = config.config;
                 config.stack_size = stack_size;
+                config.async_stack_zeroing = stack_zeroing;
                 Ok(Box::new(crate::runtime::vm::PoolingInstanceAllocator::new(
                     &config, tunables,
                 )?))
@@ -2289,6 +2332,7 @@ impl Config {
             ProfilingStrategy::JitDump => profiling_agent::new_jitdump()?,
             ProfilingStrategy::VTune => profiling_agent::new_vtune()?,
             ProfilingStrategy::None => profiling_agent::new_null(),
+            ProfilingStrategy::Pulley => profiling_agent::new_pulley()?,
         })
     }
 
@@ -2570,7 +2614,6 @@ impl Config {
     /// are enabled by default.
     ///
     /// **Note** Disabling this option is not compatible with the Winch compiler.
-    #[cfg(feature = "signals-based-traps")]
     pub fn signals_based_traps(&mut self, enable: bool) -> &mut Self {
         self.tunables.signals_based_traps = Some(enable);
         self
@@ -2835,6 +2878,11 @@ pub enum ProfilingStrategy {
 
     /// Collect profiling info using the "ittapi", used with `VTune` on Linux.
     VTune,
+
+    /// Support for profiling Pulley, Wasmtime's interpreter. Note that enabling
+    /// this at runtime requires enabling the `profile-pulley` Cargo feature at
+    /// compile time.
+    Pulley,
 }
 
 /// Select how wasm backtrace detailed information is handled.
@@ -3025,31 +3073,6 @@ impl PoolingAllocationConfig {
     /// Defaults to `1`.
     pub fn decommit_batch_size(&mut self, batch_size: usize) -> &mut Self {
         self.config.decommit_batch_size = batch_size;
-        self
-    }
-
-    /// Configures whether or not stacks used for async futures are reset to
-    /// zero after usage.
-    ///
-    /// When the [`async_support`](Config::async_support) method is enabled for
-    /// Wasmtime and the [`call_async`] variant
-    /// of calling WebAssembly is used then Wasmtime will create a separate
-    /// runtime execution stack for each future produced by [`call_async`].
-    /// During the deallocation process Wasmtime won't by default reset the
-    /// contents of the stack back to zero.
-    ///
-    /// When this option is enabled it can be seen as a defense-in-depth
-    /// mechanism to reset a stack back to zero. This is not required for
-    /// correctness and can be a costly operation in highly concurrent
-    /// environments due to modifications of the virtual address space requiring
-    /// process-wide synchronization.
-    ///
-    /// This option defaults to `false`.
-    ///
-    /// [`call_async`]: crate::TypedFunc::call_async
-    #[cfg(feature = "async")]
-    pub fn async_stack_zeroing(&mut self, enable: bool) -> &mut Self {
-        self.config.async_stack_zeroing = enable;
         self
     }
 

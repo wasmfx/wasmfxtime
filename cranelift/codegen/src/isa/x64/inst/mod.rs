@@ -30,6 +30,7 @@ use args::*;
 // Instructions (top level): definition
 
 // `Inst` is defined inside ISLE as `MInst`. We publicly re-export it here.
+pub use super::lower::isle::generated_code::AtomicRmwSeqOp;
 pub use super::lower::isle::generated_code::MInst as Inst;
 
 /// Out-of-line data for return-calls, to keep the size of `Inst` down.
@@ -1923,21 +1924,17 @@ impl PrettyPrint for Inst {
 
             Inst::Ud2 { trap_code } => format!("ud2 {trap_code}"),
 
-            Inst::ElfTlsGetAddr { ref symbol, dst } => {
+            Inst::ElfTlsGetAddr { symbol, dst } => {
                 let dst = pretty_print_reg(dst.to_reg().to_reg(), 8);
                 format!("{dst} = elf_tls_get_addr {symbol:?}")
             }
 
-            Inst::MachOTlsGetAddr { ref symbol, dst } => {
+            Inst::MachOTlsGetAddr { symbol, dst } => {
                 let dst = pretty_print_reg(dst.to_reg().to_reg(), 8);
                 format!("{dst} = macho_tls_get_addr {symbol:?}")
             }
 
-            Inst::CoffTlsGetAddr {
-                ref symbol,
-                dst,
-                tmp,
-            } => {
+            Inst::CoffTlsGetAddr { symbol, dst, tmp } => {
                 let dst = pretty_print_reg(dst.to_reg().to_reg(), 8);
                 let tmp = tmp.to_reg().to_reg();
 

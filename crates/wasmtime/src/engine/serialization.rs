@@ -232,6 +232,7 @@ impl Metadata<'_> {
             component_model_nested_names,
             component_model_more_flags,
             component_model_multiple_returns,
+            component_model_async,
             legacy_exceptions,
             gc_types,
             stack_switching,
@@ -253,6 +254,7 @@ impl Metadata<'_> {
         assert!(!shared_everything_threads);
         assert!(!legacy_exceptions);
         //assert!(!stack_switching); // NOTE(dhil): we are working on implementing it!
+        assert!(!component_model_async);
 
         Metadata {
             target: engine.compiler().triple().to_string(),

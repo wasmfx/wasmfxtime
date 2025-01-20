@@ -21,6 +21,7 @@ use alloc::vec::Vec;
 use core::fmt::Debug;
 use core::marker::PhantomData;
 use cranelift_control::ControlPlane;
+use std::string::String;
 use target_lexicon::{Architecture, Triple};
 
 pub use settings::Flags as PulleyFlags;
@@ -123,7 +124,11 @@ where
         domtree: &DominatorTree,
         ctrl_plane: &mut ControlPlane,
     ) -> CodegenResult<(VCode<inst::InstAndKind<P>>, regalloc2::Output)> {
-        let emit_info = EmitInfo::new(self.flags.clone(), self.isa_flags.clone());
+        let emit_info = EmitInfo::new(
+            func.signature.call_conv,
+            self.flags.clone(),
+            self.isa_flags.clone(),
+        );
         let sigs = SigSet::new::<abi::PulleyMachineDeps<P>>(func, &self.flags)?;
         let abi = abi::PulleyCallee::new(func, self, &self.isa_flags, &sigs)?;
         machinst::compile::<Self>(func, domtree, self, abi, emit_info, sigs, ctrl_plane)
@@ -215,6 +220,10 @@ where
         inst::InstAndKind::<P>::function_alignment()
     }
 
+    fn pretty_print_reg(&self, reg: crate::Reg, _size: u8) -> String {
+        format!("{reg:?}")
+    }
+
     fn has_native_fma(&self) -> bool {
         false
     }
@@ -284,4 +293,14 @@ fn isa_constructor_64(
     let backend =
         PulleyBackend::<super::pulley64::Pulley64>::new_with_flags(triple, shared_flags, isa_flags);
     Ok(backend.wrapped())
+}
+
+impl PulleyFlags {
+    fn endianness(&self) -> ir::Endianness {
+        if self.big_endian() {
+            ir::Endianness::Big
+        } else {
+            ir::Endianness::Little
+        }
+    }
 }

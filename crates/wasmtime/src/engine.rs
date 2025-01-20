@@ -99,7 +99,7 @@ impl Engine {
             // configured. This is the per-program initialization required for
             // handling traps, such as configuring signals, vectored exception
             // handlers, etc.
-            #[cfg(all(feature = "signals-based-traps", not(miri)))]
+            #[cfg(has_native_signals)]
             crate::runtime::vm::init_traps(config.macos_use_mach_ports);
             if !cfg!(miri) {
                 #[cfg(feature = "debug-builtins")]
@@ -158,9 +158,14 @@ impl Engine {
             #[cfg(feature = "parallel-compilation")]
             {
                 use rayon::prelude::*;
+                // If we collect into Result<Vec<B>, E> directly, the returned error is not
+                // deterministic, because any error could be returned early. So we first materialize
+                // all results in order and then return the first error deterministically, or Ok(_).
                 return input
                     .into_par_iter()
                     .map(|a| f(a))
+                    .collect::<Vec<Result<B, E>>>()
+                    .into_iter()
                     .collect::<Result<Vec<B>, E>>();
             }
         }
@@ -851,7 +856,7 @@ impl Engine {
     /// If other crashes are seen from using this method please feel free to
     /// file an issue to update the documentation here with more preconditions
     /// that must be met.
-    #[cfg(feature = "signals-based-traps")]
+    #[cfg(has_native_signals)]
     pub unsafe fn unload_process_handlers(self) {
         assert_eq!(Arc::weak_count(&self.inner), 0);
         assert_eq!(Arc::strong_count(&self.inner), 1);

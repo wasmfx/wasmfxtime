@@ -60,7 +60,11 @@ enum FiberStackStorage {
 }
 
 impl FiberStack {
-    pub fn new(size: usize) -> io::Result<Self> {
+    pub fn new(size: usize, zeroed: bool) -> io::Result<Self> {
+        // The anonymous `mmap`s we use for `FiberStackStorage` are alawys
+        // zeroed.
+        let _ = zeroed;
+
         // See comments in `mod asan` below for why asan has a different stack
         // allocation strategy.
         if cfg!(asan) {
@@ -371,7 +375,7 @@ mod asan {
 
     // These intrinsics are provided by the address sanitizer runtime. Their C
     // signatures were translated into Rust-isms here with `Option` and `&mut`.
-    extern "C" {
+    unsafe extern "C" {
         fn __sanitizer_start_switch_fiber(
             private_asan_pointer_save: Option<&mut *mut u8>,
             bottom: *const u8,

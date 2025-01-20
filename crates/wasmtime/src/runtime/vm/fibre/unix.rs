@@ -261,7 +261,7 @@ impl Drop for FiberStack {
     }
 }
 
-extern "C" {
+unsafe extern "C" {
     fn wasmtime_fibre_switch_to_parent(top_of_stack: *mut u8);
     #[allow(dead_code)] // only used in inline assembly for some platforms
     fn wasmtime_fibre_start();
@@ -270,7 +270,7 @@ extern "C" {
 /// This function is responsible for actually running a wasm function inside a
 /// continuation. It is only ever called from `wasmtime_fibre_start`. Hence, it
 /// must never return.
-extern "C" fn fiber_start(
+unsafe extern "C" fn fiber_start(
     top_of_stack: *mut u8,
     func_ref: *const VMFuncRef,
     caller_vmctx: *mut VMContext,

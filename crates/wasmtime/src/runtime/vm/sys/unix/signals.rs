@@ -6,7 +6,7 @@ use crate::runtime::vm::traphandlers::{tls, TrapRegisters, TrapTest};
 use std::cell::RefCell;
 use std::io;
 use std::mem;
-use std::ptr::{self, addr_of, addr_of_mut, null_mut};
+use std::ptr::{self, null_mut};
 
 /// Function which may handle custom signals while processing traps.
 pub type SignalHandler =
@@ -67,22 +67,22 @@ impl TrapHandler {
     }
 }
 
-unsafe fn foreach_handler(mut f: impl FnMut(*mut libc::sigaction, i32)) {
+fn foreach_handler(mut f: impl FnMut(*mut libc::sigaction, i32)) {
     // Allow handling OOB with signals on all architectures
-    f(addr_of_mut!(PREV_SIGSEGV), libc::SIGSEGV);
+    f(&raw mut PREV_SIGSEGV, libc::SIGSEGV);
 
     // Handle `unreachable` instructions which execute `ud2` right now
-    f(addr_of_mut!(PREV_SIGILL), libc::SIGILL);
+    f(&raw mut PREV_SIGILL, libc::SIGILL);
 
     // x86 and s390x use SIGFPE to report division by zero
     if cfg!(target_arch = "x86_64") || cfg!(target_arch = "s390x") {
-        f(addr_of_mut!(PREV_SIGFPE), libc::SIGFPE);
+        f(&raw mut PREV_SIGFPE, libc::SIGFPE);
     }
 
     // Sometimes we need to handle SIGBUS too:
     // - On Darwin, guard page accesses are raised as SIGBUS.
     if cfg!(target_vendor = "apple") || cfg!(target_os = "freebsd") {
-        f(addr_of_mut!(PREV_SIGBUS), libc::SIGBUS);
+        f(&raw mut PREV_SIGBUS, libc::SIGBUS);
     }
 
     // TODO(#1980): x86-32, if we support it, will also need a SIGFPE handler.
@@ -132,10 +132,10 @@ unsafe extern "C" fn trap_handler(
     context: *mut libc::c_void,
 ) {
     let previous = match signum {
-        libc::SIGSEGV => addr_of!(PREV_SIGSEGV),
-        libc::SIGBUS => addr_of!(PREV_SIGBUS),
-        libc::SIGFPE => addr_of!(PREV_SIGFPE),
-        libc::SIGILL => addr_of!(PREV_SIGILL),
+        libc::SIGSEGV => &raw const PREV_SIGSEGV,
+        libc::SIGBUS => &raw const PREV_SIGBUS,
+        libc::SIGFPE => &raw const PREV_SIGFPE,
+        libc::SIGILL => &raw const PREV_SIGILL,
         _ => panic!("unknown signal: {signum}"),
     };
     let handled = tls::with(|info| {
@@ -393,8 +393,61 @@ unsafe fn set_pc(cx: *mut libc::c_void, pc: usize, arg1: usize) {
 /// always large enough for our signal handling code. Override it by creating
 /// and registering our own alternate stack that is large enough and has a guard
 /// page.
+///
+/// Note that one might reasonably ask why do this at all? Why not remove
+/// `SA_ONSTACK` from our signal handlers entirely? The basic reason for that is
+/// because we want to print a message on stack overflow. The Rust standard
+/// library will print this message by default and by us overriding the
+/// `SIGSEGV` handler above we're now sharing responsibility for that as well.
+/// We must have `SA_ONSTACK` to even attempt to being able to printing this
+/// message, and so we leave it turned on. Wasmtime will determine a stack
+/// overflow fault isn't caused by wasm and then forward to libstd's signal
+/// handler which will actually print-and-abort.
+///
+/// Another reasonable question might be why we need to increase the size of the
+/// sigaltstack at all? This is something which we may want to reconsider in the
+/// future. For now it helps keep debug builds working which consume more stack
+/// when handling normal wasm out-of-bounds and faults. Perhaps in the future we
+/// could optimize this more or maybe even do something clever like lazily
+/// allocate the sigaltstack on the fault itself. (e.g. trampoline from a tiny
+/// stack to the "big stack" during a wasm fault or something like that)
 #[cold]
 pub fn lazy_per_thread_init() {
+    // This is a load-bearing requirement to keep address-sanitizer working and
+    // prevent crashes during fuzzing. The general idea here is that we skip the
+    // sigaltstack setup below entirely on asan builds, aka fuzzing. The exact
+    // reason for this is not entirely known, but the closest guess we have at
+    // this time is something like:
+    //
+    // * ASAN builds intercept mmap/munmap to keep track of what's going on.
+    // * The sigaltstack below registers a TLS destructor for when the current
+    //   thread exits to deallocate the stack.
+    // * ASAN looks to also have TLS destructors for its own internal state.
+    // * The current assumption is that the order of these TLS destructors can
+    //   cause corruption in ASAN state where if we run after asan's destructor
+    //   it may intercept munmap and then asan doesn't know it's been
+    //   de-initialized yet.
+    //
+    // The reproduction of this involved a standalone project built with
+    // `-Zsanitizer=address` where internally it would spawn two threads. Each
+    // thread would build a "hello world" module and then one of the threads
+    // would execute a noop exported function. If this was run thousands of
+    // times in a loop in the same process it would eventually crash under asan.
+    //
+    // It's notably not quite so simple as frobbing TLS destructors. There's
+    // clearly something else going on with ASAN state internally which we don't
+    // fully understand at this time. An attempt to make a standalone C++
+    // reproduction, for example, was not successful. In lieu of that the best
+    // we have for now is to disable our custom and larger sigaltstack in asan
+    // builds.
+    //
+    // The exact source was
+    // https://gist.github.com/alexcrichton/6815a5d57a3c5ca94a8d816a9fcc91af for
+    // future reference if necessary.
+    if cfg!(asan) {
+        return;
+    }
+
     // This thread local is purely used to register a `Stack` to get deallocated
     // when the thread exists. Otherwise this function is only ever called at
     // most once per-thread.

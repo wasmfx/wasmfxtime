@@ -7,9 +7,9 @@ use super::{
 use anyhow::{anyhow, bail, Result};
 
 use crate::masm::{
-    DivKind, ExtendKind, FloatCmpKind, Imm as I, IntCmpKind, MacroAssembler as Masm, MulWideKind,
-    OperandSize, RegImm, RemKind, RoundingMode, ShiftKind, TrapCode, TruncKind, TRUSTED_FLAGS,
-    UNTRUSTED_FLAGS,
+    DivKind, ExtendKind, FloatCmpKind, Imm as I, IntCmpKind, LoadKind, MacroAssembler as Masm,
+    MemOpKind, MulWideKind, OperandSize, RegImm, RemKind, RmwOp, RoundingMode, ShiftKind,
+    SplatKind, TrapCode, TruncKind, TRUSTED_FLAGS, UNTRUSTED_FLAGS,
 };
 use crate::{
     abi::{self, align_to, calculate_frame_adjustment, LocalSlot},
@@ -30,10 +30,12 @@ use crate::{
 use cranelift_codegen::{
     binemit::CodeOffset,
     ir::{MemFlags, RelSourceLoc, SourceLoc},
-    isa::unwind::UnwindInst,
-    isa::x64::{
-        args::{ExtMode, CC},
-        settings as x64_settings,
+    isa::{
+        unwind::UnwindInst,
+        x64::{
+            args::{ExtMode, FenceKind, CC},
+            settings as x64_settings, AtomicRmwSeqOp,
+        },
     },
     settings, Final, MachBufferFinalized, MachLabel,
 };
@@ -215,8 +217,27 @@ impl Masm for MacroAssembler {
         self.store_impl(src, dst, size, TRUSTED_FLAGS)
     }
 
-    fn wasm_store(&mut self, src: Reg, dst: Self::Address, size: OperandSize) -> Result<()> {
-        self.store_impl(src.into(), dst, size, UNTRUSTED_FLAGS)
+    fn wasm_store(
+        &mut self,
+        src: Reg,
+        dst: Self::Address,
+        size: OperandSize,
+        op_kind: MemOpKind,
+    ) -> Result<()> {
+        match op_kind {
+            MemOpKind::Atomic => {
+                if size == OperandSize::S128 {
+                    // TODO: we don't support 128-bit atomic store yet.
+                    bail!(CodeGenError::unexpected_operand_size());
+                }
+                // To stay consistent with cranelift, we emit a normal store followed by a mfence,
+                // although, we could probably just emit a xchg.
+                self.store_impl(src.into(), dst, size, UNTRUSTED_FLAGS)?;
+                self.asm.fence(FenceKind::MFence);
+                Ok(())
+            }
+            MemOpKind::Normal => self.store_impl(src.into(), dst, size, UNTRUSTED_FLAGS),
+        }
     }
 
     fn pop(&mut self, dst: WritableReg, size: OperandSize) -> Result<()> {
@@ -278,15 +299,68 @@ impl Masm for MacroAssembler {
         &mut self,
         src: Self::Address,
         dst: WritableReg,
-        size: OperandSize,
-        kind: Option<ExtendKind>,
+        kind: LoadKind,
+        op_kind: MemOpKind,
     ) -> Result<()> {
-        if let Some(ext) = kind {
-            self.asm.movsx_mr(&src, dst, ext, UNTRUSTED_FLAGS);
-            Ok(())
-        } else {
-            self.load_impl::<Self>(src, dst, size, UNTRUSTED_FLAGS)
+        let size = kind.derive_operand_size();
+
+        match kind {
+            // The guarantees of the x86-64 memory model ensure that `SeqCst`
+            // loads are equivalent to normal loads.
+            LoadKind::ScalarExtend(ext) => {
+                if op_kind == MemOpKind::Atomic && size == OperandSize::S128 {
+                    bail!(CodeGenError::unexpected_operand_size());
+                }
+
+                if ext.signed() {
+                    self.asm.movsx_mr(&src, dst, ext, UNTRUSTED_FLAGS);
+                } else {
+                    self.load_impl::<Self>(src, dst, size, UNTRUSTED_FLAGS)?
+                }
+            }
+            LoadKind::Operand(_) => {
+                if op_kind == MemOpKind::Atomic && size == OperandSize::S128 {
+                    bail!(CodeGenError::unexpected_operand_size());
+                }
+
+                self.load_impl::<Self>(src, dst, size, UNTRUSTED_FLAGS)?;
+            }
+            LoadKind::VectorExtend(ext) => {
+                if op_kind == MemOpKind::Atomic {
+                    bail!(CodeGenError::unimplemented_masm_instruction());
+                }
+
+                if !self.flags.has_avx() {
+                    bail!(CodeGenError::UnimplementedForNoAvx)
+                }
+
+                self.asm.xmm_vpmov_mr(&src, dst, ext, UNTRUSTED_FLAGS)
+            }
+            LoadKind::Splat(_) => {
+                if op_kind == MemOpKind::Atomic {
+                    bail!(CodeGenError::unimplemented_masm_instruction());
+                }
+
+                if !self.flags.has_avx() {
+                    bail!(CodeGenError::UnimplementedForNoAvx)
+                }
+
+                if size == OperandSize::S64 {
+                    self.asm
+                        .xmm_mov_mr(&src, dst, OperandSize::S64, UNTRUSTED_FLAGS);
+                    self.asm.xmm_vpshuf_rr(
+                        dst.to_reg(),
+                        dst,
+                        Self::vpshuf_mask_for_64_bit_splats(),
+                        OperandSize::S32,
+                    );
+                } else {
+                    self.asm
+                        .xmm_vpbroadcast_mr(&src, dst, size, UNTRUSTED_FLAGS);
+                }
+            }
         }
+        Ok(())
     }
 
     fn sp_offset(&self) -> Result<SPOffset> {
@@ -965,7 +1039,7 @@ impl Masm for MacroAssembler {
     }
 
     fn extend(&mut self, dst: WritableReg, src: Reg, kind: ExtendKind) -> Result<()> {
-        if let ExtendKind::I64ExtendI32U = kind {
+        if !kind.signed() {
             self.asm.movzx_rr(src, dst, kind);
         } else {
             self.asm.movsx_rr(src, dst, kind);
@@ -1048,7 +1122,7 @@ impl Masm for MacroAssembler {
     ) -> Result<()> {
         // Need to convert unsigned uint32 to uint64 for conversion instruction sequence.
         if let OperandSize::S32 = src_size {
-            self.extend(writable!(src), src, ExtendKind::I64ExtendI32U)?;
+            self.extend(writable!(src), src, ExtendKind::I64Extend32U)?;
         }
 
         self.asm
@@ -1211,6 +1285,158 @@ impl Masm for MacroAssembler {
 
         Ok(())
     }
+
+    fn splat(&mut self, context: &mut CodeGenContext<Emission>, size: SplatKind) -> Result<()> {
+        // Get the source and destination operands set up first.
+        let (src, dst) = match size {
+            // Floats can use the same register for `src` and `dst`.
+            SplatKind::F32x4 | SplatKind::F64x2 => {
+                let reg = context.pop_to_reg(self, None)?.reg;
+                (RegImm::reg(reg), writable!(reg))
+            }
+            // For ints, we need to load the operand into a vector register if
+            // it's not a constant.
+            SplatKind::I8x16 | SplatKind::I16x8 | SplatKind::I32x4 | SplatKind::I64x2 => {
+                let dst = writable!(context.any_fpr(self)?);
+                let src = if size == SplatKind::I64x2 {
+                    context.pop_i64_const().map(RegImm::i64)
+                } else {
+                    context.pop_i32_const().map(RegImm::i32)
+                }
+                .map_or_else(
+                    || -> Result<RegImm> {
+                        let reg = context.pop_to_reg(self, None)?.reg;
+                        self.reinterpret_int_as_float(
+                            dst,
+                            reg,
+                            match size {
+                                SplatKind::I8x16 | SplatKind::I16x8 | SplatKind::I32x4 => {
+                                    OperandSize::S32
+                                }
+                                SplatKind::I64x2 => OperandSize::S64,
+                                SplatKind::F32x4 | SplatKind::F64x2 => unreachable!(),
+                            },
+                        )?;
+                        context.free_reg(reg);
+                        Ok(RegImm::Reg(dst.to_reg()))
+                    },
+                    Ok,
+                )?;
+                (src, dst)
+            }
+        };
+
+        // Perform the splat on the operands.
+        if size == SplatKind::I64x2 || size == SplatKind::F64x2 {
+            if !self.flags.has_avx() {
+                bail!(CodeGenError::UnimplementedForNoAvx);
+            }
+            let mask = Self::vpshuf_mask_for_64_bit_splats();
+            match src {
+                RegImm::Reg(src) => self.asm.xmm_vpshuf_rr(src, dst, mask, OperandSize::S32),
+                RegImm::Imm(imm) => {
+                    let src = self.asm.add_constant(&imm.to_bytes());
+                    self.asm
+                        .xmm_vpshuf_mr(&src, dst, mask, OperandSize::S32, MemFlags::trusted());
+                }
+            }
+        } else {
+            if !self.flags.has_avx2() {
+                bail!(CodeGenError::UnimplementedForNoAvx2);
+            }
+
+            match src {
+                RegImm::Reg(src) => self.asm.xmm_vpbroadcast_rr(src, dst, size.lane_size()),
+                RegImm::Imm(imm) => {
+                    let src = self.asm.add_constant(&imm.to_bytes());
+                    self.asm
+                        .xmm_vpbroadcast_mr(&src, dst, size.lane_size(), MemFlags::trusted());
+                }
+            }
+        }
+
+        context
+            .stack
+            .push(Val::reg(dst.to_reg(), WasmValType::V128));
+        Ok(())
+    }
+
+    fn shuffle(&mut self, dst: WritableReg, lhs: Reg, rhs: Reg, lanes: [u8; 16]) -> Result<()> {
+        if !self.flags.has_avx() {
+            bail!(CodeGenError::UnimplementedForNoAvx)
+        }
+
+        // Use `vpshufb` with `lanes` to set the lanes in `lhs` and `rhs`
+        // separately to either the selected index or 0.
+        // Then use `vpor` to combine `lhs` and `rhs` into `dst`.
+        // Setting the most significant bit in the mask's lane to 1 will
+        // result in corresponding lane in the destination register being
+        // set to 0. 0x80 sets the most significant bit to 1.
+        let mut mask_lhs: [u8; 16] = [0x80; 16];
+        let mut mask_rhs: [u8; 16] = [0x80; 16];
+        for i in 0..lanes.len() {
+            if lanes[i] < 16 {
+                mask_lhs[i] = lanes[i];
+            } else {
+                mask_rhs[i] = lanes[i] - 16;
+            }
+        }
+        let mask_lhs = self.asm.add_constant(&mask_lhs);
+        let mask_rhs = self.asm.add_constant(&mask_rhs);
+
+        self.asm.xmm_vpshufb_rrm(dst, lhs, &mask_lhs);
+        let scratch = writable!(regs::scratch_xmm());
+        self.asm.xmm_vpshufb_rrm(scratch, rhs, &mask_rhs);
+        self.asm.vpor(dst, dst.to_reg(), scratch.to_reg());
+        Ok(())
+    }
+
+    fn atomic_rmw(
+        &mut self,
+        addr: Self::Address,
+        operand: WritableReg,
+        size: OperandSize,
+        op: RmwOp,
+        flags: MemFlags,
+        extend: Option<ExtendKind>,
+    ) -> Result<()> {
+        match op {
+            RmwOp::Add => {
+                self.asm
+                    .lock_xadd(addr, operand.to_reg(), operand, size, flags);
+            }
+            RmwOp::Sub => {
+                self.asm.neg(operand.to_reg(), operand, size);
+                self.asm
+                    .lock_xadd(addr, operand.to_reg(), operand, size, flags);
+            }
+            RmwOp::Xchg => {
+                self.asm.xchg(addr, operand.to_reg(), operand, size, flags);
+            }
+            RmwOp::And | RmwOp::Or | RmwOp::Xor => {
+                let op = match op {
+                    RmwOp::And => AtomicRmwSeqOp::And,
+                    RmwOp::Or => AtomicRmwSeqOp::Or,
+                    RmwOp::Xor => AtomicRmwSeqOp::Xor,
+                    _ => unreachable!(
+                        "invalid op for atomic_rmw_seq, should be one of `or`, `and` or `xor`"
+                    ),
+                };
+
+                self.asm
+                    .atomic_rmw_seq(addr, operand.to_reg(), operand, size, flags, op);
+            }
+        }
+
+        if let Some(extend) = extend {
+            // We don't need to zero-extend from 32 to 64bits.
+            if !(extend.from_bits() == 32 && extend.to_bits() == 64) {
+                self.asm.movzx_rr(operand.to_reg(), operand, extend);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl MacroAssembler {
@@ -1368,5 +1594,14 @@ impl MacroAssembler {
         } else {
             Ok(())
         }
+    }
+
+    /// The mask to use when performing a `vpshuf` operation for a 64-bit splat.
+    fn vpshuf_mask_for_64_bit_splats() -> u8 {
+        // Results in the first 4 bytes and second 4 bytes being
+        // swapped and then the swapped bytes being copied.
+        // [d0, d1, d2, d3, d4, d5, d6, d7, ...] yields
+        // [d4, d5, d6, d7, d0, d1, d2, d3, d4, d5, d6, d7, d0, d1, d2, d3].
+        0b01_00_01_00
     }
 }

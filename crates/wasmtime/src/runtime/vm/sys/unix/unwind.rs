@@ -24,7 +24,7 @@ cfg_if::cfg_if! {
             false
         }
     } else {
-        extern "C" {
+        unsafe extern "C" {
             // libunwind import
             fn __register_frame(fde: *const u8);
             fn __deregister_frame(fde: *const u8);
@@ -72,7 +72,7 @@ impl UnwindRegistration {
         unwind_info: *const u8,
         unwind_len: usize,
     ) -> Result<UnwindRegistration> {
-        #[cfg(feature = "signals-based-traps")]
+        #[cfg(has_virtual_memory)]
         debug_assert_eq!(
             unwind_info as usize % crate::runtime::vm::host_page_size(),
             0,

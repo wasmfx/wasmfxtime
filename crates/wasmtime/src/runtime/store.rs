@@ -602,7 +602,7 @@ impl<T> Store<T> {
                 #[cfg(feature = "component-model")]
                 host_resource_data: Default::default(),
                 interpreter: if cfg!(feature = "pulley") && engine.target().is_pulley() {
-                    Some(Interpreter::new())
+                    Some(Interpreter::new(engine))
                 } else {
                     None
                 },
@@ -683,6 +683,8 @@ impl<T> Store<T> {
 
     /// Consumes this [`Store`], destroying it, and returns the underlying data.
     pub fn into_data(mut self) -> T {
+        self.inner.flush_fiber_stack();
+
         // This is an unsafe operation because we want to avoid having a runtime
         // check or boolean for whether the data is actually contained within a
         // `Store`. The data itself is stored as `ManuallyDrop` since we're
@@ -1862,7 +1864,7 @@ impl StoreOpaque {
 
         Some(AsyncCx {
             current_suspend: self.async_state.current_suspend.get(),
-            current_poll_cx: unsafe { core::ptr::addr_of_mut!((*poll_cx_box_ptr).future_context) },
+            current_poll_cx: unsafe { &raw mut (*poll_cx_box_ptr).future_context },
             track_pkey_context_switch: self.pkey.is_some(),
         })
     }

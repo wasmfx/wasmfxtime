@@ -87,7 +87,7 @@ rustix = { workspace = true, features = ["mm", "param", "process"] }
 
 [dev-dependencies]
 # depend again on wasmtime to activate its default features for tests
-wasmtime = { workspace = true, features = ['default', 'winch', 'pulley', 'all-arch', 'call-hook', 'memory-protection-keys', 'signals-based-traps'] }
+wasmtime = { workspace = true, features = ['default', 'winch', 'pulley', 'all-arch', 'call-hook', 'memory-protection-keys'] }
 env_logger = { workspace = true }
 log = { workspace = true }
 filecheck = { workspace = true }
@@ -126,6 +126,7 @@ wasmtime-test-macros = { path = "crates/test-macros" }
 pulley-interpreter = { workspace = true, features = ["disas"] }
 wasmtime-wast-util = { path = 'crates/wast-util' }
 wasm-encoder = { workspace = true }
+cranelift-native = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_Memory"] }
@@ -170,7 +171,7 @@ authors = ["The Wasmtime Project Developers"]
 edition = "2021"
 # Wasmtime's current policy is that this number can be no larger than the
 # current stable release of Rust minus 2.
-rust-version = "1.81.0"
+rust-version = "1.82.0"
 
 [workspace.lints.rust]
 # Turn on some lints which are otherwise allow-by-default in rustc.
@@ -180,6 +181,18 @@ unstable_features = 'warn'
 unused_import_braces = 'warn'
 unused-lifetimes = 'warn'
 unused-macro-rules = 'warn'
+
+# Lints that are part of the `rust-2024-compatibility` group. This group is a
+# bit too noisy to enable wholesale but some selective items are ones we want to
+# opt-in to.
+keyword_idents_2024 = 'warn'
+unsafe-attr-outside-unsafe = 'warn'
+deprecated-safe-2024 = 'warn'
+rust-2024-guarded-string-incompatible-syntax = 'warn'
+rust-2024-prelude-collisions = 'warn'
+rust-2024-incompatible-pat = 'warn'
+missing-unsafe-on-extern = 'warn'
+impl-trait-overcaptures = 'warn'
 
 # Don't warn about unknown cfgs for pulley
 [workspace.lints.rust.unexpected_cfgs]
@@ -282,22 +295,22 @@ fs-set-times = "0.20.1"
 system-interface = { version = "0.27.1", features = ["cap_std_impls"] }
 io-lifetimes = { version = "2.0.3", default-features = false }
 io-extras = "0.18.1"
-rustix = "0.38.31"
+rustix = "0.38.43"
 # wit-bindgen:
-wit-bindgen = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "v0.35.0", default-features = false }
-wit-bindgen-rust-macro = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "v0.35.0", default-features = false }
+wit-bindgen = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "v0.37.0", default-features = false }
+wit-bindgen-rust-macro = { git = "https://github.com/wasmfx/wit-bindgenfx", tag = "v0.37.0", default-features = false }
 
 # wasm-tools family:
-wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2", default-features = false, features = ['simd'] }
-wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
-wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
-wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
-wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
-wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
-wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
-wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
-wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
-wasm-wave     = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.221.2" }
+wasmparser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.223.0", default-features = false, features = ['simd'] }
+wat           = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.223.0" }
+wast          = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.223.0" }
+wasmprinter   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.223.0" }
+wasm-encoder  = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.223.0" }
+wasm-smith    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.223.0" }
+wasm-mutate   = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.223.0" }
+wit-parser    = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.223.0" }
+wit-component = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.223.0" }
+wasm-wave     = { git = "https://github.com/wasmfx/wasmfx-tools", tag = "v1.223.0" }
 
 # Non-Bytecode Alliance maintained dependencies:
 # --------------------------
@@ -311,7 +324,7 @@ env_logger = "0.11.5"
 log = { version = "0.4.8", default-features = false }
 clap = { version = "4.5.17", default-features = false, features = ["std", "derive"] }
 clap_complete = "4.4.7"
-hashbrown = { version = "0.14", default-features = false }
+hashbrown = { version = "0.15", default-features = false }
 capstone = "0.12.0"
 smallvec = { version = "1.6.1", features = ["union"] }
 tracing = "0.1.26"
@@ -407,12 +420,12 @@ default = [
   "addr2line",
   "debug-builtins",
   "component-model",
-  "signals-based-traps",
   "threads",
   "gc",
   "gc-drc",
   "gc-null",
   "winch",
+  "pulley",
 
   # Enable some nice features of clap by default, but they come at a binary size
   # cost, so allow disabling this through disabling of our own `default`
@@ -427,10 +440,10 @@ default = [
 # These features are off-by-default but may optionally be enabled.
 all-arch = ["wasmtime/all-arch"]
 winch = ["wasmtime/winch"]
-pulley = ["wasmtime/pulley"]
 wmemcheck = ["wasmtime/wmemcheck"]
 trace-log = ["wasmtime/trace-log"]
 memory-protection-keys = ["wasmtime-cli-flags/memory-protection-keys"]
+profile-pulley = ["wasmtime/profile-pulley"]
 
 # This feature, when enabled, will statically compile out all logging statements
 # throughout Wasmtime and its dependencies.
@@ -493,7 +506,7 @@ threads = ["wasmtime-cli-flags/threads"]
 gc = ["wasmtime-cli-flags/gc", "wasmtime/gc"]
 gc-drc = ["gc", "wasmtime/gc-drc", "wasmtime-cli-flags/gc-drc"]
 gc-null = ["gc", "wasmtime/gc-null", "wasmtime-cli-flags/gc-null"]
-signals-based-traps = ["wasmtime/signals-based-traps", "wasmtime-cli-flags/signals-based-traps"]
+pulley = ["wasmtime-cli-flags/pulley"]
 
 # CLI subcommands for the `wasmtime` executable. See `wasmtime $cmd --help`
 # for more information on each subcommand.
