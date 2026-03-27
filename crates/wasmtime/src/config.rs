@@ -242,6 +242,7 @@ impl Config {
             wasmfx_config: WasmFXConfig {
                 stack_size: wasmtime_continuations::DEFAULT_FIBER_SIZE,
                 red_zone_size: wasmtime_continuations::DEFAULT_RED_ZONE_SIZE,
+                total_stacks: wasmtime_continuations::DEFAULT_TOTAL_STACKS,
             },
             target: None,
             #[cfg(feature = "gc")]
@@ -755,6 +756,13 @@ impl Config {
     /// Configures the size of the stacks created with cont.new instructions.
     pub fn wasmfx_stack_size(&mut self, size: usize) -> &mut Self {
         self.wasmfx_config.stack_size = size;
+        self
+    }
+
+    /// Configures the size of the stack pool
+    /// Configures the size of the stacks created with cont.new instructions.
+    pub fn total_stacks(&mut self, size: usize) -> &mut Self {
+        self.wasmfx_config.total_stacks = size;
         self
     }
 

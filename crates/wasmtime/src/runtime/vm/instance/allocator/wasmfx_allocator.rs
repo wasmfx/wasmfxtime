@@ -91,7 +91,11 @@ pub mod wasmfx_pooling {
         pub fn new(config: &WasmFXConfig) -> Result<Self> {
             use rustix::mm::{mprotect, MprotectFlags};
 
-            let total_stacks : u32 = 1024 /* total amount of stacks */;
+            let total_stacks : u32 = config.total_stacks as u32; /* total amount of stacks */
+
+            if total_stacks == 0 {
+                bail!("total_stacks is zero! Maybe you didn't give a value for the `--total-stacks` CLI option?");
+            }
 
             let page_size = HostAlignedByteCount::host_page_size();
 

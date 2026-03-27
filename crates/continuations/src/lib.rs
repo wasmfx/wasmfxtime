@@ -19,6 +19,8 @@ pub const DEFAULT_FIBER_SIZE: usize = 2097152; // 2MB = 512 pages of 4k
 /// from the bottom of the fiber stack.
 pub const DEFAULT_RED_ZONE_SIZE: usize = 32768; // 32K = 8 pages of 4k size
 
+pub const DEFAULT_TOTAL_STACKS: usize = 1024; // Total amount of stacks in the stack pool
+
 /// Capacity of the `HandlerList` initially created for the main stack and every
 /// continuation.
 pub const INITIAL_HANDLER_LIST_CAPACITY: usize = 4;
@@ -49,6 +51,8 @@ pub struct WasmFXConfig {
     /// function while running on a continuation stack.
     /// Must be smaller than the value of `stack_size` above.
     pub red_zone_size: usize,
+
+    pub total_stacks: usize,
 }
 
 /// This type is used to save (and subsequently restore) a subset of the data in
