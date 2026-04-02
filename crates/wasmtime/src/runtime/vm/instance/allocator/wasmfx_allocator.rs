@@ -91,7 +91,7 @@ pub mod wasmfx_pooling {
         pub fn new(config: &WasmFXConfig) -> Result<Self> {
             use rustix::mm::{mprotect, MprotectFlags};
 
-            let total_stacks : u32 = config.total_stacks as u32; /* total amount of stacks */
+            let total_stacks: u32 = config.total_stacks.try_into()?; /* total amount of stacks */
 
             if total_stacks == 0 {
                 bail!("Total_stacks value is zero in pooling allocator");
