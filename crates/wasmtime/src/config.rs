@@ -760,7 +760,6 @@ impl Config {
     }
 
     /// Configures the size of the stack pool
-    /// Configures the size of the stacks created with cont.new instructions.
     pub fn total_stacks(&mut self, size: usize) -> &mut Self {
         self.wasmfx_config.total_stacks = size;
         self
