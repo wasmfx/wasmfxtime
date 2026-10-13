@@ -16,13 +16,20 @@ on:
     branches:
     # Right now merge queues can't be used with wildcards in branch protections
     # so full CI runs both on PRs to release branches as well as merges to
-    # release branches. Note that the merge to a release branch may produce a
-    # tag at the end of CI if successful and the tag will trigger the artifact
-    # uploads as well as publication to crates.io.
+    # release branches. The downstream repository additionally runs full CI on
+    # pushes to `main` so that its long-lived integration branch is validated.
+    # Note that the merge to a release branch may produce a tag at the end of CI
+    # if successful and the tag will trigger the artifact uploads as well as
+    # publication to crates.io.
+    - main
     - 'release-*'
 
   # Allow manually triggering this request via a button or another workflow.
   workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
 
 defaults:
   run:
@@ -110,7 +117,10 @@ jobs:
   cargo_vet:
     name: Cargo vet
     needs: determine
-    if: github.repository == 'bytecodealliance/wasmtime' && needs.determine.outputs.audit
+    if: |
+      (github.repository == 'bytecodealliance/wasmtime'
+       || github.repository == 'wasmfx/wasmfxtime')
+      && needs.determine.outputs.audit
     runs-on: ubuntu-latest
     outputs:
       outcome: ${{ steps.vet.outcome }}
@@ -1236,7 +1246,10 @@ jobs:
 
   verify-publish:
     needs: determine
-    if: github.repository == 'bytecodealliance/wasmtime' && needs.determine.outputs.run-full
+    if: |
+      (github.repository == 'bytecodealliance/wasmtime'
+       || github.repository == 'wasmfx/wasmfxtime')
+      && needs.determine.outputs.run-full
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
@@ -1281,7 +1294,10 @@ jobs:
           - script: "./ci/miri-wast.sh ./tests/spec_testsuite/struct.wast -Ccollector=copying"
           - script: "./ci/miri-wast.sh ./tests/spec_testsuite/struct.wast -Ccollector=drc"
     needs: determine
-    if: needs.determine.outputs.test-miri && github.repository == 'bytecodealliance/wasmtime'
+    if: |
+      needs.determine.outputs.test-miri
+      && (github.repository == 'bytecodealliance/wasmtime'
+          || github.repository == 'wasmfx/wasmfxtime')
     name: Miri
     runs-on: ubuntu-latest
     env:
