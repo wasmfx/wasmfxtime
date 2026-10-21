@@ -1,0 +1,43 @@
+name: WasmFX
+
+on:
+  pull_request:
+    branches:
+    - main
+  push:
+    branches:
+    - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test Linux x86_64 with wasmfx-stack-pooling
+    runs-on: ubuntu-latest
+    env:
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu
+      RUST_BACKTRACE: 1
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+    - uses: ./.github/actions/install-rust
+    - run: rustup target add x86_64-unknown-linux-gnu
+    - name: Test stack switching with pooled continuation stacks
+      run: |
+        cargo run --locked --features wasmfx-stack-pooling -- \
+          wast \
+          -W stack-switching \
+          -O pooling-allocator,pooling-max-tables-per-module=2 \
+          --wasmtime-builtins \
+          tests/misc_testsuite/stack-switching/*.wast

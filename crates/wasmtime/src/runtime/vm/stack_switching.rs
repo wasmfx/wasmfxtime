@@ -3,6 +3,8 @@
 
 #[cfg(feature = "stack-switching")]
 pub(crate) mod asan;
+#[cfg(feature = "wasmfx-stack-pooling")]
+mod pooling;
 mod stack;
 
 use crate::vm::{
@@ -10,6 +12,8 @@ use crate::vm::{
 };
 use core::{marker::PhantomPinned, ptr::NonNull};
 
+#[cfg(feature = "wasmfx-stack-pooling")]
+pub(crate) use pooling::ContinuationStackPool;
 pub use stack::*;
 
 // This constant is used to signal that a trap occurred inside a child
