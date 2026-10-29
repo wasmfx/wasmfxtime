@@ -4446,11 +4446,11 @@ impl PoolingAllocationConfig {
     }
 
     /// The maximum number of execution stacks allowed for asynchronous
-    /// execution, when enabled (default is `1000`).
+    /// execution  when enabled (default is `1000`).
     ///
     /// This value has a direct impact on the amount of memory allocated by the
     /// pooling instance allocator.
-    #[cfg(feature = "async")]
+    #[cfg(any(feature = "async", feature = "wasmfx-stack-pooling"))]
     pub fn total_stacks(&mut self, count: u32) -> &mut Self {
         self.limits.total_stacks = count;
         self

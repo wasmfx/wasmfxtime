@@ -467,6 +467,11 @@ pub struct StoreOpaque {
     // store.
     #[cfg(feature = "stack-switching")]
     continuations: Vec<Box<VMContRef>>,
+    // NOTE(dhil): Intentionally declared after `continuations` such
+    // that the continuation objects are dropped before their backing
+    // mapping.
+    #[cfg(feature = "wasmfx-stack-pooling")]
+    continuation_stack_pool: Option<vm::ContinuationStackPool>,
 
     instances: TryPrimaryMap<InstanceId, StoreInstance>,
 
@@ -730,6 +735,8 @@ impl<T> Store<T> {
             vm_store_context: Default::default(),
             #[cfg(feature = "stack-switching")]
             continuations: Vec::new(),
+            #[cfg(feature = "wasmfx-stack-pooling")]
+            continuation_stack_pool: None,
             instances: TryPrimaryMap::new(),
             signal_handler: None,
             gc_store: None,
@@ -2177,6 +2184,27 @@ at https://bytecodealliance.org/security.
         // FIXME(frank-emrich) Do we need to pin this?
         let mut continuation = Box::new(VMContRef::empty());
         let stack_size = self.engine.config().async_stack_size;
+        #[cfg(feature = "wasmfx-stack-pooling")]
+        let stack = {
+            let pooling_config = match &self.engine.config().allocation_strategy {
+                crate::config::InstanceAllocationStrategy::OnDemand => None,
+                crate::config::InstanceAllocationStrategy::Pooling(config) => Some(config.clone()),
+            };
+
+            match pooling_config {
+                Some(config) => {
+                    let pool = match &mut self.continuation_stack_pool {
+                        Some(pool) => pool,
+                        slot @ None => {
+                            slot.insert(vm::ContinuationStackPool::new(&config, stack_size)?)
+                        }
+                    };
+                    pool.allocate()?
+                }
+                None => crate::vm::VMContinuationStack::new(stack_size)?,
+            }
+        };
+        #[cfg(not(feature = "wasmfx-stack-pooling"))]
         let stack = crate::vm::VMContinuationStack::new(stack_size)?;
         #[cfg(asan)]
         {

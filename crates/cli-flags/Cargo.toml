@@ -53,5 +53,10 @@ threads = ["wasmtime/threads"]
 memory-protection-keys = ["wasmtime/memory-protection-keys"]
 pulley = ["wasmtime/pulley"]
 stack-switching = ["wasmtime/stack-switching"]
+wasmfx-stack-pooling = [
+  "pooling-allocator",
+  "stack-switching",
+  "wasmtime/wasmfx-stack-pooling",
+]
 debug = ["wasmtime/debug"]
 rr = ["wasmtime/rr", "component-model"]
