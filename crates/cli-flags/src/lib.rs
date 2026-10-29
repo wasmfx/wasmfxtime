@@ -1177,10 +1177,15 @@ impl CommonOptions {
                     if let Some(limit) = self.opts.pooling_max_core_instance_size {
                         cfg.max_core_instance_size(limit);
                     }
-                    match_feature! {
-                        ["async" : self.opts.pooling_total_stacks]
-                        limit => cfg.total_stacks(limit),
-                        _ => err,
+                    #[cfg(any(feature = "async", feature = "wasmfx-stack-pooling"))]
+                    if let Some(limit) = self.opts.pooling_total_stacks {
+                        cfg.total_stacks(limit);
+                    }
+                    #[cfg(not(any(feature = "async", feature = "wasmfx-stack-pooling")))]
+                    if self.opts.pooling_total_stacks.is_some() {
+                        bail!(
+                            "support for async/wasmfx stack pooling disabled at compile time"
+                        );
                     }
                     if let Some(max) = self.opts.pooling_max_memory_size
                         .or(self.wasm.max_memory_size)

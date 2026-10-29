@@ -3,6 +3,8 @@
 
 #[cfg(feature = "stack-switching")]
 pub(crate) mod asan;
+#[cfg(feature = "wasmfx-stack-pooling")]
+mod pooling;
 mod stack;
 
 use crate::vm::{
@@ -10,6 +12,8 @@ use crate::vm::{
 };
 use core::{marker::PhantomPinned, ptr::NonNull};
 
+#[cfg(feature = "wasmfx-stack-pooling")]
+pub(crate) use pooling::ContinuationStackPool;
 pub use stack::*;
 
 // This constant is used to signal that a trap occurred inside a child
@@ -144,6 +148,28 @@ impl VMContRef {
 
     pub fn detach_stack(&mut self) -> VMContinuationStack {
         core::mem::replace(&mut self.stack, VMContinuationStack::unallocated())
+    }
+
+    /// Resets a terminal continuation for reuse by a subsequent `cont.new`.
+    ///
+    /// The stack and revision counter are intentionally preserved. Keeping the
+    /// revision counter ensures that continuation objects from the previous
+    /// use of this allocation remain invalid.
+    pub fn reset_for_reuse(&mut self) {
+        debug_assert!(matches!(
+            self.common_stack_information.state,
+            VMStackState::Returned | VMStackState::Trapped
+        ));
+        debug_assert!(!self.stack.is_unallocated());
+
+        self.common_stack_information.limits = VMStackLimits::with_stack_limit(Default::default());
+        self.common_stack_information.state = VMStackState::Fresh;
+        self.common_stack_information.handlers.clear();
+        self.common_stack_information.first_switch_handler_index = 0;
+        self.parent_chain = VMStackChain::Absent;
+        self.last_ancestor = None;
+        self.args.clear();
+        self.values.clear();
     }
 
     /// This is effectively a `Default` implementation, without calling it
@@ -498,5 +524,42 @@ mod tests {
             size_of::<VMStackChain>(),
             usize::from(offsets.ptr.size_of_vmstack_chain())
         );
+    }
+
+    #[test]
+    fn resetting_a_continuation_preserves_its_revision_and_stack() -> crate::Result<()> {
+        let mut continuation = VMContRef::empty();
+        continuation.stack = VMContinuationStack::new(64 << 10)?;
+        let stack_range = continuation.stack.range();
+        continuation.revision = 42;
+        continuation.common_stack_information.state = VMStackState::Trapped;
+        continuation
+            .common_stack_information
+            .first_switch_handler_index = 7;
+        continuation.parent_chain = VMStackChain::InitialStack(VmPtr::dangling());
+
+        continuation.reset_for_reuse();
+
+        assert_eq!(continuation.revision, 42);
+        assert_eq!(
+            continuation.common_stack_information.state,
+            VMStackState::Fresh
+        );
+        assert_eq!(
+            continuation
+                .common_stack_information
+                .first_switch_handler_index,
+            0
+        );
+        assert_eq!(continuation.parent_chain, VMStackChain::Absent);
+        assert!(continuation.last_ancestor.is_none());
+        assert_eq!(continuation.args.buffer.length, 0);
+        assert_eq!(continuation.args.buffer.capacity, 0);
+        assert!(continuation.args.gc_ref_data.is_none());
+        assert_eq!(continuation.values.buffer.length, 0);
+        assert_eq!(continuation.values.buffer.capacity, 0);
+        assert!(continuation.values.gc_ref_data.is_none());
+        assert_eq!(continuation.stack.range(), stack_range);
+        Ok(())
     }
 }

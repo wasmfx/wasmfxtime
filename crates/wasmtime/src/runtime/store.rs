@@ -467,6 +467,11 @@ pub struct StoreOpaque {
     // store.
     #[cfg(feature = "stack-switching")]
     continuations: Vec<Box<VMContRef>>,
+    // NOTE(dhil): Intentionally declared after `continuations` such
+    // that the continuation objects are dropped before their backing
+    // mapping.
+    #[cfg(feature = "wasmfx-stack-pooling")]
+    continuation_stack_pool: Option<vm::ContinuationStackPool>,
 
     instances: TryPrimaryMap<InstanceId, StoreInstance>,
 
@@ -730,6 +735,8 @@ impl<T> Store<T> {
             vm_store_context: Default::default(),
             #[cfg(feature = "stack-switching")]
             continuations: Vec::new(),
+            #[cfg(feature = "wasmfx-stack-pooling")]
+            continuation_stack_pool: None,
             instances: TryPrimaryMap::new(),
             signal_handler: None,
             gc_store: None,
@@ -2169,14 +2176,72 @@ at https://bytecodealliance.org/security.
         }
     }
 
-    /// Allocates a new continuation. Note that we currently don't support
-    /// deallocating them. Instead, all continuations remain allocated
-    /// throughout the store's lifetime.
+    /// Initializes this store's continuation stack pool when pooling allocation
+    /// is configured. This is called while allocating the first real module
+    /// instance; dummy implementation-detail instances do not create the pool.
+    #[cfg(feature = "wasmfx-stack-pooling")]
+    fn initialize_continuation_stack_pool(&mut self) -> Result<()> {
+        if self.continuation_stack_pool.is_some() {
+            return Ok(());
+        }
+
+        let config = match &self.engine.config().allocation_strategy {
+            crate::config::InstanceAllocationStrategy::OnDemand => return Ok(()),
+            crate::config::InstanceAllocationStrategy::Pooling(config) => config.clone(),
+        };
+        let stack_size = self.engine.config().async_stack_size;
+        self.continuation_stack_pool = Some(vm::ContinuationStackPool::new(&config, stack_size)?);
+        Ok(())
+    }
+
+    /// Allocates a continuation. With stack pooling, terminal continuation
+    /// objects and their stacks are recycled once the configured limit is
+    /// reached. On-demand allocation retains every continuation object for the
+    /// store's lifetime.
     #[cfg(feature = "stack-switching")]
     pub fn allocate_continuation(&mut self) -> Result<*mut VMContRef> {
+        let stack_size = self.engine.config().async_stack_size;
+        #[cfg(feature = "wasmfx-stack-pooling")]
+        if let crate::config::InstanceAllocationStrategy::Pooling(config) =
+            &self.engine.config().allocation_strategy
+        {
+            let max_stacks = config.limits.total_stacks;
+            let pool = self
+                .continuation_stack_pool
+                .as_mut()
+                .expect("continuation stack pool initialized with the first module instance");
+
+            if pool.is_full() {
+                let mut continuation = pool.recycle().ok_or_else(|| {
+                    format_err!(
+                        "maximum concurrent continuation stack limit of {} reached",
+                        max_stacks
+                    )
+                })?;
+                // SAFETY: the pool only returns terminal continuations owned
+                // by this store, and this method has exclusive store access.
+                unsafe { continuation.as_mut() }.reset_for_reuse();
+                return Ok(continuation.as_ptr());
+            }
+        }
+
         // FIXME(frank-emrich) Do we need to pin this?
         let mut continuation = Box::new(VMContRef::empty());
-        let stack_size = self.engine.config().async_stack_size;
+        let continuation_ptr = NonNull::from(continuation.deref_mut());
+        #[cfg(feature = "wasmfx-stack-pooling")]
+        let stack = match &self.engine.config().allocation_strategy {
+            crate::config::InstanceAllocationStrategy::Pooling(_) => {
+                let pool = self
+                    .continuation_stack_pool
+                    .as_mut()
+                    .expect("continuation stack pool initialized with the first module instance");
+                pool.allocate(vm::SendSyncPtr::from(continuation_ptr))?
+            }
+            crate::config::InstanceAllocationStrategy::OnDemand => {
+                crate::vm::VMContinuationStack::new(stack_size)?
+            }
+        };
+        #[cfg(not(feature = "wasmfx-stack-pooling"))]
         let stack = crate::vm::VMContinuationStack::new(stack_size)?;
         #[cfg(asan)]
         {
@@ -2190,7 +2255,7 @@ at https://bytecodealliance.org/security.
             continuation.common_stack_information.asan.stack_size = asan_range.len();
         }
         continuation.stack = stack;
-        let ptr = continuation.deref_mut() as *mut VMContRef;
+        let ptr = continuation_ptr.as_ptr();
         self.continuations.push(continuation);
         Ok(ptr)
     }
@@ -2221,6 +2286,11 @@ at https://bytecodealliance.org/security.
         runtime_info: &ModuleRuntimeInfo,
         imports: Imports<'_>,
     ) -> Result<InstanceId> {
+        #[cfg(feature = "wasmfx-stack-pooling")]
+        if matches!(&kind, AllocateInstanceKind::Module(_)) {
+            self.initialize_continuation_stack_pool()?;
+        }
+
         self.instances.reserve(1)?;
 
         let id = self.instances.next_key();
@@ -2602,6 +2672,30 @@ impl core::ops::BitOr for Asyncness {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(feature = "wasmfx-stack-pooling", has_host_compiler_backend))]
+    #[test]
+    fn continuation_stack_pool_is_initialized_with_first_real_instance() -> Result<()> {
+        let mut config = crate::Config::new();
+        config
+            .wasm_function_references(true)
+            .wasm_stack_switching(true);
+        let mut pooling = crate::PoolingAllocationConfig::new();
+        pooling.total_stacks(1);
+        config.allocation_strategy(pooling);
+
+        let engine = crate::Engine::new(&config)?;
+        let mut store = Store::new(&engine, ());
+
+        // Store creation allocates a dummy default-callee instance, which
+        // should not initialize the continuation stack pool.
+        assert!(store.inner.inner.continuation_stack_pool.is_none());
+
+        let module = crate::Module::new(&engine, "(module)")?;
+        crate::Instance::new(&mut store, &module, &[])?;
+        assert!(store.inner.inner.continuation_stack_pool.is_some());
+        Ok(())
+    }
 
     struct FuelTank {
         pub consumed_fuel: i64,

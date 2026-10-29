@@ -549,6 +549,12 @@ winch = ["wasmtime/winch"]
 wmemcheck = ["wasmtime/wmemcheck"]
 trace-log = ["wasmtime/trace-log"]
 memory-protection-keys = ["wasmtime-cli-flags/memory-protection-keys"]
+wasmfx-stack-pooling = [
+  "pooling-allocator",
+  "stack-switching",
+  "wasmtime/wasmfx-stack-pooling",
+  "wasmtime-cli-flags/wasmfx-stack-pooling",
+]
 profile-pulley = ["wasmtime/profile-pulley"]
 component-model-async = [
   "wasmtime-cli-flags/component-model-async",
