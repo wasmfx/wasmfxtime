@@ -1,5 +1,86 @@
 use wasmtime::*;
 
+#[cfg(feature = "wasmfx-stack-pooling")]
+#[test]
+fn pooling_recycles_terminal_continuations_when_full() -> Result<()> {
+    let mut config = Config::new();
+    config
+        .wasm_function_references(true)
+        .wasm_stack_switching(true);
+    let mut pool = PoolingAllocationConfig::new();
+    pool.total_stacks(1);
+    config.allocation_strategy(pool);
+
+    let engine = Engine::new(&config)?;
+    let module = Module::new(
+        &engine,
+        r#"
+            (module
+              (type $ft (func))
+              (type $ct (cont $ft))
+              (func $noop)
+              (func $trap unreachable)
+              (elem declare func $noop $trap)
+
+              (func (export "trap")
+                (resume $ct (cont.new $ct (ref.func $trap))))
+
+              (func (export "run")
+                (resume $ct (cont.new $ct (ref.func $noop)))
+                (resume $ct (cont.new $ct (ref.func $noop))))
+
+              ;; Keep a copy of a continuation object, consume it, then
+              ;; recycle its VMContRef for a new continuation. The stale copy
+              ;; must remain invalid because its revision witness is old.
+              (func (export "stale")
+                (local $live (ref $ct))
+                (local $stale (ref $ct))
+                (local.set $live (cont.new $ct (ref.func $noop)))
+                (local.set $stale (local.get $live))
+                (resume $ct (local.get $live))
+                (resume $ct (cont.new $ct (ref.func $noop)))
+                (resume $ct (local.get $stale)))
+
+              (func (export "exhaust")
+                (local $first (ref $ct))
+                (local $second (ref $ct))
+                (local.set $first (cont.new $ct (ref.func $noop)))
+                (local.set $second (cont.new $ct (ref.func $noop)))))
+        "#,
+    )?;
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[])?;
+
+    // A trapped continuation is terminal and can be recycled on the next
+    // allocation.
+    instance
+        .get_typed_func::<(), ()>(&mut store, "trap")?
+        .call(&mut store, ())
+        .unwrap_err();
+    instance
+        .get_typed_func::<(), ()>(&mut store, "run")?
+        .call(&mut store, ())?;
+
+    // Reusing the VMContRef address must not make an old continuation object
+    // valid again.
+    instance
+        .get_typed_func::<(), ()>(&mut store, "stale")?
+        .call(&mut store, ())
+        .unwrap_err();
+
+    let error = instance
+        .get_typed_func::<(), ()>(&mut store, "exhaust")?
+        .call(&mut store, ())
+        .unwrap_err();
+    assert!(
+        error.chain().any(|cause| cause
+            .to_string()
+            .contains("maximum concurrent continuation stack limit of 1 reached")),
+        "unexpected error: {error:?}"
+    );
+    Ok(())
+}
+
 mod test_utils {
     use std::any::*;
     use std::panic::AssertUnwindSafe;
