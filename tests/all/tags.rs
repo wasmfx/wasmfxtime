@@ -83,6 +83,11 @@ fn wasm_import_tags() -> Result<()> {
 // Tests that `cont.new` with a function type whose arity exceeds the
 // continuation stack size produces an error rather than writing past the
 // stack allocation.
+#[cfg(all(
+    feature = "stack-switching",
+    target_os = "linux",
+    target_arch = "x86_64"
+))]
 #[test]
 #[cfg_attr(miri, ignore)]
 fn stack_switching_cont_new_high_arity_rejected() -> Result<()> {
@@ -100,11 +105,7 @@ fn stack_switching_cont_new_high_arity_rejected() -> Result<()> {
     config.async_stack_size(8192);
     config.max_wasm_stack(4096);
 
-    let Ok(engine) = Engine::new(&config) else {
-        // Stack switching is not supported on all platforms; skip gracefully.
-        assert!(!(cfg!(target_arch = "x86_64") && cfg!(unix)));
-        return Ok(());
-    };
+    let engine = Engine::new(&config)?;
 
     // Build a WAT module with a high-arity function type.
     // 800 params stays under wasmparser's MAX_WASM_FUNCTION_PARAMS (1000)
@@ -140,6 +141,11 @@ fn stack_switching_cont_new_high_arity_rejected() -> Result<()> {
 // (8192). Before the fix, the bounds check compared against self.len (which
 // includes the guard page), so this case passed the check and then wrote
 // into the guard page, causing a segfault.
+#[cfg(all(
+    feature = "stack-switching",
+    target_os = "linux",
+    target_arch = "x86_64"
+))]
 #[test]
 #[cfg_attr(miri, ignore)]
 fn stack_switching_cont_new_guard_page_arity_rejected() -> Result<()> {
@@ -150,11 +156,7 @@ fn stack_switching_cont_new_guard_page_arity_rejected() -> Result<()> {
     config.async_stack_size(8192);
     config.max_wasm_stack(4096);
 
-    let Ok(engine) = Engine::new(&config) else {
-        // Stack switching is not supported on all platforms; skip gracefully.
-        assert!(!(cfg!(target_arch = "x86_64") && cfg!(unix)));
-        return Ok(());
-    };
+    let engine = Engine::new(&config)?;
 
     // 600 params: control data = 600 * 16 + 64 = 9664 bytes.
     // This exceeds the 8192-byte usable stack but fits within the
@@ -187,6 +189,11 @@ fn stack_switching_cont_new_guard_page_arity_rejected() -> Result<()> {
 // Tests that enabling inlining with stack switching, for now, returns an error.
 // If the support in Cranelift is fixed to the point that this is fine to
 // enable, then delete this test and the check in `config.rs` as well.
+#[cfg(all(
+    feature = "stack-switching",
+    target_os = "linux",
+    target_arch = "x86_64"
+))]
 #[test]
 fn stack_switching_disallows_inlining() -> Result<()> {
     let mut config = Config::new();

@@ -136,6 +136,7 @@ define_wasmtime_continuation_start!(
 #[cfg(not(asan))]
 define_wasmtime_continuation_start!("", "");
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_control_effect_payloads() {
     // These assumptions are baked into `wasmtime_continuation_start`.

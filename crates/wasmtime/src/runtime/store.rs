@@ -2187,37 +2187,33 @@ at https://bytecodealliance.org/security.
 
         let config = match &self.engine.config().allocation_strategy {
             crate::config::InstanceAllocationStrategy::OnDemand => return Ok(()),
-            crate::config::InstanceAllocationStrategy::Pooling(config) => config.clone(),
+            crate::config::InstanceAllocationStrategy::Pooling(config) => config,
         };
-        let stack_size = self.engine.config().async_stack_size;
-        self.continuation_stack_pool = Some(vm::ContinuationStackPool::new(&config, stack_size)?);
+        let max_stacks = usize::try_from(config.limits.total_stacks).unwrap();
+        let arena = self.engine.continuation_stack_arena()?;
+        self.continuation_stack_pool = Some(vm::ContinuationStackPool::new(arena, max_stacks)?);
         Ok(())
     }
 
-    /// Allocates a continuation. With stack pooling, terminal continuation
-    /// objects and their stacks are recycled once the configured limit is
-    /// reached. On-demand allocation retains every continuation object for the
-    /// store's lifetime.
+    /// Allocates a continuation. With stack pooling, new engine-owned stack
+    /// slots are used until the arena is full, after which terminal store-owned
+    /// continuation objects and their stacks are recycled. On-demand allocation
+    /// retains every continuation object for the store's lifetime.
     #[cfg(feature = "stack-switching")]
     pub fn allocate_continuation(&mut self) -> Result<*mut VMContRef> {
         let stack_size = self.engine.config().async_stack_size;
         #[cfg(feature = "wasmfx-stack-pooling")]
-        if let crate::config::InstanceAllocationStrategy::Pooling(config) =
+        if let crate::config::InstanceAllocationStrategy::Pooling(_) =
             &self.engine.config().allocation_strategy
         {
-            let max_stacks = config.limits.total_stacks;
             let pool = self
                 .continuation_stack_pool
                 .as_mut()
                 .expect("continuation stack pool initialized with the first module instance");
 
-            if pool.is_full() {
-                let mut continuation = pool.recycle().ok_or_else(|| {
-                    format_err!(
-                        "maximum concurrent continuation stack limit of {} reached",
-                        max_stacks
-                    )
-                })?;
+            if pool.arena_known_full()
+                && let Some(mut continuation) = pool.recycle()
+            {
                 // SAFETY: the pool only returns terminal continuations owned
                 // by this store, and this method has exclusive store access.
                 unsafe { continuation.as_mut() }.reset_for_reuse();
@@ -2230,12 +2226,33 @@ at https://bytecodealliance.org/security.
         let continuation_ptr = NonNull::from(continuation.deref_mut());
         #[cfg(feature = "wasmfx-stack-pooling")]
         let stack = match &self.engine.config().allocation_strategy {
-            crate::config::InstanceAllocationStrategy::Pooling(_) => {
+            crate::config::InstanceAllocationStrategy::Pooling(config) => {
+                let max_stacks = config.limits.total_stacks;
                 let pool = self
                     .continuation_stack_pool
                     .as_mut()
                     .expect("continuation stack pool initialized with the first module instance");
-                pool.allocate(vm::SendSyncPtr::from(continuation_ptr))?
+                let arena_was_known_full = pool.arena_known_full();
+                match pool.allocate(vm::SendSyncPtr::from(continuation_ptr))? {
+                    Some(stack) => stack,
+                    None => {
+                        let recycled = if arena_was_known_full {
+                            None
+                        } else {
+                            pool.recycle()
+                        };
+                        if let Some(mut continuation) = recycled {
+                            // SAFETY: the pool only returns terminal continuations owned
+                            // by this store, and this method has exclusive store access.
+                            unsafe { continuation.as_mut() }.reset_for_reuse();
+                            return Ok(continuation.as_ptr());
+                        }
+                        bail!(
+                            "maximum concurrent continuation stack limit of {} reached",
+                            max_stacks
+                        );
+                    }
+                }
             }
             crate::config::InstanceAllocationStrategy::OnDemand => {
                 crate::vm::VMContinuationStack::new(stack_size)?
@@ -2673,7 +2690,13 @@ impl core::ops::BitOr for Asyncness {
 mod tests {
     use super::*;
 
-    #[cfg(all(feature = "wasmfx-stack-pooling", has_host_compiler_backend))]
+    #[cfg(all(
+        feature = "wasmfx-stack-pooling",
+        has_host_compiler_backend,
+        target_os = "linux",
+        target_arch = "x86_64",
+        not(miri)
+    ))]
     #[test]
     fn continuation_stack_pool_is_initialized_with_first_real_instance() -> Result<()> {
         let mut config = crate::Config::new();
@@ -2686,14 +2709,64 @@ mod tests {
 
         let engine = crate::Engine::new(&config)?;
         let mut store = Store::new(&engine, ());
+        let mut other_store = Store::new(&engine, ());
 
         // Store creation allocates a dummy default-callee instance, which
         // should not initialize the continuation stack pool.
         assert!(store.inner.inner.continuation_stack_pool.is_none());
+        assert!(other_store.inner.inner.continuation_stack_pool.is_none());
 
         let module = crate::Module::new(&engine, "(module)")?;
         crate::Instance::new(&mut store, &module, &[])?;
+        crate::Instance::new(&mut other_store, &module, &[])?;
         assert!(store.inner.inner.continuation_stack_pool.is_some());
+        assert!(other_store.inner.inner.continuation_stack_pool.is_some());
+
+        // The arena limit is shared by stores using the same engine, and a
+        // store returns its slots to the arena when it is dropped.
+        store.inner.inner.allocate_continuation()?;
+        assert!(other_store.inner.inner.allocate_continuation().is_err());
+        drop(store);
+        other_store.inner.inner.allocate_continuation()?;
+        Ok(())
+    }
+
+    #[cfg(all(
+        feature = "wasmfx-stack-pooling",
+        has_host_compiler_backend,
+        target_os = "linux",
+        target_arch = "x86_64",
+        not(miri)
+    ))]
+    #[test]
+    fn continuation_stack_pool_fills_before_recycling() -> Result<()> {
+        let mut config = crate::Config::new();
+        config
+            .wasm_function_references(true)
+            .wasm_stack_switching(true);
+        let mut pooling = crate::PoolingAllocationConfig::new();
+        pooling.total_stacks(2);
+        config.allocation_strategy(pooling);
+        let engine = crate::Engine::new(&config)?;
+        let module = crate::Module::new(&engine, "(module)")?;
+        let mut store = Store::new(&engine, ());
+        crate::Instance::new(&mut store, &module, &[])?;
+
+        let first = store.inner.inner.allocate_continuation()?;
+        // SAFETY: the continuation is owned by this store, has never executed,
+        // and there are no other references to it.
+        unsafe { (*first).common_stack_information.state = vm::VMStackState::Returned };
+        // A terminal owner must not trigger recycling while slots remain.
+        let second = store.inner.inner.allocate_continuation()?;
+        assert_ne!(first, second);
+        assert_eq!(store.inner.inner.continuations.len(), 2);
+
+        // The failed arena checkout enables the local recycling fast path.
+        assert_eq!(store.inner.inner.allocate_continuation()?, first);
+        // SAFETY: same ownership and exclusive-access conditions as above.
+        unsafe { (*first).common_stack_information.state = vm::VMStackState::Returned };
+        assert_eq!(store.inner.inner.allocate_continuation()?, first);
+        assert_eq!(store.inner.inner.continuations.len(), 2);
         Ok(())
     }
 

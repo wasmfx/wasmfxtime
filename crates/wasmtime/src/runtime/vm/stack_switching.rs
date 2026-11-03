@@ -13,7 +13,7 @@ use crate::vm::{
 use core::{marker::PhantomPinned, ptr::NonNull};
 
 #[cfg(feature = "wasmfx-stack-pooling")]
-pub(crate) use pooling::ContinuationStackPool;
+pub(crate) use pooling::{ContinuationStackArena, ContinuationStackPool};
 pub use stack::*;
 
 // This constant is used to signal that a trap occurred inside a child
@@ -483,7 +483,7 @@ pub enum VMStackState {
     Trapped = wasmtime_environ::STACK_STATE_TRAPPED_DISCRIMINANT,
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
     use core::mem::{offset_of, size_of};
 
@@ -526,6 +526,7 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "stack-switching", not(miri)))]
     #[test]
     fn resetting_a_continuation_preserves_its_revision_and_stack() -> crate::Result<()> {
         let mut continuation = VMContRef::empty();
