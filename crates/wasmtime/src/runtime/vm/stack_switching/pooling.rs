@@ -7,15 +7,27 @@ use super::VMContinuationStack;
 use crate::config::PoolingAllocationConfig;
 use crate::prelude::*;
 use crate::runtime::vm::{SendSyncPtr, VMContRef, VMStackState};
+use crate::sync::Mutex;
+use std::sync::Arc;
+
+use imp::StackSlot;
+
+#[derive(Debug)]
+struct StackOwner {
+    continuation: SendSyncPtr<VMContRef>,
+    slot: StackSlot,
+}
 
 /// Owners of the fixed stack slots in a continuation stack pool.
 ///
-/// The store keeps every `VMContRef` alive longer than its stack pool, so these
-/// pointers remain valid for the lifetime of this list. This list is bounded by
-/// the configured maximum number of stacks.
+/// The store retains every `VMContRef` while allocation can inspect
+/// this list, so these pointers remain valid whenever they are
+/// dereferenced. During store destruction the continuations are
+/// dropped first; this pool's destructor only reads the slot
+/// identifiers and does not dereference the owner pointers.
 #[derive(Debug)]
 struct StackOwners {
-    owners: TryVec<SendSyncPtr<VMContRef>>,
+    owners: TryVec<StackOwner>,
     next_recycle: usize,
 }
 
@@ -27,24 +39,21 @@ impl StackOwners {
         })
     }
 
-    fn len(&self) -> usize {
-        self.owners.len()
-    }
-
-    fn push(&mut self, owner: SendSyncPtr<VMContRef>) -> Result<()> {
-        self.owners.push(owner)?;
+    fn push(&mut self, continuation: SendSyncPtr<VMContRef>, slot: StackSlot) -> Result<()> {
+        self.owners.push(StackOwner { continuation, slot })?;
         Ok(())
     }
 
     fn recycle(&mut self) -> Option<SendSyncPtr<VMContRef>> {
         for offset in 0..self.owners.len() {
             let index = (self.next_recycle + offset) % self.owners.len();
-            let mut owner = self.owners[index];
-            // SAFETY: `StackOwners` only contains pointers to continuations
-            // retained by the store that owns this pool. Allocation has
-            // exclusive access to that store, and terminal continuations are
-            // no longer executing on their stacks. The object is reset by the
-            // store before its pointer is returned to Wasm again.
+            let mut owner = self.owners[index].continuation;
+            // SAFETY: `StackOwners` only contains pointers to
+            // continuations retained by the store that owns this
+            // pool. Allocation has exclusive access to that store,
+            // and terminal continuations are no longer executing on
+            // their stacks. The object is reset by the store before
+            // its pointer is returned to Wasm again.
             let continuation = unsafe { owner.as_mut() };
             if matches!(
                 continuation.common_stack_information.state,
@@ -55,6 +64,10 @@ impl StackOwners {
             }
         }
         None
+    }
+
+    fn slots(&self) -> impl Iterator<Item = StackSlot> + '_ {
+        self.owners.iter().map(|owner| owner.slot)
     }
 }
 
@@ -69,17 +82,26 @@ cfg_select! {
             use super::*;
             use crate::runtime::vm::{HostAlignedByteCount, Mmap, mmap::AlignedLength};
 
-            /// A single reservation split into guarded continuation-stack slots.
+            #[derive(Clone, Copy, Debug)]
+            pub(super) struct StackSlot(usize);
+
             #[derive(Debug)]
-            pub struct ContinuationStackPool {
+            struct ArenaState {
+                next: usize,
+                free: TryVec<StackSlot>,
+            }
+
+            /// Engine-owned reservation split into guarded continuation-stack slots.
+            #[derive(Debug)]
+            pub struct ContinuationStackArena {
                 mapping: Mmap<AlignedLength>,
                 stack_size: HostAlignedByteCount,
                 max_stacks: usize,
                 page_size: HostAlignedByteCount,
-                owners: StackOwners,
+                state: Mutex<ArenaState>,
             }
 
-            impl ContinuationStackPool {
+            impl ContinuationStackArena {
                 pub fn new(config: &PoolingAllocationConfig, stack_size: usize) -> Result<Self> {
                     use rustix::mm::{MprotectFlags, mprotect};
 
@@ -121,42 +143,43 @@ cfg_select! {
                         stack_size,
                         max_stacks,
                         page_size,
-                        owners: StackOwners::with_capacity(max_stacks)?,
+                        state: Mutex::new(ArenaState {
+                            next: 0,
+                            free: TryVec::with_capacity(max_stacks)?,
+                        }),
                     })
                 }
 
-                pub fn is_full(&self) -> bool {
-                    self.owners.len() == self.max_stacks
-                }
-
-                pub fn recycle(&mut self) -> Option<SendSyncPtr<VMContRef>> {
-                    debug_assert!(self.is_full());
-                    self.owners.recycle()
-                }
-
-                pub fn allocate(
-                    &mut self,
-                    owner: SendSyncPtr<VMContRef>,
-                ) -> Result<VMContinuationStack> {
+                pub(super) fn allocate(
+                    &self,
+                ) -> Result<Option<(VMContinuationStack, StackSlot)>> {
                     if self.stack_size.is_zero() {
                         bail!(
                             "pooling allocator not configured to enable continuation stack allocation"
                         );
                     }
-                    assert!(!self.is_full());
 
-                    let index = self.owners.len();
+                    let mut state = self.state.lock();
+                    let slot = match state.free.pop() {
+                        Some(slot) => slot,
+                        None if state.next < self.max_stacks => {
+                            let slot = StackSlot(state.next);
+                            state.next += 1;
+                            slot
+                        }
+                        None => return Ok(None),
+                    };
 
                     unsafe {
                         let usable_size = self
                             .stack_size
                             .checked_sub(self.page_size)
                             .expect("a non-empty stack slot includes its guard page");
-                        let slot = self.stack_size.unchecked_mul(index);
+                        let offset = self.stack_size.unchecked_mul(slot.0);
                         let bottom = self
                             .mapping
                             .as_ptr()
-                            .add(slot.byte_count() + self.page_size.byte_count())
+                            .add(offset.byte_count() + self.page_size.byte_count())
                             .cast_mut();
 
                         match VMContinuationStack::from_raw_parts(
@@ -164,12 +187,25 @@ cfg_select! {
                             self.page_size.byte_count(),
                             usable_size.byte_count(),
                         ) {
-                            Ok(stack) => {
-                                self.owners.push(owner)?;
-                                Ok(stack)
+                            Ok(stack) => Ok(Some((stack, slot))),
+                            Err(error) => {
+                                state.free.push(slot)?;
+                                Err(error)
                             }
-                            Err(error) => Err(error),
                         }
+                    }
+                }
+
+                pub(super) fn deallocate_many(
+                    &self,
+                    slots: impl IntoIterator<Item = StackSlot>,
+                ) {
+                    let mut state = self.state.lock();
+                    for slot in slots {
+                        state
+                            .free
+                            .push(slot)
+                            .expect("arena free list was preallocated to its maximum size");
                     }
                 }
             }
@@ -179,60 +215,113 @@ cfg_select! {
         mod imp {
             use super::*;
 
-            /// Fallback that enforces the pooling limit while using
-            /// the native continuation-stack allocation mechanism.
+            #[derive(Clone, Copy, Debug)]
+            pub(super) struct StackSlot;
+
             #[derive(Debug)]
-            pub struct ContinuationStackPool {
-                stack_size: usize,
-                max_stacks: usize,
-                owners: StackOwners,
+            struct ArenaState {
+                live: usize,
             }
 
-            impl ContinuationStackPool {
+            /// Engine-owned concurrency limit for platforms without guarded
+            /// continuation-stack slots.
+            #[derive(Debug)]
+            pub struct ContinuationStackArena {
+                stack_size: usize,
+                max_stacks: usize,
+                state: Mutex<ArenaState>,
+            }
+
+            impl ContinuationStackArena {
                 pub fn new(config: &PoolingAllocationConfig, stack_size: usize) -> Result<Self> {
                     let max_stacks = usize::try_from(config.limits.total_stacks).unwrap();
                     Ok(Self {
                         stack_size,
                         max_stacks,
-                        owners: StackOwners::with_capacity(max_stacks)?,
+                        state: Mutex::new(ArenaState { live: 0 }),
                     })
                 }
 
-                pub fn is_full(&self) -> bool {
-                    self.owners.len() == self.max_stacks
-                }
-
-                pub fn recycle(&mut self) -> Option<SendSyncPtr<VMContRef>> {
-                    debug_assert!(self.is_full());
-                    self.owners.recycle()
-                }
-
-                pub fn allocate(
-                    &mut self,
-                    owner: SendSyncPtr<VMContRef>,
-                ) -> Result<VMContinuationStack> {
-                    assert!(!self.is_full());
-
-                    match VMContinuationStack::new(self.stack_size) {
-                        Ok(stack) => {
-                            self.owners.push(owner)?;
-                            Ok(stack)
-                        }
-                        Err(error) => Err(error),
+                pub(super) fn allocate(
+                    &self,
+                ) -> Result<Option<(VMContinuationStack, StackSlot)>> {
+                    let mut state = self.state.lock();
+                    if state.live == self.max_stacks {
+                        return Ok(None);
                     }
+                    let stack = VMContinuationStack::new(self.stack_size)?;
+                    state.live += 1;
+                    Ok(Some((stack, StackSlot)))
+                }
+
+                pub(super) fn deallocate_many(
+                    &self,
+                    slots: impl IntoIterator<Item = StackSlot>,
+                ) {
+                    let mut state = self.state.lock();
+                    state.live -= slots.into_iter().count();
                 }
             }
         }
     }
 }
 
-pub use imp::ContinuationStackPool;
+pub use imp::ContinuationStackArena;
 
-#[cfg(test)]
+/// Store-local ownership and recycling metadata for continuations.
+#[derive(Debug)]
+pub struct ContinuationStackPool {
+    arena: Arc<ContinuationStackArena>,
+    owners: StackOwners,
+    arena_known_full: bool,
+}
+
+impl ContinuationStackPool {
+    pub fn new(arena: Arc<ContinuationStackArena>, max_stacks: usize) -> Result<Self> {
+        Ok(Self {
+            arena,
+            owners: StackOwners::with_capacity(max_stacks)?,
+            arena_known_full: false,
+        })
+    }
+
+    pub fn arena_known_full(&self) -> bool {
+        self.arena_known_full
+    }
+
+    pub fn recycle(&mut self) -> Option<SendSyncPtr<VMContRef>> {
+        self.owners.recycle()
+    }
+
+    pub fn allocate(
+        &mut self,
+        owner: SendSyncPtr<VMContRef>,
+    ) -> Result<Option<VMContinuationStack>> {
+        let Some((stack, slot)) = self.arena.allocate()? else {
+            self.arena_known_full = true;
+            return Ok(None);
+        };
+        self.arena_known_full = false;
+        if let Err(error) = self.owners.push(owner, slot) {
+            self.arena.deallocate_many([slot]);
+            return Err(error);
+        }
+        Ok(Some(stack))
+    }
+}
+
+impl Drop for ContinuationStackPool {
+    fn drop(&mut self) {
+        self.arena.deallocate_many(self.owners.slots());
+    }
+}
+
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
     use super::*;
     use crate::config::InstanceLimits;
 
+    #[cfg(all(not(miri), not(asan)))]
     fn owner(continuation: &mut Box<VMContRef>) -> SendSyncPtr<VMContRef> {
         SendSyncPtr::from(core::ptr::NonNull::from(continuation.as_mut()))
     }
@@ -246,14 +335,15 @@ mod tests {
             },
             ..PoolingAllocationConfig::default()
         };
-        let mut pool = ContinuationStackPool::new(&config, 1)?;
+        let arena = Arc::new(ContinuationStackArena::new(&config, 1)?);
+        let mut pool = ContinuationStackPool::new(arena.clone(), 0)?;
 
-        assert!(pool.is_full());
         assert!(pool.recycle().is_none());
+        assert!(arena.allocate()?.is_none());
         Ok(())
     }
 
-    #[cfg(all(unix, not(miri), not(asan), target_arch = "x86_64"))]
+    #[cfg(all(not(miri), not(asan)))]
     #[test]
     fn continuation_stack_pool_enforces_its_limit() -> Result<()> {
         let config = PoolingAllocationConfig {
@@ -263,12 +353,15 @@ mod tests {
             },
             ..PoolingAllocationConfig::default()
         };
-        let mut pool = ContinuationStackPool::new(&config, 1)?;
+        let arena = Arc::new(ContinuationStackArena::new(&config, 1)?);
         let mut first_owner = Box::new(VMContRef::empty());
         let mut second_owner = Box::new(VMContRef::empty());
+        let mut third_owner = Box::new(VMContRef::empty());
+        let mut first_pool = ContinuationStackPool::new(arena.clone(), 2)?;
+        let mut second_pool = ContinuationStackPool::new(arena, 2)?;
 
-        let first = pool.allocate(owner(&mut first_owner))?;
-        let second = pool.allocate(owner(&mut second_owner))?;
+        let first = first_pool.allocate(owner(&mut first_owner))?.unwrap();
+        let second = first_pool.allocate(owner(&mut second_owner))?.unwrap();
         assert!(first.is_from_raw_parts());
         assert!(second.is_from_raw_parts());
         assert_ne!(first.range(), second.range());
@@ -276,18 +369,31 @@ mod tests {
         first_owner.stack = first;
         second_owner.stack = second;
 
-        assert!(pool.is_full());
-        assert!(pool.recycle().is_none());
+        assert!(first_pool.recycle().is_none());
+        assert!(second_pool.allocate(owner(&mut third_owner))?.is_none());
+        assert!(second_pool.arena_known_full());
 
         first_owner.common_stack_information.state = VMStackState::Returned;
-        let recycled = pool.recycle().unwrap();
+        let recycled = first_pool.recycle().unwrap();
         assert_eq!(recycled.as_ptr(), first_owner.as_mut() as *mut VMContRef);
         assert_eq!(first_owner.stack.range(), first_range);
 
         first_owner.common_stack_information.state = VMStackState::Running;
         second_owner.common_stack_information.state = VMStackState::Trapped;
-        let recycled = pool.recycle().unwrap();
+        let recycled = first_pool.recycle().unwrap();
         assert_eq!(recycled.as_ptr(), second_owner.as_mut() as *mut VMContRef);
+
+        // Dropping a store-local pool returns its engine-owned stack
+        // slots for use by other stores. In production the owning
+        // continuations are dropped first by `StoreOpaque`'s field
+        // order.
+        drop(first_owner);
+        drop(second_owner);
+        drop(first_pool);
+        let third = second_pool.allocate(owner(&mut third_owner))?.unwrap();
+        assert!(!second_pool.arena_known_full());
+        assert!(third.is_from_raw_parts());
+        third_owner.stack = third;
         Ok(())
     }
 }

@@ -72,6 +72,9 @@ struct EngineInner {
     compiler: Option<Box<dyn wasmtime_environ::Compiler>>,
     #[cfg(feature = "runtime")]
     allocator: Box<dyn crate::runtime::vm::InstanceAllocator + Send + Sync>,
+    #[cfg(feature = "wasmfx-stack-pooling")]
+    continuation_stack_arena:
+        crate::sync::OnceLock<Arc<crate::runtime::vm::ContinuationStackArena>>,
     #[cfg(feature = "runtime")]
     gc_runtime: Option<Arc<dyn GcRuntime>>,
     #[cfg(feature = "runtime")]
@@ -171,6 +174,8 @@ impl Engine {
                     }
                     allocator
                 },
+                #[cfg(feature = "wasmfx-stack-pooling")]
+                continuation_stack_arena: Default::default(),
                 #[cfg(feature = "runtime")]
                 gc_runtime: config.build_gc_runtime()?,
                 #[cfg(feature = "runtime")]
@@ -858,6 +863,27 @@ impl Engine {
         let r: &(dyn crate::runtime::vm::InstanceAllocator + Send + Sync) =
             self.inner.allocator.as_ref();
         &*r
+    }
+
+    #[cfg(feature = "wasmfx-stack-pooling")]
+    pub(crate) fn continuation_stack_arena(
+        &self,
+    ) -> Result<Arc<crate::runtime::vm::ContinuationStackArena>> {
+        let config = match &self.config().allocation_strategy {
+            crate::config::InstanceAllocationStrategy::OnDemand => {
+                bail!("continuation stack arena requires the pooling allocation strategy")
+            }
+            crate::config::InstanceAllocationStrategy::Pooling(config) => config,
+        };
+        let stack_size = self.config().async_stack_size;
+        self.inner
+            .continuation_stack_arena
+            .get_or_try_init(|| {
+                Ok(Arc::new(crate::runtime::vm::ContinuationStackArena::new(
+                    config, stack_size,
+                )?))
+            })
+            .cloned()
     }
 
     pub(crate) fn gc_runtime(&self) -> Option<&Arc<dyn GcRuntime>> {
