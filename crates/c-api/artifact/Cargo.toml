@@ -44,6 +44,7 @@ default = [
   'winch',
   'debug-builtins',
   'pooling-allocator',
+  # 'wasmfx-stack-pooling', # intentionally off-by-default
   'component-model',
   'component-model-async',
   'pulley',
@@ -73,6 +74,7 @@ cranelift = ["wasmtime-c-api/cranelift"]
 winch = ["wasmtime-c-api/winch"]
 debug-builtins = ["wasmtime-c-api/debug-builtins"]
 pooling-allocator = ["wasmtime-c-api/pooling-allocator"]
+wasmfx-stack-pooling = ["wasmtime-c-api/wasmfx-stack-pooling"]
 component-model = ["wasmtime-c-api/component-model"]
 component-model-async = ["wasmtime-c-api/component-model-async"]
 pulley = ["wasmtime-c-api/pulley"]
