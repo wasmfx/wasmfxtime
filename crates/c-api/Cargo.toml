@@ -63,6 +63,11 @@ winch = ['wasmtime/winch']
 debug-builtins = ['wasmtime/debug-builtins']
 wat = ['dep:wat', 'wasmtime/wat']
 pooling-allocator = ["wasmtime/pooling-allocator"]
+wasmfx-stack-pooling = [
+  "pooling-allocator",
+  "stack-switching",
+  "wasmtime/wasmfx-stack-pooling",
+]
 component-model = ["wasmtime/component-model"]
 component-model-async = ["component-model", "async", "wasmtime/component-model-async"]
 pulley = ["wasmtime/pulley"]

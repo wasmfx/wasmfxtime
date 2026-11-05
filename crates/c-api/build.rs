@@ -24,6 +24,7 @@ const FEATURES: &[&str] = &[
     "DEBUG_BUILTINS",
     "WAT",
     "POOLING_ALLOCATOR",
+    "WASMFX_STACK_POOLING",
     "COMPONENT_MODEL",
     "COMPONENT_MODEL_ASYNC",
     "PULLEY",
