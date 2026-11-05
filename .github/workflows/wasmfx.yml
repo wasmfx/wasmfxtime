@@ -35,9 +35,17 @@ jobs:
     - run: rustup target add x86_64-unknown-linux-gnu
     - name: Test stack switching with pooled continuation stacks
       run: |
-        cargo run --locked --features wasmfx-stack-pooling -- \
-          wast \
-          -W stack-switching \
-          -O pooling-allocator,pooling-max-tables-per-module=2 \
-          --wasmtime-builtins \
-          tests/misc_testsuite/stack-switching/*.wast
+        # The CLI does not read the tests' `;;! consume_fuel` settings.
+        # Run each script separately so fuel.wast cannot exhaust later tests' fuel.
+        for script in tests/misc_testsuite/stack-switching/*.wast; do
+          wasm_features=stack-switching
+          if [[ "$script" == */fuel.wast ]]; then
+            wasm_features+=,fuel=0
+          fi
+          cargo run --locked --features wasmfx-stack-pooling -- \
+            wast \
+            -W "$wasm_features" \
+            -O pooling-allocator,pooling-max-tables-per-module=2 \
+            --wasmtime-builtins \
+            "$script"
+        done
